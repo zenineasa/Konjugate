@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="320" viewBox="0 0 800 320" role="img" font-family="system-ui, -apple-system, &quot;Segoe UI&quot;, Helvetica, Arial, sans-serif">
+<title>Konjugate downloads</title>
+<desc>1,502 installer downloads across 84 releases: Windows 830, macOS 306, Linux 366.</desc>
+<rect x="0.5" y="0.5" width="799" height="319" rx="12" fill="#1a1a19" stroke="rgba(255,255,255,0.10)"/>
+<text x="32" y="48" font-size="13" font-weight="600" fill="#c3c2b7" text-anchor="start">Installer downloads</text>
+<text x="32" y="104" font-size="52" font-weight="700" fill="#f0efec" text-anchor="start">1,502</text>
+<text x="32" y="128" font-size="12" font-weight="400" fill="#898781" text-anchor="start">All releases up to v1.4.3</text>
+<path d="M36,156 H151.36085219707059 Q151.36085219707059,156 151.36085219707059,156 V168 Q151.36085219707059,168 151.36085219707059,168 H36 Q32,168 32,164 V160 Q32,156 36,156 Z" fill="#3987e5"/>
+<path d="M153.36085219707059,156 H197.36617842876166 Q197.36617842876166,156 197.36617842876166,156 V168 Q197.36617842876166,168 197.36617842876166,168 H153.36085219707059 Q153.36085219707059,168 153.36085219707059,168 V156 Q153.36085219707059,156 153.36085219707059,156 Z" fill="#d95926"/>
+<path d="M199.36617842876166,156 H248 Q252,156 252,160 V164 Q252,168 248,168 H199.36617842876166 Q199.36617842876166,168 199.36617842876166,168 V156 Q199.36617842876166,156 199.36617842876166,156 Z" fill="#199e70"/>
+<rect x="32" y="187" width="10" height="10" rx="2" fill="#3987e5"/>
+<text x="50" y="196" font-size="13" font-weight="400" fill="#f0efec" text-anchor="start">Windows</text>
+<text x="252" y="196" font-size="13" font-weight="400" fill="#c3c2b7" text-anchor="end">830 · 55%</text>
+<rect x="32" y="211" width="10" height="10" rx="2" fill="#d95926"/>
+<text x="50" y="220" font-size="13" font-weight="400" fill="#f0efec" text-anchor="start">macOS</text>
+<text x="252" y="220" font-size="13" font-weight="400" fill="#c3c2b7" text-anchor="end">306 · 20%</text>
+<rect x="32" y="235" width="10" height="10" rx="2" fill="#199e70"/>
+<text x="50" y="244" font-size="13" font-weight="400" fill="#f0efec" text-anchor="start">Linux</text>
+<text x="252" y="244" font-size="13" font-weight="400" fill="#c3c2b7" text-anchor="end">366 · 24%</text>
+<text x="312" y="48" font-size="13" font-weight="600" fill="#c3c2b7" text-anchor="start">Total downloads, release by release</text>
+<line x1="340" x2="760" y1="236" y2="236" stroke="#383835" stroke-width="1"/>
+<text x="332" y="240" font-size="11" font-weight="400" fill="#898781" text-anchor="end">0</text>
+<line x1="340" x2="760" y1="154" y2="154" stroke="#2c2c2a" stroke-width="1"/>
+<text x="332" y="158" font-size="11" font-weight="400" fill="#898781" text-anchor="end">1,000</text>
+<line x1="340" x2="760" y1="72" y2="72" stroke="#2c2c2a" stroke-width="1"/>
+<text x="332" y="76" font-size="11" font-weight="400" fill="#898781" text-anchor="end">2,000</text>
+<path d="M340.0,236.0 L340.0,236.0 L344.3,236.0 L353.0,236.0 L353.5,236.0 L367.3,235.9 L371.1,235.8 L373.6,234.6 L400.7,233.9 L405.0,233.5 L409.3,232.6 L418.3,232.1 L419.1,231.6 L423.2,230.9 L431.6,230.4 L437.8,230.0 L440.4,229.4 L446.0,228.9 L448.7,228.5 L452.6,227.6 L455.0,226.7 L459.7,226.3 L465.9,225.8 L479.0,225.3 L479.6,224.9 L483.0,224.5 L495.9,224.1 L501.3,223.7 L507.9,223.4 L509.8,223.0 L536.1,222.6 L537.5,222.1 L542.5,221.7 L544.2,221.2 L544.3,220.6 L549.8,220.1 L556.7,219.4 L563.9,218.9 L578.5,218.6 L580.0,216.2 L587.1,215.7 L587.6,215.3 L593.0,213.8 L596.4,212.5 L601.3,211.3 L609.5,209.9 L611.9,206.5 L615.7,204.3 L618.4,202.3 L620.2,200.7 L623.3,199.4 L628.1,198.2 L637.5,195.1 L644.9,192.1 L653.8,189.7 L657.8,188.8 L660.1,185.4 L676.5,180.2 L676.9,178.1 L677.0,175.1 L689.2,172.0 L694.5,169.7 L694.5,166.9 L695.7,164.3 L698.3,161.8 L700.6,158.3 L709.6,155.9 L711.2,153.2 L717.7,150.6 L719.5,148.1 L720.6,145.5 L720.9,142.9 L724.0,139.9 L726.9,137.4 L731.2,134.6 L731.8,132.2 L732.4,129.8 L733.6,127.4 L739.1,125.3 L743.9,124.2 L745.3,122.1 L748.7,119.4 L754.3,117.3 L757.2,115.5 L760.0,112.8 L760.0,236 L340.0,236 Z" fill="#3987e5" fill-opacity="0.1"/>
+<path d="M340.0,236.0 L340.0,236.0 L344.3,236.0 L353.0,236.0 L353.5,236.0 L367.3,235.9 L371.1,235.8 L373.6,234.6 L400.7,233.9 L405.0,233.5 L409.3,232.6 L418.3,232.1 L419.1,231.6 L423.2,230.9 L431.6,230.4 L437.8,230.0 L440.4,229.4 L446.0,228.9 L448.7,228.5 L452.6,227.6 L455.0,226.7 L459.7,226.3 L465.9,225.8 L479.0,225.3 L479.6,224.9 L483.0,224.5 L495.9,224.1 L501.3,223.7 L507.9,223.4 L509.8,223.0 L536.1,222.6 L537.5,222.1 L542.5,221.7 L544.2,221.2 L544.3,220.6 L549.8,220.1 L556.7,219.4 L563.9,218.9 L578.5,218.6 L580.0,216.2 L587.1,215.7 L587.6,215.3 L593.0,213.8 L596.4,212.5 L601.3,211.3 L609.5,209.9 L611.9,206.5 L615.7,204.3 L618.4,202.3 L620.2,200.7 L623.3,199.4 L628.1,198.2 L637.5,195.1 L644.9,192.1 L653.8,189.7 L657.8,188.8 L660.1,185.4 L676.5,180.2 L676.9,178.1 L677.0,175.1 L689.2,172.0 L694.5,169.7 L694.5,166.9 L695.7,164.3 L698.3,161.8 L700.6,158.3 L709.6,155.9 L711.2,153.2 L717.7,150.6 L719.5,148.1 L720.6,145.5 L720.9,142.9 L724.0,139.9 L726.9,137.4 L731.2,134.6 L731.8,132.2 L732.4,129.8 L733.6,127.4 L739.1,125.3 L743.9,124.2 L745.3,122.1 L748.7,119.4 L754.3,117.3 L757.2,115.5 L760.0,112.8" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="760.0" cy="112.8" r="4" fill="#3987e5" stroke="#1a1a19" stroke-width="2"/>
+<text x="750" y="100.836" font-size="12" font-weight="600" fill="#f0efec" text-anchor="end">1,502</text>
+<text x="340" y="256" font-size="11" font-weight="400" fill="#898781" text-anchor="start">v0.1.0 · Aug 1, 2026</text>
+<text x="760" y="256" font-size="11" font-weight="400" fill="#898781" text-anchor="end">v1.4.3 · Nov 8, 2026</text>
+<text x="312" y="284" font-size="11" font-weight="400" fill="#898781" text-anchor="start">Each point is a release at its publish date, adding that release’s lifetime downloads.</text>
+<text x="312" y="300" font-size="11" font-weight="400" fill="#898781" text-anchor="start">Not downloads over time: recent releases have had less time to collect theirs.</text>
+</svg>

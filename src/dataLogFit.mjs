@@ -40,17 +40,20 @@ export function fitPlanFromLog(document, log, mapping, { from = null, to = null,
             }
             grid.push(count ? sum / count : null);
         }
-        // Fill short runs of empty steps between known neighbours; refuse a longer gap.
+        // Fill short runs of empty steps between known neighbours, and hold the nearest reading over a short run at either end (a
+        // reading flagged bad at the very end of a live twin's window, at its now, once made a refit on that move impossible); refuse
+        // a longer gap, or a stretch with no reading at all.
         for (let index = 0; index <= steps; index += 1) {
             if (grid[index] !== null) continue;
             let end = index;
             while (end <= steps && grid[end] === null) end += 1;
             const before = index - 1;
-            if (before < 0 || end > steps || end - index > longestFill) {
+            if ((before < 0 && end > steps) || end - index > longestFill) {
                 throw new ReplayError(`${output.signal} has no readings from ${Math.round(index * timeStep)} s to ${Math.round(end * timeStep)} s into the stretch: calibrate on a stretch without a gap that long.`);
             }
             for (let fill = index; fill < end; fill += 1) {
-                grid[fill] = interpolate([{ time: before, value: grid[before] }, { time: end, value: grid[end] }], fill);
+                grid[fill] = before < 0 ? grid[end] : end > steps ? grid[before]
+                    : interpolate([{ time: before, value: grid[before] }, { time: end, value: grid[end] }], fill);
             }
             index = end;
         }

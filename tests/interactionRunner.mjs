@@ -3878,40 +3878,19 @@ export async function runInteractionTests(driver) {
         const relationshipCount = async () => Number((await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`)).match(/\d+/)[0]);
         // Real Shift-click's own screen-coordinate targeting is already covered by the
         // multi-selection copy/paste and bulk-disable tests above; this test's own subject is
-        // edge-group behavior, so selection is built the same debug-hook way the multi-node
-        // rotate/scale tests above build theirs.
+        // edge-group behavior, so the selection is set in one step by the debug hook, exactly
+        // these nodes and nothing else. (It was built from a real click on the first node, then
+        // additive selects: the click's handling could land after them and make the first node
+        // the only selection again, losing the second, and the count never reached three.)
         const selectAll = async (...names) => {
             await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
-            // A real, exclusive click on the first node -- reliable now that addNode spreads
-            // nodes apart -- clears whatever the selection happened to be left at by a prior
-            // step; selectAdditive then builds the rest without depending on any more real
-            // screen-coordinate targeting.
-            await clickElement(window, nodeLabel(names[0]));
-            await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 1`,
-                'The exclusive click did not select the first node.');
-            let expected = 1;
-            for (const name of names.slice(1)) {
-                expected += 1;
-                const id = await evaluate(window, nodeIdFor(name));
-                const isSelected = () => evaluate(window, `document.querySelector('.node-label-container[data-node="${id}"]')?.classList.contains('selected')`);
-                // Confirmed via instrumented runs: this environment's SwiftShader-throttled
-                // render loop can occasionally leave a call's effect un-landed even several
-                // seconds later (not just briefly stale). Retry the call itself, not just the
-                // wait -- but only when this specific node's own selected state genuinely never
-                // flipped; selectAdditive toggles, so re-issuing it after a call that actually
-                // landed (just slow to be observed) would deselect the node instead of fixing
-                // anything.
-                for (let attempt = 0; attempt < 3; attempt++) {
-                    if (!(await isSelected())) await evaluate(window, `window.__debugTransform.selectAdditive(${id})`);
-                    try {
-                        await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === ${expected}`,
-                            `selectAdditive did not add "${name}" to the selection.`, 2000);
-                        break;
-                    } catch (error) {
-                        if (attempt === 2) throw error;
-                    }
-                }
-            }
+            const ids = [];
+            for (const name of names) ids.push(await evaluate(window, nodeIdFor(name)));
+            await evaluate(window, `window.__debugTransform.selectExactly(${JSON.stringify(ids)})`);
+            await waitFor(window, `(() => {
+                const selected = [...document.querySelectorAll('.node-label-container.selected')].map((label) => Number(label.dataset.node));
+                return selected.length === ${ids.length} && ${JSON.stringify(ids)}.every((id) => selected.includes(id));
+            })()`, `The selection is not exactly ${names.join(', ')}.`);
         };
 
         await addNode('Group test A', 0);

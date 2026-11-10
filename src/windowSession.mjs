@@ -609,13 +609,17 @@ export class WindowSession {
         const threshold = Math.max(2 * line.residual / Math.sqrt(recent.length), floor);
         // Once a lean is called it stays called until the jumps' mean falls below half of what called it, or changes side: one jump
         // that happens to land near zero (a thermostat that was off for that stride, say) must not make the call flicker.
-        // A new lean is called only when two moves in a row see it on the same side: the test is about two standard deviations, so on
-        // noisy readings one move in a few dozen passes it by chance, and the call came and went (a motor's tachometer, every second).
+        // A new lean is called only when the move before leaned the same way too, by at least half of its own threshold (the margin
+        // that holds a lean once called): the test is about two standard deviations, so on noisy readings one move in a few dozen passes
+        // it by chance, and the call came and went (a motor's tachometer, every second). Not clear of it twice in a row: a drift growing
+        // move after move raises the threshold with its own growth, and the move after a clear one can fall just short (the lab
+        // vessel's heater, its call then never made).
         const side = line.mean > 0 ? 'above' : 'below';
         const previous = cycles.at(-2)?.trends?.[signal];
         const holding = previous?.direction === side && previous.threshold > 0 && Math.abs(line.mean) > previous.threshold / 2;
         const clear = Math.abs(line.mean) > threshold;
-        const leaning = holding || (clear && previous?.seen === side);
+        const confirmed = previous?.mean !== undefined && (previous.mean > 0 ? 'above' : 'below') === side && Math.abs(previous.mean) > (previous.threshold ?? 0) / 2;
+        const leaning = holding || (clear && confirmed);
         const direction = !leaning ? 'none' : side;
         // Past the warning means drifting past it: leaning to one side, not jumps that are large but scattered either side of nothing.
         // Once raised, the warning holds until the mean falls below half of it, as the lean does: a mean hovering at the warning must not
@@ -623,7 +627,7 @@ export class WindowSession {
         const warnAt = this.alertAt !== null && tolerance > 0 ? this.alertAt * tolerance : Infinity;
         const alarm = leaning && (Math.abs(line.mean) > warnAt || (previous?.alarm === true && previous.direction === side && Math.abs(line.mean) > warnAt / 2));
         // The threshold kept is the one that called the lean, so holding it is judged against what called it.
-        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, seen: clear ? side : null, threshold: holding && !clear ? previous.threshold : threshold };
+        return { signal, slopePerHour: line.slope, mean: line.mean, direction, alarm, threshold: holding && !clear ? previous.threshold : threshold };
     }
 
     // After the engine died: a new one is given the state the last cycle restored, the inputs it ran on, and run up to the anchor

@@ -78,6 +78,19 @@ try {
     const aloneError = windowError(alone.cycles);
     await alone.close();
 
+    // A window whose reading at now is flagged bad (the drifting rig's log has one, at a move's now) is still refitted: its last step
+    // holds the reading before it. It was refused as a gap, so a refit on that move always failed.
+    const flagged = open(wrongModel());
+    const lastReading = firstHours.findLast((observation) => observation.signal === 'tankTemperature');
+    // A minute past it too, for the move at its time to be made.
+    flagged.push(between(-1, 3 * 3600 + 60).map((observation) => (observation === lastReading ? { ...observation, quality: 'bad' } : observation)));
+    await flagged.idle();
+    assert.equal(flagged.cycles.at(-1).now, lastReading.time - origin, 'The latest move\'s now is the bad reading\'s time.');
+    const heldPlan = flagged.refitPlan();
+    const [, ...heldRows] = heldPlan.csv.trim().split('\n');
+    assert.equal(heldRows.at(-1).split(',')[1], heldRows.at(-2).split(',')[1], 'The last step holds the reading before it.');
+    await flagged.close();
+
     // Refitted after three hours.
     const session = open(wrongModel());
     session.push(firstHours);

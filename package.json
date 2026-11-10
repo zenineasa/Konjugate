@@ -93,25 +93,31 @@
         "@codemirror/lang-cpp": "^6.0.3",
         "@codemirror/lang-python": "^6.2.1",
         "@codemirror/lint": "^6.9.7",
-        "@cortex-js/compute-engine": "^0.99.0",
+        "@cortex-js/compute-engine": "^0.173.0",
         "@grpc/grpc-js": "^1.14.7",
         "@grpc/proto-loader": "^0.8.1",
         "@peculiar/x509": "^2.2.0",
-        "@wasmer/sdk": "^0.13.0",
+        "@wasmer/sdk": "^0.19.1",
         "codemirror": "^6.0.2",
         "fast-xml-parser": "^5.11.2",
         "fflate": "0.8.3",
-        "mathlive": "^0.110.0",
+        "mathlive": "^0.111.4",
         "mqtt": "^5.16.1",
         "node-opcua-certificate-manager": "^2.187.23",
         "node-opcua-client": "^2.187.23",
         "occt-import-js": "^0.0.23",
-        "plotly.js-dist-min": "^3.7.0",
+        "plotly.js-dist-min": "^4.2.0",
         "protobufjs": "^8.8.1",
         "pyodide": "^314.0.7",
         "reflect-metadata": "^0.2.2",
         "scrypt-js": "^3.0.1",
-        "three": "^0.185.1",
+        "three": "^0.187.0",
         "ws": "^8.22.1"
+    },
+    "overrides": {
+        "@electron/asar": {
+            "glob": "^14.0.4",
+            "minimatch": "^11.0.5"
+        }
     }
 }

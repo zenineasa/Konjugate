@@ -175,7 +175,8 @@ export class ResultPlot {
                     .flatMap((item) => item.samples.map((sample) => sample.value))),
                 gridcolor: index ? 'rgba(0,0,0,0)' : '#1d303a',
                 zerolinecolor: '#2b414c',
-                ...(index ? { overlaying: 'y', side: 'right', anchor: 'free', position: Math.max(.74, 1 - (index - 1) * .08) } : {})
+                // tickmode 'auto': each unit's axis picks its own round ticks (plotly 4 otherwise syncs an overlaying axis to the first one's grid).
+                ...(index ? { overlaying: 'y', side: 'right', anchor: 'free', position: Math.max(.74, 1 - (index - 1) * .08), tickmode: 'auto' } : {})
             };
         });
         const config = { responsive: true, displaylogo: false, scrollZoom: true, modeBarButtonsToRemove: ['lasso2d', 'select2d'] };

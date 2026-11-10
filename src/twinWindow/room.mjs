@@ -899,13 +899,18 @@ function takeSandboxResult(sandbox, result) {
     sandbox.series = Object.fromEntries(Object.entries(result.series).map(([signal, samples]) => [signal, thinned([...(previous[signal] ?? []), ...samples])]));
 }
 
-// What was tried, drawn from a few thousand points however long it is followed: past the limit, every other point is let go (and the
-// last kept). Following the controls adds a run ahead twenty times a second, and kept whole, a motor at a millisecond grows by tens of
-// thousands of points a second.
+// What was tried, drawn from a few thousand points however long it is followed: past the limit, the points are kept evenly spaced in
+// time over the whole run, at most half the limit of them (and the last kept). Following the controls adds a run ahead twenty times a
+// second, and kept whole, a motor at a millisecond grows by tens of thousands of points a second. (Halving by index instead let the
+// start of the run decay away, each halving thinning it again while the newest arrived whole.)
 const sandboxDrawnLimit = 4000;
 function thinned(samples) {
-    while (samples.length > sandboxDrawnLimit) samples = samples.filter((sample, index) => index % 2 === 0 || index === samples.length - 1);
-    return samples;
+    if (samples.length <= sandboxDrawnLimit) return samples;
+    const spacing = (samples.at(-1).time - samples[0].time) / (sandboxDrawnLimit / 2);
+    const kept = [samples[0]];
+    for (const sample of samples.slice(1, -1)) if (sample.time >= kept.at(-1).time + spacing) kept.push(sample);
+    kept.push(samples.at(-1));
+    return kept;
 }
 
 // Follow the controls is offered once a control drives one of the sandbox's inputs.

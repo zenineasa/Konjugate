@@ -23,15 +23,17 @@ export function element(tag, properties = {}, ...children) {
 }
 
 // A small line of a series' course, scaled to fit.
-export function sparkline(values, color = '#42c9bc') {
+// `minSpan`: the least height it is drawn to, in the values' units, so a movement too small to count (trendOf's floor) is drawn small,
+// not stretched to the full height of the line by its scale alone.
+export function sparkline(values, color = '#42c9bc', { minSpan = 0 } = {}) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 100 26');
     svg.setAttribute('preserveAspectRatio', 'none');
     const finite = values.filter(Number.isFinite);
     if (finite.length < 2) return svg;
-    const low = Math.min(...finite);
-    const high = Math.max(...finite);
-    const span = high - low || 1;
+    const middle = (Math.min(...finite) + Math.max(...finite)) / 2;
+    const span = Math.max(Math.max(...finite) - Math.min(...finite), minSpan) || 1;
+    const low = middle - span / 2;
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
     path.setAttribute('points', finite.map((value, index) => `${(index / (finite.length - 1)) * 100},${24 - ((value - low) / span) * 22}`).join(' '));
     path.setAttribute('fill', 'none');
@@ -66,6 +68,12 @@ export function valueAt(series, time) {
 // level settled to the millimetre is steady). Nothing is judged against the value's size alone: a temperature in kelvin is large, so a
 // day's fall outdoors from 8 °C to below freezing would read as steady. The span is the caller's: a few of the twin's windows, its own
 // time scale (an hour for a tank, five seconds for a motor). `change` is how far it moved, at the fitted rate, over the span.
+// The least movement trendOf counts, in the quantity's units: a thousandth of its size (its latest value, or its range near zero).
+export function trendFloor(points) {
+    const values = points.map(([, value]) => value);
+    return 0.001 * Math.max(Math.abs(values.at(-1) ?? 0), Math.max(...values) - Math.min(...values));
+}
+
 export function trendOf(points, span = 3600) {
     if (points.length < 2) return { word: '—', kind: '' };
     const latestTime = points.at(-1)[0];
@@ -81,7 +89,7 @@ export function trendOf(points, span = 3600) {
     const values = points.map(([, value]) => value);
     const range = Math.max(...values) - Math.min(...values);
     const size = Math.max(Math.abs(points.at(-1)[1]), range);
-    if (!(size > 0) || Math.abs(change) <= Math.max(scatter, 0.1 * range, 0.001 * size)) return { word: 'steady', kind: 'steady', perHour, change, span };
+    if (!(size > 0) || Math.abs(change) <= Math.max(scatter, 0.1 * range, trendFloor(points))) return { word: 'steady', kind: 'steady', perHour, change, span };
     return { word: change > 0 ? 'rising' : 'falling', kind: change > 0 ? 'rising' : 'falling', perHour, change, span };
 }
 

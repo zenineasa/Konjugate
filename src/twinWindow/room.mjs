@@ -6,7 +6,7 @@
 // the twin has made. "Try something" opens a sandbox from now, which never changes the twin, and keeps what was tried as a draft
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
-import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendOf, valueAt } from './common.mjs';
+import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendFloor, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
 import { createHumanInput } from '../renderer/humanInput.mjs';
@@ -441,7 +441,10 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
         previousNow = item.now;
         for (const row of added) { earlier.x.push(row.time / time.divisor); earlier.y.push(shownAs.at(row.simulated)); }
     }
-    const window = inSpan(rows.filter((row) => row.time >= previousNow - 1e-9).map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })));
+    // This move's stretch joins the line before it as every earlier move's does, straight up or down where it set the model right (the
+    // line broken instead where this move is the first with new values), so the right-hand end reads as the rest of the line does.
+    const joined = earlier.x.length && earlier.x.at(-1) !== null && !cycle.refit ? [{ time: earlier.x.at(-1) * time.divisor, value: earlier.y.at(-1) }] : [];
+    const window = [...joined, ...inSpan(rows.filter((row) => row.time >= previousNow - 1e-9).map((row) => ({ time: row.time, value: shownAs.at(row.simulated) })))];
     // The forecast from where the system is: the state set at now toward the latest reading (src/windowSession.mjs), its line starting there.
     const startsAt = cycle.forecastFrom?.[tile.signal]?.applied;
     const forecast = [...(Number.isFinite(startsAt) ? [{ time: cycle.now, value: shownAs.at(startsAt) }] : []), ...(cycle.forecast?.[tile.signal] ?? []).map((point) => ({ time: point.time, value: shownAs.at(point.value) }))];
@@ -454,7 +457,7 @@ function drawTile(tile, cycle, past, time = visibleTime(cycle)) {
             { type: 'scatter', mode: 'lines', name: 'Band (10–90%)', x: hours(band), y: band.map((point) => shownAs.at(point.low)), line: { width: 0 }, fill: 'tonexty', fillcolor: 'rgba(75,143,226,.18)', hoverinfo: 'skip' }
         ] : []),
         { type: 'scatter', mode: 'markers', name: 'Measured', x: shownMeasured.map(([at]) => at / time.divisor), y: shownMeasured.map(([, value]) => value), marker: { size: 3, color: '#e0894c' } },
-        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, connectgaps: false, line: { width: 1.5, color: 'rgba(75,143,226,.75)' }, legendgroup: 'model', showlegend: false }] : []),
+        ...(earlier.x.length ? [{ type: 'scatter', mode: 'lines', name: 'Model, as each move ran it', x: earlier.x, y: earlier.y, connectgaps: false, line: { width: 2, color: '#4b8fe2' }, legendgroup: 'model', showlegend: false }] : []),
         { type: 'scatter', mode: 'lines', name: 'Model', x: hours(window), y: window.map((point) => point.value), line: { width: 2, color: '#4b8fe2' }, legendgroup: 'model' },
         { type: 'scatter', mode: 'lines', name: 'Forecast', x: hours(forecast), y: forecast.map((point) => point.value), line: { width: 2, dash: 'dash', color: '#4b8fe2' } },
         ...(sandbox ? [{ type: 'scatter', mode: 'lines', name: 'Tried', x: hours(sandbox), y: sandbox.map((point) => point.value), line: { width: 2, dash: 'dot', color: '#9b8cf0' } }] : [])
@@ -671,7 +674,9 @@ function drawInferred(cycle) {
             element('div', {}, element('strong', { textContent: name }), element('small', { textContent: kind })),
             number,
             element('span', { className: `trend ${trend.kind}`, textContent: trend.word, title: trend.said ?? (Number.isFinite(trend.change) ? `${trend.change > 0 ? '+' : ''}${shown(shownAs.by(trend.change))}${units} over the last ${dataClock(trend.span)}` : '') }),
-            sparkline(everyFew(shownHistory, 120).map(([, value]) => shownAs.at(value))));
+            // Drawn at least four times the least movement the word counts (in the model's units; °C and K differ by an offset only), so a
+            // slab that warmed a tenth of a degree, "steady", does not bend across the whole line.
+            sparkline(everyFew(shownHistory, 120).map(([, value]) => shownAs.at(value)), undefined, { minSpan: 4 * trendFloor(shownHistory) }));
         made.setAttribute('role', 'row');
         return made;
     };

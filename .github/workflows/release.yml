@@ -371,6 +371,64 @@ jobs:
                   choco push $nupkg.FullName --source https://push.chocolatey.org/ --api-key $env:CHOCOLATEY_API_KEY
                   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+    aptRepositoryRelease:
+        needs: release
+        if: startsWith(github.ref, 'refs/tags/v')
+        runs-on: ubuntu-latest
+        # Makes this release an apt repository: the .deb files are already its assets (the `release`
+        # job attached them), so this adds the signed index and the public key beside them. The
+        # ReadMe's install steps point apt at releases/latest/download, so the newest release is the
+        # repository. Opt-in by secret, like the other channels: without APT_SIGNING_PRIVATE_KEY it
+        # only prints a notice. See docs/packageManagerDistribution.md for creating the key.
+        permissions:
+            contents: write
+        env:
+            APT_SIGNING_PRIVATE_KEY: ${{ secrets.APT_SIGNING_PRIVATE_KEY }}
+            APT_SIGNING_PASSPHRASE: ${{ secrets.APT_SIGNING_PASSPHRASE }}
+            GH_TOKEN: ${{ github.token }}
+        steps:
+            - name: Skip when the apt repository isn't set up yet
+              if: env.APT_SIGNING_PRIVATE_KEY == ''
+              run: echo "::notice::APT_SIGNING_PRIVATE_KEY is not set; skipping the apt repository (see docs/packageManagerDistribution.md)."
+            - uses: actions/checkout@v4
+              if: env.APT_SIGNING_PRIVATE_KEY != ''
+            - uses: actions/setup-node@v4
+              if: env.APT_SIGNING_PRIVATE_KEY != ''
+              with:
+                  node-version: 24.19.0
+            - name: Build the signed apt repository and add it to the release
+              if: env.APT_SIGNING_PRIVATE_KEY != ''
+              # The .deb files are downloaded back from the release rather than taken from the build,
+              # so the index describes exactly the files users download.
+              run: |
+                  sudo apt-get update
+                  sudo apt-get install -y apt-utils gnupg
+                  printf '%s\n' "$APT_SIGNING_PRIVATE_KEY" | gpg --batch --import
+                  export APT_SIGNING_KEY="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')"
+                  mkdir -p out/debs
+                  gh release download "${{ github.ref_name }}" --pattern '*.deb' --dir out/debs
+                  node scripts/createAptRepository.mjs out/debs out/aptRepository
+                  cd out/aptRepository
+                  gh release upload "${{ github.ref_name }}" Packages Packages.gz Release InRelease Release.gpg konjugate-archive-keyring.gpg konjugate-archive-keyring.asc --clobber
+            - name: Install Konjugate from the published repository
+              if: env.APT_SIGNING_PRIVATE_KEY != ''
+              # What a user does, against the release just published: this is the check that GitHub's
+              # redirects, the signatures and the package index all work together.
+              run: |
+                  repo="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+                  sudo install -d -m 0755 /etc/apt/keyrings
+                  sudo wget -nv -O /etc/apt/keyrings/konjugate.gpg "$repo/konjugate-archive-keyring.gpg"
+                  sudo tee /etc/apt/sources.list.d/konjugate.sources > /dev/null <<EOF
+                  Types: deb
+                  URIs: $repo/
+                  Suites: ./
+                  Signed-By: /etc/apt/keyrings/konjugate.gpg
+                  EOF
+                  sudo apt-get update
+                  sudo apt-get install -y --no-install-recommends konjugate
+                  test -u /usr/lib/konjugate/chrome-sandbox
+                  dpkg -s konjugate | grep '^Version:'
+
     microsoftStoreRelease:
         needs: release
         if: startsWith(github.ref, 'refs/tags/v')

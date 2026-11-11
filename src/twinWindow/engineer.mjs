@@ -5,9 +5,9 @@
 // model (an undoable edit in the project window), so there is one model; the warning is taken at once; what a move does with each
 // measured signal, the parameters the estimator tracks, and the twin's timing take effect when it starts again.
 
-import { $, $$, cleanError, dataClock, element, shown, tunableParameters, withValues } from './common.mjs';
+import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
-import { timingProblem } from '../twinSetup.mjs';
+import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
 let host = null;
 let on = false;
@@ -24,6 +24,16 @@ export function initEngineer(given) {
     $('#refitKeep').addEventListener('click', () => applyRefit(true));
     $('#alertAmount').addEventListener('change', () => setAlert());
     for (const field of ['#members', '#timingWindow', '#timingStride', '#timingHorizon', '#timingStep']) $(field).addEventListener('change', () => markDirty());
+    // The unit the window, the time between moves and the forecast are typed in: what they read is kept, only said in another unit.
+    $('#timingUnit').addEventListener('change', () => {
+        const from = Number($('#timingUnit').dataset.factor) || 60;
+        const to = Number($('#timingUnit').value);
+        for (const field of timingFields) {
+            const value = Number($(field).value);
+            if ($(field).value !== '' && Number.isFinite(value)) $(field).value = String(Number((value * from / to).toPrecision(12)));
+        }
+        showTimingUnit(to);
+    });
     $('#restartTwin').addEventListener('click', () => restart());
 }
 
@@ -51,10 +61,7 @@ export function engineerOpened(twin) {
         ? `Warn when a signal drifts by (${unit ? `${unit} ` : ''}a move on ${first?.target?.label ?? first?.signal}; the same share of each other signal's tolerance)`
         : `Warn when it drifts by (${unit ? `${unit} ` : ''}a move)`;
     $('#alertAmount').value = live.alert > 0 ? String(Number(live.alert.toPrecision(2))) : '';
-    $('#timingWindow').value = String(live.window / 60);
-    $('#timingStride').value = String(live.stride / 60);
-    $('#timingHorizon').value = String(live.horizon / 60);
-    $('#timingStep').value = String(live.timeStep);
+    showTiming(twin);
     $('#members').value = String(live.members);
     renderTunable(twin);
     renderCorrections(twin);
@@ -92,12 +99,44 @@ function refreshButtons(twin) {
     }
 }
 
+// ---- Timing ------------------------------------------------------------------------------------------------------------------------
+// The window, the time between moves and the forecast, in the unit that reads at the twin's scale: seconds for a motor that moves
+// every second, minutes for a tank that moves every ten, hours for one that moves every hour or more. The time step is in seconds.
+const timingFields = ['#timingWindow', '#timingStride', '#timingHorizon'];
+const timingUnitOf = (stride) => (stride < 60 ? 1 : stride < 3600 ? 60 : 3600);
+
+function showTimingUnit(factor) {
+    $('#timingUnit').value = String(factor);
+    $('#timingUnit').dataset.factor = String(factor);
+    for (const name of $$('.timingUnitName')) name.textContent = { 1: 's', 60: 'min', 3600: 'h' }[factor];
+}
+
+// The twin's timing as it runs, in the form (the timing chosen from a live source's first readings arrives while it may be open).
+export function showTiming(twin) {
+    const live = twin.run.live;
+    const factor = timingUnitOf(live.stride);
+    showTimingUnit(factor);
+    for (const [field, key] of [['#timingWindow', 'window'], ['#timingStride', 'stride'], ['#timingHorizon', 'horizon']]) $(field).value = String(Number((live[key] / factor).toPrecision(12)));
+    $('#timingStep').value = String(live.timeStep);
+    timingNote(twin, live);
+}
+
+// A time step longer than the one the model's own runs take, said: a stiff model (a motor's current, which settles in milliseconds)
+// can run away at a longer one, its values growing without end.
+function timingNote(twin, live) {
+    const own = modelTimeStep(twin.settings.document);
+    const longer = own && live.timeStep > own * (1 + 1e-9);
+    $('#timingNote').className = longer ? 'status warning' : 'status';
+    $('#timingNote').textContent = longer ? `The model's own runs step every ${formatSpan(own)}: a longer step can make a fast model run away. Shorten it if the twin's values grow without end.` : '';
+}
+
 // Settings changed, to be taken when the twin starts again; timing it could not run with is said at once, and the twin is not stopped
 // for it.
 function markDirty() {
     dirty = true;
     const twin = currentTwin();
     const problem = twin ? timingProblem(liveFromForm(twin)) : null;
+    if (twin) timingNote(twin, liveFromForm(twin));
     $('#restartTwin').disabled = Boolean(problem);
     $('#restartNote').className = problem ? 'status warning' : 'status';
     $('#restartNote').textContent = problem ?? (twin?.run.source.kind === 'recording'
@@ -359,13 +398,15 @@ function liveFromForm(twin) {
             corrections[name] = { gain: gain > 0 && gain < 1 ? gain : 0.3 };
         }
     }
-    const minutes = (selector, fallback) => {
+    const factor = Number($('#timingUnit').value) || 60;
+    // In seconds, rounded off the unit's conversion (0.1 min is 6 s, not 6.000000000000001).
+    const span = (selector, fallback) => {
         const value = Number($(selector).value);
-        return value > 0 ? value * 60 : fallback;
+        return value > 0 ? Number((value * factor).toPrecision(12)) : fallback;
     };
     return {
         ...twin.run.live,
-        window: minutes('#timingWindow', twin.run.live.window), stride: minutes('#timingStride', twin.run.live.stride), horizon: minutes('#timingHorizon', twin.run.live.horizon),
+        window: span('#timingWindow', twin.run.live.window), stride: span('#timingStride', twin.run.live.stride), horizon: span('#timingHorizon', twin.run.live.horizon),
         timeStep: Number($('#timingStep').value) > 0 ? Number($('#timingStep').value) : twin.run.live.timeStep,
         corrections,
         members: Math.round(Number($('#members').value)) || 32,

@@ -13,6 +13,10 @@ export const clock = (date) => date.toLocaleTimeString([], { hour: '2-digit', mi
 // A time in the data, in the unit that reads at its size: seconds for a motor's, minutes, hours for a tank's or a house's.
 export const dataClock = (seconds) => (Math.abs(seconds) < 60 ? `${Number(seconds.toFixed(1))} s`
     : Math.abs(seconds) < 3600 ? `${Number((seconds / 60).toFixed(1))} min` : `${Number((seconds / 3600).toFixed(2))} h`);
+// A span as the timing message gives it: milliseconds under a second, then seconds, minutes, hours.
+export const formatSpan = (seconds) => (seconds < 1 ? `${Number((seconds * 1000).toPrecision(3))} ms` : seconds < 60 ? `${Number(seconds.toPrecision(3))} s`
+    : seconds < 3600 ? `${Number((seconds / 60).toPrecision(3))} min` : `${Number((seconds / 3600).toPrecision(3))} h`);
+export const timingText = ({ window, stride }) => `a ${formatSpan(window)} window, moving every ${formatSpan(stride)}`;
 export const dataTime = (seconds) => `at ${dataClock(seconds)} of data`;
 export const plural = (count, word, many = `${word}s`) => `${count} ${count === 1 ? word : many}`;
 

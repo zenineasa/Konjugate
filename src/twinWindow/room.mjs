@@ -6,9 +6,10 @@
 // the twin has made. "Try something" opens a sandbox from now, which never changes the twin, and keeps what was tried as a draft
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
-import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, trendFloor, trendOf, valueAt } from './common.mjs';
-import { engineerCycle, engineerOpened, showEngineer, engineerOn } from './engineer.mjs';
+import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, formatSpan, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, timingText, trendFloor, trendOf, valueAt } from './common.mjs';
+import { engineerCycle, engineerOpened, showEngineer, showTiming, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
+import { modelTimeStep } from '../twinSetup.mjs';
 import { createHumanInput } from '../renderer/humanInput.mjs';
 import { createSteering } from '../renderer/inputSteering.mjs';
 
@@ -153,7 +154,8 @@ export function openRoom(run) {
     $('#timeSpan').value = String(twin.layout.span ?? 'recent');
     if (!$('#timeSpan').value) $('#timeSpan').value = 'recent';
     $('#healthTwin').className = 'healthItem';
-    $('#healthTwin').textContent = 'Starting the twin…';
+    // A live source's pace is learnt from its first readings, which choose the timing.
+    $('#healthTwin').textContent = settings.timingFromReadings ? 'Starting the twin: reading how often the data comes…' : 'Starting the twin…';
     $('#healthSource').className = 'healthItem';
     $('#healthSource').textContent = run.sourceLabel;
     $('#healthDrift').textContent = '';
@@ -778,6 +780,21 @@ function cycleEvents(cycle, stats) {
         else if (drift === 'lean') addEvent('lean', `${name} is leaning ${trend.direction} the readings`, jumps, cycle.now);
         else addEvent('good', `${name} is back in step with the readings`, '', cycle.now);
     }
+    // The model running away, said once a run, with the likeliest cause: a time step too long for it.
+    const runaway = cycle.runaway?.[0];
+    if (runaway && !twin.ranAway) {
+        twin.ranAway = true;
+        const tile = twin.tiles.find((candidate) => candidate.signal === runaway.signal);
+        const shownAs = displayOf(tile?.target?.unit);
+        const unit = shownAs.unit ? ` ${shownAs.unit}` : '';
+        const value = Number.isFinite(runaway.value) ? `${Number(shownAs.at(runaway.value).toPrecision(3))}${unit}` : 'a value that is not a number';
+        const own = modelTimeStep(twin.settings.document);
+        const step = Number(twin.settings.timeStep);
+        addEvent('bad', `The model ran away: ${tile?.target?.label ?? tile?.name ?? runaway.signal} reached ${value}, against a reading of ${Number(shownAs.at(runaway.reading).toPrecision(3))}${unit}`,
+            own && step > own * (1 + 1e-9)
+                ? `The twin steps every ${formatSpan(step)}, longer than the ${formatSpan(own)} the model's own runs take: a fast model can grow without end at a step too long for it. Shorten the time step under Engineer, Timing.`
+                : `A time step too long for the model (now ${formatSpan(step)}) is the usual cause: shorten it under Engineer, Timing.`, cycle.now);
+    }
     twin.drift = driftOf(cycle.trend);
     if (stats.passedOver && !twin.stats.passedOver) addEvent('info', `The twin started at the latest readings, passing over ${plural(stats.passedOver, 'move')} of what the source already held`, '', cycle.now);
     if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${plural(stats.skipped - twin.stats.skipped, 'move')} to keep up`, 'a longer stride or a shorter window (Engineer, Timing) keeps up', cycle.now);
@@ -826,6 +843,15 @@ export function handleEvent(update) {
         }
         engineerCycle(twin, cycle);
         reportStatus();
+    } else if (update.type === 'timing') {
+        // The timing chosen from a live source's first readings: what the room draws and the engineer shows from now on.
+        const { window, stride, horizon, timeStep, spacing } = update;
+        Object.assign(twin.settings, { window, stride, horizon, timeStep });
+        Object.assign(twin.run.live, { window, stride, horizon, timeStep });
+        $('#sandboxMinutes').value = String(Math.max(1, Math.round(horizon / 60)));
+        if (!twin.cycles.length) $('#healthTwin').textContent = 'Starting the twin…';
+        addEvent('info', 'The twin\'s timing follows the readings', `The readings come every ${formatSpan(spacing)}, so the twin uses ${timingText({ window, stride })}, a ${formatSpan(horizon)} forecast and a ${formatSpan(timeStep)} time step. Change it under Engineer, Timing.`);
+        if (engineerOn()) showTiming(twin);
     } else if (update.type === 'note') {
         $('#roomStatus').textContent = update.message;
         addEvent('info', update.message);

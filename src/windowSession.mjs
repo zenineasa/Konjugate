@@ -410,6 +410,16 @@ export class WindowSession {
         const share = (trend) => Math.abs(trend.mean) / (this.tolerances[trend.signal] > 0 ? this.tolerances[trend.signal] : 1);
         const ranked = Object.values(cycle.trends).sort((a, b) => (b.alarm - a.alarm) || ((b.direction !== 'none') - (a.direction !== 'none')) || share(b) - share(a));
         cycle.trend = ranked[0].alarm || ranked[0].direction !== 'none' ? ranked[0] : cycle.trends[this.outputs[0].signal];
+        // A model that ran away on the move: a value that is not a number, or a thousand times further from the latest reading than the
+        // reading and its tolerance are large (a stiff model stepped too coarsely grows without end). Said, since nothing else in the
+        // room would say why its lines left the plot.
+        cycle.runaway = this.outputs.flatMap((entry) => {
+            const reading = this.#goodReadings(entry.signal, now).at(-1);
+            if (!reading) return [];
+            const limit = 1e3 * (Math.abs(reading.value) + (this.tolerances[entry.signal] > 0 ? this.tolerances[entry.signal] : 0));
+            const worst = model[entry.signal].find((sample) => !Number.isFinite(sample.value) || Math.abs(sample.value - reading.value) > limit);
+            return worst ? [{ signal: entry.signal, time: worst.time, value: worst.value, reading: reading.value }] : [];
+        });
         this.#refit = null;
         this.#restartFrom = null;
         this.cycles.push(cycle);

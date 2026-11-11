@@ -12,9 +12,9 @@ import { suggestSymbol } from '../csvImport.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
 import { readingNoise } from '../stateEstimator.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
-import { defaultTiming, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
+import { defaultTiming, medianGap, modelTimeStep, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
-import { $, $$, cleanError, shown, sparkline } from './common.mjs';
+import { $, $$, cleanError, formatSpan, shown, sparkline, timingText } from './common.mjs';
 import { abandonRoom, addEvent, closeRoom, closeTileMenu, currentTwin, handleEvent, initRoom, modelChanged, openRoom, openTileMenu } from './room.mjs';
 import { initEngineer } from './engineer.mjs';
 
@@ -446,18 +446,13 @@ const liveDefaults = { corrections: {}, members: 32, untracked: [] };
 function logSpacing(rows) {
     if (!state.log) return 0;
     const spacings = rows.filter((row) => row.role === 'output').map((row) => {
-        const times = latestReadings(state.log.observations, row.signal.id).filter((reading) => reading.quality !== 'bad').map((reading) => reading.time);
-        const gaps = times.slice(1).map((time, index) => time - times[index]).filter((gap) => gap > 0).sort((a, b) => a - b);
-        return gaps.length ? gaps[Math.floor(gaps.length / 2)] : Infinity;
+        const gap = medianGap(latestReadings(state.log.observations, row.signal.id).filter((reading) => reading.quality !== 'bad').map((reading) => reading.time));
+        return gap > 0 ? gap : Infinity;
     });
     const spacing = Math.min(...spacings);
     return Number.isFinite(spacing) ? spacing : 0;
 }
 
-// A span as the timing message gives it: milliseconds under a second, then seconds, minutes, hours.
-const formatSpan = (seconds) => (seconds < 1 ? `${Number((seconds * 1000).toPrecision(3))} ms` : seconds < 60 ? `${Number(seconds.toPrecision(3))} s`
-    : seconds < 3600 ? `${Number((seconds / 60).toPrecision(3))} min` : `${Number((seconds / 3600).toPrecision(3))} h`);
-const timingText = ({ window, stride }) => `a ${formatSpan(window)} window, moving every ${formatSpan(stride)}`;
 
 function currentSetup() {
     return normalizeTwinSetup({
@@ -492,8 +487,8 @@ function twinSource() {
 }
 
 // What the twin runs with: the setup's mapping and conversions, the tolerances read from the first readings, and the twin's settings
-// (the setup's, or the defaults: an hour's window moving every ten minutes, an hour's forecast, a warning at a quarter of the first
-// measured signal's tolerance).
+// (the setup's, or the defaults: timing from how often the readings come, the model's own time step, a warning at a quarter of the
+// first measured signal's tolerance).
 function buildRun(setup) {
     const { mapping, conversions } = twinSessionMapping(setup);
     const rows = state.rows.filter((row) => row.target);
@@ -509,7 +504,7 @@ function buildRun(setup) {
     }));
     const first = mapping.find((entry) => entry.role === 'output');
     const saved = { ...liveDefaults, ...setup.live };
-    const timeStep = saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : 60);
+    const timeStep = saved.timeStep ?? (state.log ? suggestedReplayTimeStep(state.context.document, state.log.observations.map((observation) => ({ ...observation, signal: rows.find((row) => row.signal.id === observation.signal)?.name ?? observation.signal })), mapping) : modelTimeStep(state.context.document) ?? 60);
     // Timing not kept with the setup follows how often the readings come (src/twinSetup.mjs, defaultTiming): a fast system read every
     // 50 ms is not left with an hour's window.
     const timing = defaultTiming({ spacing: logSpacing(rows), timeStep });
@@ -522,6 +517,9 @@ function buildRun(setup) {
         live = { ...live, ...fallback };
         state.timingReset = `The timing kept with the setup could not run (${problem.replace(/\.$/, '')}), so the twin uses the default: ${timingText(fallback)}.`;
     } else state.timingReset = null;
+    // A live source (a broker, a server, the push service) says nothing of how often its readings come until they come: with no timing
+    // kept, the twin waits for its first few readings and chooses from their spacing, as it does from a log's, and says so.
+    const fromReadings = !state.log && !problem && !('window' in (setup.live ?? {})) ? { step: !('timeStep' in (setup.live ?? {})) } : null;
     // A default that is not the usual hour, said, so a person knows where it came from and where to change it.
     state.timingChosen = !problem && !('window' in (setup.live ?? {})) && timing.stride !== 600 ? `The readings come every ${formatSpan(logSpacing(rows))}, so the twin uses ${timingText(timing)} and a ${formatSpan(timing.horizon)} forecast. Change it under Engineer, Timing.` : null;
     const estimating = Object.values(live.corrections).some((correction) => correction.estimate);
@@ -530,7 +528,8 @@ function buildRun(setup) {
         document: state.context.document, mapping, window: live.window, stride: live.stride, horizon: live.horizon, timeStep: live.timeStep,
         tolerances, corrections: structuredClone(live.corrections), conversions,
         estimator: { members: live.members, parameters: trackable, drift: Object.fromEntries(Object.entries(live.drift ?? {}).map(([id, value]) => [Number(id), value])) },
-        alertAt: live.alert > 0 && tolerances[first.signal] > 0 ? live.alert / tolerances[first.signal] : null
+        alertAt: live.alert > 0 && tolerances[first.signal] > 0 ? live.alert / tolerances[first.signal] : null,
+        ...(fromReadings ? { timingFromReadings: fromReadings } : {})
     };
     // A log's readings carry its own names for its signals (another logger's columns, the names they were read under); every other
     // source's readings carry the twin's.

@@ -231,11 +231,13 @@
                     <section>
                         <h3>Timing</h3>
                         <div class="timing">
-                            <label class="field"><span>Window (min)</span><input id="timingWindow" type="number" min="1" step="1"></label>
-                            <label class="field"><span>Moves every (min)</span><input id="timingStride" type="number" min="1" step="1"></label>
-                            <label class="field"><span>Forecast (min)</span><input id="timingHorizon" type="number" min="1" step="1"></label>
-                            <label class="field"><span>Time step (s)</span><input id="timingStep" type="number" min="0.001" step="any"></label>
+                            <label class="field"><span>Times in</span><select id="timingUnit"><option value="1">seconds</option><option value="60">minutes</option><option value="3600">hours</option></select></label>
+                            <label class="field"><span>Window (<span class="timingUnitName">min</span>)</span><input id="timingWindow" type="number" min="0" step="any"></label>
+                            <label class="field"><span>Moves every (<span class="timingUnitName">min</span>)</span><input id="timingStride" type="number" min="0" step="any"></label>
+                            <label class="field"><span>Forecast (<span class="timingUnitName">min</span>)</span><input id="timingHorizon" type="number" min="0" step="any"></label>
+                            <label class="field"><span>Time step (s)</span><input id="timingStep" type="number" min="0" step="any"></label>
                         </div>
+                        <p id="timingNote" class="status"></p>
                     </section>
                     <div class="engineerFooter">
                         <p id="restartNote" class="status"></p>

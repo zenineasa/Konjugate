@@ -23,6 +23,7 @@ import { DataLogWriter } from './dataLogWriter.mjs';
 import { followMqtt } from './mqttSource.mjs';
 import { followOpcUa } from './opcuaSource.mjs';
 import { followPush } from './pushSource.mjs';
+import { timingFromReadings } from './twinSetup.mjs';
 import { WindowSession } from './windowSession.mjs';
 
 // What a window needs of a cycle, kept small: the jumps, the comparison in the window, the forecast and the trend.
@@ -44,7 +45,7 @@ export function cycleEvent(cycle, stats) {
         type: 'cycle',
         cycle: {
             index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, trends: cycle.trends, wallSeconds: cycle.wallSeconds,
-            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null,
+            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null, runaway: cycle.runaway ?? [],
             // Each input's last reading up to now, for a sandbox to start its controls from.
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null])),
             // What was done over the move's window, for the control room's timeline of the inputs.
@@ -110,7 +111,9 @@ export class LiveTwin {
     #stopped = false;
 
     // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt, corrections, conversions }; source as
-    // above. conversions: { signal: { scale, offset, unit } }, a mapping's unit conversions (docs/proposals/controlRoom.md), applied to
+    // above. `timingFromReadings` { step }: the timing is not known yet (a live source's readings come at a pace nothing has said), so
+    // the twin waits for its first few readings and chooses the window, the time between moves and the forecast from their spacing,
+    // and with `step` the time step too (src/twinSetup.mjs, timingFromReadings); it says what it chose with a 'timing' event. conversions: { signal: { scale, offset, unit } }, a mapping's unit conversions (docs/proposals/controlRoom.md), applied to
     // each reading as it reaches the twin, so the twin works in the model's units; a recording keeps what the source sent.
     constructor(settings, source, engineOptions, onEvent) {
         this.settings = settings;
@@ -118,22 +121,44 @@ export class LiveTwin {
         this.#onEvent = onEvent;
         const conversions = settings.conversions ?? {};
         const converting = Object.keys(conversions).length > 0;
-        const onHeader = (header) => {
-            const converted = converting
-                ? { ...header, signals: header.signals.map((signal) => (conversions[signal.name]?.unit !== undefined ? { ...signal, unit: conversions[signal.name].unit } : signal)) }
-                : header;
+        let header = null;
+        const begin = (timing) => {
             this.#session = new WindowSession({
                 // Data that arrives in real time is kept up with; a recording played as fast as it can go gets every move.
-                ...settings, header: converted, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
+                ...settings, ...timing, header, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
                 onCycle: (cycle) => { this.#onEvent(cycleEvent(cycle, this.#session.stats())); }
             });
         };
+        const onHeader = (given) => {
+            header = converting
+                ? { ...given, signals: given.signals.map((signal) => (conversions[signal.name]?.unit !== undefined ? { ...signal, unit: conversions[signal.name].unit } : signal)) }
+                : given;
+            if (!settings.timingFromReadings) begin({});
+        };
+        // Readings held while the timing waits on them, and the times of each measured signal's good ones.
+        let held = [];
+        const outputs = new Set((settings.mapping ?? []).filter((entry) => entry.role === 'output').map((entry) => entry.signal));
+        const times = Object.fromEntries([...outputs].map((signal) => [signal, []]));
         const onObservations = (observations) => {
             try {
-                this.#session?.push(converting ? observations.map((observation) => {
+                const converted = converting ? observations.map((observation) => {
                     const conversion = conversions[observation.signal];
                     return conversion ? { ...observation, value: observation.value * conversion.scale + conversion.offset } : observation;
-                }) : observations);
+                }) : observations;
+                if (this.#session || !settings.timingFromReadings) {
+                    this.#session?.push(converted);
+                    return;
+                }
+                held.push(...converted);
+                for (const observation of converted) if (outputs.has(observation.signal) && observation.quality !== 'bad') times[observation.signal].push(observation.time);
+                for (const list of Object.values(times)) list.sort((a, b) => a - b);
+                const timing = timingFromReadings(times, { timeStep: settings.timeStep, step: settings.timingFromReadings.step === true });
+                if (!timing || !header) return;
+                const { spacing, ...chosen } = timing;
+                begin(chosen);
+                this.#onEvent({ type: 'timing', ...chosen, spacing });
+                this.#session.push(held);
+                held = [];
             } catch (error) {
                 this.#fail(error);
             }

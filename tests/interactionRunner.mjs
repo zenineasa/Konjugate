@@ -6255,6 +6255,8 @@ export async function runInteractionTests(driver) {
             assert.match(await evaluate(twin, `document.querySelector('#mappingRows .mappingRow[data-signal="lab/rig/tank/temperature"] select[data-field="target"]').selectedOptions[0].textContent`), /Water temperature/);
             await evaluate(twin, `document.querySelector('#openRoom').click()`);
             await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin made no moves from the broker.', 30000);
+            // A broker says nothing of how often its readings come: with no timing kept, the twin chose it from the first few readings.
+            assert.ok((await twinEvents(twin)).some((text) => /timing follows the readings.*The readings come every/.test(text)), 'The twin did not say the timing it chose from the readings.');
             await evaluate(twin, `document.querySelector('#roomStop').click()`);
             await waitFor(twin, `Boolean(window.__debugTwinWindow.summary()?.recordedTo)`, 'Stopping did not say where the readings were recorded.', 15000);
             const recordedTo = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).recordedTo;

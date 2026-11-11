@@ -132,3 +132,30 @@ export function defaultTiming({ spacing = 0, timeStep }) {
     if (positive(timeStep)) stride = Math.max(1, Math.ceil(stride / timeStep - 1e-9)) * timeStep;
     return { window: 6 * stride, stride, horizon: 6 * stride };
 }
+
+// The usual time between readings: the median gap between those at the given times (in order), 0 with fewer than two.
+export function medianGap(times) {
+    const gaps = times.slice(1).map((time, index) => time - times[index]).filter((gap) => gap > 0).sort((a, b) => a - b);
+    return gaps.length ? gaps[Math.floor(gaps.length / 2)] : 0;
+}
+
+// The step the model's own runs take (its active run configuration's), or null when it has none.
+export function modelTimeStep(document) {
+    const configuration = (document?.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document?.runConfigurations?.[0];
+    return Number(configuration?.globalTimeStep) > 0 ? Number(configuration.globalTimeStep) : null;
+}
+
+// Readings a twin following a live source waits for, from any one measured signal, before it chooses timing from their spacing.
+export const readingsForTiming = 6;
+
+// Timing chosen from a live source's first readings (src/liveTwinHost.mjs): `readings` { signal: [times] } of the measured signals so
+// far. Null until one of them has enough readings; then the timing, with the time step shortened to the spacing when `step` is to
+// follow it too (as a log's does: a model is not stepped more coarsely than its data comes).
+export function timingFromReadings(readings, { timeStep, step = false }) {
+    const spacings = Object.values(readings).filter((times) => times.length >= readingsForTiming).map(medianGap).filter((gap) => gap > 0);
+    if (!spacings.length) return null;
+    // To three figures: a live source's times are its clock's, which jitter (50 ms comes as 0.04999995 s).
+    const spacing = Number(Math.min(...spacings).toPrecision(3));
+    const chosenStep = step ? Math.min(timeStep, spacing) : timeStep;
+    return { ...defaultTiming({ spacing, timeStep: chosenStep }), timeStep: chosenStep, spacing };
+}

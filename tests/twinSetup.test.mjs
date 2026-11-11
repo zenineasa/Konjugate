@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { defaultTiming, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../src/twinSetup.mjs';
+import { defaultTiming, modelTimeStep, normalizeTwinSetup, timingFromReadings, timingProblem, twinSessionMapping } from '../src/twinSetup.mjs';
 
 test('a setup keeps its source, its usable mapping entries and its settings, and drops the rest', () => {
     const setup = normalizeTwinSetup({
@@ -82,4 +82,20 @@ test('timing not kept with a setup follows how often the readings come, and can 
     for (const [spacing, timeStep] of [[0.05, 0.001], [2, 0.01], [5, 0.5], [7, 3], [0.001, 0.001], [3600, 60]]) {
         assert.equal(timingProblem({ ...defaultTiming({ spacing, timeStep }), timeStep }), null, `${spacing} s readings on a ${timeStep} s step`);
     }
+});
+
+test('a live source\'s timing is chosen once a measured signal has enough readings, from their spacing', () => {
+    const every = (step, count) => Array.from({ length: count }, (_, index) => 100 + index * step + (index % 2 ? 1e-7 : 0));
+    assert.equal(timingFromReadings({ motorSpeed: every(0.05, 5) }, { timeStep: 0.001 }), null, 'Not before six readings.');
+    assert.deepEqual(timingFromReadings({ motorSpeed: every(0.05, 6), slow: every(1, 6) }, { timeStep: 0.001 }), { window: 6, stride: 1, horizon: 6, timeStep: 0.001, spacing: 0.05 });
+    // The step follows the readings when it was not kept: a model stepped every minute, read every 50 ms, is stepped every 50 ms.
+    assert.equal(timingFromReadings({ motorSpeed: every(0.05, 6) }, { timeStep: 60, step: true }).timeStep, 0.05);
+    assert.equal(timingFromReadings({ motorSpeed: every(0.05, 6) }, { timeStep: 60 }).timeStep, 60);
+    assert.deepEqual(timingFromReadings({ tank: every(60, 6) }, { timeStep: 60, step: true }), { window: 3600, stride: 600, horizon: 3600, timeStep: 60, spacing: 60 });
+});
+
+test('a model\'s own step is its active run configuration\'s', () => {
+    assert.equal(modelTimeStep({ activeRunConfigurationId: 2, runConfigurations: [{ id: 1, globalTimeStep: 1 }, { id: 2, globalTimeStep: 0.001 }] }), 0.001);
+    assert.equal(modelTimeStep({ runConfigurations: [{ id: 1, globalTimeStep: 60 }] }), 60);
+    assert.equal(modelTimeStep({}), null);
 });

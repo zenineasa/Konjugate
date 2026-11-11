@@ -18,6 +18,7 @@
 import { webcrypto, randomBytes, X509Certificate, createPrivateKey } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename, chmod } from 'node:fs/promises';
 import { hostname, networkInterfaces } from 'node:os';
+import { isIPv6 } from 'node:net';
 import { join } from 'node:path';
 import { createSecureContext } from 'node:tls';
 
@@ -37,6 +38,18 @@ export function networkAddresses() {
     const looksLikeAddress = /^[\d.]+$/.test(name) || name.includes(':');
     const names = looksLikeAddress ? [] : [name, ...(name.includes('.') ? [] : [`${name}.local`])];
     return { ips: [...new Set(ips)], names: [...new Set(names)] };
+}
+
+// A name or address in a form two spellings of the same one share. A certificate lists an IPv6 address in upper case with its zero
+// groups written out, where the network interfaces report it in lower case with them compressed, so without this a computer with
+// an IPv6 address would never find its own address in its own certificate and would make a new certificate every time.
+function comparable(name) {
+    const lower = name.toLowerCase();
+    if (!isIPv6(lower) || lower.includes('.')) return lower;
+    const [head, tail] = lower.split('::');
+    const groups = (text) => (text ? text.split(':') : []);
+    const written = tail === undefined ? groups(head) : [...groups(head), ...Array(8 - groups(head).length - groups(tail).length).fill('0'), ...groups(tail)];
+    return written.map((group) => Number.parseInt(group, 16).toString(16)).join(':');
 }
 
 // A certificate's fingerprint, the names and addresses it is for, and when it runs out.
@@ -96,7 +109,8 @@ export async function ensurePushCertificate(directory, { now = Date.now(), addre
     try {
         const [certificate, key] = await Promise.all([readFile(path, 'utf8'), readFile(keyPath, 'utf8')]);
         const described = describeCertificate(certificate);
-        const covered = [...addresses.ips, ...addresses.names].every((name) => described.names.includes(name));
+        const certified = new Set(described.names.map(comparable));
+        const covered = [...addresses.ips, ...addresses.names].every((name) => certified.has(comparable(name)));
         // Not yet valid (the clock was set back since it was made) counts as not fitting too.
         if (covered && described.notBefore <= now && described.notAfter - now > renewWithinDays * 86400000) {
             createSecureContext({ cert: certificate, key });

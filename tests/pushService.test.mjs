@@ -375,6 +375,13 @@ describe('push service on the network', () => {
         const again = await ensurePushCertificate(directory, { addresses });
         assert.equal(again.made, false);
         assert.equal(again.fingerprint, first.fingerprint, 'The same certificate is used again, so scripts keep trusting it.');
+        // A certificate lists an IPv6 address in upper case with its zero groups written out; the network interfaces give it lower case and compressed.
+        const withIpv6 = { ips: ['192.0.2.10', 'fdbf:42ff:eacc:d639:819:3a83:e234:4990', 'fd00::1'], names: ['labpc', 'labpc.local'] };
+        const ipv6First = await ensurePushCertificate(directory, { addresses: withIpv6 });
+        assert.equal(ipv6First.made, true);
+        const ipv6Again = await ensurePushCertificate(directory, { addresses: withIpv6 });
+        assert.equal(ipv6Again.made, false, 'An IPv6 address is found in the certificate made for it, so the same certificate is used again.');
+        assert.equal(ipv6Again.fingerprint, ipv6First.fingerprint);
         const moved = await ensurePushCertificate(directory, { addresses: { ips: ['192.0.2.99'], names: ['labpc'] } });
         assert.equal(moved.made, true, 'A new address is not in the old certificate, so a new one is made.');
         const late = await ensurePushCertificate(directory, { addresses: { ips: ['192.0.2.99'], names: ['labpc'] }, now: Date.now() + 820 * 86400000 });

@@ -65,6 +65,12 @@ test('the launcher is valid shell, runs the installed app and only drops the san
     assert.match(script, /--no-sandbox/);
 });
 
+test('the shipped desktop file names the window class GNOME needs to show the app icon', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const source = await readFile(new URL('../packaging/linux/com.konjugate.Konjugate.desktop', import.meta.url), 'utf8');
+    assert.match(desktopEntry(source), /^StartupWMClass=konjugate$/m);
+});
+
 test('the desktop entry points at the launcher on the PATH and keeps everything else', () => {
     const entry = desktopEntry('[Desktop Entry]\nName=Konjugate\nExec=Konjugate %f\nIcon=com.konjugate.Konjugate\n');
     assert.equal(entry, '[Desktop Entry]\nName=Konjugate\nExec=konjugate %f\nIcon=com.konjugate.Konjugate\n');

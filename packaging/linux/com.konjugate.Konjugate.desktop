@@ -7,4 +7,7 @@ Icon=com.konjugate.Konjugate
 Type=Application
 Categories=Science;Engineering;
 Terminal=false
+# What the window reports as its class (Wayland app_id), so GNOME and KDE can match a running window to this
+# entry and show its icon. Found by trying values on Ubuntu 26.04 (GNOME, Wayland): lowercase works.
+StartupWMClass=konjugate
 MimeType=application/x-konjugate;

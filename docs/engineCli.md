@@ -61,7 +61,21 @@ konjugate --cli run <project.kjt> --target-time <seconds> [--configuration <name
 konjugate --cli validate <project.kjt>
 ```
 
-In the development tree (unpackaged), invoke it as `electron . --cli run ...` from the repo root; the packaged/installed `konjugate` binary accepts the same `--cli run|validate ...` arguments directly.
+In the development tree (unpackaged), invoke it as `electron . --cli run ...` from the repo root; the packaged/installed `konjugate` binary accepts the same `--cli run|validate ...` arguments directly. Call the app's own executable, not a shortcut or `open`, so that output streams back and the exit code is the run's:
+
+```bash
+# macOS
+/Applications/Konjugate.app/Contents/MacOS/Konjugate --cli run model.kjt --target-time 30 --output-csv result.csv
+
+# Windows
+Konjugate.exe --cli run model.kjt --target-time 30 --output-csv result.csv
+
+# Linux: the apt package puts konjugate on PATH; an AppImage is run directly
+konjugate --cli run model.kjt --target-time 30 --output-csv result.csv
+./Konjugate-*-$(uname -m).AppImage --cli run model.kjt --target-time 30 --output-csv result.csv
+```
+
+A command-line run is always its own process, even while the app is open.
 
 - `--target-time <seconds>` is required for `run`; the project's active run configuration is used unless `--configuration` names or numbers a specific one. A project that keeps no run configuration (most of the bundled examples) runs with the one the app gives it when it opens: "Default", a 0.01 s step and a 0.1 s output interval.
 - `--output-kjt <path>` writes the original project with the result embedded, in the same format Konjugate itself saves when you keep a run's results (see [Embedded binary result storage](resultFileFormat.md)) -- reopen it in the app to inspect the run visually.

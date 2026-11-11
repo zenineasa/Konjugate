@@ -118,6 +118,16 @@ npm run coverage
 
 Runs the unit tests and the interaction suite with V8's coverage on and writes `out/coverage/report.txt`: for each file under `src/`, the share of its lines of code the unit tests run, the interaction tests run, either runs, and how many neither runs (each such line is listed in `notRun.json`). `node scripts/coverageReport.mjs out/coverage` reports again from what is there. It is a map for deciding what to test next, not a target, and nothing passes or fails on it. It measures every window the scenarios open (each project window, the twin's, the example guide, the provider editor), the command line, and the web edition's suite in Chromium, whose shell it assembles again first so it serves today's `src/` (it is counted against a `src/` file only where the shell serves that file unchanged, so a shell left from before would read as code not run). That needs a web engine as new as the engine's sources (`npm run build:web:threads`, which takes minutes, so it is not built here); without one, the report says so and leaves the web edition out. What it does not see: the web engine's worker, the add-on launcher's own process, the push service's process, and the provider editor's renderer (its window is opened, but its code does not reach the report yet), so those read as not run even where a scenario exercises them.
 
+### Testing a packaged build
+
+The suites above run against `out/engine/` and a plain `electron .` launch. Some failures only appear once the app is packaged: a missing bundled library, a resource path that only resolves in the packaged layout, or a code-signing side effect. To catch those, run the same suites against a real package:
+
+```bash
+npm run test:package
+```
+
+This packages the app for the host platform (as `npm run package` does), then runs the engine and interaction suites against that package. It builds a fresh package each time, so it is a check before a release rather than part of the everyday loop. `make verifyPackagedEngine` or `make verifyPackagedInteraction` runs one half (each also builds the package first).
+
 The dependency-free partitioner remains an intentionally separate test path:
 
 ```bash
@@ -126,4 +136,12 @@ cd engine
 ctest --preset development-no-metis
 ```
 
-Application packaging has additional host-specific requirements and is documented separately from the development workflow.
+## Building a release
+
+```bash
+make
+```
+
+`make` (or `make build`) installs missing dependencies, generates the application and web icons, packages Electron and writes the installer for the host platform to `out/release/`: a DMG on macOS, an installer (`*-setup.exe`) on Windows, and an AppImage on Linux. The packaged application folder is kept in `out/package/`. `make distributableWindowsPortable` also builds a portable ZIP on Windows, and `make clean` removes the dependencies, the lockfile, generated icons, caches and every build output.
+
+Windows needs NSIS (`makensis`) on `PATH`, and Linux needs `appimagetool`. Every package includes `ThirdPartyNotices.md` and the license texts under `thirdPartyLicenses/`, and packaging fails without them. [Release packaging](releasePackaging.md) covers each platform's host tools and the checks run on the packaged app.

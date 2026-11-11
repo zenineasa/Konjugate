@@ -2,280 +2,169 @@
 
 # Konjugate
 
-This is an attempt to create an open-source graph-native simulation engine for building composable engineering simulations and digital twins.
+**An open-source, graph-native simulation engine for composable engineering simulations and digital twins.**
 
-The objective is to simplify the process of modelling complex physical systems by representing them as networks of interconnected components, where components define states and interactions define the transport of quantities.
+Draw a system as components connected by relationships, write each one's equations, and run it. Konjugate assembles the whole system for you, and the same model can be steered live, fitted to measured data, kept in step with a real system as a digital twin, or exported as code.
 
-Rather than requiring users to manually assemble large system-level formulations, this project explores an approach where systems are represented as graphs of interconnected components. Components define their states and properties, while relationships define the equations governing how quantities are transported and transformed.
+<p align="center">
+<a href="https://github.com/zenineasa/Konjugate/releases/latest"><img src="https://img.shields.io/github/v/release/zenineasa/Konjugate?label=Download&style=for-the-badge&color=0f9d8a" alt="Download the latest release"></a>
+<a href="https://web.konjugate.com/"><img src="https://img.shields.io/badge/Try%20in%20browser-2a78d6?style=for-the-badge" alt="Try Konjugate in your browser"></a>
+<a href="https://discord.gg/WPUzNyC3S"><img src="https://img.shields.io/badge/Discord-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Join the Konjugate community on Discord"></a>
+<a href="https://whatsapp.com/channel/0029Vb8dF8EKgsNs7dydEG1x"><img src="https://img.shields.io/badge/WhatsApp-25D366?logo=whatsapp&logoColor=white&style=for-the-badge" alt="Follow the Konjugate channel on WhatsApp"></a>
+</p>
 
-<div align="center">
-<table>
-	<tr>
-		<th align="center">Community</th>
-		<th align="center">Latest release</th>
-	</tr>
-	<tr>
-		<td align="center"><a href="https://whatsapp.com/channel/0029Vb8dF8EKgsNs7dydEG1x"><img src="https://img.shields.io/badge/Join%20WhatsApp-25D366?logo=whatsapp&logoColor=white&style=for-the-badge" alt="Follow the Konjugate channel on WhatsApp"></a> <a href="https://discord.gg/WPUzNyC3S"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?logo=discord&logoColor=white&style=for-the-badge" alt="Join the Konjugate community on Discord"></a></td>
-		<td align="center"><a href="https://github.com/zenineasa/Konjugate/releases/latest"><img src="https://img.shields.io/github/v/release/zenineasa/Konjugate?label=Download%20Latest%20Release&style=for-the-badge" alt="Download the latest Konjugate release"></a></td>
-	</tr>
-</table>
-</div>
+<p align="center"><img src="assets/ForReadme/konjugateAppScreenshot.png" alt="The Konjugate desktop app" width="900"></p>
 
-<div align="center">
-<a href="https://www.youtube.com/watch?v=jiL0kP0VQvQ"><img src="assets/ForReadme/youtubeVideoThumbnail.png" alt="Watch the Konjugate introduction video" width="600"></a>
-<p>New here? Watch the introduction above, or follow the full <a href="https://www.youtube.com/watch?v=eDHksSqKhFs&list=PLRaxEsOU31bE">On-Ramp series</a> on YouTube, starting from Episode 1.</p>
-</div>
+## What you can do with it
 
-<div align="center">
+- **Model a system as a graph.** Nodes hold states, edges carry the equations between them, written in ordinary LaTeX. Group repeated structure into subsystems and edge groups, and reuse it.
+- **Run it and steer it.** Watch a run as it happens, change a parameter mid-run, fork a scenario from any point, and replay the result. Larger models are partitioned and run in parallel.
+- **Build digital twins.** Connect a running model to live measurements from a data log, an MQTT broker, an OPC UA server or a script, keep it in step with the real system, refit it as it drifts, and forecast ahead. See [Connecting a data source](docs/connectingADataSource.md).
+- **Start from data.** Import a CSV of time series and Konjugate proposes which variables drive which, in what direction and with what equation, for you to review before anything is added. See [Causal inference](docs/causalInference.md).
+- **Describe it in words.** The Model Assistant turns a plain-language request into model changes you can review and undo, with local or hosted models. See [the Model Assistant guide](docs/aiAssistantGuide.md).
+- **Take it elsewhere.** Export standalone C++ or an FMI 2.0/3.0 FMU, import FMUs, or run projects headlessly from the command line. See [Code export](docs/codeExport.md).
+
+<p align="center">
+<a href="https://www.youtube.com/watch?v=jiL0kP0VQvQ"><img src="assets/ForReadme/youtubeVideoThumbnail.png" alt="Watch the Konjugate introduction video on YouTube" width="560"></a>
+<br>
+New here? Watch the introduction, then follow the <a href="https://www.youtube.com/watch?v=eDHksSqKhFs&list=PLRaxEsOU31bE">On-Ramp series</a> from Episode 1.
+</p>
+
+## Get Konjugate
+
+Konjugate runs on macOS, Windows and Linux. It is in public beta: used for real work, but the engine, file schema and interface still change between releases. To look around first, **[try it in your browser](https://web.konjugate.com/)** with nothing to install; the browser edition runs models in batch and leaves out C++ providers, FMUs, add-ons and the Model Assistant.
+
+Konjugate is not code-signed yet, so a download from the releases page may bring up a security warning the first time you open it. The download is not damaged; each section below says what to do.
+
+### macOS
+
+Install with [Homebrew](https://brew.sh), which checks the download against its published checksum and opens without a warning:
+
+```bash
+brew install --cask zenineasa/konjugate/konjugate
+```
+
+Or download the DMG for Apple silicon or Intel from the [latest release](https://github.com/zenineasa/Konjugate/releases/latest). If macOS then says "Konjugate.app is damaged and can't be opened", move it to Applications and run `xattr -cr /Applications/Konjugate.app` in Terminal, or open System Settings → Privacy & Security → Open Anyway.
+
+### Windows
+
+Install from the [Microsoft Store](https://apps.microsoft.com/detail/9p5c9s7dsrpj), which is signed by Microsoft, shows no warning and keeps Konjugate up to date.
+
+Or download the installer from the [latest release](https://github.com/zenineasa/Konjugate/releases/latest). If SmartScreen then shows "Windows protected your PC", click **More info**, then **Run anyway**.
+
+### Linux
+
+On **Debian 12, Ubuntu 22.04 or newer**, add Konjugate's apt repository, then install and update it like any other package:
+
+```bash
+repo=https://github.com/zenineasa/Konjugate/releases/latest/download
+key=/etc/apt/keyrings/konjugate.gpg
+
+# Add the Konjugate archive signing key
+sudo install -d -m 0755 /etc/apt/keyrings
+sudo wget -nv -O "$key" "$repo/konjugate-archive-keyring.gpg"
+
+# Add the Konjugate APT repository
+sudo tee /etc/apt/sources.list.d/konjugate.sources > /dev/null <<EOF
+Types: deb
+URIs: $repo/
+Suites: ./
+Signed-By: $key
+EOF
+
+# Install Konjugate
+sudo apt update
+sudo apt install konjugate
+```
+
+On **any distribution from 2022 or newer** (glibc 2.35, as in Ubuntu 22.04, Debian 12 or Fedora 36), run the AppImage, with nothing to install:
+
+```bash
+release=https://api.github.com/repos/zenineasa/Konjugate/releases/latest
+
+# Download the AppImage for this machine (x86_64 or aarch64)
+url=$(wget -qO- $release | grep -o "https://[^\"]*-$(uname -m)\.AppImage\"" | tr -d '"')
+wget "$url"
+
+# Make it executable and run it
+chmod +x Konjugate-*.AppImage
+./Konjugate-*.AppImage
+```
+
+Or download the AppImage for your machine from the [latest release](https://github.com/zenineasa/Konjugate/releases/latest) yourself, then run the last two commands.
+
+## How it works
+
+A dynamic system is usually written as one large function, $\dot{x} = f(x, u, t)$, of every state $x$, input $u$ and time $t$. As a system grows, $f$ becomes a tangle of coupled terms that is hard to read, change or extend.
+
+Konjugate builds $f$ from small pieces instead. Each node $i$ holds some states $x_i$, and its rate of change is the sum of what its relationships bring in plus what happens locally:
+
+```math
+\dot{x}_i = \sum_j f_{ij}(x_i, x_j, t) + s_i(x_i, u, t)
+```
+
+where $f_{ij}$ is the interaction from node $j$ to node $i$, such as convective heat transfer from a battery to the air around it, and $s_i$ is a source, sink or local process, such as electrical heating or an applied input.
+
+<p align="center">
+<picture>
+	<source media="(prefers-color-scheme: dark)" srcset="assets/ForReadme/graphRepresentation-dark.svg">
+	<img src="assets/ForReadme/graphRepresentation-light.svg" alt="Five nodes joined by directed interactions: an arrow from node j to node i carries f_ij, and each node has a local term s_i" width="800">
+</picture>
+</p>
+
+Any term can depend on time and be piecewise, so a heater that only runs during working hours is written directly in its equation:
+
+```math
+s_i = \begin{cases} P & 28800 \le t < 64800 \\ 0 & \text{otherwise} \end{cases}
+```
+
+which heats with power $P$ from 08:00 to 18:00 on the first day ($t$ in seconds). Because every piece is local, a model is assembled from reusable components rather than rewritten as a whole, and the same project runs unchanged in the app, in the browser, from the command line or as exported code.
+
+## Build on Konjugate
+
+Konjugate is meant to be extended. Each of these has its own guide:
+
+- **Add-ons** (`.kja`) open their own windows on a project and its results: visualizers, dashboards, tools. Start with [Add-on development](docs/addonDevelopment.md) and the [Hello World add-on](docs/helloWorldAddon.md).
+- **Plugins** (`.kjp`) add relationship providers written in C++ or Python and reusable component templates. See [Plugin development](docs/pluginDevelopment.md).
+- **Publishing:** add-ons and plugins are found and installed from Konjugate's own Extensions Explorer, from registries anyone can host, with no central marketplace. See [the Extensions Explorer](docs/extensionsExplorer.md) and [Package registry](docs/registry.md).
+- **Scripting and automation:** run or validate a project headlessly with `konjugate --cli` ([Command-line use](docs/engineCli.md#getting-a-portable-result-konjugate---cli)), feed a running twin readings from your own program ([Connecting a data source](docs/connectingADataSource.md)), or read and write projects directly ([Project schema](docs/projectSchema.md), [KJT format](docs/kjtFormat.md)).
+
+Published extensions you can install today:
+
+| Extension | What it does |
+| --- | --- |
+| [Logistics Toolbox](https://github.com/zenineasa/Konjugate-Logistics) | Ports, warehouses, and road and rail lanes conserving containers and trucks as stocks and flows, plus a tool that turns any region's OpenStreetMap data into a runnable network model. |
+| [Fintech Toolbox](https://github.com/zenineasa/Konjugate-Fintech) | Quantitative finance and systemic risk: interbank contagion stress tests and market-dynamics causal transmission. |
+| [Robotics Toolbox](https://github.com/zenineasa/konjugate-robotics) | Draw a robot from solids and joints in 3D and build it into the canvas, each solid a node and each joint an edge with its own equations. |
+| [Pose Visualizer](https://github.com/zenineasa/Konjugate-PoseVisualizer) | A Three.js 6-DOF pose visualizer for results, with timeline-synced playback. |
+| [Results Analysis](https://github.com/zenineasa/Konjugate-ResultPlotViewer) | Time-series, scatter and distribution plots for exploring and comparing results, with CSV export. |
+| [Hello World](https://github.com/zenineasa/Konjugate-HelloWorld) | The smallest possible add-on, as a starting point for writing your own. |
+
+## Build from source
+
+You need Node.js 24.19 or newer, CMake 3.20 or newer, Git and a C++20 toolchain (Xcode Command Line Tools on macOS, Visual Studio 2022 with **Desktop development with C++** on Windows, `build-essential` on Debian and Ubuntu). Then:
+
+```bash
+npm ci
+npm run setup   # native dependencies, engine config
+npm run dev     # build the engine, start the app
+```
+
+`make` builds an installer for your platform into `out/release/`, and `npm test` runs the unit tests. [Development setup](docs/developmentSetup.md) covers each platform in detail, the test suites, the browser edition's toolchain and release builds, and [the documentation index](docs/index.md) lists the rest.
+
+## Community and contributing
+
+Questions, ideas and models are welcome on [Discord](https://discord.gg/WPUzNyC3S) and the [WhatsApp channel](https://whatsapp.com/channel/0029Vb8dF8EKgsNs7dydEG1x). To contribute code, read [CONTRIBUTING.md](CONTRIBUTING.md): pull requests ask you to sign a short copyright assignment agreement in the pull request itself.
+
+<p align="center">
 <picture>
 	<source media="(prefers-color-scheme: dark)" srcset="assets/ForReadme/downloads-dark.svg">
 	<img src="assets/ForReadme/downloads-light.svg" alt="Konjugate installer downloads, split by platform and totalled release by release" width="800">
 </picture>
-</div>
-
-## Why build another simulation software?
-
-This is a natural question. As an engineer, I have come across, used and even developed several simulation tools. Modern simulation platforms are extremely powerful and have enabled remarkable advances across many engineering disciplines.
-
-However, many engineering systems are still difficult to model quickly and it is not necessarily due to a lack of capability in existing tools; rather it is because different simulation frameworks are built around different ways of thinking about a system.
-
-Some approaches begin with equations. Others focus on physical domains, block diagrams, meshes or specialised modelling languages. These abstractions are extremely effective within their intended applications, but translating a complex real-world system into the appropriate representation can often require significant effort.
-
-This project explores another perspective: representing systems as networks of interconnected components. Components define their states and properties, while the relationships between them define the mathematical models governing how quantities are transferred and transformed.
-
-The goal is not to replace existing simulation tools, but to explore a flexible and composable framework for modelling complex engineering systems, enabling applications ranging from rapid system prototyping and conjugate multiphysics simulations to the development of digital twins.
-
-## Viewing Systems as Networks of States and Relationships
-
-Engineers often describe dynamic systems using states and their evolution over time.
-
-A general dynamic system can be represented as:
-
-$$
-\dot{x}=f(x,u,t)
-$$
-
-where $x$ represents the state vector of the system, $u$ represents external inputs, $t$ represents time and $f$ describes the mathematical relationships governing the evolution of those states.
-
-However, as systems become larger and more interconnected, the function $f$ often becomes a complex collection of coupled relationships between individual components. Understanding, modifying and extending such models can become increasingly difficult.
-
-This project explores a representation where a system is viewed as a network of states and relationships. Nodes represent stateful components, while relationships represent the interactions that govern how quantities are transferred, transformed or constrained between them.
-
-Instead of defining one large function:
-
-$$
-\dot{x}=f(x,u,t)
-$$
-
-the system dynamics can be composed from smaller interaction models:
-
-$$
-\dot{x_i} = \sum_j f_{ij}(x_i,x_j,t) + s_i(x_i,u,t)
-$$
-
-where:
-
-- $x_i$ represents the states contained within a component.
-- $f_{ij}$ represents the interaction model between components.
-- $s_i$ represents sources, sinks or internal processes affecting the component.
-- $t$ represents simulation time, available to every relationship and local term.
-
-![Graph representation of node states, interactions and local source terms](assets/ForReadme/graphRepresentation.png)
-
-In more practical terms, each node represents a component with values that can change over time. A relationship term $f_{ij}$ describes how one component influences another—for example, convective heat transfer between a battery and its surrounding air. A local term $s_i$ describes what happens within or directly to a component, such as electrical heating, heat loss to the environment or an externally applied input.
-
-Either kind of term can depend on time, and can be piecewise. A heater that only runs during working hours, a supply that drops during a planned outage, or a flow that only exists while a tank is above some level are written directly in the equation. For example,
-
-$$
-s_i = \begin{cases} P & 28800 \le t < 64800 \\ 0 & \text{otherwise} \end{cases}
-$$
-
-heats with power $P$ between 08:00 and 18:00 of the first day ($t$ is in seconds).
-
-Together, these smaller contributions determine how the state of every component evolves.
-
-By composing nodes and relationships, complex systems can be assembled from reusable models.
-
-## Causal inference
-
-Building a model by hand assumes you already know its structure, which components exist and how they interact. Often you don't; you have a CSV of timeseries data (sensor logs, monitoring exports, historical records) and want to know what's actually driving what before you can start authoring a model.
-
-Konjugate can propose a starting graph from that data directly. Import a CSV of multivariate timeseries, and it finds which columns are related, in which direction, and whether the relationship is linear or curved; then builds real nodes, edges and equations from it, reviewed and accepted before anything is added to your model.
-
-It works in two stages: a lagged partial-correlation pass cheaply screens which variables are worth testing at all, then a joint ridge regression determines each surviving relationship's direction and fits its equation, linear or polynomial. See [Causal inference](docs/causalInference.md) for the full method.
-
-## Add-ons & Plugins
-
-Konjugate ships with a built-in Explorer for discovering and one-click-installing add-ons and plugins, with no central marketplace to run or depend on — see [the Extensions Explorer](docs/extensionsExplorer.md) for how it works. A few real examples are already published:
-
-<table>
-<td width="280"><a href="https://github.com/zenineasa/Konjugate-Logistics"><img src="registry/images/konjugate.logistics.webp" alt="Konjugate Logistics Toolbox"></a></td>
-<td><strong><a href="https://github.com/zenineasa/Konjugate-Logistics">Konjugate Logistics Toolbox</a></strong><br>Supply-chain and logistics modeling for Konjugate: ports, warehouses, road and rail lanes conserving containers and trucks as stocks and flows, plus a toolbox that turns any region's OpenStreetMap data into a runnable network model.</td>
-</tr>
-<tr>
-<td width="280"><a href="https://github.com/zenineasa/Konjugate-Fintech"><img src="registry/images/konjugate.fintech.webp" alt="Konjugate Fintech Toolbox"></a></td>
-<td><strong><a href="https://github.com/zenineasa/Konjugate-Fintech">Konjugate Fintech Toolbox</a></strong><br>Quantitative finance, DeFi, and systemic-risk modeling for Konjugate: interbank contagion stress-testing and market-dynamics causal transmission.</td>
-</tr>
-<tr>
-<td width="280"><a href="https://github.com/zenineasa/konjugate-robotics"><img src="registry/images/konjugate.robotics.webp" alt="Konjugate Robotics Toolbox"></a></td>
-<td><strong><a href="https://github.com/zenineasa/konjugate-robotics">Konjugate Robotics Toolbox</a></strong><br>Draw a robot from solids and joints in a 3D window and build it into the canvas: each solid becomes a node and each joint an edge carrying its own equations. The robot then runs, takes live sliders, forks and fits like any other model, and can be wired to anything else you model.</td>
-</tr>
-<tr>
-<td width="280"><a href="https://github.com/zenineasa/Konjugate-PoseVisualizer"><img src="registry/images/konjugate.poseVisualizer.webp" alt="Pose Visualizer"></a></td>
-<td><strong><a href="https://github.com/zenineasa/Konjugate-PoseVisualizer">Pose Visualizer</a></strong><br>A Three.js 6-DOF pose visualizer for Konjugate results, with timeline-synced playback.</td>
-</tr>
-<tr>
-<td width="280"><a href="https://github.com/zenineasa/Konjugate-ResultPlotViewer"><img src="registry/images/konjugate.resultPlotViewer.webp" alt="Results Analysis"></a></td>
-<td><strong><a href="https://github.com/zenineasa/Konjugate-ResultPlotViewer">Results Analysis</a></strong><br>Plotly-backed time-series, scatter and distribution plots for exploring and comparing Konjugate simulation results, with CSV export.</td>
-</tr>
-<tr>
-<td width="280"><a href="https://github.com/zenineasa/Konjugate-HelloWorld"><img src="registry/images/konjugate.helloWorld.webp" alt="Hello World"></a></td>
-<td><strong><a href="https://github.com/zenineasa/Konjugate-HelloWorld">Hello World</a></strong><br>A minimal Konjugate add-on — the simplest possible example of the add-on API, meant as a starting point for anyone learning to author one.</td>
-</tr>
-<tr>
-</table>
-
-Install any of these from Konjugate's own Extensions dialog (Discover tab), or see [Add-on development](docs/addonDevelopment.md) to build your own.
-
-## Current Status
-
-Konjugate is in active development and public beta, not early-stage anymore — a real cross-platform release pipeline (macOS, Windows, Linux, plus an in-browser preview), causal inference from timeseries data, numerical stability diagnostics, FMU import/export, and an add-on/plugin ecosystem with one-click discovery and installation are already built and in use. The engine, schema and UI are still evolving, and the project isn't code-signed yet (see "Installing a Release Build" below), so treat it as beta-quality rather than a finished 1.0.
-
-## Try It in Your Browser
-
-Want a quick look before installing anything? A free, in-browser trial of Konjugate needs no install: **[try it at web.konjugate.com](https://web.konjugate.com/)**. It's a lightweight preview, not the full app — Run is batch-only there (no live progress or mid-run control), and programmable C++ providers, FMU import/export, add-ons, and AI-assisted authoring aren't available yet. For the full experience, **[download the desktop app](https://github.com/zenineasa/Konjugate/releases/latest)** above.
-
-## Installing a Release Build
-
-Konjugate isn't code-signed yet — an active choice while the project is in beta, not an accident — so your OS may show a security warning the first time you open a downloaded release. This doesn't mean the download is corrupted.
-
-- **macOS**: the recommended way is [Homebrew](https://brew.sh). One command puts Konjugate in your Applications folder, checks the download against its published checksum and opens without a warning:
-  ```bash
-  brew install --cask zenineasa/konjugate/konjugate
-  ```
-  Update later with `brew upgrade --cask konjugate`. Because Konjugate isn't signed, Homebrew clears macOS's quarantine flag for you, so macOS hasn't checked the app itself; install it if you trust the project.
-
-  Prefer to download the app yourself? If you see "Konjugate.app is damaged and can't be opened," move it to Applications, then in Terminal run:
-  ```bash
-  xattr -cr /Applications/Konjugate.app
-  ```
-  Alternatively, open System Settings → Privacy & Security → Open Anyway.
-- **Windows**: install Konjugate from the [Microsoft Store](https://apps.microsoft.com/detail/9p5c9s7dsrpj) — it is signed by Microsoft, so there is no security warning. If you download the installer from the releases page instead and see a blue "Windows protected your PC" warning from SmartScreen, click **More info**, then click the **Run anyway** button that appears.
-
-## Development
-
-Konjugate supports development on macOS, Windows and Linux.
-
-### Prerequisites
-
-- **Windows**: Node.js 24+, Git, CMake, and Visual Studio 2022+ with **Desktop development with C++**. (Run commands in Developer PowerShell).
-- **macOS**: Node.js 24+, CMake (`brew install cmake`), Git, and Xcode Command Line Tools (`xcode-select --install`).
-- **Linux (Ubuntu/Debian)**: Node.js 24+, CMake, Git, and C++ build tools (`sudo apt install build-essential cmake git curl zip unzip tar pkg-config`).
-
-### Quick Start
-
-Run the standard procedure on any platform:
-
-```bash
-npm ci
-npm run setup
-npm run dev
-```
-
-Setup uses a pinned `vcpkg` baseline for native dependencies (Boost.PropertyTree, Eigen3, METIS, NLopt, OpenSSL, Protobuf, Zlib) and configures the C++ engine. MSVC builds automatically enable multi-processor parallel compilation (`/MP`); see [the development setup guide](docs/developmentSetup.md) for Windows build performance optimization tips.
-
-An experimental browser build (see [Konjugate Web](docs/proposals/webEdition.md)) is a separate, opt-in toolchain: `npm run setup:web` (or `make setupWeb`) installs a pinned Emscripten SDK, independently of everything above.
-
-## Building
-
-Run the complete host-platform build with:
-
-```bash
-make
-```
-
-or:
-
-```bash
-make build
-```
-
-The build installs missing dependencies, generates application and web icons, packages Electron and writes the shareable artifact to `out/release/`.
-
-- macOS produces a DMG.
-- Windows produces an installer (`*-setup.exe`) and requires NSIS (`makensis`) on `PATH`. A portable ZIP is also available via `make distributableWindowsPortable`.
-- Linux produces an AppImage and requires `appimagetool` on `PATH`. The official download is named after its architecture (e.g. `appimagetool-x86_64.AppImage`), so rename or symlink it to `appimagetool` and mark it executable. See [release packaging](docs/releasePackaging.md) for details.
-
-Generated application bundles are stored in `out/package/`. Run `make clean` to remove dependencies, the lockfile, generated icons, caches and all build outputs.
-
-Every packaged application includes `ThirdPartyNotices.md` and the applicable license texts under `thirdPartyLicenses/`. Packaging fails if these compliance files are missing. Native engine builds that include METIS receive the same files in their build directory. See [release packaging](docs/releasePackaging.md) for the host tools and packaged-runtime checks.
-
-## Command-line mode
-
-The packaged app can also run a project headlessly from a terminal — no window opens, and it exits when the run finishes. Invoke the app's own executable directly (not through `open`/a shell shortcut) so output streams back and the exit code is real:
-
-```bash
-# macOS
-/Applications/Konjugate.app/Contents/MacOS/Konjugate --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
-
-# Windows
-Konjugate.exe --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
-
-# Linux (AppImage — make it executable once with chmod +x; the file name ends in x86_64 or aarch64)
-./Konjugate-*-$(uname -m).AppImage --cli run model.kjt --target-time 30 --output-kjt result.kjt --output-csv result.csv
-```
-
-- `--cli run <project.kjt> --target-time <seconds>` runs the project's active run configuration (or `--configuration <name-or-id>` to pick another) for the given simulated duration.
-- `--output-kjt <path>` writes a new `.kjt` with the result embedded, exactly like saving after a run in the GUI.
-- `--output-csv <path>` exports the same signal columns the GUI's CSV export button produces — opens directly in Excel or any spreadsheet app.
-- `--cli validate <project.kjt>` prints the validation report as JSON and exits `0` if valid, `2` if not.
-- An encrypted `.kjt` reads its password from a `KONJUGATE_PASSWORD` environment variable, never a command-line flag, so it never lands in shell history.
-
-This also works against a dev build: `electron . --cli run model.kjt --target-time 30 ...`. A CLI invocation always runs as its own independent process, even while a GUI instance is already open elsewhere.
-
-## Testing
-
-```bash
-npm test                 # unit tests
-npm run test:engine      # C++ engine test suite, against the dev build
-npm run test:interaction # Electron UI interaction tests, against the dev build
-npm run test:all         # unit + interaction
-```
-
-Dev-build tests run against `out/engine/` and a plain `electron .` launch. To also catch packaging-only failures they can't reach — a missing bundled library, a resource path that only resolves once laid out the way the packager produces it, code-signing side effects — run the same suites against an actual packaged build instead:
-
-```bash
-npm run test:package
-```
-
-This packages the app for the host platform (equivalent to `npm run package`) and then runs the engine and interaction suites against that package rather than the dev build. It's slower than the dev-mode suites, since it depends on a fresh package build each time, so treat it as a pre-release check rather than part of the fast dev loop. To run just one half, use `make verifyPackagedEngine` or `make verifyPackagedInteraction` (each also builds the package first).
-
-## Vision and Roadmap
-
-The vision of this project is to create an integrated environment for modelling and simulating complex systems.
-
-The initial focus is on developing a desktop application where users can define components, their states and relationships between them. These models can be explored interactively using a general-purpose simulation engine with real-time visualization.
-
-The desktop application uses a separate native C++ process to validate and execute the same `.kjt` models. The validator and simulation runner are also available through command-line interfaces, keeping model behavior consistent across desktop and automated workflows.
-
-An extensible add-on/plugin ecosystem already lets users and developers contribute physics models, reusable components, visualization tools and other simulation capabilities through the community — see [Add-ons & Plugins](#add-ons--plugins) above — and continuing to grow that ecosystem, not building the mechanism itself, is the ongoing direction here.
-
-The roadmap includes:
-
-- graph-based system modelling — built,
-- interactive simulation environment — built,
-- high-performance simulation execution — built, including partitioned, multi-threaded execution for larger models,
-- extensible physics models — built, via the add-on/plugin ecosystem,
-- AI-assisted modelling workflows — in progress, via the Model Assistant and causal-inference-driven model proposals.
-
-## Contributing
-
-The project is currently focused on building a strong foundation.
-
-Ideas, discussions and contributions are welcome. Contributions require signing a short copyright assignment agreement directly in the pull request; see [CONTRIBUTING.md](CONTRIBUTING.md).
+</p>
 
 ## License
 
-This project is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE) for details. The example projects it ships (the `.kjt` files in `examples/`, with their guides) are released under the 0BSD license instead (the Zero-Clause BSD license, with no conditions at all), so you may use, change and share them for any purpose; see [examples/LICENSE](examples/LICENSE).
+Konjugate is licensed under the [Mozilla Public License 2.0](LICENSE). The bundled example projects in `examples/` and their guides are released under the [Zero-Clause BSD license](examples/LICENSE), so you may use, change and share them for any purpose.
 
 Copyright © 2026 Zenin Easa Panthakkalakath

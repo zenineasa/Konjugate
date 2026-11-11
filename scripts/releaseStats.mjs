@@ -4,13 +4,18 @@
 // scripts/bumpVersion.mjs on every version bump, on the maintainer's own machine, before the new
 // release exists -- so it counts everything published up to the previous version.
 //
-// GitHub only reports a lifetime download count per release asset, never when those downloads
-// happened. So the curve is release by release: each point is a release at its publish date, and
-// the curve climbs by that release's lifetime downloads. It is not downloads over time -- recent
-// releases have had less time to collect theirs -- and the chart says so beneath the curve.
+// What counts: the installers, .exe, .dmg, .AppImage and .deb, as GitHub counts them. That is
+// downloads, not people: GitHub cannot tell a first install from an update, so an AppImage update
+// or an `apt upgrade` adds to its release's count like any other download. Left out are the files
+// that are fetched for reasons other than installing: the .AppImage.zsync files (checked by AppImage
+// updates) and the apt repository's index and key files (Packages, InRelease, the keyring...),
+// which apt fetches on every `apt update`. Each release's own CI run downloads its .deb files once
+// or twice, to index them and to test the install, so the Linux count runs a little high.
 //
-// Only installers count: .exe, .dmg and .AppImage. The .AppImage.zsync files are fetched by AppImage
-// delta updates, not by new users, so they're left out.
+// GitHub only reports a lifetime count per asset, never when the downloads happened, so the curve
+// is release by release: each point is a release at its publish date, climbing by that release's
+// lifetime downloads. It is not downloads over time -- recent releases have had less time to collect
+// theirs -- and the chart says so beneath the curve.
 //
 // Never fails the caller: offline or rate-limited, it warns and leaves the committed files as they
 // were. Set GITHUB_TOKEN to lift the unauthenticated limit of 60 requests an hour.
@@ -28,7 +33,7 @@ const repository = 'zenineasa/Konjugate';
 const platforms = [
     { key: 'windows', label: 'Windows', matches: (name) => name.endsWith('.exe') },
     { key: 'macos', label: 'macOS', matches: (name) => name.endsWith('.dmg') },
-    { key: 'linux', label: 'Linux', matches: (name) => name.endsWith('.AppImage') },
+    { key: 'linux', label: 'Linux', matches: (name) => name.endsWith('.AppImage') || name.endsWith('.deb') },
 ];
 
 async function fetchReleases() {

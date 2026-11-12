@@ -9,9 +9,16 @@ import { exampleLabel } from '../src/exampleCatalog.mjs';
 import { decodeProjectBundle } from '../src/projectFile.mjs';
 import { calibrateTank, calibrateTankValues } from '../src/tutorials/calibrateTank.mjs';
 import { firstModel, firstModelValues as tourModel } from '../src/tutorials/firstModel.mjs';
-import { exampleTitle, groupTutorials, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorialForExample, tutorials, tutorialStartLabel } from '../src/tutorials/index.mjs';
+import { exampleTitle, groupTutorials, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorials, tutorialsForExample, tutorialStartLabel } from '../src/tutorials/index.mjs';
 import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
 import { tuneController, tuneControllerValues } from '../src/tutorials/tuneController.mjs';
+import { heatingRecordCsv } from '../scripts/generateHeatingRecord.mjs';
+import { buildFromComponentsValues } from '../src/tutorials/buildFromComponents.mjs';
+import { fixInstabilityValues } from '../src/tutorials/fixInstability.mjs';
+import { optimiseObjectiveValues } from '../src/tutorials/optimiseObjective.mjs';
+import { steerByHandValues } from '../src/tutorials/steerByHand.mjs';
+import { whatIfBranchesValues } from '../src/tutorials/whatIfBranches.mjs';
+import { objectiveVocabulary } from '../src/renderer/tuningObjective.mjs';
 
 // The first-model tour's tests below were written against its own step list; these bind the shared functions to it.
 const tourSteps = firstModel.steps;
@@ -135,7 +142,8 @@ test('every tutorial has what the list and the controller need, starts with a we
         for (const step of steps) {
             assert.ok(step.title && step.text, `${tutorial.id}/${step.id} needs a title and text`);
             assert.equal(typeof step.done, 'function');
-            if (step.advance !== 'next') assert.ok(step.target, `${tutorial.id}/${step.id} points at nothing`);
+            // A step whose work is in another window (the live twin's) points at nothing here, and says where it is instead.
+            if (step.advance !== 'next') assert.ok(step.target || step.elsewhere === 'twin', `${tutorial.id}/${step.id} points at nothing`);
         }
     }
 });
@@ -162,15 +170,16 @@ test('what a tutorial points at, fills in and starts from exists', () => {
             const { example } = tutorial.start;
             assert.ok(existsSync(join(root, 'examples', example)), `${tutorial.id} starts from ${example}, which is not shipped`);
             assert.ok(manifest.examples.some((entry) => `${entry.id}.kjt` === example), `${tutorial.id}'s example is not in examples/manifest.json`);
-            assert.equal(tutorialForExample(example), tutorial);
+            assert.ok(tutorialsForExample(example).includes(tutorial));
         } else {
             assert.equal(tutorial.start.from, 'empty');
         }
         for (const fileName of tutorial.data ?? []) assert.ok(existsSync(join(root, 'examples', fileName)), `${tutorial.id} reads ${fileName}, which is not shipped`);
     }
-    assert.deepEqual(tutorialDataFiles, ['tankCalibrationMeasured.csv']);
+    assert.deepEqual(tutorialDataFiles, ['tankCalibrationMeasured.csv', 'heatingRecord.csv']);
     assert.equal(tutorialById('nope'), null);
-    assert.equal(tutorialForExample('heatedWaterTank.kjt'), null);
+    assert.deepEqual(tutorialsForExample('heatedWaterTank.kjt'), []);
+    assert.deepEqual(tutorialsForExample('tankCalibration.kjt').map((tutorial) => tutorial.id), ['calibrateTank', 'optimiseObjective'], 'An example can have several tutorials.');
 });
 
 test('an example is named in the list as the Examples dialog names it', () => {
@@ -186,8 +195,19 @@ test('the list is searched by title, tags, sentence and starting example, every 
     assert.equal(ids('PID')[0], 'tuneController', 'Case does not matter.');
     assert.equal(ids('measured data')[0], 'calibrateTank');
     assert.equal(ids('Tank Calibration')[0], 'calibrateTank', 'The starting example\'s name finds it.');
-    assert.equal(ids('position controlled joint')[0], 'tuneController');
+    assert.ok(['tuneController', 'steerByHand', 'whatIfBranches'].includes(ids('position controlled joint')[0]), 'An example\'s name finds the tutorials on it.');
+    assert.deepEqual(ids('position controlled joint').sort(), ['steerByHand', 'tuneController', 'whatIfBranches']);
     assert.equal(ids('first')[0], 'firstModel');
+    assert.equal(ids('fork')[0], 'whatIfBranches');
+    assert.equal(ids('what if')[0], 'whatIfBranches');
+    assert.equal(ids('stability')[0], 'fixInstability');
+    assert.equal(ids('substeps')[0], 'fixInstability');
+    assert.equal(ids('digital twin')[0], 'liveTwin');
+    assert.equal(ids('keyboard')[0], 'steerByHand');
+    assert.equal(ids('gamepad')[0], 'steerByHand');
+    assert.equal(ids('component library')[0], 'buildFromComponents');
+    assert.equal(ids('causal')[0], 'discoverEquations');
+    assert.equal(ids('maximise')[0], 'optimiseObjective');
     assert.deepEqual(ids('controller calibrate'), [], 'Every word must match.');
     assert.deepEqual(ids('zzzz'), []);
     // A title match ranks above a match elsewhere: "run" is in the first-model tutorial's title and only in the others' sentences.
@@ -295,4 +315,39 @@ test('a skipped step is not reported as undone: "Skip this step" did it, and the
     assert.equal(brokenStep(facts, runIndex, tourSteps), 1, 'Undone and not skipped: the first step to repeat.');
     assert.equal(brokenStep(facts, runIndex, tourSteps, new Set([1, 2, 3, 4, 5])), null);
     assert.equal(brokenStep(facts, runIndex, tourSteps, new Set([1, 2])), 3);
+});
+
+test('the heating record the inference tutorial downloads is the one its generator writes', async () => {
+    assert.equal(await readFile(join(root, 'examples', 'heatingRecord.csv'), 'utf8'), heatingRecordCsv(),
+        'examples/heatingRecord.csv has drifted from scripts/generateHeatingRecord.mjs: run the script again.');
+});
+
+test('the names, ids and starting values the newer tutorials\' cards and skips rely on are the examples\' own', async () => {
+    const joint = await exampleDocument('positionControlledJoint.kjt');
+    const setpoint = joint.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'setpointAngle');
+    assert.equal(setpoint.id, whatIfBranchesValues.setpoint.parameterId);
+    assert.equal(setpoint.value, whatIfBranchesValues.setpoint.from);
+    assert.equal(setpoint.mode, 'live', 'A fork can only start with other values for live parameters.');
+    assert.ok(whatIfBranchesValues.setpoint.to >= setpoint.control.minimum && whatIfBranchesValues.setpoint.to <= setpoint.control.maximum);
+    assert.equal(setpoint.id, steerByHandValues.setpoint.parameterId);
+    assert.equal(setpoint.symbol, steerByHandValues.setpoint.symbol);
+    assert.equal(setpoint.name, steerByHandValues.setpoint.name);
+
+    const spring = await exampleDocument('springMassDamper.kjt');
+    const stiffness = spring.edges.find((edge) => edge.name === fixInstabilityValues.spring).parameters.find((parameter) => parameter.symbol === 'stiffness');
+    assert.equal(stiffness.id, fixInstabilityValues.stiffness.parameterId);
+    assert.equal(stiffness.value, fixInstabilityValues.stiffness.from);
+    const mass = spring.nodes.find((node) => node.id === fixInstabilityValues.mass.id);
+    assert.equal(mass.name, fixInstabilityValues.mass.name);
+    assert.equal(mass.numerics.substepsPerGlobalStep, fixInstabilityValues.mass.substepsFrom);
+
+    const tank = await exampleDocument('tankCalibration.kjt');
+    const state = objectiveVocabulary(tank).states.find((candidate) => candidate.label === optimiseObjectiveValues.state);
+    assert.equal(state?.name, optimiseObjectiveValues.stateName, 'The objective editor names the tank\'s temperature as the card expects.');
+
+    for (const id of [...buildFromComponentsValues.parts.map((part) => part.template), buildFromComponentsValues.armature.template, buildFromComponentsValues.shaft.template]) {
+        const template = JSON.parse(await readFile(join(root, 'assets', 'componentLibrary', `${id}.json`), 'utf8'));
+        const part = buildFromComponentsValues.parts.find((candidate) => candidate.template === id);
+        if (part) assert.equal(template.name, part.name, `The ${id} template places a node called ${part.name}.`);
+    }
 });

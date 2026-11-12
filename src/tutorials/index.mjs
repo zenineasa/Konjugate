@@ -4,11 +4,18 @@
 // list is searched and grouped. Shared by the desktop and web editions' renderer and by the main process (which checks the ids a window
 // reports and the data files it asks for against this list).
 
+import { buildFromComponents } from './buildFromComponents.mjs';
 import { calibrateTank } from './calibrateTank.mjs';
+import { discoverEquations } from './discoverEquations.mjs';
 import { firstModel } from './firstModel.mjs';
+import { liveTwin } from './liveTwin.mjs';
+import { fixInstability } from './fixInstability.mjs';
+import { optimiseObjective } from './optimiseObjective.mjs';
+import { steerByHand } from './steerByHand.mjs';
 import { tuneController } from './tuneController.mjs';
+import { whatIfBranches } from './whatIfBranches.mjs';
 
-export const tutorials = Object.freeze([firstModel, calibrateTank, tuneController]);
+export const tutorials = Object.freeze([firstModel, buildFromComponents, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, whatIfBranches, discoverEquations, liveTwin]);
 
 // The groups of the list, in order, with the heading each shows. A tutorial's `area` is one of these ids.
 export const tutorialAreas = Object.freeze([
@@ -22,8 +29,8 @@ export const tutorialAreas = Object.freeze([
 
 export const tutorialById = (id) => tutorials.find((tutorial) => tutorial.id === id) ?? null;
 
-// The tutorial that starts from an example (by its file name, as the Examples dialog names it), for the guide's link back to it.
-export const tutorialForExample = (exampleId) => tutorials.find((tutorial) => tutorial.start.from === 'example' && tutorial.start.example === exampleId) ?? null;
+// The tutorials that start from an example (by its file name, as the Examples dialog names it), for the guide's cards back to them.
+export const tutorialsForExample = (exampleId) => tutorials.filter((tutorial) => tutorial.start.from === 'example' && tutorial.start.example === exampleId);
 
 // The files beside the examples that a tutorial reads (a tutorial's measurements): the only ones a window may ask the main process for.
 export const tutorialDataFiles = Object.freeze([...new Set(tutorials.flatMap((tutorial) => tutorial.data ?? []))]);

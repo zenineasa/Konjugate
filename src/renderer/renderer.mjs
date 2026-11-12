@@ -25,6 +25,7 @@ import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
 import { groupTutorials, searchTutorials, tutorialById, tutorialStartLabel } from '../tutorials/index.mjs';
+import { stepText } from '../tutorials/steps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { liveRange } from '../inputBindings.mjs';
@@ -4708,6 +4709,7 @@ function updateModelStatus() {
 }
 
 function navigateToValidationIssue(item) {
+    if (tour.active) tutorialFollowedIssue = item.code ?? null;
     $('#validationPanel').hidden = true;
     $('#validationSummary').ariaExpanded = 'false';
     if (item.location.kind === 'runConfiguration') {
@@ -6997,6 +6999,7 @@ async function startSimulation() {
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;
         if (tutorialRunModel?.document === runDocument) tutorialRunModel.jobId = execution.jobId;
+        if (tour.active && pendingFork) tutorialForkValues.set(execution.jobId, (pendingFork.overrides ?? []).map(({ entry }) => Number(entry.value)));
         // A fork must keep the parent's job/result alive as an immutable sibling branch rather
         // than releasing it the way an ordinary new run replaces its predecessor.
         if (previousResultSessionId && previousResultSessionId !== execution.jobId && !forkingFromSessionId) {
@@ -9179,6 +9182,7 @@ function openParameterTuning() {
 // the tuning card's replay, the log it has open goes too, chosen as the twin's source.
 function openTwinWindow(log = null, { fresh = false } = {}) {
     if (activeResult) return;
+    twinWindowOpen = true;
     window.engine.liveTwin.openWindow({
         document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup,
         // A demonstration's model, opened as it ships and not saved as the person's own: picked again, it is opened afresh.
@@ -9293,6 +9297,12 @@ function refreshLiveTwinChip() {
 }
 window.engine.liveTwin?.onStatusChanged?.((status) => {
     windowTwinStatus = status;
+    if (status?.closed) twinWindowOpen = false;
+    if (tour.active && status) {
+        if (status.running) tutorialTwin.sawRunning = true;
+        tutorialTwin.movesSeen = Math.max(tutorialTwin.movesSeen, Number(status.moves) || 0);
+        if (status.alarm) tutorialTwin.sawAlarm = true;
+    }
     refreshLiveTwinChip();
 });
 $('#liveTwinChip').addEventListener('click', () => { if (windowTwinStatus?.running) window.engine.liveTwin.focusWindow(); });
@@ -12273,6 +12283,19 @@ const tutorialPlotsSeen = new Map();
 // The latest run started during a tutorial: its job, the model it was started from, and whether it has finished with a result. Kept
 // when the results are closed (as they must be to change the model), so a step can still ask what the latest run was run with.
 let tutorialRunModel = null;
+// Whether a tutorial's objective search has run (kept, since the tuning card resets when it is closed).
+let tutorialObjectiveSearched = false;
+// The code of the validation issue last followed from the list while a tutorial ran (kept: the list closes when one is followed).
+let tutorialFollowedIssue = null;
+// The values each fork started with, by its job, while a tutorial ran.
+const tutorialForkValues = new Map();
+// The live twin while a tutorial ran: whether its window is open, and what it has done (kept: it stops when its recording ends).
+let twinWindowOpen = false;
+const tutorialTwin = { sawRunning: false, movesSeen: 0, sawAlarm: false };
+// Whether a tutorial step is shown in the twin window now.
+let tutorialStepInTwin = false;
+// The live parameters changed by hand during a run while a tutorial ran (kept: the results are closed before the model can change).
+const tutorialSteered = new Set();
 // The tutorials finished, for the Tutorials list's ticks (read from the store each time the list opens).
 let tutorialsCompleted = [];
 const tourNodeLabel = (name) => [...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(name)) ?? null;
@@ -12352,6 +12375,7 @@ const tour = createTour({
         if (tutorialRunModel && activeResult && !simulationRunning && tutorialRunModel.jobId === activeEngineJobId) tutorialRunModel.finished = true;
         if (nodePlotVisible && $('#editNodeName').value) tutorialPlotsSeen.set($('#editNodeName').value, activeEngineJobId);
         const edgeEditorOpen = !$('#edgeEditor').classList.contains('hidden');
+        if (parameterTuningGoal === 'objective' && parameterTuningState?.report) tutorialObjectiveSearched = true;
         return {
             document: serializeProjectDocument(),
             ui: {
@@ -12373,6 +12397,50 @@ const tour = createTour({
                 tuningOpen: !$('#parameterTuning').classList.contains('hidden'),
                 tuningDataLoaded: parameterTuningGoal === 'data' && Boolean(parameterTuningState?.csvContent && parameterTuningState.mapping?.length),
                 tuningFitted: parameterTuningGoal === 'data' && Boolean(parameterTuningState?.report),
+                tuningGoal: parameterTuningGoal,
+                objectiveLatex: parameterTuningObjective.latex,
+                objectiveValid: $('#parameterTuningObjectiveDiagnostics').textContent.startsWith('Valid objective: '),
+                objectiveDirection: $('#parameterTuningDirection').value,
+                objectiveRunTime: Number($('#parameterTuningRunTime').value),
+                objectiveTimeStep: Number($('#parameterTuningTimeStep').value),
+                objectiveLimits: parameterTuningLimits.map((limit) => ({ latex: limit.editor.latex, relation: limit.relationSelect.value, limit: limit.limitInput.value })),
+                objectiveSearched: tutorialObjectiveSearched,
+                validationPanelOpen: !$('#validationPanel').hidden,
+                validationCodes: (currentValidation.issues ?? []).map((issue) => issue.code),
+                followedIssue: tutorialFollowedIssue,
+                nodeEditorFor: $('#nodeEditor').classList.contains('hidden') ? null : selectedNode?.userData.definition.title ?? null,
+                numericsTabShown: !$('#nodeEditor [data-node-panel="numerics"]').hidden,
+                libraryOpen: !$('#componentLibraryPanel').hidden,
+                timelineTime: Number(activeResult?.samples[activeResultSampleIndex]?.time ?? NaN),
+                branchesPanelOpen: !$('#branchesPanel').hidden,
+                forkPanelOpen: !$('#forkParameterPanel').hidden,
+                forks: [...branches.values()].filter((branch) => branch.parentBranchUuid).map((branch) => ({
+                    forkTime: branch.forkTime,
+                    finished: !(simulationRunning && branch.branchUuid === activeBranchUuid),
+                    values: tutorialForkValues.get(branch.jobId) ?? []
+                })),
+                comparing: comparisonBranchUuids.size > 0,
+                inferenceOpen: !$('#causalInference').classList.contains('hidden'),
+                inferenceLoaded: !$('#causalInferenceMappingSection').hidden,
+                inferenceCandidates: !$('#causalInferenceCandidatesSection').hidden,
+                anyRelationshipRow: document.querySelector('.relationshipRow'),
+                twinWindowOpen,
+                twinSawRunning: tutorialTwin.sawRunning,
+                twinMovesSeen: tutorialTwin.movesSeen,
+                twinSawAlarm: tutorialTwin.sawAlarm,
+                demonstration: demonstrationProject,
+                settingsOpen: $('#settingsDialog').open,
+                controllersShown: $('#settingsDialog').open && !$('[data-settings-page="controllers"]').hidden,
+                bindings: (steering.document?.bindings ?? []).map((entry) => ({ symbol: entry.parameter.symbol, type: entry.control.type })),
+                simulationRunning,
+                runOnline: Boolean(runLaunchSettings.online),
+                // A live run's parameters can be steered once its first results are in.
+                steerable: liveControlsOffered(),
+                steered: (() => {
+                    if (activeResult?.interventions?.length) for (const id of changedParameterIds(activeResult.interventions)) tutorialSteered.add(Number(id));
+                    return [...tutorialSteered];
+                })(),
+                endpointPick: $('#endpointPickBanner').hidden ? null : ($('#endpointPickTitle').textContent.toLowerCase().includes('target') ? 'target' : 'source'),
                 labelOf: tourNodeLabel,
                 relationshipRowOf: tutorialRelationshipRow
             }
@@ -12402,6 +12470,9 @@ const tour = createTour({
             await waitUntil(() => currentValidation.valid && !$('#runButton').disabled, 15000);
             fillRunDialog(step.runSeconds);
             $('#startRun').click();
+            // The step is done when the run is: the card waits with it (its buttons off), rather than moving on to a step about results.
+            await waitUntil(() => simulationRunning, 5000);
+            await waitUntil(() => !simulationRunning && activeResult, 180000);
         },
         plotNode: async (step) => {
             await waitUntil(() => activeResult && !simulationRunning, 120000);
@@ -12430,10 +12501,208 @@ const tour = createTour({
         runFit: async () => {
             await waitUntil(() => !$('#runParameterTuning').hidden && !$('#runParameterTuning').disabled, 15000);
             $('#runParameterTuning').click();
+            await waitUntil(() => Boolean(parameterTuningState?.report), 300000);
         },
         applyFit: async () => {
             await waitUntil(() => !$('#commitParameterTuning').hidden && !$('#commitParameterTuning').disabled, 180000);
             $('#commitParameterTuning').click();
+        },
+        chooseObjective: async () => {
+            if ($('#parameterTuning').classList.contains('hidden')) openParameterTuning();
+            if (parameterTuningGoal !== 'objective') $('#parameterTuningGoalObjective').click();
+        },
+        // The objective and its limit written as the card's buttons write them: a summary, then a state's chip.
+        writeFinalObjective: async (step) => {
+            if (parameterTuningGoal !== 'objective') $('#parameterTuningGoalObjective').click();
+            parameterTuningObjective.mathField.focus();
+            [...document.querySelectorAll('#parameterTuningSummaryButtons button')].find((button) => button.textContent === 'final')?.click();
+            [...document.querySelectorAll('#parameterTuningStateChips button')].find((button) => button.textContent.includes(step.state))?.click();
+            await waitUntil(() => $('#parameterTuningObjectiveDiagnostics').textContent.startsWith('Valid objective: '), 10000);
+        },
+        setObjectiveGoal: async (step) => {
+            setField('#parameterTuningDirection', step.direction, 'change');
+            setField('#parameterTuningRunTime', String(step.runSeconds));
+            setField('#parameterTuningTimeStep', String(step.timeStep));
+        },
+        addObjectiveLimit: async (step) => {
+            if (!parameterTuningLimits.length) $('#addParameterTuningConstraint').click();
+            const limit = parameterTuningLimits.at(-1);
+            const stateName = parameterTuningState?.vocabulary?.states.find((state) => state.label === step.state)?.name;
+            if (!limit || !stateName) return;
+            limit.editor.mathField.value = `\\max\\left(\\mathrm{${stateName}}\\right)`;
+            limit.editor.mathField.dispatchEvent(new Event('input', { bubbles: true }));
+            limit.relationSelect.value = '<=';
+            limit.relationSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            limit.limitInput.value = String(step.limit);
+            limit.limitInput.dispatchEvent(new Event('input', { bubbles: true }));
+            // A formula written in a limit makes that limit's editor the one the buttons write into; the objective is the default again.
+            parameterTuningEditor = parameterTuningObjective;
+        },
+        openValidationList: async () => {
+            if ($('#validationPanel').hidden) $('#validationSummary').click();
+        },
+        followStabilityWarning: async (step) => {
+            await waitUntil(() => (currentValidation.issues ?? []).some((issue) => issue.code === step.warning), 10000);
+            const issue = (currentValidation.issues ?? []).find((candidate) => candidate.code === step.warning);
+            if (!issue) return;
+            $('#validationPanel').hidden = true;
+            $('#validationSummary').ariaExpanded = 'false';
+            navigateToValidationIssue(issue);
+        },
+        setSubsteps: async (step) => {
+            const node = [...nodeObjects.values()].find((object) => object.userData.definition.title === step.node);
+            if (!node) return;
+            if ($('#nodeEditor').classList.contains('hidden') || selectedNode !== node) {
+                selectNode(node);
+                openNodeEditor(node.userData.definition);
+            }
+            $('#nodeEditor [data-node-tab="numerics"]').click();
+            setField('#editNodeSubsteps', String(step.substeps), 'change');
+            await waitUntil(() => !(currentValidation.issues ?? []).some((issue) => issue.code === 'numericsPotentiallyUnstable'), 10000);
+        },
+        openLibrary: async () => {
+            if ($('#componentLibraryPanel').hidden) $('#componentLibraryButton').click();
+            await waitUntil(() => document.querySelectorAll('.componentLibraryItem').length > 0, 10000);
+        },
+        // Each part the step names that is not on the canvas yet, placed from the library as a click on it places it.
+        placeTemplates: async (step) => {
+            if ($('#componentLibraryPanel').hidden) $('#componentLibraryButton').click();
+            await waitUntil(() => document.querySelectorAll('.componentLibraryItem').length > 0, 10000);
+            for (const part of step.templates) {
+                if (model.nodes.some((node) => node.title === part.name && !node.deleted)) continue;
+                const count = model.nodes.filter((node) => !node.deleted).length;
+                document.querySelector(`[data-template-id="${part.template}"]`)?.click();
+                await waitUntil(() => model.nodes.filter((node) => !node.deleted).length > count, 5000);
+            }
+        },
+        // A relationship template applied as a person applies it: the template, then each end's label, then Create edge.
+        connectTemplate: async (step) => {
+            const { template, from, to } = step.connection;
+            // Parts just placed get their labels a frame later; the ends are clicked by their labels.
+            await waitUntil(() => tourNodeLabel(from) && tourNodeLabel(to), 5000);
+            if ($('#edgeBuilder').classList.contains('hidden') && $('#endpointPickBanner').hidden) {
+                if ($('#componentLibraryPanel').hidden) $('#componentLibraryButton').click();
+                await waitUntil(() => Boolean(document.querySelector(`[data-template-id="${template}"]`)), 10000);
+                document.querySelector(`[data-template-id="${template}"]`)?.click();
+                await waitUntil(() => !$('#endpointPickBanner').hidden, 5000);
+            }
+            if (!$('#endpointPickBanner').hidden && !$('#endpointPickTitle').textContent.toLowerCase().includes('target')) {
+                tourNodeLabel(from)?.click();
+                await waitUntil(() => $('#endpointPickTitle').textContent.toLowerCase().includes('target'), 5000);
+            }
+            if (!$('#endpointPickBanner').hidden) tourNodeLabel(to)?.click();
+            await waitUntil(() => !$('#edgeBuilder').classList.contains('hidden') && $('#builderEquationDiagnostics').classList.contains('valid'), 10000);
+            $('#createEdge').click();
+            await waitUntil(() => $('#edgeBuilder').classList.contains('hidden'), 5000);
+        },
+        moveTimelineTo: async (step) => {
+            await waitUntil(() => activeResult && !simulationRunning, 60000);
+            setField('#resultTimeline', String(step.seconds));
+        },
+        openFork: async () => {
+            if ($('#branchesPanel').hidden) $('#branchesButton').click();
+            $('#forkHereButton').click();
+            await waitUntil(() => !$('#forkParameterPanel').hidden || $('#runLaunchDialog').open, 5000);
+        },
+        // The fork run as the person would: Fork here (from the moment the step names, if no fork is under way), its parameter set in the
+        // fork's panel, Continue, then the Run dialog's Start.
+        runFork: async (step) => {
+            if ($('#forkParameterPanel').hidden && !$('#runLaunchDialog').open) {
+                await waitUntil(() => activeResult && !simulationRunning, 60000);
+                if (Math.abs(Number(activeResult?.samples[activeResultSampleIndex]?.time) - step.seconds) > 0.25) setField('#resultTimeline', String(step.seconds));
+                $('#forkHereButton').click();
+                await waitUntil(() => !$('#forkParameterPanel').hidden, 5000);
+            }
+            if (!$('#forkParameterPanel').hidden) {
+                const input = [...document.querySelectorAll('#forkParameterRows input[type="number"]')].find((candidate) => candidate.getAttribute('aria-label') === `${step.parameterName} value`);
+                if (input) {
+                    input.value = String(step.value);
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                $('#confirmForkParameters').click();
+                await waitUntil(() => $('#runLaunchDialog').open, 5000);
+            }
+            if (!$('#runLaunchDialog').open) return;
+            fillRunDialog(step.runSeconds);
+            $('#startRun').click();
+            await waitUntil(() => simulationRunning, 5000);
+            await waitUntil(() => !simulationRunning && activeResult, 180000);
+        },
+        compareBaseline: async () => {
+            if ($('#branchesPanel').hidden) $('#branchesButton').click();
+            await waitUntil(() => Boolean(document.querySelector('#branchTree .branchCompareToggle:not(:disabled)')), 5000);
+            const box = document.querySelector('#branchTree .branchCompareToggle:not(:disabled):not(:checked)');
+            if (!box) return;
+            box.checked = true;
+            box.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        openInference: async () => {
+            if ($('#causalInference').classList.contains('hidden')) openCausalInference();
+        },
+        loadInferenceData: async () => {
+            if ($('#causalInference').classList.contains('hidden')) openCausalInference();
+            const fileName = tour.tutorial?.data?.[0];
+            if (fileName) await loadCausalInferenceCsv(await window.tutorials.loadData(fileName));
+        },
+        runInference: async () => {
+            await waitUntil(() => !$('#runCausalInference').hidden && !$('#runCausalInference').disabled, 10000);
+            $('#runCausalInference').click();
+            await waitUntil(() => !$('#causalInferenceCandidatesSection').hidden, 60000);
+        },
+        importInference: async () => {
+            await waitUntil(() => !$('#commitCausalInference').hidden && !$('#commitCausalInference').disabled, 60000);
+            const relationships = model.relationships.filter((relationship) => !relationship.deleted).length;
+            $('#commitCausalInference').click();
+            await waitUntil(() => model.relationships.filter((relationship) => !relationship.deleted).length > relationships, 15000);
+        },
+        openAnyRelationship: async () => {
+            const relationship = model.relationships.find((candidate) => !candidate.deleted);
+            if (relationship) openRelationshipEditor(relationship);
+        },
+        openTwin: async () => { if (!twinWindowOpen) openTwinWindow(); },
+        // The demonstration started in the twin window, as its own button there starts it.
+        startTwinDemo: async (step) => {
+            if (!twinWindowOpen) openTwinWindow();
+            await window.engine.liveTwin?.startDemo?.(step.variant);
+            await waitUntil(() => tutorialTwin.sawRunning, 60000);
+        },
+        waitForTwinMoves: async (step) => { await waitUntil(() => tutorialTwin.movesSeen >= step.moves || tutorialTwin.sawAlarm, 120000); },
+        waitForTwinAlarm: async () => { await waitUntil(() => tutorialTwin.sawAlarm, 180000); },
+        openControllers: async () => { openSettings('controllers'); },
+        // Bindings kept as Settings › Controllers keeps them: one key first, then the two as one control.
+        bindKey: async (step) => {
+            const document = steering.document;
+            await steering.save({ ...document, bindings: [...document.bindings.filter((entry) => entry.parameter.symbol !== step.symbol),
+                { id: crypto.randomUUID(), device: { kind: 'keyboard' }, control: { type: 'key', code: step.key }, parameter: { symbol: step.symbol, name: step.parameterName } }] });
+        },
+        bindKeyPair: async (step) => {
+            const document = steering.document;
+            await steering.save({ ...document, bindings: [...document.bindings.filter((entry) => entry.parameter.symbol !== step.symbol),
+                { id: crypto.randomUUID(), device: { kind: 'keyboard' }, control: { type: 'keys', up: step.keys.up, down: step.keys.down }, parameter: { symbol: step.symbol, name: step.parameterName } }] });
+        },
+        startOnlineRun: async (step) => {
+            if ($('#settingsDialog').open) await settings.close();
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            await waitUntil(() => currentValidation.valid && !$('#runButton').disabled, 15000);
+            if (!$('#runLaunchDialog').open) $('#runButton').click();
+            setField('#runTargetTime', String(step.runSeconds));
+            if (!$('#runOnlineMode').checked) {
+                $('#runOnlineMode').checked = true;
+                $('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            setField('#runPacingMode', 'realTime', 'change');
+            $('#startRun').click();
+            await waitUntil(() => liveControlsOffered(), 15000);
+        },
+        // The up key held for a moment, as a person holds it, with no field in use.
+        steerWithKeys: async (step) => {
+            await waitUntil(() => liveControlsOffered(), 15000);
+            document.activeElement?.blur?.();
+            window.dispatchEvent(new KeyboardEvent('keydown', { code: step.key, bubbles: true, cancelable: true }));
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            window.dispatchEvent(new KeyboardEvent('keyup', { code: step.key, bubbles: true, cancelable: true }));
+            await waitUntil(() => activeResult?.interventions?.some((change) => change.kind !== 'restart'), 5000);
         },
         closeResults: async () => {
             document.querySelectorAll('.contextCard.editorCard:not(.hidden) > header [data-close-card]').forEach((button) => button.click());
@@ -12449,6 +12718,13 @@ const tour = createTour({
             input.dispatchEvent(new Event('input', { bubbles: true }));
             input.dispatchEvent(new Event('change', { bubbles: true }));
         }
+    },
+    // A step whose work is in the twin window is shown there too, since that window covers this one's card.
+    onStep: (step, label) => {
+        const inTwin = step?.elsewhere === 'twin';
+        if (!inTwin && !tutorialStepInTwin) return;
+        tutorialStepInTwin = inTwin;
+        window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition) } : null);
     },
     onFinish: (outcome, tutorial) => {
         $('#statusText').textContent = outcome === 'completed' ? `Tutorial finished: ${tutorial.title}` : 'Tutorial left · take it again any time from Tutorials';
@@ -12476,6 +12752,11 @@ async function startTutorial(id) {
     tourTimelineMoved = false;
     tutorialPlotsSeen.clear();
     tutorialRunModel = null;
+    tutorialObjectiveSearched = false;
+    tutorialFollowedIssue = null;
+    tutorialForkValues.clear();
+    Object.assign(tutorialTwin, { sawRunning: false, movesSeen: 0, sawAlarm: false });
+    tutorialSteered.clear();
     tour.start(tutorial, { start: serializeProjectDocument() });
     return true;
 }

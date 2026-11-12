@@ -370,3 +370,11 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .demoChoices button:hover:not(:disabled) { border-color: var(--accent); }
 .demosDialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .demosDialog footer .field.inline { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12.5px; }
+
+/* A tutorial's step whose work is in this window (docs/proposals/tutorials.md): at the bottom left, above everything, out of the way. */
+.tutorialBanner { position: fixed; z-index: 9000; left: 20px; bottom: 20px; width: min(360px, calc(100vw - 40px)); box-sizing: border-box; padding: 14px 16px; color: #dbe7ec; background: #0f1d27; border: 1px solid #2f6f6a; border-radius: 10px; box-shadow: 0 12px 40px rgb(0 0 0 / 55%); }
+.tutorialBanner[hidden] { display: none; }
+.tutorialBanner small { display: block; color: #7fa3ad; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+.tutorialBanner strong { display: block; margin: 2px 0 6px; font-size: 15px; }
+.tutorialBanner p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: #b9ccd4; }
+.tutorialBanner .tutorialBannerNote { display: block; font-size: 11px; color: #7fa3ad; }

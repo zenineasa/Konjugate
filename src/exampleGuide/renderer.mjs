@@ -314,14 +314,11 @@ window.exampleGuide.onContent((payload) => {
         return;
     }
     welcome = null;
-    // An example with a tutorial (docs/proposals/tutorials.md) offers it first, so someone who opened the example from the Examples
-    // dialog learns there is a walkthrough of it.
-    const tutorial = payload.tutorial;
-    const tutorialCard = tutorial
-        ? `<section class="tourCard"><div><strong>${escapeHtml(tutorial.title)}</strong><p>A ${escapeHtml(String(tutorial.minutes))}-minute tutorial that walks you through this example, step by step, right in the app.</p></div><button type="button" data-start-tutorial>Take the tutorial</button></section>`
-        : '';
-    document.querySelector('#content').innerHTML = tutorialCard + renderMarkdown(markdown);
-    document.querySelector('[data-start-tutorial]')?.addEventListener('click', () => window.exampleGuide.startTutorial(tutorial.id));
+    // An example with tutorials (docs/proposals/tutorials.md) offers them first, so someone who opened the example from the Examples
+    // dialog learns there are walkthroughs of it.
+    const tutorialCards = (payload.tutorials ?? []).map((tutorial) => `<section class="tourCard"><div><strong>${escapeHtml(tutorial.title)}</strong><p>${escapeHtml(tutorial.summary)} A ${escapeHtml(String(tutorial.minutes))}-minute tutorial on this example, step by step, right in the app.</p></div><button type="button" data-start-tutorial="${escapeHtml(tutorial.id)}">Take the tutorial</button></section>`).join('');
+    document.querySelector('#content').innerHTML = tutorialCards + renderMarkdown(markdown);
+    document.querySelectorAll('[data-start-tutorial]').forEach((button) => button.addEventListener('click', () => window.exampleGuide.startTutorial(button.dataset.startTutorial)));
     document.querySelectorAll('[data-external-link]').forEach((link) => link.addEventListener('click', (event) => {
         event.preventDefault();
         window.exampleGuide.openExternal(link.href);

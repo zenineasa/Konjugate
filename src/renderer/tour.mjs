@@ -20,7 +20,9 @@ const element = (tag, className, text) => {
 // the card's text, such as a download; what it returns is said under the text); edition: 'desktop' | 'web';
 // onFinish(outcome, tutorial) with 'completed' or 'skipped', after the card has gone from the screen.
 // start(tutorial, { start }) plays a tutorial; `start` is the project as the tutorial found it, handed to every check.
-export function createTour({ getFacts, actions: pageActions = {}, edition, onFinish = () => {}, pollMilliseconds = 300 }) {
+// onStep(step | null, label) is told whenever the step on screen changes, and null when the tutorial ends: for a step whose work is in
+// another window, which shows it there.
+export function createTour({ getFacts, actions: pageActions = {}, edition, onFinish = () => {}, onStep = () => {}, pollMilliseconds = 300 }) {
     let tutorial = null;
     let steps = [];
     let startDocument = null;
@@ -28,9 +30,15 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     let active = false;
     let timer = null;
     let filling = false;
+    // Which play of a tutorial an action belongs to: one still waiting when a tutorial ends (or another starts) is left to finish
+    // unheard, and does not hold the next tutorial's buttons.
+    let play = 0;
     // The steps the person skipped: "Skip this step" did them, and a check that does not hold for a moment after (a run still starting)
     // is not reported as something undone.
     const skipped = new Set();
+    // The step whose skip could not do it, while the person is still on it.
+    let skipFailed = null;
+    let shownStep = null;
     const ring = element('div', 'tourRing');
     ring.hidden = true;
     ring.setAttribute('aria-hidden', 'true');
@@ -157,12 +165,18 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         skip.hidden = step.id === 'finish';
         skipStep.hidden = step.advance === 'next' || !pageActions[step.skip];
         skipStep.disabled = filling;
+        if (skipFailed !== reached) skipFailed = null;
         back.hidden = broken === null;
-        notice.hidden = broken === null;
+        notice.hidden = broken === null && skipFailed === null;
+        if (skipFailed !== null && broken === null) notice.textContent = 'This step could not be done for you. Try it by hand, or skip it again.';
         if (broken !== null) {
             notice.textContent = `Something from step ${broken} is no longer there.`;
             back.textContent = `Go back to step ${broken}`;
             back.onclick = () => { reached = broken; render(); };
+        }
+        if (shownStep !== step) {
+            shownStep = step;
+            onStep(step, stepLabel(reached, steps));
         }
         const ringRect = placeRing(step, facts);
         placeCard(ringRect);
@@ -171,7 +185,11 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     function finish(outcome) {
         if (!active) return;
         active = false;
+        play += 1;
+        filling = false;
         clearInterval(timer);
+        shownStep = null;
+        onStep(null, '');
         ring.hidden = true;
         card.hidden = true;
         onFinish(outcome, tutorial);
@@ -186,9 +204,10 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     async function perform(name) {
         const step = steps[reached];
         if (filling || !pageActions[name]) return undefined;
+        const ours = play;
         filling = true;
         render();
-        try { return await pageActions[name](step); } finally { filling = false; render(); }
+        try { return await pageActions[name](step); } finally { if (play === ours) { filling = false; render(); } }
     }
     fillButton.addEventListener('click', () => perform(steps[reached].fill));
     link.addEventListener('click', async () => {
@@ -199,8 +218,20 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     skipStep.addEventListener('click', async () => {
         const index = reached;
         const step = steps[index];
+        const ours = play;
         if (filling || step.advance === 'next') return;
         try { await perform(step.skip); } catch (error) { console.error(`Skipping the "${step.id}" step failed.`, error); }
+        if (play !== ours) return;
+        // A skip counts once the step is done; if it could not be done for the person, the card says so and stays, rather than moving on
+        // to a step that needs it.
+        const until = Date.now() + 3000;
+        while (!step.done({ ...getFacts(), start: startDocument }) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+        if (play !== ours) return;
+        if (!step.done({ ...getFacts(), start: startDocument })) {
+            skipFailed = index;
+            render();
+            return;
+        }
         skipped.add(index);
         if (active && reached === index) reached = index + 1;
         render();
@@ -217,7 +248,10 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
             startDocument = start;
             card.setAttribute('aria-label', played.title);
             reached = 0;
+            play += 1;
+            filling = false;
             skipped.clear();
+            skipFailed = null;
             linkNote.textContent = '';
             dragged = null;
             delete card.dataset.spot;

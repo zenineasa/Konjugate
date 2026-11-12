@@ -28,6 +28,10 @@ contextBridge.exposeInMainWorld('twin', Object.freeze({
     fit: (content, csv, config) => ipcRenderer.invoke('engineFit', content, csv, config),
     // The simulated rig's model opened in the project window, for a demonstration; the window's context follows.
     openDemoModel: (variant) => ipcRenderer.invoke('twinOpenDemoModel', variant),
+    // A demonstration the project window asks for (a tutorial's "Skip this step"), started as its button here starts it.
+    onStartDemo: (callback) => ipcRenderer.on('twinStartDemo', (_event, variant) => callback(variant)),
+    // The project window's tutorial step, when its work is here ({ label, title, text }, or null when it is over).
+    onTutorialStep: (callback) => ipcRenderer.on('twinTutorialStep', (_event, step) => callback(step)),
     memory: Object.freeze({
         get: () => ipcRenderer.invoke('twinMemoryGet'),
         save: (memory) => ipcRenderer.invoke('twinMemorySave', memory)

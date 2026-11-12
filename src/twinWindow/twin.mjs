@@ -622,6 +622,19 @@ initEngineer({
     }
 });
 api.liveTwin.onEvent((update) => handleEvent(update));
+// The project window's tutorial step, when its work is here: shown in a banner of its own, since this window covers the card.
+api.onTutorialStep?.((step) => {
+    $('#tutorialBanner').hidden = !step;
+    if (!step) return;
+    $('#tutorialBannerLabel').textContent = step.label || 'Tutorial';
+    $('#tutorialBannerTitle').textContent = step.title;
+    $('#tutorialBannerText').textContent = step.text;
+});
+// A demonstration the project window asks for (a tutorial's "Skip this step"): its button pressed, once the window has its context.
+api.onStartDemo?.(async (variant) => {
+    for (let waited = 0; !state.context && waited < 50; waited += 1) await new Promise((resolve) => setTimeout(resolve, 100));
+    document.querySelector(`[data-demo="${CSS.escape(variant)}"]`)?.click();
+});
 
 // ---- The window's context ------------------------------------------------------------------------------------------------------
 api.onContext(async (context) => {

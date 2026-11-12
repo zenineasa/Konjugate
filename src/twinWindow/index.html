@@ -12,6 +12,14 @@
     <script type="module" src="twin.mjs"></script>
 </head>
 <body>
+    <!-- A tutorial's step whose work is in this window (docs/proposals/tutorials.md), shown here since this window covers the project
+         window's card. Its text only: the tutorial is skipped or left from the project window. -->
+    <aside id="tutorialBanner" class="tutorialBanner" role="status" aria-live="polite" hidden>
+        <small id="tutorialBannerLabel"></small>
+        <strong id="tutorialBannerTitle"></strong>
+        <p id="tutorialBannerText"></p>
+        <span class="tutorialBannerNote">From the tutorial in the project window, where you can skip this step or leave the tutorial.</span>
+    </aside>
     <header class="titleBar">
         <div class="title"><img src="../../assets/icon.svg" alt=""><strong>Live twin</strong><span id="projectName"></span></div>
         <div class="titleTools"><button id="moreMenu" type="button" aria-label="More" title="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm7 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z"/></svg></button></div>

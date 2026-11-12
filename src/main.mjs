@@ -41,7 +41,7 @@ import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } fr
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
 import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
-import { tutorialById, tutorialDataFiles, tutorialForExample } from './tutorials/index.mjs';
+import { tutorialById, tutorialDataFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -467,14 +467,14 @@ async function openExampleGuide(projectWindow, id) {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     const guideName = `${exampleIdFromFileName(id)}.md`;
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
-    // An example with a tutorial says so at the top of its guide (docs/proposals/tutorials.md).
-    const tutorial = tutorialForExample(id);
+    // An example with tutorials says so at the top of its guide (docs/proposals/tutorials.md).
+    const tutorials = tutorialsForExample(id).map((tutorial) => ({ id: tutorial.id, title: tutorial.title, minutes: tutorial.minutes, summary: tutorial.summary }));
     return openGuideWindow(projectWindow, {
         id,
         title: exampleLabel(id),
         markdown,
         kind: 'example',
-        ...(tutorial ? { tutorial: { id: tutorial.id, title: tutorial.title, minutes: tutorial.minutes } } : {})
+        ...(tutorials.length ? { tutorials } : {})
     });
 }
 
@@ -871,8 +871,8 @@ function openTwinWindow(projectWindow, payload) {
     });
     createdWindow.on('closed', () => {
         if (state.twinWindow === createdWindow) state.twinWindow = null;
-        // Its twin ends with it: the project window's chip is told.
-        if (!projectWindow.isDestroyed()) projectWindow.webContents.send('twinStatusChanged', { running: false });
+        // Its twin ends with it: the project window's chip is told, and that the window has gone.
+        if (!projectWindow.isDestroyed()) projectWindow.webContents.send('twinStatusChanged', { running: false, closed: true });
     });
     createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext); });
     createdWindow.loadFile(join(currentDir, 'twinWindow', 'index.html'));
@@ -943,6 +943,28 @@ ipcMain.handle('twinOpenConnections', (event) => {
     return true;
 });
 // A demonstration's model (the simulated rig), opened in the project window for the twin window that asks for it.
+// A tutorial's step whose work is in the twin window (docs/proposals/tutorials.md), shown there too, since the twin window opens in
+// front of the project window and its card; null when the step is over. Only its text: the tutorial is run from the project window.
+ipcMain.handle('twinTutorialStep', (event, step) => {
+    requireProjectWindow(event, 'Only a project window can show its tutorial in its twin window.');
+    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    if (!twinWindow || twinWindow.isDestroyed()) return false;
+    const shown = step && typeof step === 'object' ? { label: String(step.label ?? ''), title: String(step.title ?? ''), text: String(step.text ?? '') } : null;
+    const send = () => { if (!twinWindow.isDestroyed()) twinWindow.webContents.send('twinTutorialStep', shown); };
+    if (twinWindow.webContents.isLoading()) twinWindow.webContents.once('did-finish-load', send); else send();
+    return true;
+});
+// A demonstration started in a project window's twin window, as its own button there starts one: a tutorial's "Skip this step"
+// (docs/proposals/tutorials.md). Sent once the twin window has loaded; only the demonstrations it offers.
+ipcMain.handle('twinStartDemo', async (event, variant) => {
+    requireProjectWindow(event, 'Only a project window can start its twin\'s demonstration.');
+    if (!['steady', 'drifting', 'house', 'plant', 'motor'].includes(variant)) return false;
+    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    if (!twinWindow || twinWindow.isDestroyed()) return false;
+    if (twinWindow.webContents.isLoading()) await new Promise((resolve) => twinWindow.webContents.once('did-finish-load', resolve));
+    twinWindow.webContents.send('twinStartDemo', variant);
+    return true;
+});
 ipcMain.handle('twinOpenDemoModel', (event, variant) => {
     const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
     if (!projectWindow) return false;

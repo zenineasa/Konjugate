@@ -40,7 +40,8 @@ import { bugReportUrl, formatBugReportEmail } from './bugReport.mjs';
 import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
-import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered } from './welcomeStateStore.mjs';
+import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
+import { tutorialById, tutorialDataFiles, tutorialForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -74,6 +75,8 @@ import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, 
 // A test's own profile folder, so a test run never reads or writes the person's own (tests/cliMode.e2e.mjs runs --cli with it too).
 if (['--interaction-test', '--generate-example-thumbnails', '--cli'].some((flag) => process.argv.includes(flag)) && process.env.KONJUGATE_INTERACTION_USER_DATA) {
     app.setPath('userData', process.env.KONJUGATE_INTERACTION_USER_DATA);
+    // Whatever the app saves straight to Downloads (a tutorial's data file) lands beside the test's own data, not in the person's folder.
+    app.setPath('downloads', join(process.env.KONJUGATE_INTERACTION_USER_DATA, 'Downloads'));
 }
 // A test run that dies of a fatal error (running out of memory, say) leaves Node's report of it, with the JavaScript stack at that moment,
 // in KONJUGATE_INTERACTION_REPORTS: what was allocating is then known, not guessed.
@@ -464,11 +467,14 @@ async function openExampleGuide(projectWindow, id) {
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     const guideName = `${exampleIdFromFileName(id)}.md`;
     const markdown = await readFile(join(examplesDir, guideName), 'utf8');
+    // An example with a tutorial says so at the top of its guide (docs/proposals/tutorials.md).
+    const tutorial = tutorialForExample(id);
     return openGuideWindow(projectWindow, {
         id,
         title: exampleLabel(id),
         markdown,
-        kind: 'example'
+        kind: 'example',
+        ...(tutorial ? { tutorial: { id: tutorial.id, title: tutorial.title, minutes: tutorial.minutes } } : {})
     });
 }
 
@@ -725,6 +731,25 @@ ipcMain.handle('welcomeStartTour', (event) => {
     return true;
 });
 ipcMain.handle('tourRecordCompleted', async () => { await welcomeState().update(withTourCompleted); return true; });
+// The tutorials (docs/proposals/tutorials.md). A window reports a finished tutorial by id, checked against the shipped list, and reads
+// which ones are finished for the ticks in its Tutorials list; an example guide's "Take the tutorial" starts one in the window it belongs
+// to, and closes itself so the tutorial has the screen.
+ipcMain.handle('tutorialsCompleted', async () => (await welcomeState().get()).tutorialsCompleted);
+ipcMain.handle('tutorialRecordCompleted', async (_event, id) => {
+    if (typeof id !== 'string' || !tutorialById(id)) return false;
+    await welcomeState().update((current) => withTutorialCompleted(current, id));
+    return true;
+});
+ipcMain.handle('exampleGuideStartTutorial', (event, id) => {
+    if (typeof id !== 'string' || !tutorialById(id)) return false;
+    const guideWindow = BrowserWindow.fromWebContents(event.sender);
+    const projectWindow = [...projectWindows].find((window) => projectWindowState.get(window)?.exampleGuideWindow === guideWindow);
+    if (!projectWindow || projectWindow.isDestroyed()) return false;
+    guideWindow.close();
+    projectWindow.webContents.send('tutorialStart', id);
+    projectWindow.focus();
+    return true;
+});
 ipcMain.handle('welcomeDismissFeatured', async (_event, id) => {
     if (typeof id !== 'string' || !currentWelcomeFeed.featured.some((item) => item.id === id)) return false;
     await welcomeState().update((current) => withDismissed(current, id));
@@ -1546,6 +1571,34 @@ ipcMain.handle('projectLoadExample', async (_event, id) => {
     if (pluginExample) return { ...await decodeProjectForRenderer(await readFile(pluginExample.entry)), suggestedFilename: id };
     if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
     return { ...await decodeProjectForRenderer(await readFile(join(examplesDir, id))), suggestedFilename: id };
+});
+
+// A file a tutorial brings beside the examples (its measurements; only the names the shipped tutorials list). The card's link downloads
+// it: saved straight to the Downloads folder, as a browser saves a download, under a new name if one is already taken there, so the person
+// can then choose it in the app the way they would choose their own data. "Skip this step" reads it instead, to load it for them.
+ipcMain.handle('projectDownloadTutorialData', async (event, fileName) => {
+    requireProjectWindow(event, 'Only a project window can download a tutorial\'s data.');
+    if (!tutorialDataFiles.includes(fileName)) throw new Error('That file is not part of a tutorial.');
+    const folder = app.getPath('downloads');
+    await mkdir(folder, { recursive: true });
+    const dot = fileName.lastIndexOf('.');
+    const [stem, extension] = dot > 0 ? [fileName.slice(0, dot), fileName.slice(dot)] : [fileName, ''];
+    const bytes = await readFile(join(examplesDir, fileName));
+    for (let copy = 0; copy < 1000; copy += 1) {
+        const path = join(folder, copy ? `${stem} (${copy})${extension}` : fileName);
+        try {
+            await writeFile(path, bytes, { flag: 'wx' });
+            return { path, fileName: basename(path) };
+        } catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+        }
+    }
+    throw new Error('The Downloads folder has too many copies of that file already.');
+});
+ipcMain.handle('projectLoadTutorialData', async (event, fileName) => {
+    requireProjectWindow(event, 'Only a project window can read a tutorial\'s data.');
+    if (!tutorialDataFiles.includes(fileName)) throw new Error('That file is not part of a tutorial.');
+    return readFile(join(examplesDir, fileName), 'utf8');
 });
 
 ipcMain.handle('projectOpenExampleGuide', async (event, id) => {

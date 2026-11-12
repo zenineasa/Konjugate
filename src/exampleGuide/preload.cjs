@@ -29,6 +29,8 @@ contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
     dismissFeatured: (id) => ipcRenderer.invoke('welcomeDismissFeatured', id),
     openFeatured: (id) => ipcRenderer.invoke('welcomeOpenFeatured', id),
     startTour: () => ipcRenderer.invoke('welcomeStartTour'),
+    // An example's tutorial (docs/proposals/tutorials.md), by the id the guide's content came with.
+    startTutorial: (id) => ipcRenderer.invoke('exampleGuideStartTutorial', id),
     openHelpFeedback: () => ipcRenderer.invoke('appOpenHelpFeedback'),
     // The Welcome window's one-time recommended-add-ons offer (see docs/extensionsExplorer.md) --
     // entries is exactly the recommendedAddons array this same window was sent in onContent.

@@ -170,6 +170,21 @@ input, select, textarea { user-select: text; }
 .helpFeedbackLink:hover, .helpFeedbackLink:focus-visible { color: #f0f7f8; text-decoration-color: currentColor; }
 .helpFeedbackLink.copied { color: #74ddd3; text-decoration: none; }
 .helpFeedbackAnnounce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+/* Tutorials (docs/proposals/tutorials.md): the searchable list, in the Help & feedback dialog's frame. */
+.tutorialsDialog .tutorialsSearch { width: 100%; height: 40px; margin: 16px 0 6px; padding: 0 14px; color: #f0f7f8; background: #0a151d; border: 1px solid #253a46; border-radius: 6px; font: inherit; font-size: 13px; }
+.tutorialsDialog .tutorialsSearch:focus-visible { border-color: #74ddd3; outline: none; }
+.tutorialsDialog h2.tutorialsGroup { display: block; margin: 20px 0 0 2px; color: #5e737e; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.tutorialEntry { display: flex; align-items: center; gap: 16px; margin: 8px 0 0; padding: 14px 16px; background: #0a151d; border: 1px solid #172a35; border-radius: 8px; }
+.tutorialEntryText { flex: 1; min-width: 0; }
+.tutorialEntryHeading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tutorialEntryText strong { color: #f0f7f8; font-size: 13px; font-weight: 620; }
+.tutorialsDialog .tutorialEntryText p { margin: 4px 0 6px; color: #9fb1b9; font-size: 12px; line-height: 1.55; }
+.tutorialEntryMeta { color: #5e737e; font-size: 11px; }
+.tutorialDone { padding: 1px 7px; color: #74ddd3; background: rgb(66 201 188 / 12%); border: 1px solid rgb(66 201 188 / 35%); border-radius: 10px; font-size: 10px; font-weight: 700; }
+.tutorialEntry .helpFeedbackPrimary { flex: none; min-height: 34px; padding: 0 16px; font-size: 12px; }
+.tutorialEditionNote { flex: none; max-width: 150px; color: #82959e; font-size: 11px; line-height: 1.45; text-align: right; }
+.tutorialsDialog .tutorialsEmpty { margin: 16px 2px 0; }
+.tutorialsDialog .tutorialsEmpty[hidden] { display: none; }
 @media (prefers-reduced-motion: reduce) { .helpFeedbackPrimary { transition: none; } .helpFeedbackPrimary:hover, .helpFeedbackPrimary:focus-visible { transform: none; } }
 .passwordError { min-height: 16px; padding-top: 6px; color: #d48288; font-size: 8px; }
 .passwordDialog textarea { padding: 6px 8px; color: #d4e0e5; background: #09141b; border: 1px solid #2c404b; border-radius: 4px; outline: 0; font: inherit; font-size: 8px; resize: vertical; }
@@ -1691,6 +1706,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .tourFloating .tourNotice { margin: 0 0 4px; font-size: 12px; color: #e9b872; }
 .tourFloating .tourActions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
 .tourFloating .tourActions .tourLink { margin-right: auto; }
+/* "Leave tutorial" and "Skip this step" sit together on the left, the step's own buttons on the right. */
+.tourFloating .tourActions .tourLink:has(+ .tourSkipStep:not([hidden])) { margin-right: 4px; }
+.tourFloating .tourContentLink { display: block; height: auto; margin: -4px 0 12px; padding: 0; color: #74ddd3; background: none; border: 0; font-size: 13px; font-weight: 600; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
+.tourFloating .tourLinkNote { margin: -6px 0 12px; font-size: 12px; line-height: 1.45; color: #8fb3bd; overflow-wrap: anywhere; }
+.tourFloating .tourLinkNote[hidden] { display: none; }
 .tourFloating button { height: 30px; padding: 0 14px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; }
 .tourFloating .tourPrimary { color: #061412; background: #42c9bc; border: 1px solid #42c9bc; }
 .tourFloating .tourSecondary { color: #dbe7ec; background: transparent; border: 1px solid #3b5460; }

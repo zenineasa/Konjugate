@@ -8,8 +8,9 @@ export const welcomeStateVersion = 1;
 const maxDismissed = 200;
 const maxOpenedEpisodes = 100;
 const maxShownEntries = 200;
+const maxTutorials = 200;
 
-export const emptyWelcomeState = () => ({ version: welcomeStateVersion, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false });
+export const emptyWelcomeState = () => ({ version: welcomeStateVersion, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] });
 
 const strings = (value, max) => (Array.isArray(value) ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry !== ''))].slice(-max) : []);
 
@@ -28,6 +29,9 @@ export function normalizeWelcomeState(raw) {
     if (typeof raw.lastSeenVersion === 'string' && raw.lastSeenVersion !== '') state.lastSeenVersion = raw.lastSeenVersion;
     state.tourOffered = raw.tourOffered === true;
     state.tourCompleted = raw.tourCompleted === true;
+    state.tutorialsCompleted = strings(raw.tutorialsCompleted, maxTutorials);
+    // Finished before tutorials were kept by name: the tour is the first-model tutorial.
+    if (state.tourCompleted && !state.tutorialsCompleted.includes('firstModel')) state.tutorialsCompleted = [...state.tutorialsCompleted, 'firstModel'];
     return state;
 }
 
@@ -39,7 +43,13 @@ export const withFeaturedShown = (state, id) => ({ ...state, featuredShown: { ..
 export const withLastSeenVersion = (state, version) => ({ ...state, lastSeenVersion: version });
 // The first-model tour (docs/proposals/guidedTour.md): offered once, on the first launch, whether or not it was taken; completed when its last step was reached.
 export const withTourOffered = (state) => ({ ...state, tourOffered: true });
-export const withTourCompleted = (state) => ({ ...state, tourOffered: true, tourCompleted: true });
+export const withTourCompleted = (state) => withTutorialCompleted({ ...state, tourOffered: true, tourCompleted: true }, 'firstModel');
+// The tutorials (docs/proposals/tutorials.md): which ones a person has finished, for the ticks in the Tutorials list. Finishing the
+// first-model tutorial is finishing the tour.
+export function withTutorialCompleted(state, id) {
+    const next = { ...state, tutorialsCompleted: strings([...(state.tutorialsCompleted ?? []), id], maxTutorials) };
+    return id === 'firstModel' ? { ...next, tourOffered: true, tourCompleted: true } : next;
+}
 
 // What the Welcome window remembers between launches, in one small file in the user data folder: which
 // Featured items were dismissed, how many launches each has been shown on, which tutorial episodes

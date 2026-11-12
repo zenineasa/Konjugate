@@ -82,6 +82,42 @@ export const tour = {
     recordCompleted: async () => true
 };
 
+// The tutorials (docs/proposals/tutorials.md). Which are finished is kept in this browser's local storage (or, where that is blocked,
+// only until the page closes); a tutorial's data file is read, and downloaded, from beside the examples, where the examples themselves are.
+const tutorialsCompletedKey = 'konjugate.tutorialsCompleted';
+let tutorialsCompletedInMemory = [];
+export const tutorials = {
+    completed: async () => {
+        const stored = storage((local) => JSON.parse(local.getItem(tutorialsCompletedKey) ?? 'null'));
+        return Array.isArray(stored) ? stored.filter((id) => typeof id === 'string') : tutorialsCompletedInMemory;
+    },
+    recordCompleted: async (id) => {
+        const next = [...new Set([...await tutorials.completed(), id])];
+        tutorialsCompletedInMemory = next;
+        storage((local) => local.setItem(tutorialsCompletedKey, JSON.stringify(next)));
+        return true;
+    },
+    loadData: async (fileName) => {
+        const response = await fetch(new URL(`../../examples/${encodeURIComponent(fileName)}`, import.meta.url));
+        if (!response.ok) throw new Error('That file is not part of a tutorial.');
+        return response.text();
+    },
+    // Downloaded as the browser downloads any file: to the Downloads folder, unless the browser is set to ask.
+    downloadData: async (fileName) => {
+        const text = await tutorials.loadData(fileName);
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
+        link.download = fileName;
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
+        return { path: null, fileName };
+    },
+    // There is no example guide window to start one from in the browser.
+    onStart: () => {}
+};
+
 export const applicationInfo = {
     get: async () => ({ version }),
     openWelcome: async () => { tourStarters.forEach((start) => start()); }

@@ -8149,6 +8149,220 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.__debugTour.stop()`);
     });
 
+    // ---- Tutorials (docs/proposals/tutorials.md): the list, and each tutorial that starts from an example, played the whole way.
+    const tutorialHelpers = () => {
+        const press = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        const waitForStep = async (id, timeout = 15000) => {
+            try { await waitFor(window, `window.__debugTour.step() === ${JSON.stringify(id)}`, `The tutorial did not reach "${id}".`, timeout); } catch (error) {
+                const facts = await evaluate(window, `JSON.stringify({ tutorial: window.__debugTour.tutorial(), step: window.__debugTour.step(), status: document.querySelector('#statusText').textContent, tuning: document.querySelector('#parameterTuningStatus')?.textContent, blockers: window.__debugTour.blockers() })`);
+                throw new Error(`${error.message} ${facts}`);
+            }
+        };
+        const clickLabel = (name) => evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)})).click()`);
+        const cardOverlaps = (selector) => evaluate(window, `(() => { const a = document.querySelector('.tourFloating').getBoundingClientRect(); const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top); })()`);
+        // A clean, empty project, so starting a tutorial asks nothing (the question about unsaved work is a native dialog on the desktop).
+        const clean = async () => {
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'An earlier simulation did not finish.', 30000);
+            if (await evaluate(window, `window.__debugTour.active()`)) await evaluate(window, `window.__debugTour.stop()`);
+            const emptyDocument = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(emptyDocument)}, 'tutorial.kjt')`);
+            await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('0 nodes') && !window.__debugTour.blockers().hasResult && !window.__debugTour.blockers().dirty`, 'The empty project did not load.');
+        };
+        return { press, waitForStep, clickLabel, cardOverlaps, clean };
+    };
+
+    await run('the Tutorials button lists every tutorial, grouped, searchable, and starts one from its example without opening the guide', async () => {
+        const { press, waitForStep, clean } = tutorialHelpers();
+        await clean();
+        const handlesBefore = driver.allHandles?.() ?? [];
+        await press('#tutorialsButton');
+        await waitFor(window, `document.querySelector('#tutorialsDialog').open`, 'The Tutorials list did not open.');
+        assert.equal(await evaluate(window, `document.activeElement === document.querySelector('#tutorialsSearch')`), true, 'The search field is ready to type in.');
+        assert.equal(await evaluate(window, `document.querySelector('.tutorialsGroup').textContent`), 'Start here');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['firstModel', 'calibrateTank', 'tuneController']);
+        assert.match(await evaluate(window, `document.querySelector('.tutorialEntry[data-tutorial="calibrateTank"] .tutorialEntryMeta').textContent`), /Starts from the Tank Calibration example/);
+        const search = (text) => evaluate(window, `(() => { const field = document.querySelector('#tutorialsSearch'); field.value = ${JSON.stringify(text)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await search('pid');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['tuneController']);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.tutorialsGroup').length`), 0, 'A search lists matches, not groups.');
+        await search('zzzz');
+        assert.equal(await evaluate(window, `document.querySelector('#tutorialsEmpty').hidden`), false);
+        // Enter in the search field does not close the list.
+        await evaluate(window, `document.querySelector('#tutorialsSearch').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))`);
+        assert.equal(await evaluate(window, `document.querySelector('#tutorialsDialog').open`), true);
+        await search('calibrate');
+        await press('.tutorialEntry[data-tutorial="calibrateTank"] .helpFeedbackPrimary');
+        await waitFor(window, `!document.querySelector('#tutorialsDialog').open`, 'Starting a tutorial did not close the list.');
+        await waitFor(window, `window.__debugTour.tutorial() === 'calibrateTank'`, 'The calibration tutorial did not start.');
+        await waitForStep('welcome');
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The Tank Calibration example did not load.');
+        assert.equal(await evaluate(window, `document.querySelector('.tourFloating').getAttribute('aria-label')`), 'Calibrate a model against measured data');
+        assert.equal(await evaluate(window, `document.querySelector('#exampleGuideButton').hidden`), false, 'The example\'s guide is one click away.');
+        if (driver.capabilities.multiWindow) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            assert.equal(driver.allHandles().length, handlesBefore.length, 'The example guide window opened over the tutorial.');
+        }
+        // Leaving says where to find it again.
+        await press('.tourFloating .tourActions .tourLink');
+        await waitFor(window, `!window.__debugTour.active()`, 'Leaving did not end the tutorial.');
+        assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /take it again any time from Tutorials/);
+    });
+
+    await run('the calibration tutorial fits the tank to its measurements, keeps the fit and runs it, and is ticked in the list', async () => {
+        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        await clean();
+        assert.equal(await evaluate(window, `window.__debugTour.startTutorial('calibrateTank')`), true);
+        await waitForStep('welcome');
+        await press('.tourFloating .tourPrimary');
+        await waitForStep('openTuning');
+        await press('#parameterTuningButton');
+        await waitForStep('addData');
+        // The card's link downloads the example's measurements; it does not load them: choosing the file is the person's to do.
+        assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourContentLink').textContent`), /Download the measurements/);
+        const shipped = await readFile(join(process.cwd(), 'examples', 'tankCalibrationMeasured.csv'), 'utf8');
+        if (driver.capabilities.multiWindow) {
+            // On the desktop it is saved straight to the Downloads folder (the test's own, beside its user data), and the card says where.
+            await press('.tourFloating .tourContentLink');
+            await waitFor(window, `/^Saved to .*Downloads/.test(document.querySelector('.tourFloating .tourLinkNote').textContent)`, 'The card did not say where the file was saved.');
+            const savedPath = (await evaluate(window, `document.querySelector('.tourFloating .tourLinkNote').textContent`)).replace(/^Saved to /, '');
+            assert.equal(await readFile(savedPath, 'utf8'), shipped, 'The downloaded copy is not the example\'s measurements.');
+            // Downloading it again keeps the first copy and saves another beside it, as a browser does.
+            await press('.tourFloating .tourContentLink');
+            await waitFor(window, `/\\(1\\)\\.csv$/.test(document.querySelector('.tourFloating .tourLinkNote').textContent)`, 'A second download did not get a name of its own.');
+        } else {
+            const downloaded = await driver.captureExport(() => press('.tourFloating .tourContentLink'));
+            assert.equal(downloaded.bytes.toString('utf8'), shipped, 'The downloaded copy is not the example\'s measurements.');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.equal(await evaluate(window, `window.__debugTour.step()`), 'addData', 'Downloading the file is not choosing it.');
+        // Choosing it through "Choose CSV file" (the file picker cannot be driven, so its file is handed over as the picker would).
+        await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(shipped)}, 'tankCalibrationMeasured.csv')`);
+        await waitForStep('runFit');
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningStatus').textContent`), /Matched 1 to existing states/);
+        await waitFor(window, `!document.querySelector('#runParameterTuning').disabled && !document.querySelector('#runParameterTuning').hidden`, 'Run fit was not offered.');
+        await press('#runParameterTuning');
+        await waitForStep('apply', 120000);
+        await waitFor(window, `!document.querySelector('#commitParameterTuning').disabled`, 'Apply fitted values was not offered.');
+        await press('#commitParameterTuning');
+        await waitForStep('run', 30000);
+        const saved = await savedProject();
+        const capacitance = saved.sharedParameters.find((parameter) => parameter.symbol === 'waterThermalCapacitance').value;
+        const loss = saved.edges.find((edge) => edge.name === 'Ambient heat loss').parameters.find((parameter) => parameter.symbol === 'heatLossCoefficient').value;
+        assert.ok(Math.abs(capacitance / 209000 - 1) < 0.05, `The fit found the capacitance: ${capacitance}.`);
+        assert.ok(Math.abs(loss / 20 - 1) < 0.05, `The fit found the heat loss: ${loss}.`);
+        await waitFor(window, `document.querySelector('#runButton').title === 'Run simulation'`, 'The model was not validated for a run.', 15000);
+        // A run left online (paced against the clock) by something earlier would take the eight simulated hours: the fill turns it off.
+        await press('#runButton');
+        await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'The Run dialog did not open.');
+        await evaluate(window, `(() => { const online = document.querySelector('#runOnlineMode'); online.checked = true; online.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        // Skipping the step runs it as asked, offline, whatever the Run dialog was left set to.
+        await press('.tourFloating .tourSkipStep');
+        await waitFor(window, `!document.querySelector('#runLaunchDialog').open`, 'The skipped run did not start.', 15000);
+        await waitForStep('plotTank', 60000);
+        assert.equal(await evaluate(window, `document.querySelector('#runOnlineMode').checked`), false, 'The skipped run was left online.');
+        await clickLabel('Water tank');
+        await waitForStep('finish');
+        await press('.tourFloating .tourPrimary');
+        await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+        assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /Tutorial finished/);
+        await press('#tutorialsButton');
+        await waitFor(window, `Boolean(document.querySelector('.tutorialEntry[data-tutorial="calibrateTank"] .tutorialDone'))`, 'The finished tutorial was not ticked.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial).join()`), 'firstModel,calibrateTank,tuneController', 'A finished tutorial keeps its place.');
+        await press('#tutorialsClose');
+    });
+
+    await run('the controller tutorial runs the joint, raises the gain in the relationship editor, runs it again and compares', async () => {
+        const { press, waitForStep, clickLabel, cardOverlaps, clean } = tutorialHelpers();
+        await clean();
+        assert.equal(await evaluate(window, `window.__debugTour.startTutorial('tuneController')`), true);
+        await waitForStep('welcome');
+        await press('.tourFloating .tourPrimary');
+        await waitForStep('run');
+        await waitFor(window, `document.querySelector('#runButton').title === 'Run simulation'`, 'The model was not validated for a run.', 15000);
+        await press('#runButton');
+        await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'The Run dialog did not open.');
+        await evaluate(window, `(() => { const field = document.querySelector('#runTargetTime'); field.value = '10'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await press('#startRun');
+        await waitForStep('plotAngle', 60000);
+        await clickLabel('Joint link');
+        await waitForStep('closeResults');
+        // The Joint link's editor is open and covers the end of the timeline, so the step points at its close button first.
+        await waitFor(window, `!document.querySelector('.tourRing').hidden && Math.abs(document.querySelector('.tourRing').getBoundingClientRect().top - document.querySelector('#nodeEditor > header [data-close-card]').getBoundingClientRect().top) < 8`, 'The ring did not move to the editor\'s close button.');
+        await press('#nodeEditor > header [data-close-card]');
+        await waitFor(window, `document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The editor did not close.');
+        await waitFor(window, `Math.abs(document.querySelector('.tourRing').getBoundingClientRect().top - document.querySelector('#closeResults').getBoundingClientRect().top) < 8`, 'The ring did not move to Close and edit.');
+        await press('#closeResults');
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing the results did not ask first.');
+        await press('#confirmCloseResults');
+        await waitForStep('openController');
+        await press('.tourFloating .tourSkipStep');
+        await waitForStep('changeGain');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor').classList.contains('hidden')`), false, 'Skipping did not open the controller.');
+        assert.equal(await cardOverlaps('#edgeEditor'), false, 'The tutorial card covers the relationship editor.');
+        // Changing the gain by hand, as the card asks.
+        await evaluate(window, `(() => { const input = document.querySelector('#edgeEditorParameters [data-parameter-id="19"] input[data-field="value"]'); input.value = '10'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitForStep('rerun');
+        const saved = await savedProject();
+        assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
+        await press('.tourFloating .tourSkipStep');
+        await waitForStep('compare', 60000);
+        await clickLabel('Joint link');
+        await waitForStep('finish');
+        assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourText').textContent`), /unstable/);
+        await press('.tourFloating .tourPrimary');
+        await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+    });
+
+    await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {
+        const { press, clean } = tutorialHelpers();
+        for (const id of ['firstModel', 'calibrateTank', 'tuneController']) {
+            await clean();
+            assert.equal(await evaluate(window, `window.__debugTour.startTutorial(${JSON.stringify(id)})`), true);
+            await waitFor(window, `window.__debugTour.step() === 'welcome'`, `${id} did not start.`);
+            await press('.tourFloating .tourPrimary');
+            for (let guard = 0; guard < 20; guard += 1) {
+                const step = await evaluate(window, `window.__debugTour.step()`);
+                if (step === 'finish') break;
+                await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${id}/${step} offered no Skip this step.`);
+                await press('.tourFloating .tourSkipStep');
+                await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `${id}: skipping ${step} did not move on.`, 120000);
+                assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `${id}: after skipping ${step}, a step was reported undone.`);
+            }
+            assert.equal(await evaluate(window, `window.__debugTour.step()`), 'finish', `${id} did not reach its end.`);
+            // Each skip did its step: the model is what the tutorial builds, whatever the person skipped.
+            const saved = await savedProject();
+            if (id === 'firstModel') {
+                assert.deepEqual(saved.nodes.map((node) => node.name), ['Heater', 'Block']);
+                assert.equal(saved.edges.length, 1);
+            } else if (id === 'calibrateTank') {
+                const loss = saved.edges.find((edge) => edge.name === 'Ambient heat loss').parameters.find((parameter) => parameter.symbol === 'heatLossCoefficient').value;
+                assert.ok(Math.abs(loss / 20 - 1) < 0.05, `The skipped fit found the heat loss: ${loss}.`);
+            } else {
+                assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
+            }
+            await press('.tourFloating .tourPrimary');
+            await waitFor(window, `!window.__debugTour.active()`, `${id} did not finish.`);
+        }
+    });
+
+    await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
+        const { waitForStep, clean } = tutorialHelpers();
+        await clean();
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#exampleButton').click()`);
+        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Tank Calibration'))`, 'Examples explorer did not populate.');
+        await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Tank Calibration').click()`);
+        await waitFor(window, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Tank Calibration'`, 'The example was not selected.');
+        await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        const guideWindow = await driver.waitForNewHandle(before, { titleIncludes: 'Example Guide' });
+        await waitFor(guideWindow, `Boolean(document.querySelector('[data-start-tutorial]'))`, 'The guide did not offer its tutorial.');
+        assert.match(await evaluate(guideWindow, `document.querySelector('.tourCard strong').textContent`), /Calibrate a model against measured data/);
+        await evaluate(guideWindow, `document.querySelector('[data-start-tutorial]').click()`);
+        await waitFor(window, `window.__debugTour.tutorial() === 'calibrateTank'`, 'The guide did not start its tutorial.');
+        await waitForStep('welcome');
+        await evaluate(window, `window.__debugTour.stop()`);
+    }, { skip: !driver.capabilities.renderedExampleGuide && 'the web edition opens an example\'s guide as its raw .md file, with no page to offer the tutorial in' });
+
     await new Promise((resolve) => setTimeout(resolve, 1000));
     for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
     await fakeOllama?.close();

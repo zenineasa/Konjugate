@@ -56,6 +56,16 @@ contextBridge.exposeInMainWorld('tour', {
     recordCompleted: () => ipcRenderer.invoke('tourRecordCompleted')
 });
 
+// The tutorials (docs/proposals/tutorials.md): which are finished (for the Tutorials list's ticks), reporting one finished, downloading a
+// tutorial's data file (its measurements) for the person to choose, reading it (for "Skip this step"), and main telling this window to start one (an example guide's "Take the tutorial").
+contextBridge.exposeInMainWorld('tutorials', {
+    completed: () => ipcRenderer.invoke('tutorialsCompleted'),
+    recordCompleted: (id) => ipcRenderer.invoke('tutorialRecordCompleted', id),
+    downloadData: (fileName) => ipcRenderer.invoke('projectDownloadTutorialData', fileName),
+    loadData: (fileName) => ipcRenderer.invoke('projectLoadTutorialData', fileName),
+    onStart: (callback) => ipcRenderer.on('tutorialStart', (_event, id) => callback(id))
+});
+
 // "Help & feedback": the text of the email a person can send us (see bugReport.mjs), GitHub's pre-filled report, and main telling this
 // window to show the dialog (the Welcome window's button).
 contextBridge.exposeInMainWorld('helpFeedback', {

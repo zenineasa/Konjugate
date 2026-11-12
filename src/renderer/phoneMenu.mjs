@@ -27,7 +27,9 @@ export const phoneMenuEntries = [
     { id: 'versionInfoButton', label: 'Version', keepOpen: true },
     { id: 'nodeLabelsButton', label: 'Node labels', useTitle: true, keepOpen: true, separated: true },
     { id: 'edgeLabelsButton', label: 'Relationship labels', useTitle: true, keepOpen: true },
-    { id: 'welcomeButton', label: 'About Konjugate', separated: true },
+    { id: 'tutorialsButton', label: 'Tutorials', separated: true },
+    { id: 'helpFeedbackButton', label: 'Help & feedback' },
+    { id: 'welcomeButton', label: 'About Konjugate' },
     { id: 'zoomInButton', label: 'Larger interface', keepOpen: true },
     { id: 'zoomOutButton', label: 'Smaller interface', keepOpen: true }
 ];

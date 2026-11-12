@@ -11,7 +11,7 @@ implementation: complete
 
 # A guided first-model tour
 
-**Status: built** (stages 1 to 3, the desktop and web editions, with the "Fill this in for me" buttons). Written down before any code, like [The Welcome window](welcomeWindow.md), so the steps and wording could be reviewed first. The decisions at the end were settled as recommended, with the changes noted in place.
+**Status: built** (stages 1 to 3, the desktop and web editions, with the "Fill this in for me" buttons). Since then it has become the first of the [tutorials](tutorials.md): its steps live in `src/tutorials/firstModel.mjs`, the shared step logic in `src/tutorials/steps.mjs`, its skip link reads "Leave tutorial", and a skip points to the Tutorials button. What follows is the design as it was built. Written down before any code, like [The Welcome window](welcomeWindow.md), so the steps and wording could be reviewed first. The decisions at the end were settled as recommended, with the changes noted in place.
 
 ## The decision this rests on
 

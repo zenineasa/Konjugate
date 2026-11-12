@@ -314,7 +314,14 @@ window.exampleGuide.onContent((payload) => {
         return;
     }
     welcome = null;
-    document.querySelector('#content').innerHTML = renderMarkdown(markdown);
+    // An example with a tutorial (docs/proposals/tutorials.md) offers it first, so someone who opened the example from the Examples
+    // dialog learns there is a walkthrough of it.
+    const tutorial = payload.tutorial;
+    const tutorialCard = tutorial
+        ? `<section class="tourCard"><div><strong>${escapeHtml(tutorial.title)}</strong><p>A ${escapeHtml(String(tutorial.minutes))}-minute tutorial that walks you through this example, step by step, right in the app.</p></div><button type="button" data-start-tutorial>Take the tutorial</button></section>`
+        : '';
+    document.querySelector('#content').innerHTML = tutorialCard + renderMarkdown(markdown);
+    document.querySelector('[data-start-tutorial]')?.addEventListener('click', () => window.exampleGuide.startTutorial(tutorial.id));
     document.querySelectorAll('[data-external-link]').forEach((link) => link.addEventListener('click', (event) => {
         event.preventDefault();
         window.exampleGuide.openExternal(link.href);

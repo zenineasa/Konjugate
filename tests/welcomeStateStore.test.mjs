@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered
+    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted
 } from '../src/welcomeStateStore.mjs';
 
 async function withDirectory(run) {
@@ -38,7 +38,7 @@ test('each change does what it says', () => {
     state = withFeaturedShown(withFeaturedShown(withFeaturedShown(state, 'a'), 'a'), 'b');
     assert.deepEqual(state.featuredShown, { a: 2, b: 1 });
     assert.equal(withLastSeenVersion(state, '1.3.0').lastSeenVersion, '1.3.0');
-    assert.deepEqual(emptyWelcomeState(), { version: 1, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false }, 'the original is untouched');
+    assert.deepEqual(emptyWelcomeState(), { version: 1, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] }, 'the original is untouched');
 });
 
 test('a damaged or wrong-version file means an empty state, never an error', async () => {
@@ -118,4 +118,16 @@ test('the tour is offered once, completing it counts as having been offered, and
     assert.deepEqual([completed.tourOffered, completed.tourCompleted], [true, true]);
     assert.equal(normalizeWelcomeState({ ...completed }).tourCompleted, true);
     assert.deepEqual([normalizeWelcomeState({ version: 1, tourOffered: 'yes' }).tourOffered, normalizeWelcomeState({ version: 1, tourCompleted: 1 }).tourCompleted], [false, false]);
+});
+
+test('finished tutorials are kept by id, once each, and the first-model tutorial and the tour are one', () => {
+    let state = withTutorialCompleted(withTutorialCompleted(emptyWelcomeState(), 'calibrateTank'), 'calibrateTank');
+    assert.deepEqual(state.tutorialsCompleted, ['calibrateTank']);
+    assert.equal(state.tourCompleted, false, 'Another tutorial is not the tour.');
+    state = withTutorialCompleted(state, 'firstModel');
+    assert.deepEqual([state.tourOffered, state.tourCompleted], [true, true]);
+    assert.deepEqual(withTourCompleted(emptyWelcomeState()).tutorialsCompleted, ['firstModel']);
+    assert.deepEqual(normalizeWelcomeState({ version: 1, tourCompleted: true }).tutorialsCompleted, ['firstModel'], 'A tour finished before tutorials were kept by name counts.');
+    assert.deepEqual(normalizeWelcomeState({ version: 1, tutorialsCompleted: ['a', 3, '', 'a', null, 'b'] }).tutorialsCompleted, ['a', 'b']);
+    assert.deepEqual(normalizeWelcomeState({ version: 1, tutorialsCompleted: 'a' }).tutorialsCompleted, []);
 });

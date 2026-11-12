@@ -23,7 +23,8 @@ import { createSettingsSheet } from './settingsSheet.mjs';
 import { createLocalModelsSection } from './localModelsSection.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
-import { tourModel } from '../tour/tourSteps.mjs';
+import { firstModelValues } from '../tutorials/firstModel.mjs';
+import { groupTutorials, searchTutorials, tutorialById, tutorialStartLabel } from '../tutorials/index.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { liveRange } from '../inputBindings.mjs';
@@ -6667,8 +6668,9 @@ function requestCloseResultsConfirmation() {
     });
 }
 
-async function closeResultPlayback() {
-    if (!activeResult || simulationRunning || !await requestCloseResultsConfirmation()) return;
+// `confirm: false` is a tutorial's "Skip this step", which closes the results the person was asked to close.
+async function closeResultPlayback({ confirm = true } = {}) {
+    if (!activeResult || simulationRunning || (confirm && !await requestCloseResultsConfirmation())) return;
     await discardResultPlayback({ markProjectChanged: activeResultPersistedInProject });
     $('#statusText').textContent = 'Results removed · model editing enabled';
 }
@@ -6805,7 +6807,7 @@ function openForkLaunchDialog() {
     $('#runLaunchError').textContent = '';
     $('#runLaunchDialog').showModal();
 }
-$('#closeResults').addEventListener('click', closeResultPlayback);
+$('#closeResults').addEventListener('click', () => closeResultPlayback());
 $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
 // Python has no thread-based parallel option (the GIL means threads would not actually run this
 // CPU-bound loop in parallel -- see src/codeExport.mjs), but it does support mpi via mpi4py. An
@@ -6971,9 +6973,14 @@ async function startSimulation() {
     $('#statusText').textContent = pendingFork ? 'Starting fork…' : 'Running simulation…';
     const previousResultSessionId = activeEngineJobId;
     const forkingFromSessionId = pendingFork ? previousResultSessionId : null;
+    const tutorialRunBefore = tutorialRunModel;
     try {
         const configuration = { ...activeRunConfiguration(), ...runLaunchSettings.configurationOverride };
-        const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(serializeProjectDocument()))), {
+        const runDocument = serializeProjectDocument();
+        // A tutorial's step can ask what the latest run was run with (after a change it asked for, say). The run is the latest from the
+        // moment it is asked for, so nothing seen with the one before counts as seen with it while the engine is starting.
+        if (tour.active) tutorialRunModel = { jobId: null, document: runDocument, finished: false };
+        const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(runDocument))), {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
             pacing: runLaunchSettings.pacing,
@@ -6989,6 +6996,7 @@ async function startSimulation() {
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;
+        if (tutorialRunModel?.document === runDocument) tutorialRunModel.jobId = execution.jobId;
         // A fork must keep the parent's job/result alive as an immutable sibling branch rather
         // than releasing it the way an ordinary new run replaces its predecessor.
         if (previousResultSessionId && previousResultSessionId !== execution.jobId && !forkingFromSessionId) {
@@ -7031,6 +7039,8 @@ async function startSimulation() {
         }
     } catch (error) {
         console.error('C++ simulation failed.', error);
+        // A run that never started is not the latest run.
+        if (tutorialRunModel && tutorialRunModel.jobId === null) tutorialRunModel = tutorialRunBefore;
         $('#statusText').textContent = 'Simulation failed';
         $('#runButton').title = error.message;
         simulationRunning = false;
@@ -12252,12 +12262,24 @@ async function loadOpenedProjectFile(file) {
     $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
 }
 
-// ---- The guided first-model tour (docs/proposals/guidedTour.md) ------------------------------------------------------------
-// The steps and their checks are in ../tour/tourSteps.mjs; this wires them to this page: the facts a check needs, and the "Fill this
-// in for me" actions, which do what a person would do in the builders, through the builders' own fields.
+// ---- Tutorials (docs/proposals/tutorials.md; the first of them is the first-model tour, docs/proposals/guidedTour.md) --------------
+// The tutorials and their checks are in ../tutorials/; this wires them to this page: the facts a check needs, and the "Fill this in for
+// me" actions, which do what a person would do, through the page's own fields and buttons.
+const tutorialEdition = document.documentElement.hasAttribute('data-web-edition') ? 'web' : 'desktop';
 let tourTimelineMoved = false;
-let tourBlockPlotShown = false; // once the target node's plot has been on screen; kept, so a later deselection does not undo the step
+// The nodes whose plot has been on screen while a tutorial ran, and for each, the run it was showing: "has been plotted" is kept, so a
+// later deselection does not undo a step; "plotted since the latest run" is what a step after a second run asks.
+const tutorialPlotsSeen = new Map();
+// The latest run started during a tutorial: its job, the model it was started from, and whether it has finished with a result. Kept
+// when the results are closed (as they must be to change the model), so a step can still ask what the latest run was run with.
+let tutorialRunModel = null;
+// The tutorials finished, for the Tutorials list's ticks (read from the store each time the list opens).
+let tutorialsCompleted = [];
 const tourNodeLabel = (name) => [...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(name)) ?? null;
+const tutorialRelationshipRow = (name) => {
+    const relationship = model.relationships.find((candidate) => candidate.title === name && !candidate.deleted);
+    return relationship ? document.querySelector(`.relationshipRow[data-relationship="${relationship.id}"]`) : null;
+};
 $('#resultTimeline').addEventListener('input', () => { if (activeResult) tourTimelineMoved = true; });
 
 const setField = (selector, value, eventName = 'input') => {
@@ -12278,7 +12300,7 @@ function fillNodeBuilder({ name, temperature }) {
     if ($('#nodeBuilder').classList.contains('hidden')) openAddBuilder('node');
     setField('#newNodeName', name);
     const row = $('#stateVariableRows .stateVariableRow');
-    const values = { name: tourModel.state.name, symbol: tourModel.state.symbol, value: String(temperature), unit: tourModel.state.unit };
+    const values = { name: firstModelValues.state.name, symbol: firstModelValues.state.symbol, value: String(temperature), unit: firstModelValues.state.unit };
     for (const [field, value] of Object.entries(values)) {
         const input = row.querySelector(`[data-field="${field}"]`);
         input.value = value;
@@ -12287,18 +12309,49 @@ function fillNodeBuilder({ name, temperature }) {
 }
 function fillEdgeEndpoints() {
     if ($('#edgeBuilder').classList.contains('hidden')) openAddBuilder('edge');
-    chooseOption('#edgeSource', tourModel.source.name);
-    chooseOption('#edgeTarget', tourModel.target.name);
+    chooseOption('#edgeSource', firstModelValues.source.name);
+    chooseOption('#edgeTarget', firstModelValues.target.name);
     setField('#newEdgeName', 'Heat flow');
+}
+// Resolves once `ready()` is true, or after `timeout` milliseconds whatever it says (a skip then does what it can).
+async function waitUntil(ready, timeout = 5000) {
+    const until = Date.now() + timeout;
+    while (!ready() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
+}
+async function fillEdgeEquation() {
+    if ($('#edgeBuilder').classList.contains('hidden') || !$('#edgeSource').value || $('#edgeSource').value === $('#edgeTarget').value) fillEdgeEndpoints();
+    // The builder's references follow the endpoints a moment after they are chosen; the equation is entered once they have.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    const target = [...$('#edgeEquationOutput').options].find((option) => option.textContent.startsWith('target.'));
+    if (target) setField('#edgeEquationOutput', target.value, 'change');
+    $('#edgeMathField').setValue(firstModelValues.equationLatex);
+    $('#edgeMathField').dispatchEvent(new Event('input', { bubbles: true }));
+}
+function fillRunDialog(seconds) {
+    if (!$('#runLaunchDialog').open) $('#runButton').click();
+    setField('#runTargetTime', String(seconds));
+    // An online run is paced against the clock, which a tutorial's run (eight simulated hours, say) must not be.
+    if ($('#runOnlineMode').checked) {
+        $('#runOnlineMode').checked = false;
+        $('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true }));
+    }
+}
+function openTutorialRelationship(name) {
+    const relationship = model.relationships.find((candidate) => candidate.title === name && !candidate.deleted);
+    if (!relationship) return false;
+    if ($('#edgeEditor').classList.contains('hidden') || selectedRelationship?.id !== relationship.id) openRelationshipEditor(relationship);
+    return true;
 }
 
 const tour = createTour({
-    edition: document.documentElement.hasAttribute('data-web-edition') ? 'web' : 'desktop',
+    edition: tutorialEdition,
     getFacts: () => {
         const edgeBuilderOpen = !$('#edgeBuilder').classList.contains('hidden');
         const plotRect = $('#nodeResultPlot').getBoundingClientRect();
         const nodePlotVisible = Boolean(activeResult) && plotRect.width > 0 && plotRect.height > 0;
-        if (nodePlotVisible && $('#editNodeName').value === tourModel.target.name) tourBlockPlotShown = true;
+        if (tutorialRunModel && activeResult && !simulationRunning && tutorialRunModel.jobId === activeEngineJobId) tutorialRunModel.finished = true;
+        if (nodePlotVisible && $('#editNodeName').value) tutorialPlotsSeen.set($('#editNodeName').value, activeEngineJobId);
+        const edgeEditorOpen = !$('#edgeEditor').classList.contains('hidden');
         return {
             document: serializeProjectDocument(),
             ui: {
@@ -12306,50 +12359,130 @@ const tour = createTour({
                 edgeBuilderOpen,
                 edgeSourceNodeId: edgeBuilderOpen ? $('#edgeSource').value : '',
                 edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
+                edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
                 runDialogOpen: $('#runLaunchDialog').open,
+                closeResultsDialogOpen: $('#closeResultsDialog').open,
+                // The close button of an editor open at the side, which can cover the end of the timeline.
+                openEditorClose: document.querySelector('.contextCard.editorCard:not(.hidden) > header [data-close-card]'),
                 hasResult: Boolean(activeResult),
+                runModel: tutorialRunModel?.finished ? tutorialRunModel.document : null,
                 timelineMoved: tourTimelineMoved,
                 nodePlotVisible,
-                blockPlotShown: tourBlockPlotShown,
-                labelOf: tourNodeLabel
+                plotsSeen: [...tutorialPlotsSeen.keys()],
+                plotsSeenSinceRun: tutorialRunModel?.finished ? [...tutorialPlotsSeen].filter(([, jobId]) => jobId === tutorialRunModel.jobId).map(([name]) => name) : [],
+                tuningOpen: !$('#parameterTuning').classList.contains('hidden'),
+                tuningDataLoaded: parameterTuningGoal === 'data' && Boolean(parameterTuningState?.csvContent && parameterTuningState.mapping?.length),
+                tuningFitted: parameterTuningGoal === 'data' && Boolean(parameterTuningState?.report),
+                labelOf: tourNodeLabel,
+                relationshipRowOf: tutorialRelationshipRow
             }
         };
     },
-    fill: {
-        sourceNode: async () => fillNodeBuilder(tourModel.source),
-        targetNode: async () => fillNodeBuilder(tourModel.target),
+    // What a step's fill button, its "Skip this step" and a link in its text do (each step names the ones it uses). A skip does the step
+    // through the page's own fields and buttons, as the person would, so the steps after it find what they expect.
+    actions: {
+        sourceNode: async () => fillNodeBuilder(firstModelValues.source),
+        targetNode: async () => fillNodeBuilder(firstModelValues.target),
         edgeEndpoints: async () => fillEdgeEndpoints(),
-        edgeEquation: async () => {
-            if ($('#edgeBuilder').classList.contains('hidden') || !$('#edgeSource').value || $('#edgeSource').value === $('#edgeTarget').value) fillEdgeEndpoints();
-            // The builder's references follow the endpoints a moment after they are chosen; the equation is entered once they have.
-            await new Promise((resolve) => setTimeout(resolve, 150));
-            const target = [...$('#edgeEquationOutput').options].find((option) => option.textContent.startsWith('target.'));
-            if (target) setField('#edgeEquationOutput', target.value, 'change');
-            $('#edgeMathField').setValue(tourModel.equationLatex);
-            $('#edgeMathField').dispatchEvent(new Event('input', { bubbles: true }));
+        edgeEquation: async () => fillEdgeEquation(),
+        runTime: async (step) => fillRunDialog(step.runSeconds),
+        openNodeBuilder: async () => { if ($('#nodeBuilder').classList.contains('hidden')) openAddBuilder('node'); },
+        createSourceNode: async () => { fillNodeBuilder(firstModelValues.source); $('#createNode').click(); },
+        createTargetNode: async () => { fillNodeBuilder(firstModelValues.target); $('#createNode').click(); },
+        chooseEdgeEndpoints: async () => fillEdgeEndpoints(),
+        createEdge: async () => {
+            await fillEdgeEquation();
+            await waitUntil(() => $('#builderEquationDiagnostics').classList.contains('valid'), 15000);
+            $('#createEdge').click();
         },
-        runTime: async () => {
-            if (!$('#runLaunchDialog').open) $('#runButton').click();
-            setField('#runTargetTime', String(tourModel.runSeconds));
+        runModel: async (step) => {
+            await waitUntil(() => !simulationRunning, 60000);
+            // The model is locked while results are on screen; a new run needs them closed.
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            await waitUntil(() => currentValidation.valid && !$('#runButton').disabled, 15000);
+            fillRunDialog(step.runSeconds);
+            $('#startRun').click();
+        },
+        plotNode: async (step) => {
+            await waitUntil(() => activeResult && !simulationRunning, 120000);
+            tourNodeLabel(step.node)?.click();
+        },
+        moveTimeline: async () => {
+            const slider = $('#resultTimeline');
+            slider.value = slider.max;
+            slider.dispatchEvent(new Event('input', { bubbles: true }));
+        },
+        openTuning: async () => { if ($('#parameterTuning').classList.contains('hidden')) openParameterTuning(); },
+        // A tutorial's data file (the tank's measurements): the link in the card downloads it, for the person to choose in the app as they
+        // would their own; skipping the step loads it for them.
+        downloadTutorialData: async () => {
+            const fileName = tour.tutorial?.data?.[0];
+            if (!fileName) return undefined;
+            const saved = await window.tutorials.downloadData(fileName);
+            return saved.path ? `Saved to ${saved.path}` : `Downloaded ${saved.fileName}: your browser saved it, usually to your Downloads folder.`;
+        },
+        loadTutorialData: async () => {
+            if ($('#parameterTuning').classList.contains('hidden')) openParameterTuning();
+            if (parameterTuningGoal !== 'data') $('#parameterTuningGoalData').click();
+            const fileName = tour.tutorial?.data?.[0];
+            if (fileName) await loadParameterTuningCsv(await window.tutorials.loadData(fileName), fileName);
+        },
+        runFit: async () => {
+            await waitUntil(() => !$('#runParameterTuning').hidden && !$('#runParameterTuning').disabled, 15000);
+            $('#runParameterTuning').click();
+        },
+        applyFit: async () => {
+            await waitUntil(() => !$('#commitParameterTuning').hidden && !$('#commitParameterTuning').disabled, 180000);
+            $('#commitParameterTuning').click();
+        },
+        closeResults: async () => {
+            document.querySelectorAll('.contextCard.editorCard:not(.hidden) > header [data-close-card]').forEach((button) => button.click());
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+        },
+        openRelationship: async (step) => { openTutorialRelationship(step.relationship); },
+        setParameter: async (step) => {
+            if (!openTutorialRelationship(step.relationship)) return;
+            const input = document.querySelector(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] input[data-field="value"]`);
+            if (!input || input.disabled) return;
+            input.value = String(step.value);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
         }
     },
-    onFinish: (outcome) => {
-        $('#statusText').textContent = outcome === 'completed' ? 'Tour finished' : `Tour skipped · you can take it again from the ${document.documentElement.hasAttribute('data-web-edition') ? 'Konjugate button' : 'Welcome window'}`;
-        if (outcome === 'completed') window.tour?.recordCompleted();
+    onFinish: (outcome, tutorial) => {
+        $('#statusText').textContent = outcome === 'completed' ? `Tutorial finished: ${tutorial.title}` : 'Tutorial left · take it again any time from Tutorials';
+        if (outcome === 'completed') {
+            if (!tutorialsCompleted.includes(tutorial.id)) tutorialsCompleted = [...tutorialsCompleted, tutorial.id];
+            window.tutorials?.recordCompleted(tutorial.id);
+            if (tutorial.id === 'firstModel') window.tour?.recordCompleted();
+        }
     }
 });
 
-// Starts the tour on a new, empty project, after the usual question if there is work in this one.
-async function startTour() {
-    if (simulationRunning || tour.active) return;
-    if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
-    await loadProjectDocument(structuredClone(emptyProjectDocument), { fileName: 'First model.kjt' });
+// Starts a tutorial where it starts: a new, empty project, or a fresh copy of its example (the example's guide is not opened, so the
+// tutorial's card is the one thing saying what to do; its button stays in the toolbar). Either way after the usual question if there is
+// work in this one. A tutorial already running is replaced. Returns whether it started.
+async function startTutorial(id) {
+    const tutorial = tutorialById(id);
+    if (!tutorial || simulationRunning || !tutorial.editions.includes(tutorialEdition)) return false;
+    if (tutorial.start.from === 'example') {
+        const untouched = activeExampleId === tutorial.start.example && !activeResult && exampleAsLoaded === JSON.stringify(serializeProjectDocument());
+        if (!untouched && !await loadExample(tutorial.start.example, { openGuide: false })) return false;
+    } else {
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return false;
+        await loadProjectDocument(structuredClone(emptyProjectDocument), { fileName: tutorial.start.fileName });
+    }
     tourTimelineMoved = false;
-    tourBlockPlotShown = false;
-    tour.start();
+    tutorialPlotsSeen.clear();
+    tutorialRunModel = null;
+    tour.start(tutorial, { start: serializeProjectDocument() });
+    return true;
 }
+const startTour = () => startTutorial('firstModel');
 window.tour?.onStart(startTour);
-window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, shown: tourBlockPlotShown }), start: startTour, step: () => tour.step, active: () => tour.active, stop: () => tour.stop() };
+window.tutorials?.onStart((id) => startTutorial(id));
+window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, plotsSeen: [...tutorialPlotsSeen.keys()] }), start: startTour, startTutorial, tutorial: () => tour.tutorial?.id ?? null, step: () => tour.step, active: () => tour.active, stop: () => tour.stop() };
 
 async function openProject() {
     if (simulationRunning) return;
@@ -12476,11 +12609,15 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
     }
 }
 
-async function loadExample(id) {
-    if (!id) return;
+// The example just loaded, as it was loaded: a tutorial started from that example while it is still untouched (from its guide, say)
+// starts from it as it is, instead of asking about discarding a copy nobody has changed.
+let exampleAsLoaded = null;
+// Loads an example as an unsaved copy and, unless a tutorial is starting from it, opens its guide. Returns whether it loaded.
+async function loadExample(id, { openGuide = true } = {}) {
+    if (!id) return false;
     try {
-        if (simulationRunning) return;
-        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+        if (simulationRunning) return false;
+        if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return false;
         const example = await window.projectFiles.loadExample(id);
         await loadProjectDocument(JSON.parse(example.content), {
             fileName: example.suggestedFilename,
@@ -12489,12 +12626,15 @@ async function loadExample(id) {
             embeddedBranches: example.embeddedBranches
         });
         activeExampleId = id;
+        exampleAsLoaded = JSON.stringify(serializeProjectDocument());
         $('#exampleGuideButton').hidden = false;
-        await window.projectFiles.openExampleGuide(id);
+        if (openGuide) await window.projectFiles.openExampleGuide(id);
         $('#statusText').textContent = 'Example loaded as an unsaved copy';
+        return true;
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Example failed · ${error.message}`;
+        return false;
     } finally {
         // .close() on an already-closed <dialog> is a harmless no-op, so this is safe even if
         // loadExample is ever invoked from somewhere other than the explorer's own Open button.
@@ -13619,6 +13759,83 @@ $('#helpFeedbackCopyEverything').addEventListener('click', (event) => {
 });
 $('#helpFeedbackOpenGitHub').addEventListener('click', () => window.helpFeedback.openGitHub());
 $('#helpFeedbackClose').addEventListener('click', () => $('#helpFeedbackDialog').close());
+
+// ---- The Tutorials list (docs/proposals/tutorials.md): every shipped tutorial, searched as the person types. With nothing typed it is
+// grouped by area; a search lists the matches best first. A finished tutorial keeps its place and shows a tick.
+function tutorialListEntry(tutorial) {
+    const row = document.createElement('div');
+    row.className = 'tutorialEntry';
+    row.dataset.tutorial = tutorial.id;
+    const text = document.createElement('div');
+    text.className = 'tutorialEntryText';
+    const heading = document.createElement('div');
+    heading.className = 'tutorialEntryHeading';
+    const title = document.createElement('strong');
+    title.textContent = tutorial.title;
+    heading.append(title);
+    if (tutorialsCompleted.includes(tutorial.id)) {
+        const done = document.createElement('span');
+        done.className = 'tutorialDone';
+        done.textContent = '✓ Done';
+        heading.append(done);
+    }
+    text.append(heading);
+    const summary = document.createElement('p');
+    summary.textContent = tutorial.summary;
+    const meta = document.createElement('span');
+    meta.className = 'tutorialEntryMeta';
+    meta.textContent = `About ${tutorial.minutes} min · ${tutorialStartLabel(tutorial)}`;
+    text.append(summary, meta);
+    row.append(text);
+    if (tutorial.editions.includes(tutorialEdition)) {
+        const start = document.createElement('button');
+        start.type = 'button';
+        start.className = 'helpFeedbackPrimary';
+        start.textContent = 'Start';
+        start.setAttribute('aria-label', `Start ${tutorial.title}`);
+        start.addEventListener('click', () => {
+            $('#tutorialsDialog').close();
+            startTutorial(tutorial.id);
+        });
+        row.append(start);
+    } else {
+        // Listed in both editions, so the list is the same everywhere; only the edition that can play it offers Start.
+        const note = document.createElement('span');
+        note.className = 'tutorialEditionNote';
+        note.textContent = tutorialEdition === 'web' ? 'In the desktop app' : 'In the web edition';
+        row.append(note);
+    }
+    return row;
+}
+function renderTutorialsList() {
+    const query = $('#tutorialsSearch').value;
+    const found = searchTutorials(query);
+    const list = $('#tutorialsList');
+    list.replaceChildren();
+    if (query.trim()) list.append(...found.map(tutorialListEntry));
+    else for (const group of groupTutorials()) {
+        const heading = document.createElement('h2');
+        heading.className = 'tutorialsGroup';
+        heading.textContent = group.title;
+        list.append(heading, ...group.tutorials.map(tutorialListEntry));
+    }
+    $('#tutorialsEmpty').hidden = found.length > 0;
+}
+async function openTutorialsDialog() {
+    // What is stored, with what was finished in this window (whose report may still be on its way to the store).
+    let stored = [];
+    try { stored = await window.tutorials?.completed() ?? []; } catch { stored = []; }
+    tutorialsCompleted = [...new Set([...stored, ...tutorialsCompleted])];
+    $('#tutorialsSearch').value = '';
+    renderTutorialsList();
+    $('#tutorialsDialog').showModal();
+    $('#tutorialsSearch').focus();
+}
+$('#tutorialsButton').addEventListener('click', openTutorialsDialog);
+$('#tutorialsClose').addEventListener('click', () => $('#tutorialsDialog').close());
+$('#tutorialsSearch').addEventListener('input', renderTutorialsList);
+// Enter in the search field would submit the dialog's form, which closes it.
+$('#tutorialsSearch').addEventListener('keydown', (event) => { if (event.key === 'Enter') event.preventDefault(); });
 
 $('#extensionsButton').addEventListener('click', openExtensionsDialog);
 $('#extensionsTitleButton').addEventListener('click', openExtensionsDialog);

@@ -636,6 +636,21 @@
         </form>
     </dialog>
 
+    <!-- Tutorials (docs/proposals/tutorials.md): the searchable list. Each entry starts its tutorial, from an empty canvas or from a shipped
+         example; one the other edition alone can play is listed with a note instead of a Start button. Built by renderer.mjs from
+         src/tutorials/index.mjs. -->
+    <dialog id="tutorialsDialog" class="passwordDialog helpFeedbackDialog tutorialsDialog" aria-labelledby="tutorialsTitle">
+        <form method="dialog">
+            <button id="tutorialsClose" class="helpFeedbackCloseButton" type="button" aria-label="Close">×</button>
+            <span class="contextKicker">Learn</span>
+            <h1 id="tutorialsTitle">Tutorials</h1>
+            <p class="helpFeedbackIntro">Short walkthroughs, right in the app. Each one says what to do next, checks that you did it, and can be left at any point. Most start from an example, so you learn a feature on a model that already works.</p>
+            <input id="tutorialsSearch" class="tutorialsSearch" type="search" placeholder="Search tutorials, e.g. calibrate, controller, plot" aria-label="Search tutorials" autocomplete="off" spellcheck="false">
+            <div id="tutorialsList" class="tutorialsList"></div>
+            <p id="tutorialsEmpty" class="tutorialsEmpty" role="status" hidden>No tutorial matches that yet. The Examples menu and the documentation cover more.</p>
+        </form>
+    </dialog>
+
     <dialog id="runLaunchDialog" class="passwordDialog runConfigurationDialog">
         <form method="dialog">
             <span class="contextKicker">Simulation</span>
@@ -761,6 +776,11 @@
         </button>
         <span class="railSeparator" aria-hidden="true"></span>
         <div id="addonRailButtons" class="addonRailButtons"></div>
+        <!-- Tutorials (docs/proposals/tutorials.md): short, checked walkthroughs in the app itself, found in one searchable list. -->
+        <button id="tutorialsButton" class="toolButton railTool" type="button" aria-label="Tutorials" aria-haspopup="dialog">
+            <span class="railToolSymbol"><svg class="toolSvg" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 4.2C6.6 3.2 4.6 2.8 2.5 3v8.8c2.1-.2 4.1.2 5.5 1.2 1.4-1 3.4-1.4 5.5-1.2V3c-2.1-.2-4.1.2-5.5 1.2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M8 4.2V13" fill="none" stroke="currentColor" stroke-width="1.2"/></svg></span>
+            <span class="railToolLabel">Tutorials</span>
+        </button>
         <button id="helpFeedbackButton" class="toolButton railTool" type="button" aria-label="Help and feedback" aria-haspopup="dialog">
             <span class="railToolSymbol"><svg class="toolSvg" viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M2.5 3.5h11v7h-5l-3 2.5v-2.5h-3z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/><path d="M6 6.2h4M6 8.2h2.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg></span>
             <span class="railToolLabel">Help &amp; feedback</span>
@@ -1128,7 +1148,7 @@
                     <button id="parameterTuningGoalReplay" type="button" aria-pressed="false">Replay a data log</button>
                 </div>
                 <p id="parameterTuningGoalHint" class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
-                <label class="geometrySourceButton">
+                <label id="parameterTuningFileChooser" class="geometrySourceButton">
                     <input id="parameterTuningFile" type="file" accept=".csv">
                     <span id="parameterTuningFileLabel">↥ Choose CSV file</span>
                 </label>

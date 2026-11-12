@@ -1,11 +1,12 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The guided first-model tour's controller (docs/proposals/guidedTour.md): a card that says what to do next, a ring around the control
-// it is about, and a check, every few hundred milliseconds and whenever told something happened, of whether the person has done it.
-// What the steps say and how each is judged lives in ../tour/tourSteps.mjs, shared by both editions; what this file knows about the
-// page is only what it is handed: how to read the facts the checks need, and how to fill a step in.
+// The tutorials' controller (docs/proposals/tutorials.md; the first-model tour, docs/proposals/guidedTour.md, is the first of them): a
+// card that says what to do next, a ring around the control it is about, and a check, every few hundred milliseconds and whenever told
+// something happened, of whether the person has done it. What each tutorial's steps say and how each is judged lives in ../tutorials/,
+// shared by both editions; what this file knows about the page is only what it is handed: how to read the facts the checks need, and how
+// to fill a step in.
 
-import { brokenStepBefore, currentStepIndex, stepLabel, stepText, tourSteps } from '../tour/tourSteps.mjs';
+import { brokenStepBefore, currentStepIndex, stepLabel, stepText } from '../tutorials/steps.mjs';
 
 const element = (tag, className, text) => {
     const created = document.createElement(tag);
@@ -14,23 +15,36 @@ const element = (tag, className, text) => {
     return created;
 };
 
-// getFacts() -> { document, ui }; fill: { [name]: async () => void }; edition: 'desktop' | 'web';
-// onFinish(outcome) with 'completed' or 'skipped', after the tour has gone from the screen.
-export function createTour({ getFacts, fill = {}, edition, onFinish = () => {}, pollMilliseconds = 300 }) {
+// getFacts() -> { document, ui }; actions: { [name]: async (step) => string | void }, the page's own actions a step names: its `fill` (the
+// fill button), its `skip` (what "Skip this step" does for the person, so the steps after it still work) and its `link.action` (a link in
+// the card's text, such as a download; what it returns is said under the text); edition: 'desktop' | 'web';
+// onFinish(outcome, tutorial) with 'completed' or 'skipped', after the card has gone from the screen.
+// start(tutorial, { start }) plays a tutorial; `start` is the project as the tutorial found it, handed to every check.
+export function createTour({ getFacts, actions: pageActions = {}, edition, onFinish = () => {}, pollMilliseconds = 300 }) {
+    let tutorial = null;
+    let steps = [];
+    let startDocument = null;
     let reached = 0;
     let active = false;
     let timer = null;
     let filling = false;
+    // The steps the person skipped: "Skip this step" did them, and a check that does not hold for a moment after (a run still starting)
+    // is not reported as something undone.
+    const skipped = new Set();
     const ring = element('div', 'tourRing');
     ring.hidden = true;
     ring.setAttribute('aria-hidden', 'true');
     const card = element('section', 'tourFloating');
     card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-label', 'Guided tour');
+    card.setAttribute('aria-label', 'Tutorial');
     card.hidden = true;
     const progress = element('span', 'tourProgress');
     const title = element('strong', 'tourTitle');
     const text = element('p', 'tourText');
+    const link = element('button', 'tourContentLink', '');
+    link.type = 'button';
+    const linkNote = element('p', 'tourLinkNote');
+    linkNote.setAttribute('role', 'status');
     const notice = element('p', 'tourNotice');
     const back = element('button', 'tourLink', '');
     back.type = 'button';
@@ -38,11 +52,13 @@ export function createTour({ getFacts, fill = {}, edition, onFinish = () => {}, 
     fillButton.type = 'button';
     const next = element('button', 'tourPrimary', 'Next');
     next.type = 'button';
-    const skip = element('button', 'tourLink', 'Skip tour');
+    const skip = element('button', 'tourLink', 'Leave tutorial');
     skip.type = 'button';
+    const skipStep = element('button', 'tourLink tourSkipStep', 'Skip this step');
+    skipStep.type = 'button';
     const actions = element('div', 'tourActions');
-    actions.append(skip, fillButton, next);
-    card.append(progress, title, text, notice, back, actions);
+    actions.append(skip, skipStep, fillButton, next);
+    card.append(progress, title, text, link, linkNote, notice, back, actions);
     document.body.append(ring, card);
 
     const targetOf = (step, facts) => (typeof step.target === 'function' ? step.target(facts.ui) : step.target);
@@ -119,20 +135,28 @@ export function createTour({ getFacts, fill = {}, edition, onFinish = () => {}, 
         // and the ring move into it while it is open, and back out when it closes.
         const host = document.querySelector('dialog[open]') ?? document.body;
         if (ring.parentElement !== host) host.append(ring, card);
-        const facts = getFacts();
-        const index = currentStepIndex(facts, reached);
+        const facts = { ...getFacts(), start: startDocument };
+        const index = currentStepIndex(facts, reached, steps);
         reached = Math.max(reached, index);
-        const step = tourSteps[reached];
-        const broken = brokenStepBefore(facts, reached);
+        const step = steps[reached];
+        const broken = brokenStepBefore(facts, reached, steps, skipped);
         card.hidden = false;
-        progress.textContent = stepLabel(reached);
+        progress.textContent = stepLabel(reached, steps);
         title.textContent = step.title;
         text.textContent = stepText(step, edition);
+        if (link.dataset.step !== step.id) { linkNote.textContent = ''; link.dataset.step = step.id; }
+        link.hidden = !step.link || !pageActions[step.link.action];
+        link.textContent = step.link?.label ?? '';
+        link.disabled = filling;
+        linkNote.hidden = !linkNote.textContent;
         next.hidden = step.advance !== 'next';
         next.textContent = step.nextLabel ?? 'Next';
-        fillButton.hidden = !step.fill || !fill[step.fill];
+        fillButton.hidden = !step.fill || !pageActions[step.fill];
+        fillButton.textContent = step.fillLabel ?? 'Fill this in for me';
         fillButton.disabled = filling;
         skip.hidden = step.id === 'finish';
+        skipStep.hidden = step.advance === 'next' || !pageActions[step.skip];
+        skipStep.disabled = filling;
         back.hidden = broken === null;
         notice.hidden = broken === null;
         if (broken !== null) {
@@ -150,28 +174,51 @@ export function createTour({ getFacts, fill = {}, edition, onFinish = () => {}, 
         clearInterval(timer);
         ring.hidden = true;
         card.hidden = true;
-        onFinish(outcome);
+        onFinish(outcome, tutorial);
     }
 
     next.addEventListener('click', () => {
-        if (tourSteps[reached].id === 'finish') finish('completed');
+        if (steps[reached].id === 'finish') finish('completed');
         else { reached += 1; render(); }
     });
     skip.addEventListener('click', () => finish('skipped'));
-    fillButton.addEventListener('click', async () => {
-        const step = tourSteps[reached];
-        if (filling || !fill[step.fill]) return;
+    // Runs one of the page's actions for the step on screen, one at a time; returns what it returned.
+    async function perform(name) {
+        const step = steps[reached];
+        if (filling || !pageActions[name]) return undefined;
         filling = true;
         render();
-        try { await fill[step.fill](); } finally { filling = false; render(); }
+        try { return await pageActions[name](step); } finally { filling = false; render(); }
+    }
+    fillButton.addEventListener('click', () => perform(steps[reached].fill));
+    link.addEventListener('click', async () => {
+        const said = await perform(steps[reached].link?.action);
+        linkNote.textContent = typeof said === 'string' ? said : '';
+        render();
+    });
+    skipStep.addEventListener('click', async () => {
+        const index = reached;
+        const step = steps[index];
+        if (filling || step.advance === 'next') return;
+        try { await perform(step.skip); } catch (error) { console.error(`Skipping the "${step.id}" step failed.`, error); }
+        skipped.add(index);
+        if (active && reached === index) reached = index + 1;
+        render();
     });
     window.addEventListener('resize', () => render());
 
     return {
         get active() { return active; },
-        get step() { return active ? tourSteps[reached].id : null; },
-        start() {
+        get step() { return active ? steps[reached].id : null; },
+        get tutorial() { return active ? tutorial : null; },
+        start(played, { start = null } = {}) {
+            tutorial = played;
+            steps = played.steps;
+            startDocument = start;
+            card.setAttribute('aria-label', played.title);
             reached = 0;
+            skipped.clear();
+            linkNote.textContent = '';
             dragged = null;
             delete card.dataset.spot;
             active = true;

@@ -86,7 +86,10 @@ import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '..
 import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
-import { executionProjectDocument, hydrateSubsystems, subsystemBoundaryCrossings } from '../subsystems.mjs';
+import {
+    executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
+    subsystemLocations, subsystemMoveTargets
+} from '../subsystems.mjs';
 import {
     expandEdgeGroup,
     hydrateEdgeGroups,
@@ -576,6 +579,8 @@ const selectedNodeIds = new Set();
 let selectedRelationship = null;
 let activeEdgeGroupId = null;
 let activeSubsystemId = null;
+// The subsystem box selected on the canvas (a click selects it and opens its card; Open or a double click steps inside).
+let selectedSubsystemId = null;
 let currentTool = 'select';
 let currentView = 'orbit';
 let is2DLocked = false;
@@ -714,7 +719,7 @@ function updateSelectionActionControls() {
     $('#saveTemplateButton').disabled = locked || !selectedNodeIds.size;
     $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
     $('#createEdgeGroup').disabled = locked || selectedNodeIds.size < 2;
-    $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship);
+    $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship && selectedSubsystemId === null);
     let canPaste = false;
     if (!locked) {
         try {
@@ -1247,9 +1252,14 @@ function createSubsystemObject(definition) {
     object.userData = { kind: 'subsystem', id: definition.id, definition };
     const wrapper = document.createElement('div');
     wrapper.className = 'subsystem-label';
-    wrapper.innerHTML = `<button class="subsystemLabel" type="button"><strong>${escapeHtml(definition.name)}</strong><small>${boundaryPortCountText(liveBoundaryCrossings(definition.id).length)} · Open subsystem</small></button>`;
+    // The label lets clicks through to the box behind it, which selects the subsystem; only its Open button steps inside.
+    wrapper.innerHTML = `<div class="subsystemLabel"><strong>${escapeHtml(definition.name)}</strong><small>${boundaryPortCountText(liveBoundaryCrossings(definition.id).length)}</small><button class="subsystemOpen" type="button">Open</button></div>`;
     object.userData.summary = $('.subsystemLabel small', wrapper);
-    $('.subsystemLabel', wrapper).addEventListener('click', (event) => {
+    object.userData.nameElement = $('.subsystemLabel strong', wrapper);
+    object.userData.labelElement = $('.subsystemLabel', wrapper);
+    $('.subsystemOpen', wrapper).setAttribute('aria-label', `Open ${definition.name}`);
+    $('.subsystemOpen', wrapper).addEventListener('pointerdown', (event) => event.stopPropagation());
+    $('.subsystemOpen', wrapper).addEventListener('click', (event) => {
         event.stopPropagation();
         enterSubsystem(definition.id);
     });
@@ -1428,7 +1438,7 @@ function relationshipEndObject(definition, role) {
 function syncSubsystemBoundaries() {
     subsystemObjects.forEach((object) => {
         if (!object.visible || !object.userData.summary) return;
-        const text = `${boundaryPortCountText(liveBoundaryCrossings(object.userData.id).length)} · Open subsystem`;
+        const text = boundaryPortCountText(liveBoundaryCrossings(object.userData.id).length);
         if (object.userData.summary.textContent !== text) object.userData.summary.textContent = text;
     });
     const descriptions = activeSubsystemId === null ? [] : liveBoundaryCrossings(activeSubsystemId).map(describeBoundaryCrossing);
@@ -1449,6 +1459,11 @@ function syncSubsystemBoundaries() {
 }
 
 function refreshSubsystemView() {
+    // A subsystem being viewed that has gone (deleted, dissolved, or its creation undone) gives way to the nearest one left.
+    for (let current = model.subsystems.find((item) => item.id === activeSubsystemId); activeSubsystemId !== null && (!current || current.deleted);
+        current = model.subsystems.find((item) => item.id === activeSubsystemId)) {
+        activeSubsystemId = current?.parentSubsystemId ?? null;
+    }
     clearSelection();
     nodeObjects.forEach((object, id) => {
         const definition = object.userData.definition;
@@ -1458,17 +1473,45 @@ function refreshSubsystemView() {
         const definition = object.userData.definition;
         object.visible = !definition.deleted && definition.parentSubsystemId === activeSubsystemId;
     });
-    const breadcrumb = $('#subsystemBreadcrumb');
-    breadcrumb.hidden = activeSubsystemId === null;
-    if (activeSubsystemId !== null) {
-        const current = model.subsystems.find((item) => item.id === activeSubsystemId);
-        breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" disabled>${escapeHtml(current?.name ?? 'Subsystem')}</button>`;
-        $('[data-subsystem-parent]', breadcrumb).addEventListener('click', () => enterSubsystem(current?.parentSubsystemId ?? null));
-    }
+    renderSubsystemBreadcrumb();
     // Laid out afresh for the view just entered, from where its contents are now.
     subsystemTerminalSignature = '';
     updateRelationships();
     updateModelStatus();
+}
+
+// The path at the top of the canvas while inside a subsystem. The current name is a button that renames it in place.
+function renderSubsystemBreadcrumb() {
+    const breadcrumb = $('#subsystemBreadcrumb');
+    breadcrumb.hidden = activeSubsystemId === null;
+    if (activeSubsystemId === null) return;
+    const current = model.subsystems.find((item) => item.id === activeSubsystemId);
+    breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" data-subsystem-rename title="Rename this subsystem">${escapeHtml(current?.name ?? 'Subsystem')}</button>`;
+    $('[data-subsystem-parent]', breadcrumb).addEventListener('click', () => enterSubsystem(current?.parentSubsystemId ?? null));
+    $('[data-subsystem-rename]', breadcrumb).addEventListener('click', (event) => {
+        if (activeResult || !current) return;
+        const input = document.createElement('input');
+        input.value = current.name;
+        input.maxLength = 120;
+        input.setAttribute('aria-label', 'Subsystem name');
+        input.dataset.subsystemRenameInput = '';
+        let settled = false;
+        const finish = (commit) => {
+            if (settled) return;
+            settled = true;
+            if (commit) renameSubsystem(current.id, input.value);
+            renderSubsystemBreadcrumb();
+        };
+        input.addEventListener('keydown', (keyEvent) => {
+            keyEvent.stopPropagation();
+            if (keyEvent.key === 'Enter') finish(true);
+            if (keyEvent.key === 'Escape') finish(false);
+        });
+        input.addEventListener('blur', () => finish(true));
+        event.currentTarget.replaceWith(input);
+        input.focus();
+        input.select();
+    });
 }
 
 function enterSubsystem(id) {
@@ -1802,6 +1845,13 @@ dragControls.addEventListener('dragend', (event) => {
         return;
     }
     const moved = draggedNodePositions(dragStartPositions, event.object.userData.id, (id) => nodeObjects.get(id)?.position);
+    // Dropped onto a subsystem box: the dragged nodes go inside it, where they were dropped, as one undo step with the drag.
+    const dropTarget = moved && !activeResult && lastCanvasPointer ? subsystemUnderPointer(lastCanvasPointer) : null;
+    if (dropTarget !== null && moveNodesToSubsystem([...moved.to.keys()], dropTarget, { positions: moved })) {
+        dragStartPositions = null;
+        dragLastPosition = null;
+        return;
+    }
     if (moved) {
         const { from, to } = moved;
         const applyPositions = (positions) => {
@@ -1817,6 +1867,11 @@ dragControls.addEventListener('dragend', (event) => {
     dragStartPositions = null;
     dragLastPosition = null;
 });
+
+function subsystemUnderPointer({ clientX, clientY }) {
+    setPointerFromEvent({ clientX, clientY });
+    return firstIntersection([...subsystemObjects.values()].filter((object) => object.visible))?.object.userData.id ?? null;
+}
 
 const raycaster = new THREE.Raycaster();
 raycaster.params.Line.threshold = 0.32;
@@ -1854,6 +1909,16 @@ window.__relationshipScreenPoint = (title, t = 0.5) => {
     return screenPointFor(relationship.line.userData.curve.getPoint(t));
 };
 
+// The on-screen points of a node and of a subsystem box, by name, for tests that drag one onto the other.
+window.__nodeScreenPoint = (title) => {
+    const node = [...nodeObjects.values()].find((object) => object.userData.definition.title === title);
+    return node ? screenPointFor(node.position) : null;
+};
+window.__subsystemScreenPoint = (name) => {
+    const object = [...subsystemObjects.values()].find((candidate) => candidate.userData.definition.name === name && !candidate.userData.definition.deleted);
+    return object ? screenPointFor(object.position) : null;
+};
+
 // Whether a relationship is drawn in the current view, by title (subsystem scoping hides some).
 window.__relationshipVisible = (title) => [...relationshipObjects.values()].find((entry) => entry.definition.title === title)?.line.visible ?? null;
 
@@ -1886,6 +1951,7 @@ function updateSelectionOutline() {
         outline.material.dispose();
         selectionOutlines.delete(id);
     });
+    syncSubsystemSelectionOutline();
     selectedNodeIds.forEach((id) => {
         const node = nodeObjects.get(id);
         if (!node?.visible) return;
@@ -1904,8 +1970,45 @@ function updateSelectionOutline() {
     updateSelectionActionControls();
 }
 
+let subsystemSelectionOutline = null;
+
+function syncSubsystemSelectionOutline() {
+    const object = selectedSubsystemId === null ? null : subsystemObjects.get(selectedSubsystemId);
+    subsystemObjects.forEach((candidate) => candidate.userData.labelElement?.classList.toggle('selected', candidate === object && candidate.visible));
+    if (subsystemSelectionOutline && (!object?.visible || subsystemSelectionOutline.userData.subsystemId !== selectedSubsystemId)) {
+        scene.remove(subsystemSelectionOutline);
+        subsystemSelectionOutline.geometry.dispose();
+        subsystemSelectionOutline.material.dispose();
+        subsystemSelectionOutline = null;
+    }
+    if (!object?.visible) return;
+    if (!subsystemSelectionOutline) {
+        subsystemSelectionOutline = new THREE.BoxHelper(object, 0x62e1d5);
+        subsystemSelectionOutline.material.depthTest = false;
+        subsystemSelectionOutline.renderOrder = 20;
+        subsystemSelectionOutline.userData.subsystemId = selectedSubsystemId;
+        scene.add(subsystemSelectionOutline);
+    }
+    subsystemSelectionOutline.setFromObject(object);
+}
+
+// Selects a subsystem box, as clicking it does: nodes and relationships are let go, and the card is opened by the caller.
+function selectSubsystem(id) {
+    const object = subsystemObjects.get(id);
+    if (!object?.visible) return;
+    selectedNode = null;
+    selectedNodeIds.clear();
+    selectedRelationship = null;
+    selectedSubsystemId = id;
+    transformControls.detach();
+    updateSelectionOutline();
+    updateRelationshipSelection();
+    if (activeResult) window.addons.publishEvent('selection.change', null);
+}
+
 function selectNode(node, { additive = false } = {}) {
     if (!node?.visible) return;
+    selectedSubsystemId = null;
     if (additive) {
         if (selectedNodeIds.has(node.userData.id)) {
             selectedNodeIds.delete(node.userData.id);
@@ -1933,6 +2036,7 @@ function selectNode(node, { additive = false } = {}) {
 }
 
 function selectRelationship(relationship) {
+    selectedSubsystemId = null;
     selectedNode = null;
     selectedNodeIds.clear();
     selectedRelationship = relationship;
@@ -1942,6 +2046,7 @@ function selectRelationship(relationship) {
 }
 
 function clearSelection() {
+    selectedSubsystemId = null;
     selectedNode = null;
     selectedNodeIds.clear();
     selectedRelationship = null;
@@ -2141,6 +2246,7 @@ function renderNodeEditorModel(node) {
     $('#nodeEditorTitle').textContent = definition.title;
     $('#editNodeName').value = definition.title;
     $('#editNodeType').value = definition.type;
+    renderNodeEditorSubsystem(definition);
     $('#editNodeDescription').value = definition.description ?? '';
     $('#editNodeSubsteps').value = definition.substepsPerGlobalStep;
     $('#editNodeIntegration').value = definition.integration ?? 'explicit';
@@ -3649,6 +3755,7 @@ function openNodeContextMenu(clientX, clientY) {
     $('#nodeContextDisableAll').hidden = !multi;
     $('#nodeContextEnableAll').hidden = !multi;
     $('#nodeContextCreateEdgeGroup').hidden = !multi;
+    renderNodeContextMoveTargets();
     // Scoped to whichever group is currently open for editing -- a node can technically belong
     // to more than one group, but a single context click can only unambiguously mean "this one".
     const activeGroup = currentEdgeGroup();
@@ -11655,15 +11762,31 @@ function fireLongPress() {
     action();
 }
 
+let subsystemPointerDown = null;
+// Where the pointer last was over the canvas, for a drag of nodes dropped onto a subsystem box (DragControls' dragend has none).
+let lastCanvasPointer = null;
+renderer.domElement.addEventListener('pointermove', (event) => { lastCanvasPointer = { clientX: event.clientX, clientY: event.clientY }; });
+
+renderer.domElement.addEventListener('dblclick', (event) => {
+    setPointerFromEvent(event);
+    const subsystemHit = firstIntersection([...subsystemObjects.values()].filter((object) => object.visible));
+    if (subsystemHit) enterSubsystem(subsystemHit.object.userData.id);
+});
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || transformControls.dragging) return;
     setPointerFromEvent(event);
     const subsystemHit = firstIntersection([...subsystemObjects.values()].filter((object) => object.visible));
     if (subsystemHit) {
+        // A click selects the subsystem and opens its card (on release, as a node's editor does, so orbiting from a box does
+        // not open it); its Open button, or a double click, steps inside.
         nodePointerDown = null;
-        enterSubsystem(subsystemHit.object.userData.id);
+        if (activeEndpointPick) return;
+        selectSubsystem(subsystemHit.object.userData.id);
+        subsystemPointerDown = { id: subsystemHit.object.userData.id, x: event.clientX, y: event.clientY };
         return;
     }
+    subsystemPointerDown = null;
     const nodeIntersection = firstIntersection(nodePickTargets);
     const node = rootNodeFromIntersection(nodeIntersection);
 
@@ -11728,6 +11851,12 @@ renderer.domElement.addEventListener('pointermove', (event) => {
 });
 
 renderer.domElement.addEventListener('pointerup', (event) => {
+    if (subsystemPointerDown) {
+        const { id, x, y } = subsystemPointerDown;
+        subsystemPointerDown = null;
+        if (event.button === 0 && Math.hypot(event.clientX - x, event.clientY - y) <= 4 && selectedSubsystemId === id) openSubsystemEditor(id, event.clientX, event.clientY);
+        return;
+    }
     if (relationshipPointerDown) {
         clearTimeout(relationshipPointerDown.timer);
         const { definition, x, y, holdTriggered } = relationshipPointerDown;
@@ -11762,6 +11891,15 @@ renderer.domElement.addEventListener('pointerup', (event) => {
 renderer.domElement.addEventListener('contextmenu', (event) => {
     event.preventDefault();
     setPointerFromEvent(event);
+    const subsystemHit = firstIntersection([...subsystemObjects.values()].filter((object) => object.visible));
+    if (subsystemHit) {
+        const id = subsystemHit.object.userData.id;
+        stageContextMenuAction(() => {
+            selectSubsystem(id);
+            openSubsystemContextMenu(id, event.clientX, event.clientY);
+        });
+        return;
+    }
     const nodeIntersection = firstIntersection(nodePickTargets);
     const node = rootNodeFromIntersection(nodeIntersection);
 
@@ -12730,6 +12868,8 @@ const tour = createTour({
                     return tutorialExecutionSummaryShown;
                 })(),
                 subsystemLabelOf: (name) => [...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong')?.textContent === name) ?? null,
+                // The Open button on a subsystem box's label, which steps inside it (a click on the box only selects it).
+                subsystemOpenOf: (name) => [...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong')?.textContent === name)?.querySelector('.subsystemOpen') ?? null,
                 steered: (() => {
                     if (activeResult?.interventions?.length) for (const id of changedParameterIds(activeResult.interventions)) tutorialSteered.add(Number(id));
                     return [...tutorialSteered];
@@ -15666,6 +15806,10 @@ function updateViewCube() {
 function deleteSelected() {
     if (activeResult) return;
     finishEquationEdit();
+    if (selectedSubsystemId !== null) {
+        deleteSubsystemAction(selectedSubsystemId);
+        return;
+    }
     if (selectedNodeIds.size) {
         const nodeIds = new Set(selectedNodeIds);
         const affectedRelationships = [];
@@ -16336,6 +16480,249 @@ function createSubsystemFromSelection(name) {
     $('#statusText').textContent = `${subsystem.name} created with ${nodeIds.length} node${nodeIds.length === 1 ? '' : 's'} and ${boundaryPortCountText(liveBoundaryCrossings(id).length)}`;
     return true;
 }
+
+// ---- Subsystem lifecycle (docs/subsystems.md#lifecycle) ---------------------------------------------------------------
+// Each operation is one undo step. What it touches is worked out by the pure functions in src/subsystems.mjs.
+
+function subsystemById(id) {
+    return model.subsystems.find((subsystem) => subsystem.id === id && !subsystem.deleted) ?? null;
+}
+
+function updateSubsystemNameDisplays(subsystem) {
+    const object = subsystemObjects.get(subsystem.id);
+    if (object?.userData.nameElement) object.userData.nameElement.textContent = subsystem.name;
+    object?.userData.labelElement?.querySelector('.subsystemOpen')?.setAttribute('aria-label', `Open ${subsystem.name}`);
+    renderSubsystemBreadcrumb();
+    if (currentSubsystemCardId() === subsystem.id) renderSubsystemEditor(subsystem.id);
+    // Terminals name where an outside node is, by its subsystem path.
+    subsystemTerminalSignature = '';
+    updateRelationships();
+}
+
+function renameSubsystem(id, name) {
+    const subsystem = subsystemById(id);
+    const next = normalizeSubsystemName(name);
+    if (activeResult || !subsystem || !next || next === subsystem.name) return false;
+    const previous = subsystem.name;
+    const apply = (value) => {
+        subsystem.name = value;
+        updateSubsystemNameDisplays(subsystem);
+    };
+    apply(next);
+    recordHistory({ undo: () => apply(previous), redo: () => apply(next) });
+    $('#statusText').textContent = `Subsystem renamed to ${next}`;
+    return true;
+}
+
+// Puts a subsystem's own nodes and nested subsystems into its parent, as they are, and removes it. Node ids are kept, so
+// plots, results and run configurations still find them. Nodes already deleted that still name the subsystem are handed to
+// the parent too, so undoing their deletion later does not bring them back into a subsystem that is gone.
+function dissolveSubsystemAction(id) {
+    const subsystem = subsystemById(id);
+    if (activeResult || !subsystem) return false;
+    const parentId = subsystem.parentSubsystemId ?? null;
+    const members = model.nodes.filter((node) => node.subsystemId === id);
+    const children = model.subsystems.filter((candidate) => candidate.parentSubsystemId === id);
+    const contents = subsystemContents({ subsystems: model.subsystems, nodes: model.nodes, subsystemId: id });
+    const apply = (dissolved) => {
+        subsystem.deleted = dissolved;
+        members.forEach((node) => { node.subsystemId = dissolved ? parentId : id; });
+        children.forEach((child) => { child.parentSubsystemId = dissolved ? parentId : id; });
+        hideCards();
+        refreshSubsystemView();
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    const parts = [countText(contents.nodeIds.length, 'node'), contents.childSubsystemIds.length ? countText(contents.childSubsystemIds.length, 'subsystem') : null].filter(Boolean);
+    $('#statusText').textContent = `${subsystem.name} dissolved: ${parts.join(' and ')} moved to ${subsystemPathName(parentId)}`;
+    return true;
+}
+
+function countText(count, noun) {
+    return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+// Deletes a subsystem with everything in it and the relationships connecting it to the rest of the model, once the person
+// has seen what that is.
+function deleteSubsystemAction(id, { confirmed = false } = {}) {
+    const subsystem = subsystemById(id);
+    if (activeResult || !subsystem) return false;
+    const plan = subsystemDeletion({ subsystems: model.subsystems, nodes: model.nodes, edges: model.relationships, subsystemId: id });
+    const nested = plan.subsystemIds.length - 1;
+    const parts = [
+        countText(plan.nodeIds.length, 'node'),
+        nested ? countText(nested, 'nested subsystem') : null,
+        plan.insideEdgeIds.length ? `${countText(plan.insideEdgeIds.length, 'relationship')} inside it` : null,
+        plan.boundaryEdgeIds.length ? `${countText(plan.boundaryEdgeIds.length, 'relationship')} connecting it to the rest of the model` : null
+    ].filter(Boolean);
+    if (!confirmed && !window.confirm(`Delete “${subsystem.name}”? This also deletes ${parts.join(', ')}. Undo brings them back.`)) return false;
+    const subsystems = plan.subsystemIds.map(subsystemById).filter(Boolean);
+    const nodes = plan.nodeIds.map((nodeId) => model.nodes.find((node) => node.id === nodeId)).filter(Boolean);
+    const edges = [...plan.insideEdgeIds, ...plan.boundaryEdgeIds].map((edgeId) => model.relationships.find((edge) => edge.id === edgeId)).filter(Boolean);
+    const apply = (deleted) => {
+        [...subsystems, ...nodes, ...edges].forEach((entity) => { entity.deleted = deleted; });
+        hideCards();
+        refreshSubsystemView();
+        updateValidationStatus();
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    $('#statusText').textContent = `${subsystem.name} deleted with ${parts.join(', ')}`;
+    return true;
+}
+
+// Moves nodes into a subsystem, or out to the top level (null). Relationships stay as they are: any that now cross a
+// boundary are shown as terminals inside and drawn to the box outside. `positions`, from a drag onto a box, is undone with it.
+function moveNodesToSubsystem(nodeIds, targetSubsystemId, { positions = null } = {}) {
+    if (activeResult) return false;
+    if (targetSubsystemId !== null && !subsystemById(targetSubsystemId)) return false;
+    const nodes = nodeIds.map((nodeId) => model.nodes.find((node) => node.id === nodeId && !node.deleted))
+        .filter((node) => node && (node.subsystemId ?? null) !== targetSubsystemId);
+    if (!nodes.length) return false;
+    const previous = new Map(nodes.map((node) => [node.id, node.subsystemId ?? null]));
+    const apply = (moved) => {
+        nodes.forEach((node) => { node.subsystemId = moved ? targetSubsystemId : previous.get(node.id); });
+        positions?.[moved ? 'to' : 'from'].forEach((position, nodeId) => nodeObjects.get(nodeId)?.position.copy(position));
+        hideCards();
+        refreshSubsystemView();
+    };
+    apply(true);
+    recordHistory({ undo: () => apply(false), redo: () => apply(true) });
+    $('#statusText').textContent = `${nodes.length === 1 ? nodes[0].title : countText(nodes.length, 'node')} moved to ${subsystemPathName(targetSubsystemId)}`;
+    return true;
+}
+
+// ---- The subsystem card and menu --------------------------------------------------------------------------------------
+
+function currentSubsystemCardId() {
+    const card = $('#subsystemEditor');
+    return card.classList.contains('hidden') ? null : Number(card.dataset.subsystem);
+}
+
+function renderSubsystemEditor(id) {
+    const subsystem = subsystemById(id);
+    const card = $('#subsystemEditor');
+    if (!subsystem) {
+        card.classList.add('hidden');
+        return;
+    }
+    card.dataset.subsystem = id;
+    $('#subsystemEditorHeading').textContent = subsystem.name;
+    if (document.activeElement !== $('#subsystemEditorName')) $('#subsystemEditorName').value = subsystem.name;
+    const contents = subsystemContents({ subsystems: model.subsystems, nodes: model.nodes, subsystemId: id });
+    const crossings = liveBoundaryCrossings(id).map(describeBoundaryCrossing);
+    $('#subsystemEditorSummary').textContent = [
+        countText(contents.nodeIds.length, 'node'),
+        contents.childSubsystemIds.length ? `${countText(contents.childSubsystemIds.length, 'subsystem')} inside` : null,
+        contents.allNodeIds.length !== contents.nodeIds.length ? `${countText(contents.allNodeIds.length, 'node')} in all` : null,
+        boundaryPortCountText(crossings.length),
+        `in ${subsystemPathName(subsystem.parentSubsystemId)}`
+    ].filter(Boolean).join(' · ');
+    $('#subsystemEditorPorts').replaceChildren(...crossings.map((crossing) => {
+        const item = document.createElement('li');
+        item.innerHTML = `<b>${crossing.badge}</b> ${escapeHtml(crossing.edge.title)} · ${escapeHtml(crossing.name)}${crossing.detail ? ` <small>${escapeHtml(crossing.detail)}</small>` : ''}`;
+        return item;
+    }));
+    const locked = Boolean(activeResult);
+    ['#subsystemEditorName', '#subsystemEditorDissolve', '#subsystemEditorDelete'].forEach((selector) => { $(selector).disabled = locked; });
+}
+
+function openSubsystemEditor(id, clientX, clientY) {
+    const card = $('#subsystemEditor');
+    hideCards(card);
+    renderSubsystemEditor(id);
+    if (!subsystemById(id)) return;
+    const object = subsystemObjects.get(id);
+    const point = clientX === undefined && object ? screenPointFor(object.position) : { x: clientX, y: clientY };
+    positionCard(card, point.x, point.y);
+}
+
+$('#subsystemEditorName').addEventListener('change', (event) => {
+    const id = currentSubsystemCardId();
+    if (id === null) return;
+    if (!renameSubsystem(id, event.target.value)) event.target.value = subsystemById(id)?.name ?? '';
+});
+$('#subsystemEditorName').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') event.target.blur();
+});
+$('#subsystemEditorOpen').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id !== null) enterSubsystem(id);
+});
+$('#subsystemEditorDissolve').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id !== null) dissolveSubsystemAction(id);
+});
+$('#subsystemEditorDelete').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id !== null) deleteSubsystemAction(id);
+});
+
+let contextSubsystemId = null;
+
+function openSubsystemContextMenu(id, clientX, clientY) {
+    const menu = $('#subsystemContextMenu');
+    hideCards(menu);
+    contextSubsystemId = id;
+    const locked = Boolean(activeResult);
+    ['#subsystemContextRename', '#subsystemContextDissolve', '#subsystemContextDelete'].forEach((selector) => { $(selector).hidden = locked; });
+    positionCard(menu, clientX, clientY);
+}
+
+$('#subsystemContextOpen').addEventListener('click', () => { if (contextSubsystemId !== null) enterSubsystem(contextSubsystemId); });
+$('#subsystemContextRename').addEventListener('click', () => {
+    if (contextSubsystemId === null) return;
+    const rect = $('#subsystemContextMenu').getBoundingClientRect();
+    openSubsystemEditor(contextSubsystemId, rect.left, rect.top);
+    $('#subsystemEditorName').focus();
+    $('#subsystemEditorName').select();
+});
+$('#subsystemContextDissolve').addEventListener('click', () => { if (contextSubsystemId !== null) dissolveSubsystemAction(contextSubsystemId); });
+$('#subsystemContextDelete').addEventListener('click', () => {
+    if (contextSubsystemId === null) return;
+    $('#subsystemContextMenu').classList.add('hidden');
+    deleteSubsystemAction(contextSubsystemId);
+});
+
+// The node menu's moves: into each subsystem shown beside the selection, and out to the parent of the one being viewed.
+function renderNodeContextMoveTargets() {
+    const container = $('#nodeContextMoveTargets');
+    container.replaceChildren();
+    if (activeResult || !selectedNodeIds.size) return;
+    const targets = subsystemMoveTargets({ subsystems: model.subsystems, activeSubsystemId });
+    const what = selectedNodeIds.size === 1 ? 'this node' : `the ${selectedNodeIds.size} selected nodes`;
+    const button = (target, title, detail) => {
+        const element = document.createElement('button');
+        element.type = 'button';
+        element.dataset.moveTarget = target === null ? 'model' : target;
+        element.innerHTML = `<i class="primitiveIcon">▤</i><span><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></span><b>›</b>`;
+        element.addEventListener('click', () => {
+            $('#nodeContextMenu').classList.add('hidden');
+            moveNodesToSubsystem([...selectedNodeIds], target);
+        });
+        return element;
+    };
+    targets.into.forEach((id) => container.append(button(id, `Move into “${subsystemById(id).name}”`, `Put ${what} inside that subsystem`)));
+    if (targets.parent !== undefined) {
+        const parentName = targets.parent === null ? 'the model' : `“${subsystemById(targets.parent)?.name}”`;
+        container.append(button(targets.parent, 'Move to parent', `Put ${what} in ${parentName}, a level up`));
+    }
+}
+
+// The node editor's Subsystem field: every place the node can be, by path, nested ones included.
+function renderNodeEditorSubsystem(definition) {
+    const select = $('#editNodeSubsystem');
+    const locations = subsystemLocations({ subsystems: model.subsystems });
+    select.replaceChildren(...locations.map((location) => new Option(location.path, location.id === null ? '' : String(location.id))));
+    select.value = definition.subsystemId === null || definition.subsystemId === undefined ? '' : String(definition.subsystemId);
+}
+
+$('#editNodeSubsystem').addEventListener('change', (event) => {
+    const node = selectedNode?.userData.definition;
+    if (!node) return;
+    const target = event.target.value === '' ? null : Number(event.target.value);
+    if (!moveNodesToSubsystem([node.id], target)) renderNodeEditorSubsystem(node);
+});
 
 $('#createSubsystem').addEventListener('click', () => {
     if (activeResult || !selectedNodeIds.size) return;

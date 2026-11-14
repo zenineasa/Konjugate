@@ -2,14 +2,17 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { executionProjectDocument, hydrateSubsystems, subsystemBoundaryCrossings, subsystemContains } from '../src/subsystems.mjs';
+import {
+    executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContains, subsystemContents,
+    subsystemDeletion, subsystemLocations, subsystemMoveTargets, subsystemSubtreeIds
+} from '../src/subsystems.mjs';
 
 // Model ─ Plant (20) ─ Pump (21)
 //       └ Controls (30)
 const subsystems = [
-    { id: 20, parentSubsystemId: null },
-    { id: 21, parentSubsystemId: 20 },
-    { id: 30, parentSubsystemId: null }
+    { id: 20, name: 'Plant', parentSubsystemId: null },
+    { id: 21, name: 'Pump', parentSubsystemId: 20 },
+    { id: 30, name: 'Controls', parentSubsystemId: null }
 ];
 const nodes = [
     { id: 1, subsystemId: 20 }, { id: 2, subsystemId: 20 }, { id: 3, subsystemId: null },
@@ -109,4 +112,51 @@ test('flattens hierarchy metadata without changing graph entities', () => {
     assert.deepEqual(executionProjectDocument(document), { format: 'konjugate', version: 1,
         nodes: [{ id: 1 }, { id: 2 }], edges: document.edges });
     assert.equal(document.nodes[0].subsystemId, 9);
+});
+
+test('a subtree is the subsystem and everything nested in it, outermost first, without deleted subsystems', () => {
+    assert.deepEqual(subsystemSubtreeIds({ subsystems, subsystemId: 20 }), [20, 21]);
+    assert.deepEqual(subsystemSubtreeIds({ subsystems, subsystemId: 21 }), [21]);
+    assert.deepEqual(subsystemSubtreeIds({ subsystems: subsystems.map((item) => (item.id === 21 ? { ...item, deleted: true } : item)), subsystemId: 20 }), [20]);
+    assert.deepEqual(subsystemSubtreeIds({ subsystems, subsystemId: 99 }), []);
+});
+
+test('contents separate what dissolving hands to the parent from everything inside', () => {
+    assert.deepEqual(subsystemContents({ subsystems, nodes, subsystemId: 20 }), { nodeIds: [1, 2], childSubsystemIds: [21], allNodeIds: [1, 2, 5], nestedSubsystemIds: [21] });
+    assert.deepEqual(subsystemContents({ subsystems, nodes: nodes.map((node) => (node.id === 2 ? { ...node, deleted: true } : node)), subsystemId: 20 }).nodeIds, [1]);
+});
+
+test('deleting a subsystem counts what goes inside and the relationships to the rest of the model', () => {
+    const edges = [
+        { id: 40, source: 5, target: 1 }, // inside Plant (Pump to Tank)
+        { id: 41, source: 5, target: 6 }, // Pump to Controls: crosses
+        { id: 42, source: 3, target: 5 }, // top level into Pump: crosses
+        { id: 43, source: 3, target: 4 }, // outside entirely
+        { id: 44, source: 1, target: 3, deleted: true }
+    ];
+    assert.deepEqual(subsystemDeletion({ subsystems, nodes, edges, subsystemId: 20 }), {
+        subsystemIds: [20, 21], nodeIds: [1, 2, 5], insideEdgeIds: [40], boundaryEdgeIds: [41, 42]
+    });
+    assert.deepEqual(subsystemDeletion({ subsystems, nodes, edges, subsystemId: 21 }), {
+        subsystemIds: [21], nodeIds: [5], insideEdgeIds: [], boundaryEdgeIds: [40, 41, 42]
+    });
+    assert.equal(subsystemDeletion({ subsystems, nodes, edges, subsystemId: 99 }), null);
+});
+
+test('locations list every place a node can go, in tree order, by path', () => {
+    assert.deepEqual(subsystemLocations({ subsystems }).map(({ id, path }) => [id, path]), [
+        [null, 'Model'], [30, 'Model / Controls'], [20, 'Model / Plant'], [21, 'Model / Plant / Pump']
+    ]);
+});
+
+test('a selection moves into the subsystems shown, or out to the parent of the one being viewed', () => {
+    assert.deepEqual(subsystemMoveTargets({ subsystems, activeSubsystemId: null }), { into: [20, 30], parent: undefined });
+    assert.deepEqual(subsystemMoveTargets({ subsystems, activeSubsystemId: 20 }), { into: [21], parent: null });
+    assert.deepEqual(subsystemMoveTargets({ subsystems, activeSubsystemId: 21 }), { into: [], parent: 20 });
+});
+
+test('a name is trimmed, kept to 120 characters, and never empty', () => {
+    assert.equal(normalizeSubsystemName('  Bodies '), 'Bodies');
+    assert.equal(normalizeSubsystemName('   '), null);
+    assert.equal(normalizeSubsystemName('x'.repeat(130)).length, 120);
 });

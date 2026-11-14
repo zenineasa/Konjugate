@@ -1699,7 +1699,11 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `(() => { document.querySelector('#subsystemName').value = 'Thermal enclosure'; document.querySelector('#subsystemCreate').click(); })()`);
         await waitFor(window, `[...document.querySelectorAll('.subsystemLabel')].some((label) => label.textContent.includes('Thermal enclosure'))`, 'Subsystem proxy did not appear.');
         await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => /Battery module|Enclosed air/.test(label.textContent) && !label.textContent.includes('copy')).every((label) => getComputedStyle(label).display === 'none')`, 'Wrapped nodes remained visible outside the subsystem.');
-        await clickElement(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Thermal enclosure'))`);
+        // A click on the box selects it and opens its card; its Open button steps inside.
+        await clickElement(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Thermal enclosure')).querySelector('strong')`);
+        await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === 'Thermal enclosure'`, 'Clicking the subsystem did not open its card.');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemBreadcrumb').hidden`), true, 'A single click stepped inside.');
+        await clickElement(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Thermal enclosure')).querySelector('.subsystemOpen')`);
         await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden`, 'Subsystem navigation did not enter the subsystem.');
         await waitFor(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => /Battery module|Enclosed air/.test(label.textContent) && !label.textContent.includes('copy')).every((label) => getComputedStyle(label).display !== 'none')`, 'Subsystem members did not appear after entering.');
         await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
@@ -7185,9 +7189,9 @@ export async function runInteractionTests(driver) {
     };
     const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
 
-    await run('inside a subsystem, relationships crossing its boundary end at terminals that follow the model', async () => {
-        // Loads a model of its own, as the scenarios after it do. Model: Heater and Ambient at the top level; Plant holds Tank and the nested Pump (holding Pump motor); Controls,
-        // beside Plant, holds Sensor. Ambient and Tank are an edge group, one member edge each way.
+    // A model of subsystems for the scenarios below, each loading it afresh, as the scenarios after them load models of their own. Model: Heater and Ambient at the top level; Plant holds Tank and the nested Pump (holding Pump motor); Controls,
+    // beside Plant, holds Sensor. Ambient and Tank are an edge group, one member edge each way.
+    const hierarchy = (() => {
         const state = (id, symbol) => ({ id, name: symbol, symbol, initialValue: 0 });
         const node = (id, name, position, stateId, symbol, subsystemId) => ({ id, name, position, appearance: { type: 'primitive', shape: 'box', color: '#888888' },
             states: [state(stateId, symbol)], sourceTerms: [], ...(subsystemId ? { subsystemId } : {}) });
@@ -7215,21 +7219,32 @@ export async function runInteractionTests(driver) {
                 { id: 30, name: 'Controls', parentSubsystemId: null, position: [7, 3, 0] }
             ]
         };
-        const proxy = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong').textContent === ${JSON.stringify(name)})`;
+        // A box shown in the current view, by name (a hidden one keeps its label in the page, out of sight).
+        const proxy = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong').textContent === ${JSON.stringify(name)} && getComputedStyle(label.parentElement).display !== 'none')`;
+        const open = (name) => `${proxy(name)}.querySelector('.subsystemOpen')`;
         const proxyText = (name) => evaluate(window, `${proxy(name)}.querySelector('small').textContent`);
         const terminals = () => evaluate(window, `[...document.querySelectorAll('.subsystemTerminal')].filter((terminal) => getComputedStyle(terminal.parentElement).display !== 'none')
             .map((terminal) => [Number(terminal.dataset.terminalEdge), terminal.querySelector('.subsystemTerminalEdge').innerText.replace(/\\s+/g, ' ').trim()]).sort((a, b) => a[0] - b[0])`);
         const terminal = (edgeId, part) => `document.querySelector('.subsystemTerminal[data-terminal-edge="${edgeId}"] .${part}')`;
+        return { project, proxy, open, proxyText, terminals, terminal };
+    })();
+    const loadHierarchyProject = async () => {
+        const { project, proxy } = hierarchy;
         await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Hierarchy.kjt')`);
         await waitFor(window, `Boolean(${proxy('Plant')}) && Boolean(${proxy('Controls')})`, 'The hierarchy project did not load.');
+    };
+
+    await run('inside a subsystem, relationships crossing its boundary end at terminals that follow the model', async () => {
+        const { proxy, open, proxyText, terminals, terminal } = hierarchy;
+        await loadHierarchyProject();
 
         // The proxies count what crosses them now, nested members counting as inside.
-        assert.equal(await proxyText('Plant'), '5 boundary ports · Open subsystem');
-        assert.equal(await proxyText('Controls'), '2 boundary ports · Open subsystem');
+        assert.equal(await proxyText('Plant'), '5 boundary ports');
+        assert.equal(await proxyText('Controls'), '2 boundary ports');
         assert.deepEqual(await terminals(), [], 'The top level has no boundary, so no terminals.');
 
         // Inside Plant: a terminal for each crossing, incoming or outgoing, naming the outside node, its state and where it is.
-        await clickElement(window, proxy('Plant'));
+        await clickElement(window, open('Plant'));
         await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden`, 'Plant was not entered.');
         await waitFor(window, `document.querySelectorAll('.subsystemTerminal').length === 5`, 'Plant did not show a terminal for each crossing.');
         assert.deepEqual(await terminals(), [
@@ -7257,7 +7272,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelectorAll('.subsystemTerminal').length === 5`, 'Delete with nothing selected changed the boundary.');
 
         // Nested: inside Pump, the relationship from Sensor (in the sibling Controls) and the one to Tank (in the parent) are terminals.
-        await clickElement(window, proxy('Pump'));
+        await clickElement(window, open('Pump'));
         await waitFor(window, `document.querySelector('#subsystemBreadcrumb').textContent.includes('Pump') && document.querySelectorAll('.subsystemTerminal').length === 2`, 'Pump did not show its two crossings.');
         assert.deepEqual(await terminals(), [[13, '→ In Sensor reading · Model / Controls'], [14, 'Out → Tank level · Model / Plant']]);
 
@@ -7275,13 +7290,134 @@ export async function runInteractionTests(driver) {
         await window.mouseUp(heating, { button: 'left', clickCount: 1 });
         await waitFor(window, `document.querySelector('#editEdgeName').value === 'Heating' && !document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Heating was not selected.');
         await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
-        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '4 boundary ports · Open subsystem'`, 'The proxy kept a stale count after a delete.');
+        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '4 boundary ports'`, 'The proxy kept a stale count after a delete.');
         await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
-        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '5 boundary ports · Open subsystem'`, 'Undo did not restore the count.');
+        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '5 boundary ports'`, 'Undo did not restore the count.');
         const saved = await evaluate(window, `window.__debugProject.serialize()`);
         assert.equal(saved.subsystems.length, 3);
         assert.ok(saved.subsystems.every((subsystem) => !('ports' in subsystem)), 'Ports are not written: the boundary is derived.');
 
+    });
+
+    await run('a subsystem is selected by a click and renamed, dissolved and deleted from its card and menu, and nodes move in and out of it, each undoable', async () => {
+        const { proxy, open, proxyText } = hierarchy;
+        await loadHierarchyProject();
+        const key = (init) => evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...${JSON.stringify(init)} })); })()`);
+        const undo = () => key({ key: 'z', metaKey: true, ctrlKey: true });
+        const redo = () => key({ key: 'z', shiftKey: true, metaKey: true, ctrlKey: true });
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const where = async (nodeId) => (await saved()).nodes.find((item) => item.id === nodeId).subsystemId ?? null;
+        const names = async () => (await saved()).subsystems.map((subsystem) => subsystem.name).sort();
+        const label = (title) => `[...document.querySelectorAll('.node-label-container')].find((container) => getComputedStyle(container).display !== 'none' && container.querySelector('.objectLabel strong, .objectLabel')?.textContent.includes(${JSON.stringify(title)}))?.querySelector('.objectLabel')`;
+        const box = (name) => `${proxy(name)}.querySelector('strong')`;
+
+        // A click on the box selects it and opens its card, without stepping inside.
+        await clickElement(window, box('Plant'));
+        await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === 'Plant'`, 'Clicking the box did not open its card.');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemBreadcrumb').hidden`), true, 'A single click stepped inside.');
+        assert.equal(await evaluate(window, `${proxy('Plant')}.classList.contains('selected')`), true, 'The clicked subsystem is not shown selected.');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemEditorSummary').textContent`), '1 node · 1 subsystem inside · 2 nodes in all · 5 boundary ports · in Model');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#subsystemEditorPorts li').length`), 5);
+
+        // Renamed in its card; undo and redo.
+        await typeInto(`document.querySelector('#subsystemEditorName')`, 'Tank farm');
+        await waitFor(window, `Boolean(${proxy('Tank farm')})`, 'The box did not take the new name.');
+        assert.deepEqual(await names(), ['Controls', 'Pump', 'Tank farm']);
+        await undo();
+        await waitFor(window, `Boolean(${proxy('Plant')})`, 'Undo did not restore the name.');
+        await redo();
+        await waitFor(window, `Boolean(${proxy('Tank farm')})`, 'Redo did not rename it again.');
+
+        // Dissolved from its right-click menu: Sensor comes out to the top level; undo puts it back.
+        await rightClickElement(window, box('Controls'));
+        await waitFor(window, `!document.querySelector('#subsystemContextMenu').classList.contains('hidden')`, 'The subsystem menu did not open.');
+        await evaluate(window, `document.querySelector('#subsystemContextDissolve').click()`);
+        await waitFor(window, `!${proxy('Controls')}`, 'Controls was not dissolved.');
+        assert.equal(await where(7), null);
+        await waitFor(window, `Boolean(${label('Sensor')})`, 'The dissolved subsystem\'s node is not shown in its parent.');
+        await undo();
+        await waitFor(window, `Boolean(${proxy('Controls')})`, 'Undo did not bring Controls back.');
+        assert.equal(await where(7), 30);
+
+        // Moved in from the node menu: Heating no longer crosses, so the count follows; undo.
+        await rightClickElement(window, label('Heater'));
+        await waitFor(window, `Boolean(document.querySelector('#nodeContextMoveTargets [data-move-target="20"]'))`, 'The node menu offered no move into Tank farm.');
+        assert.equal(await evaluate(window, `document.querySelector('#nodeContextMoveTargets [data-move-target="20"] strong').textContent`), 'Move into “Tank farm”');
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('#nodeContextMoveTargets [data-move-target="model"]'))`), false, 'At the top level there is no parent to move to.');
+        await evaluate(window, `document.querySelector('#nodeContextMoveTargets [data-move-target="20"]').click()`);
+        await waitFor(window, `${proxy('Tank farm')}.querySelector('small').textContent === '4 boundary ports'`, 'Moving Heater in did not change the count.');
+        assert.equal(await where(5), 20);
+        await waitFor(window, `!${label('Heater')}`, 'Heater is still shown at the top level.');
+        await undo();
+        await waitFor(window, `${proxy('Tank farm')}.querySelector('small').textContent === '5 boundary ports'`, 'Undo did not move Heater back out.');
+
+        // The node editor's Subsystem field lists every place by path, nested ones too, and moves the node there.
+        await evaluate(window, `${label('Ambient')}.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#nodeEditorTitle').textContent === 'Ambient'`, 'Ambient\'s editor did not open.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelector('#editNodeSubsystem').options].map((option) => option.textContent)`), ['Model', 'Model / Controls', 'Model / Tank farm', 'Model / Tank farm / Pump']);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeSubsystem').value`), '');
+        await evaluate(window, `(() => { const select = document.querySelector('#editNodeSubsystem'); select.value = '21'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `document.querySelector('#statusText').textContent === 'Ambient moved to Model / Tank farm / Pump'`, 'The editor did not move Ambient into Pump.');
+        assert.equal(await where(9), 21);
+        await undo();
+        await waitFor(window, `Boolean(${label('Ambient')})`, 'Undo did not bring Ambient back.');
+
+        // Dragged onto the box, a node goes inside, as one undo step with the drag.
+        await waitForCanvasAtRest(window);
+        const from = await evaluate(window, `window.__nodeScreenPoint('Heater')`);
+        const to = await evaluate(window, `window.__subsystemScreenPoint('Tank farm')`);
+        await window.mouseMove(from);
+        await window.mouseDown(from, { button: 'left', clickCount: 1 });
+        for (let step = 1; step <= 8; step += 1) await window.mouseMove({ x: Math.round(from.x + (to.x - from.x) * step / 8), y: Math.round(from.y + (to.y - from.y) * step / 8) });
+        await window.mouseUp(to, { button: 'left', clickCount: 1 });
+        await waitFor(window, `document.querySelector('#statusText').textContent === 'Heater moved to Model / Tank farm'`, 'Dropping Heater onto the box did not move it in.');
+        await undo();
+        await waitFor(window, `Boolean(${label('Heater')})`, 'Undo did not take Heater back out.');
+        assert.equal(await where(5), null);
+
+        // Inside, the breadcrumb renames it, and the node menu moves a node out to the parent or into the nested subsystem.
+        await clickElement(window, open('Tank farm'));
+        await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden`, 'Tank farm was not entered.');
+        await evaluate(window, `document.querySelector('[data-subsystem-rename]').click()`);
+        await evaluate(window, `(() => { const input = document.querySelector('[data-subsystem-rename-input]'); input.value = 'Plant'; input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); })()`);
+        await waitFor(window, `document.querySelector('[data-subsystem-rename]')?.textContent === 'Plant'`, 'The breadcrumb did not rename the subsystem.');
+        assert.deepEqual(await names(), ['Controls', 'Plant', 'Pump']);
+        await rightClickElement(window, label('Tank'));
+        await waitFor(window, `Boolean(document.querySelector('#nodeContextMoveTargets [data-move-target="model"]'))`, 'The node menu offered no move to the parent.');
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('#nodeContextMoveTargets [data-move-target="21"]'))`), true, 'The nested Pump is not offered.');
+        await evaluate(window, `document.querySelector('#nodeContextMoveTargets [data-move-target="model"]').click()`);
+        await waitFor(window, `document.querySelector('#statusText').textContent === 'Tank moved to Model'`, 'Tank was not moved to the parent.');
+        await waitFor(window, `!${label('Tank')}`, 'Tank is still shown inside.');
+        await undo();
+        await waitFor(window, `Boolean(${label('Tank')})`, 'Undo did not bring Tank back in.');
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').hidden`, 'Did not return to the model.');
+
+        // Deleted from its card, after a confirmation that counts what goes with it; undo brings everything back.
+        await evaluate(window, `(() => { window.__confirmed = []; window.__realConfirm = window.confirm; window.confirm = (message) => { window.__confirmed.push(message); return true; }; })()`);
+        try {
+            await clickElement(window, box('Plant'));
+            await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden')`, 'Plant\'s card did not open.');
+            await evaluate(window, `document.querySelector('#subsystemEditorDelete').click()`);
+            await waitFor(window, `!${proxy('Plant')}`, 'Plant was not deleted.');
+            assert.deepEqual(await evaluate(window, `window.__confirmed`), ['Delete “Plant”? This also deletes 2 nodes, 1 nested subsystem, 1 relationship inside it, 5 relationships connecting it to the rest of the model. Undo brings them back.']);
+            const after = await saved();
+            assert.deepEqual([after.subsystems.map((subsystem) => subsystem.name), after.nodes.map((item) => item.name).sort(), after.edges.length], [['Controls'], ['Ambient', 'Heater', 'Sensor'], 0]);
+            await undo();
+            await waitFor(window, `Boolean(${proxy('Plant')}) && ${proxy('Plant')}.querySelector('small').textContent === '5 boundary ports'`, 'Undo did not restore Plant and its relationships.');
+            assert.equal((await saved()).edges.length, 6);
+
+            // The Delete key deletes a selected subsystem too, and asks first: refused, nothing goes.
+            await evaluate(window, `(() => { window.confirm = (message) => { window.__confirmed.push(message); return false; }; })()`);
+            await clickElement(window, box('Controls'));
+            await waitFor(window, `${proxy('Controls')}.classList.contains('selected')`, 'Controls was not selected.');
+            await key({ key: 'Delete' });
+            await waitFor(window, `window.__confirmed.length === 2`, 'Delete did not ask about the selected subsystem.');
+            assert.match(await evaluate(window, `window.__confirmed[1]`), /^Delete “Controls”\? This also deletes 1 node, 2 relationships connecting it/);
+            assert.deepEqual(await names(), ['Controls', 'Plant', 'Pump']);
+        } finally {
+            await evaluate(window, `(() => { window.confirm = window.__realConfirm; })()`);
+        }
     });
 
     await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {
@@ -8744,7 +8880,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#subsystemDialog').open`, 'The subsystem was not asked for.');
         await evaluate(window, `(() => { document.querySelector('#subsystemName').value = 'Bodies'; document.querySelector('#subsystemCreate').click(); })()`);
         await waitForStep('enter');
-        await evaluate(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies')).click()`);
+        await evaluate(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies')).querySelector('.subsystemOpen').click()`);
         await waitForStep('run');
         await press('.tourFloating .tourSkipStep');
         await waitFor(window, `['plot', 'leave'].includes(window.__debugTour.step())`, 'The run did not finish.', 60000);

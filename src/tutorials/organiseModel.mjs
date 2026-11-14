@@ -86,8 +86,8 @@ const steps = Object.freeze([
     {
         id: 'enter',
         title: 'Step inside',
-        text: `Click the "${values.subsystem}" box to step inside it. The path at the top of the canvas says where you are.`,
-        target: (ui) => (ui.insideSubsystem ? '#subsystemBreadcrumb' : ui.subsystemLabelOf(values.subsystem)), skip: 'enterSubsystem', name: values.subsystem,
+        text: `Press Open on the "${values.subsystem}" box to step inside it (or double-click the box; a single click selects it and opens its card). The path at the top of the canvas says where you are.`,
+        target: (ui) => (ui.insideSubsystem ? '#subsystemBreadcrumb' : ui.subsystemOpenOf(values.subsystem)), skip: 'enterSubsystem', name: values.subsystem,
         done: ({ ui }) => ui.enteredSubsystem
     },
     {
@@ -114,7 +114,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have organised a model',
-        text: 'Subsystems can hold subsystems. A node selected on the canvas can join a group from its editor, and a member can be detached to give it values of its own. Selected nodes can also be saved as your own component, with "Save to my library", to place again in any model.',
+        text: 'Subsystems can hold subsystems. Click a subsystem\'s box for its card: rename it there, dissolve it back into its nodes, or delete it. Right-click selected nodes to move them into a subsystem or out to the level above, or drag them onto its box. A node selected on the canvas can join a group from its editor, and a member can be detached to give it values of its own. Selected nodes can also be saved as your own component, with "Save to my library", to place again in any model.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);
@@ -125,7 +125,7 @@ export const organiseModel = Object.freeze({
     summary: 'Copy one part into three, join them all with one shared relationship, and fold them into a subsystem.',
     minutes: 6,
     area: 'modelling',
-    tags: ['subsystem', 'edge group', 'group', 'mesh', 'copy', 'paste', 'select all', 'rectangle select', 'multi-select', 'organise', 'organize', 'hierarchy', 'my library', 'thermal'],
+    tags: ['subsystem', 'rename subsystem', 'dissolve', 'edge group', 'group', 'mesh', 'copy', 'paste', 'select all', 'rectangle select', 'multi-select', 'organise', 'organize', 'hierarchy', 'my library', 'thermal'],
     start: { from: 'empty', fileName: 'Three bodies.kjt' },
     editions: ['desktop', 'web'],
     steps

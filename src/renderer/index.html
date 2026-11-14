@@ -884,6 +884,7 @@
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
                 <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
+                <label class="editorField" id="editNodeSubsystemField"><span>Subsystem</span><select id="editNodeSubsystem" aria-label="The subsystem this node is in"></select></label>
                 <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>
             </section>
             <section>
@@ -1048,6 +1049,23 @@
                 <div id="editEdgeProviderSection" hidden></div>
             </section>
             <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
+        </div>
+
+        <div id="subsystemEditor" class="contextCard editorCard subsystemEditor hidden">
+            <header><div><span class="contextKicker">Subsystem</span><strong id="subsystemEditorHeading">Subsystem</strong></div><button data-close-card type="button">×</button></header>
+            <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <section>
+                <label class="editorField"><span>Name</span><input id="subsystemEditorName" autocomplete="off" maxlength="120"></label>
+                <p id="subsystemEditorSummary" class="builderHint"></p>
+                <h3>Boundary</h3>
+                <ul id="subsystemEditorPorts" class="subsystemPortList"></ul>
+                <p class="builderHint">To move nodes in, select them and right-click, choose a subsystem in a node's editor, or drag them onto the box.</p>
+            </section>
+            <footer class="subsystemEditorActions">
+                <button id="subsystemEditorOpen" class="doneButton" type="button">Open subsystem</button>
+                <button id="subsystemEditorDissolve" type="button" title="Put its nodes and subsystems in the level above, as they are">Dissolve subsystem</button>
+                <button id="subsystemEditorDelete" class="dangerButton" type="button" title="Delete it with everything inside, and its relationships to the rest of the model">Delete subsystem</button>
+            </footer>
         </div>
 
         <div id="edgeGroupEditor" class="contextCard editorCard edgeGroupEditor hidden">
@@ -1318,9 +1336,19 @@
             <button id="nodeContextSaveTemplate" type="button"><i class="primitiveIcon">⊞</i><span><strong>Save to my library</strong><small>Keep the selection as a reusable component</small></span><b>›</b></button>
             <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
             <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
+            <div id="nodeContextMoveTargets"></div>
             <button id="nodeContextCreateEdgeGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Create edge group</strong><small>One relationship, meshed across the selection</small></span><b>›</b></button>
             <hr>
             <button id="nodeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong id="nodeContextDeleteLabel">Delete node</strong></span><b>›</b></button>
+        </div>
+
+        <div id="subsystemContextMenu" class="contextCard addPalette hidden">
+            <span class="contextKicker">Subsystem</span>
+            <button id="subsystemContextOpen" type="button"><i class="primitiveIcon">▤</i><span><strong>Open subsystem</strong><small>Step inside to see and edit what it holds</small></span><b>›</b></button>
+            <button id="subsystemContextRename" type="button"><i class="primitiveIcon">✎</i><span><strong>Rename subsystem</strong><small>Give it a name of its own</small></span><b>›</b></button>
+            <button id="subsystemContextDissolve" type="button"><i class="primitiveIcon">⇲</i><span><strong>Dissolve subsystem</strong><small>Put its contents in the level above, as they are</small></span><b>›</b></button>
+            <hr>
+            <button id="subsystemContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete subsystem</strong><small>With everything inside it</small></span><b>›</b></button>
         </div>
 
         <div id="edgeContextMenu" class="contextCard addPalette hidden">

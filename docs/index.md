@@ -20,7 +20,7 @@ okf_version: "0.2"
 * [Assistant Evaluation](assistantEvaluation.md) - Harness that scores a model on the assistant's job: cases, assertions, reference answers, the error-direction report, request pools and commands
 * [Parallel Execution](parallelExecution.md) - Native execution backends: serial loop, shared thread pool, and communication-aware partitions
 * [Provider Execution Transports](providerExecution.md) - Runtime execution and IPC options for user-defined C++ and Python providers
-* [Subsystems](subsystems.md) - Authoring-hierarchy container model and automatic boundary port resolution
+* [Subsystems](subsystems.md) - Authoring-hierarchy containers: live boundary terminals, and renaming, dissolving, deleting and moving nodes in and out
 * [Edge Groups](edgeGroups.md) - Shared relationship definitions expanding into a mesh of edges across member nodes
 * [Edge Directionality](edgeDirectionality.md) - Directed relationship pairs and conservative physical exchange semantics
 

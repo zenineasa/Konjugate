@@ -7185,6 +7185,105 @@ export async function runInteractionTests(driver) {
     };
     const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
 
+    await run('inside a subsystem, relationships crossing its boundary end at terminals that follow the model', async () => {
+        // Loads a model of its own, as the scenarios after it do. Model: Heater and Ambient at the top level; Plant holds Tank and the nested Pump (holding Pump motor); Controls,
+        // beside Plant, holds Sensor. Ambient and Tank are an edge group, one member edge each way.
+        const state = (id, symbol) => ({ id, name: symbol, symbol, initialValue: 0 });
+        const node = (id, name, position, stateId, symbol, subsystemId) => ({ id, name, position, appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+            states: [state(stateId, symbol)], sourceTerms: [], ...(subsystemId ? { subsystemId } : {}) });
+        const edge = (id, name, [sourceNodeId, sourceStateId], [targetNodeId, targetStateId], extra = {}) => ({ id, name,
+            source: { nodeId: sourceNodeId, stateId: sourceStateId }, target: { nodeId: targetNodeId, stateId: targetStateId }, directionality: 'directed',
+            equation: '0', equationModel: { latex: '0', output: { role: 'target', stateId: targetStateId }, bindings: [], mathJson: 0 },
+            parameters: [], appearance: { color: '#888888', offset: 0 }, ...extra });
+        const tank = [1, 2]; const motor = [3, 4]; const heater = [5, 6]; const sensor = [7, 8]; const ambient = [9, 10];
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [
+                node(1, 'Tank', [-3, 0, 0], 2, 'level', 20), node(3, 'Pump motor', [1.5, 0, 0], 4, 'speed', 21),
+                node(5, 'Heater', [-7, 3, 0], 6, 'temperature'), node(7, 'Sensor', [7, 3, 0], 8, 'reading', 30),
+                node(9, 'Ambient', [0, -4, 0], 10, 'temperature')
+            ],
+            edges: [
+                edge(11, 'Heating', heater, tank), edge(12, 'Sense level', tank, sensor), edge(13, 'Drive', sensor, motor), edge(14, 'Fill', motor, tank),
+                edge(15, 'Loss out', tank, ambient, { groupId: 40 }), edge(16, 'Loss in', ambient, tank, { groupId: 40 })
+            ],
+            edgeGroups: [{ id: 40, name: 'Losses', memberNodeIds: [1, 9], color: '#2fb8a4', definition: { parameters: [], output: { symbol: '' }, equation: '' } }],
+            // Plant still carries ports stored by an earlier version, one naming an edge deleted since: it opens all the same.
+            subsystems: [
+                { id: 20, name: 'Plant', parentSubsystemId: null, position: [-1, 0, 0], ports: [{ id: 50, edgeId: 99, internalNodeId: 1, externalNodeId: 5, role: 'target' }] },
+                { id: 21, name: 'Pump', parentSubsystemId: 20, position: [1.5, 0, 0] },
+                { id: 30, name: 'Controls', parentSubsystemId: null, position: [7, 3, 0] }
+            ]
+        };
+        const proxy = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong').textContent === ${JSON.stringify(name)})`;
+        const proxyText = (name) => evaluate(window, `${proxy(name)}.querySelector('small').textContent`);
+        const terminals = () => evaluate(window, `[...document.querySelectorAll('.subsystemTerminal')].filter((terminal) => getComputedStyle(terminal.parentElement).display !== 'none')
+            .map((terminal) => [Number(terminal.dataset.terminalEdge), terminal.querySelector('.subsystemTerminalEdge').innerText.replace(/\\s+/g, ' ').trim()]).sort((a, b) => a[0] - b[0])`);
+        const terminal = (edgeId, part) => `document.querySelector('.subsystemTerminal[data-terminal-edge="${edgeId}"] .${part}')`;
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Hierarchy.kjt')`);
+        await waitFor(window, `Boolean(${proxy('Plant')}) && Boolean(${proxy('Controls')})`, 'The hierarchy project did not load.');
+
+        // The proxies count what crosses them now, nested members counting as inside.
+        assert.equal(await proxyText('Plant'), '5 boundary ports · Open subsystem');
+        assert.equal(await proxyText('Controls'), '2 boundary ports · Open subsystem');
+        assert.deepEqual(await terminals(), [], 'The top level has no boundary, so no terminals.');
+
+        // Inside Plant: a terminal for each crossing, incoming or outgoing, naming the outside node, its state and where it is.
+        await clickElement(window, proxy('Plant'));
+        await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden`, 'Plant was not entered.');
+        await waitFor(window, `document.querySelectorAll('.subsystemTerminal').length === 5`, 'Plant did not show a terminal for each crossing.');
+        assert.deepEqual(await terminals(), [
+            [11, '→ In Heater temperature · Model'],
+            [12, 'Out → Sensor reading · Model / Controls'],
+            [13, '→ In Sensor reading · Model / Controls'],
+            [15, 'Out → Ambient temperature · Model · group Losses'],
+            [16, '→ In Ambient temperature · Model · group Losses']
+        ]);
+        assert.equal(await evaluate(window, `document.querySelector('.subsystemTerminal[data-terminal-edge="11"]').classList.contains('left') && document.querySelector('.subsystemTerminal[data-terminal-edge="12"]').classList.contains('right')`), true, 'Incoming terminals stand on the left and outgoing ones on the right.');
+        for (const title of ['Heating', 'Sense level', 'Drive', 'Fill', 'Loss out', 'Loss in']) {
+            assert.equal(await evaluate(window, `window.__relationshipVisible(${JSON.stringify(title)})`), true, `${title} is drawn inside Plant.`);
+        }
+
+        // A terminal selects its relationship.
+        await clickElement(window, terminal(12, 'subsystemTerminalEdge'));
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === 'Sense level'`, 'Clicking the terminal did not open its relationship.');
+
+        // Deleting it takes its terminal away and the count down; undoing brings both back.
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        await waitFor(window, `!document.querySelector('.subsystemTerminal[data-terminal-edge="12"]') && document.querySelectorAll('.subsystemTerminal').length === 4`, 'The deleted relationship kept its terminal.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `document.querySelectorAll('.subsystemTerminal').length === 5`, 'Undo did not bring the terminal back.');
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        await waitFor(window, `document.querySelectorAll('.subsystemTerminal').length === 5`, 'Delete with nothing selected changed the boundary.');
+
+        // Nested: inside Pump, the relationship from Sensor (in the sibling Controls) and the one to Tank (in the parent) are terminals.
+        await clickElement(window, proxy('Pump'));
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').textContent.includes('Pump') && document.querySelectorAll('.subsystemTerminal').length === 2`, 'Pump did not show its two crossings.');
+        assert.deepEqual(await terminals(), [[13, '→ In Sensor reading · Model / Controls'], [14, 'Out → Tank level · Model / Plant']]);
+
+        // The ↗ beside a terminal goes to the view showing the outside node, and selects it.
+        await clickElement(window, terminal(14, 'subsystemTerminalJump'));
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').textContent.includes('Plant') && [...document.querySelectorAll('.node-label-container.selected')].map((label) => label.textContent).some((text) => text.includes('Tank'))`, 'The jump did not land on Tank, selected.');
+
+        // Back at the top level, deleting a relationship drawn to the proxy changes its count at once, and undo restores it.
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').hidden && document.querySelectorAll('.subsystemTerminal').length === 0`, 'Leaving Plant did not clear its terminals.');
+        await waitForCanvasAtRest(window);
+        const heating = await evaluate(window, `window.__relationshipScreenPoint('Heating', 0.5)`);
+        await window.mouseMove(heating);
+        await window.mouseDown(heating, { button: 'left', clickCount: 1 });
+        await window.mouseUp(heating, { button: 'left', clickCount: 1 });
+        await waitFor(window, `document.querySelector('#editEdgeName').value === 'Heating' && !document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Heating was not selected.');
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '4 boundary ports · Open subsystem'`, 'The proxy kept a stale count after a delete.');
+        await evaluate(window, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true }))`);
+        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent === '5 boundary ports · Open subsystem'`, 'Undo did not restore the count.');
+        const saved = await evaluate(window, `window.__debugProject.serialize()`);
+        assert.equal(saved.subsystems.length, 3);
+        assert.ok(saved.subsystems.every((subsystem) => !('ports' in subsystem)), 'Ports are not written: the boundary is derived.');
+
+    });
+
     await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {
         await loadAuthoringProject();
         await openRelationship('Sense');

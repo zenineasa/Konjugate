@@ -1,8 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+// A subsystem's boundary is not stored: which relationships cross it is derived from the current edges and node membership
+// whenever it is needed (see subsystemBoundaryCrossings). A document written before that may still carry a `ports` array on
+// each subsystem; it is read past and never written again (docs/subsystems.md).
 export function hydrateSubsystems(document, registerId) {
-    const nodeIds = new Set(document.nodes.map((node) => node.id));
-    const edgeIds = new Set(document.edges.map((edge) => edge.id));
     const subsystemIds = new Set();
     const subsystems = (document.subsystems ?? []).map((subsystem) => {
         registerId(subsystem.id, 'Every subsystem must have a unique positive integer id.');
@@ -13,14 +14,7 @@ export function hydrateSubsystems(document, registerId) {
             parentSubsystemId: subsystem.parentSubsystemId ?? null,
             position: Array.isArray(subsystem.position) && subsystem.position.length === 3
                 ? subsystem.position.map(Number) : [0, 0, 0],
-            deleted: false,
-            ports: (subsystem.ports ?? []).map((port) => {
-                registerId(port.id, 'Every subsystem port must have a unique positive integer id.');
-                if (!edgeIds.has(port.edgeId) || !nodeIds.has(port.internalNodeId) || !nodeIds.has(port.externalNodeId)) {
-                    throw new Error(`A port in “${subsystem.name ?? subsystem.id}” references a missing graph entity.`);
-                }
-                return { ...port };
-            })
+            deleted: false
         };
     });
     subsystems.forEach((subsystem) => {
@@ -36,20 +30,48 @@ export function hydrateSubsystems(document, registerId) {
     return subsystems;
 }
 
-export function deriveSubsystemPorts({ subsystemId, nodeIds, edges, allocateId }) {
-    if (!Number.isSafeInteger(subsystemId) || subsystemId <= 0) {
-        throw new TypeError('A subsystem requires a positive integer id.');
+// An edge's endpoint is a node id on the canvas and `{ nodeId }` in a project document; either is accepted.
+const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
+
+// Whether a node in `nodeSubsystemId` (null at the top level) lies inside `subsystemId`, directly or through nested subsystems.
+export function subsystemContains({ subsystems, subsystemId, nodeSubsystemId }) {
+    const parents = new Map(subsystems.map((subsystem) => [subsystem.id, subsystem.parentSubsystemId ?? null]));
+    const seen = new Set();
+    for (let current = nodeSubsystemId ?? null; current !== null && !seen.has(current); current = parents.get(current) ?? null) {
+        if (current === subsystemId) return true;
+        seen.add(current);
     }
-    const members = new Set(nodeIds);
+    return false;
+}
+
+// The one place a subsystem's boundary is worked out, used by the proxy in the parent view (its count) and by the terminals
+// drawn inside it. A relationship crosses the boundary when exactly one of its endpoints is inside the subsystem, counting
+// nodes in nested subsystems as inside; the other endpoint may be at the top level, in a parent subsystem or in a sibling.
+// Each crossing names the relationship, its inside and outside node, the inside node's role, and the direction seen from
+// inside: `incoming` when the outside node is the source, `outgoing` when it is the target, `bidirectional` for an edge that
+// applies its result to both ends (docs/edgeDirectionality.md). Deleted entities, given as `deleted: true`, are left out, as
+// are subsystems that are deleted themselves. Edge-group members are ordinary edges here, each crossing on its own.
+export function subsystemBoundaryCrossings({ subsystemId, subsystems = [], nodes = [], edges = [] }) {
+    const live = subsystems.filter((subsystem) => !subsystem.deleted);
+    if (!live.some((subsystem) => subsystem.id === subsystemId)) return [];
+    const inside = new Map();
+    nodes.forEach((node) => {
+        if (node.deleted) return;
+        inside.set(Number(node.id), subsystemContains({ subsystems: live, subsystemId, nodeSubsystemId: node.subsystemId ?? null }));
+    });
     return edges.flatMap((edge) => {
-        const sourceInside = members.has(edge.source.nodeId);
-        const targetInside = members.has(edge.target.nodeId);
-        if (sourceInside === targetInside) return [];
+        if (edge.deleted) return [];
+        const sourceNodeId = endpointNodeId(edge.source);
+        const targetNodeId = endpointNodeId(edge.target);
+        if (!inside.has(sourceNodeId) || !inside.has(targetNodeId)) return [];
+        const sourceInside = inside.get(sourceNodeId);
+        if (sourceInside === inside.get(targetNodeId)) return [];
         return [{
-            id: allocateId(), edgeId: edge.id,
-            internalNodeId: sourceInside ? edge.source.nodeId : edge.target.nodeId,
-            externalNodeId: sourceInside ? edge.target.nodeId : edge.source.nodeId,
-            role: sourceInside ? 'source' : 'target'
+            edgeId: edge.id,
+            internalNodeId: sourceInside ? sourceNodeId : targetNodeId,
+            externalNodeId: sourceInside ? targetNodeId : sourceNodeId,
+            role: sourceInside ? 'source' : 'target',
+            direction: edge.directionality === 'bidirectional' ? 'bidirectional' : sourceInside ? 'outgoing' : 'incoming'
         }];
     });
 }

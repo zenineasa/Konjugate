@@ -86,7 +86,7 @@ import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '..
 import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
-import { deriveSubsystemPorts, executionProjectDocument, hydrateSubsystems } from '../subsystems.mjs';
+import { executionProjectDocument, hydrateSubsystems, subsystemBoundaryCrossings } from '../subsystems.mjs';
 import {
     expandEdgeGroup,
     hydrateEdgeGroups,
@@ -1247,7 +1247,8 @@ function createSubsystemObject(definition) {
     object.userData = { kind: 'subsystem', id: definition.id, definition };
     const wrapper = document.createElement('div');
     wrapper.className = 'subsystem-label';
-    wrapper.innerHTML = `<button class="subsystemLabel" type="button"><strong>${escapeHtml(definition.name)}</strong><small>${definition.ports.length} boundary ${definition.ports.length === 1 ? 'port' : 'ports'} · Open subsystem</small></button>`;
+    wrapper.innerHTML = `<button class="subsystemLabel" type="button"><strong>${escapeHtml(definition.name)}</strong><small>${boundaryPortCountText(liveBoundaryCrossings(definition.id).length)} · Open subsystem</small></button>`;
+    object.userData.summary = $('.subsystemLabel small', wrapper);
     $('.subsystemLabel', wrapper).addEventListener('click', (event) => {
         event.stopPropagation();
         enterSubsystem(definition.id);
@@ -1276,6 +1277,177 @@ function displayObjectForNode(nodeId) {
     return subsystem ? subsystemObjects.get(subsystem.id) : null;
 }
 
+// A subsystem's boundary is worked out from the current edges and membership every time it is shown (subsystemBoundaryCrossings,
+// docs/subsystems.md), so the proxy's count and the terminals inside always agree with the model.
+function liveBoundaryCrossings(subsystemId) {
+    return subsystemBoundaryCrossings({ subsystemId, subsystems: model.subsystems, nodes: model.nodes, edges: model.relationships });
+}
+
+function boundaryPortCountText(count) {
+    return `${count} boundary ${count === 1 ? 'port' : 'ports'}`;
+}
+
+// Inside a subsystem, each relationship crossing its boundary ends at a terminal at the side of the view standing in for the
+// node outside: incoming relationships on the left, outgoing on the right. By edge id.
+const subsystemTerminals = new Map();
+let subsystemTerminalSignature = '';
+
+function subsystemPathName(subsystemId) {
+    const names = [];
+    const seen = new Set();
+    for (let id = subsystemId ?? null; id !== null && !seen.has(id);) {
+        seen.add(id);
+        const subsystem = model.subsystems.find((item) => item.id === id);
+        if (!subsystem) break;
+        names.unshift(subsystem.name);
+        id = subsystem.parentSubsystemId;
+    }
+    return ['Model', ...names].join(' / ');
+}
+
+function describeBoundaryCrossing(crossing) {
+    const edge = model.relationships.find((relationship) => relationship.id === crossing.edgeId);
+    const outside = model.nodes.find((node) => node.id === crossing.externalNodeId);
+    // The outside node is the edge's target when the inside node is its source.
+    const outsideStateId = crossing.role === 'source' ? edge.targetStateId : edge.sourceStateId;
+    const state = outside.states?.find((candidate) => candidate.id === outsideStateId) ?? null;
+    const group = edge.groupId === null || edge.groupId === undefined ? null : model.edgeGroups.find((candidate) => candidate.id === edge.groupId) ?? null;
+    const location = subsystemPathName(outside.subsystemId);
+    const badge = crossing.direction === 'incoming' ? '→ In' : crossing.direction === 'outgoing' ? 'Out →' : '⇄ Both';
+    const relation = crossing.direction === 'incoming' ? 'from' : crossing.direction === 'outgoing' ? 'to' : 'with';
+    const kind = crossing.direction === 'bidirectional' ? 'Bidirectional relationship' : `${crossing.direction === 'incoming' ? 'Incoming' : 'Outgoing'} relationship`;
+    return {
+        ...crossing, edge, outside,
+        badge,
+        name: outside.title,
+        detail: [state?.symbol, location, group ? `group ${group.name}` : null].filter(Boolean).join(' · '),
+        tooltip: `${kind} “${edge.title}” ${relation} ${outside.title}${state ? ` (${state.symbol})` : ''}, in ${location}. Click to select it.`
+    };
+}
+
+function removeSubsystemTerminals() {
+    subsystemTerminals.forEach(({ object, label }) => {
+        object.remove(label);
+        label.element.remove();
+        scene.remove(object);
+        object.geometry.dispose();
+        object.material.dispose();
+    });
+    subsystemTerminals.clear();
+}
+
+// The terminals stand beside what is shown inside, outside its bounds, ordered by where their inside node is so that few lines
+// cross. They are laid out when the boundary changes, not as nodes are dragged, so they stay where the person last saw them.
+function layoutSubsystemTerminals(descriptions) {
+    const shown = [...nodeObjects.values(), ...subsystemObjects.values()].filter((object) => object.visible);
+    const box = new THREE.Box3();
+    shown.forEach((object) => box.expandByPoint(object.position));
+    if (box.isEmpty()) box.expandByPoint(new THREE.Vector3(0, -0.7, 0));
+    const centre = box.getCenter(new THREE.Vector3());
+    // Stack along whichever of Y and Z is up on screen: Y when the camera looks across the model, Z when it looks down on it.
+    const view = camera.position.clone().sub(orbitControls.target).normalize();
+    const stackAxis = Math.abs(view.y) < 0.7 ? 'y' : 'z';
+    const stackSign = stackAxis === 'y' ? 1 : -Math.sign(view.y || 1);
+    const spacing = 1.35;
+    const sides = { left: [], right: [] };
+    descriptions.forEach((description) => {
+        const outsideIsSource = description.role === 'target';
+        sides[outsideIsSource ? 'left' : 'right'].push(description);
+    });
+    const positions = new Map();
+    Object.entries(sides).forEach(([side, items]) => {
+        const insidePosition = (item) => displayObjectForNode(item.internalNodeId)?.position[stackAxis] ?? centre[stackAxis];
+        items.sort((a, b) => stackSign * (insidePosition(b) - insidePosition(a)) || a.edgeId - b.edgeId);
+        items.forEach((item, index) => {
+            const position = centre.clone();
+            position.x = side === 'left' ? box.min.x - 4 : box.max.x + 4;
+            position[stackAxis] = centre[stackAxis] + stackSign * ((items.length - 1) / 2 - index) * spacing;
+            positions.set(item.edgeId, { position, side });
+        });
+    });
+    return positions;
+}
+
+function createSubsystemTerminal(description, { position, side }) {
+    const object = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.2),
+        new THREE.MeshBasicMaterial({ color: 0x86ddd5, depthTest: false })
+    );
+    object.renderOrder = 9;
+    object.position.copy(position);
+    object.userData = { kind: 'subsystemTerminal', edgeId: description.edgeId };
+    const element = document.createElement('div');
+    element.className = `subsystemTerminal ${description.direction} ${side}`;
+    element.dataset.terminalEdge = description.edgeId;
+    element.innerHTML = `<button class="subsystemTerminalEdge" type="button"><b>${description.badge}</b><strong>${escapeHtml(description.name)}</strong><small>${escapeHtml(description.detail)}</small></button><button class="subsystemTerminalJump" type="button" aria-label="Go to ${escapeHtml(description.name)}" title="Go to ${escapeHtml(description.name)}">↗</button>`;
+    $('.subsystemTerminalEdge', element).title = description.tooltip;
+    element.addEventListener('pointerdown', (event) => event.stopPropagation());
+    $('.subsystemTerminalEdge', element).addEventListener('click', (event) => {
+        event.stopPropagation();
+        const definition = model.relationships.find((relationship) => relationship.id === description.edgeId && !relationship.deleted);
+        if (!definition) return;
+        selectRelationship(definition);
+        transformControls.detach();
+        openRelationshipEditor(definition);
+        $('#statusText').textContent = description.tooltip.replace(/ Click to select it\.$/, '');
+    });
+    $('.subsystemTerminalJump', element).addEventListener('click', (event) => {
+        event.stopPropagation();
+        goToOutsideNode(description.externalNodeId);
+    });
+    const label = new CSS2DObject(element);
+    label.renderOrder = 20;
+    // The label sits on the far side of its terminal from the inside of the subsystem.
+    label.center.set(side === 'left' ? 1 : 0, 0.5);
+    label.position.set(side === 'left' ? -0.3 : 0.3, 0, 0);
+    object.add(label);
+    scene.add(object);
+    subsystemTerminals.set(description.edgeId, { object, label, crossing: description });
+}
+
+// Leaves the subsystem for the view that shows the outside node itself, and selects it there.
+function goToOutsideNode(nodeId) {
+    const definition = model.nodes.find((node) => node.id === nodeId && !node.deleted);
+    if (!definition) return;
+    enterSubsystem(definition.subsystemId ?? null);
+    const object = nodeObjects.get(nodeId);
+    if (object?.visible) selectNode(object);
+    $('#statusText').textContent = `${definition.title} · ${subsystemPathName(definition.subsystemId)}`;
+}
+
+// Which object a relationship's end is drawn to in the current view: the node, the proxy of the subsystem holding it, or,
+// inside a subsystem, the terminal that stands in for a node outside.
+function relationshipEndObject(definition, role) {
+    const terminal = subsystemTerminals.get(definition.id);
+    if (terminal && terminal.crossing.role !== role) return terminal.object;
+    return displayObjectForNode(definition[role]);
+}
+
+// Keeps the proxies' counts, the terminals and which relationships are drawn in step with the model. Cheap when nothing
+// about the boundary has changed, since it runs with every redraw of the relationships.
+function syncSubsystemBoundaries() {
+    subsystemObjects.forEach((object) => {
+        if (!object.visible || !object.userData.summary) return;
+        const text = `${boundaryPortCountText(liveBoundaryCrossings(object.userData.id).length)} · Open subsystem`;
+        if (object.userData.summary.textContent !== text) object.userData.summary.textContent = text;
+    });
+    const descriptions = activeSubsystemId === null ? [] : liveBoundaryCrossings(activeSubsystemId).map(describeBoundaryCrossing);
+    const signature = JSON.stringify([activeSubsystemId, descriptions.map(({ edgeId, role, direction, badge, name, detail, tooltip }) => [edgeId, role, direction, badge, name, detail, tooltip])]);
+    if (signature !== subsystemTerminalSignature) {
+        subsystemTerminalSignature = signature;
+        removeSubsystemTerminals();
+        const positions = layoutSubsystemTerminals(descriptions);
+        descriptions.forEach((description) => createSubsystemTerminal(description, positions.get(description.edgeId)));
+    }
+    relationshipObjects.forEach((relationship) => {
+        const source = relationshipEndObject(relationship.definition, 'source');
+        const target = relationshipEndObject(relationship.definition, 'target');
+        const visible = Boolean(!relationship.definition.deleted && source && target && source !== target);
+        relationship.line.visible = visible;
+        if (relationship.marker) relationship.marker.visible = visible;
+    });
+}
+
 function refreshSubsystemView() {
     clearSelection();
     nodeObjects.forEach((object, id) => {
@@ -1286,13 +1458,6 @@ function refreshSubsystemView() {
         const definition = object.userData.definition;
         object.visible = !definition.deleted && definition.parentSubsystemId === activeSubsystemId;
     });
-    relationshipObjects.forEach((relationship) => {
-        const source = displayObjectForNode(relationship.definition.source);
-        const target = displayObjectForNode(relationship.definition.target);
-        const visible = !relationship.definition.deleted && source && target && source !== target;
-        relationship.line.visible = Boolean(visible);
-        if (relationship.marker) relationship.marker.visible = Boolean(visible);
-    });
     const breadcrumb = $('#subsystemBreadcrumb');
     breadcrumb.hidden = activeSubsystemId === null;
     if (activeSubsystemId !== null) {
@@ -1300,6 +1465,8 @@ function refreshSubsystemView() {
         breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" disabled>${escapeHtml(current?.name ?? 'Subsystem')}</button>`;
         $('[data-subsystem-parent]', breadcrumb).addEventListener('click', () => enterSubsystem(current?.parentSubsystemId ?? null));
     }
+    // Laid out afresh for the view just entered, from where its contents are now.
+    subsystemTerminalSignature = '';
     updateRelationships();
     updateModelStatus();
 }
@@ -1316,8 +1483,8 @@ model.subsystems.forEach(createSubsystemObject);
 const selectionOutlines = new Map();
 
 function relationshipPoints(definition) {
-    const source = displayObjectForNode(definition.source)?.position ?? nodeObjects.get(definition.source).position;
-    const target = displayObjectForNode(definition.target)?.position ?? nodeObjects.get(definition.target).position;
+    const source = relationshipEndObject(definition, 'source')?.position ?? nodeObjects.get(definition.source).position;
+    const target = relationshipEndObject(definition, 'target')?.position ?? nodeObjects.get(definition.target).position;
 
     if (definition.waypoints?.length) {
         return {
@@ -1555,6 +1722,7 @@ model.relationships.forEach(createRelationship);
 const relationshipBundleObjects = new Map();
 
 function updateRelationships() {
+    syncSubsystemBoundaries();
     relationshipObjects.forEach((relationship) => {
         const points = relationshipPoints(relationship.definition);
         const curve = new THREE.CatmullRomCurve3([
@@ -1685,6 +1853,9 @@ window.__relationshipScreenPoint = (title, t = 0.5) => {
     if (!relationship) return null;
     return screenPointFor(relationship.line.userData.curve.getPoint(t));
 };
+
+// Whether a relationship is drawn in the current view, by title (subsystem scoping hides some).
+window.__relationshipVisible = (title) => [...relationshipObjects.values()].find((entry) => entry.definition.title === title)?.line.visible ?? null;
 
 window.__waypointScreenPoint = (title, index) => {
     const relationship = [...relationshipObjects.values()].find((entry) => entry.definition.title === title);
@@ -7691,8 +7862,7 @@ function serializeProjectDocument() {
             id: subsystem.id,
             name: subsystem.name,
             parentSubsystemId: subsystem.parentSubsystemId,
-            position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
-            ports: structuredClone(subsystem.ports)
+            position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position
         })),
         // Node deletion (deleteSelected) only toggles visibility -- it has no reason to know
         // about edgeGroups, and doesn't touch group.memberNodeIds -- so a group whose members
@@ -7747,6 +7917,8 @@ function clearRenderedModel() {
         object.geometry.dispose();
         object.material.dispose();
     });
+    removeSubsystemTerminals();
+    subsystemTerminalSignature = '';
     relationshipObjects.clear();
     nodeObjects.clear();
     subsystemObjects.clear();
@@ -16140,13 +16312,11 @@ function createSubsystemFromSelection(name) {
     const id = allocateModelEntityId();
     const center = nodeIds.reduce((sum, nodeId) => sum.add(nodeObjects.get(nodeId).position), new THREE.Vector3())
         .multiplyScalar(1 / nodeIds.length);
-    const serialized = serializeProjectDocument();
     const subsystem = {
         id,
         name: name.trim() || `Subsystem ${model.subsystems.filter((item) => !item.deleted).length + 1}`,
         parentSubsystemId: activeSubsystemId,
         position: center.toArray(),
-        ports: deriveSubsystemPorts({ subsystemId: id, nodeIds, edges: serialized.edges, allocateId: allocateModelEntityId }),
         deleted: false
     };
     const previousMembership = new Map(nodeIds.map((nodeId) => [nodeId,
@@ -16163,7 +16333,7 @@ function createSubsystemFromSelection(name) {
     };
     apply(true);
     recordHistory({ undo: () => apply(false), redo: () => apply(true) });
-    $('#statusText').textContent = `${subsystem.name} created with ${nodeIds.length} node${nodeIds.length === 1 ? '' : 's'} and ${subsystem.ports.length} boundary ${subsystem.ports.length === 1 ? 'port' : 'ports'}`;
+    $('#statusText').textContent = `${subsystem.name} created with ${nodeIds.length} node${nodeIds.length === 1 ? '' : 's'} and ${boundaryPortCountText(liveBoundaryCrossings(id).length)}`;
     return true;
 }
 

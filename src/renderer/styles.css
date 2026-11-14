@@ -701,6 +701,16 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .subsystemLabel strong, .subsystemLabel small { display: block; }
 .subsystemLabel strong { font-size: 10px; }
 .subsystemLabel small { margin-top: 4px; color: #6fa89f; font-size: 8px; }
+.subsystemTerminal { display: flex; align-items: stretch; gap: 2px; pointer-events: none; }
+.subsystemTerminal.left { flex-direction: row-reverse; }
+.subsystemTerminal button { pointer-events: auto; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px dashed #4aa99f; border-radius: 6px; box-shadow: 0 8px 20px rgb(0 0 0 / 26%); cursor: pointer; user-select: none; }
+.subsystemTerminal button:hover, .subsystemTerminal button:focus-visible { border-style: solid; border-color: #86ddd5; }
+.subsystemTerminalEdge { display: grid; grid-template-columns: auto 1fr; column-gap: 7px; max-width: 190px; padding: 6px 9px; text-align: left; }
+.subsystemTerminal.left .subsystemTerminalEdge { text-align: right; }
+.subsystemTerminalEdge b { grid-row: span 2; align-self: center; color: #86ddd5; font-size: 9px; white-space: nowrap; }
+.subsystemTerminalEdge strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.subsystemTerminalEdge small { overflow: hidden; color: #6fa89f; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.subsystemTerminalJump { padding: 0 7px; color: #86ddd5; font-size: 11px; }
 .node-label-container { pointer-events: none; }
 .objectLabel { position: relative; width: auto; min-width: 112px; padding: 7px 9px; user-select: none; background: rgb(15 27 36 / 91%); border: 1px solid #2c414d; border-radius: 6px; box-shadow: 0 8px 18px rgb(0 0 0 / 24%); backdrop-filter: blur(8px); transition: width .16s, padding .16s, border-color .16s; pointer-events: auto; }
 .objectLabel::before { position: absolute; top: 50%; right: 100%; width: 12px; height: 1px; background: #3d5663; content: ""; }

@@ -9,6 +9,7 @@
 * [Continuous Time Conversion](continuousTimeConversion.md) - Converting discrete empirical coefficients to continuous-time differential equations
 * [Launcher Add-ons](launcherAddons.md) - Sandbox host and permissions model for launcher add-on extensions
 * [Component Library](componentLibrary.md) - Declarative library of reusable engineering components and ports
+* [Subsystem Components](subsystemComponents.md) - Subsystems as reusable components: one definition with named ports and exposed parameters, placed as instances, saved to and linked from their own .kjt file, and expanded into the flat graph the engine already runs
 * [OpenStreetMap Traffic Simulation](openStreetMapTrafficSimulation.md) - Geographic network import and traffic twin simulation
 * [In-App Auto-Updates](autoUpdates.md) - Background update checking and differential updates
 * [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: the permanent On-Ramp tutorials, a time-limited Featured slot, and the trust rules for promotions

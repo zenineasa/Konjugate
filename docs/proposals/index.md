@@ -13,7 +13,7 @@
 * [In-App Auto-Updates](autoUpdates.md) - Background update checking and differential updates
 * [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: the permanent On-Ramp tutorials, a time-limited Featured slot, and the trust rules for promotions
 * [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window
-* [Tutorials](tutorials.md) - Built: a searchable list of short, checked in-app tutorials opened from a Tutorials button above Help & feedback, most starting from a shipped example, built by turning the guided tour into one tutorial among many
+* [Tutorials](tutorials.md) - Built: a searchable list of twenty-three short, checked in-app tutorials covering every feature, opened from a Tutorials button above Help & feedback, most starting from a shipped example, built by turning the guided tour into one tutorial among many
 * [Parameter Tuning Objectives](parameterTuningObjectives.md) - Tuning against a user-written objective (minimise or maximise) as well as measured data, and progress, estimates and stop-and-keep-best while a tuning runs
 * [Tuning Editors and Programs](tuningEditorsAndPrograms.md) - The tuning objective in the shared equation editor, objectives written as C++ or Python programs, and the shared classes behind both
 * [Digital Twin Connections](digitalTwinConnections.md) - How a running model reads the data a lab already records: Konjugate as a client of the lab's files, broker or server, the engine work that comes first, detaching into a sandbox, and proving it on a real recording

@@ -9,7 +9,7 @@ import { exampleLabel } from '../src/exampleCatalog.mjs';
 import { decodeProjectBundle } from '../src/projectFile.mjs';
 import { calibrateTank, calibrateTankValues } from '../src/tutorials/calibrateTank.mjs';
 import { firstModel, firstModelValues as tourModel } from '../src/tutorials/firstModel.mjs';
-import { exampleTitle, groupTutorials, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorials, tutorialsForExample, tutorialStartLabel } from '../src/tutorials/index.mjs';
+import { exampleTitle, groupTutorials, tutorialModelFiles, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorials, tutorialsForExample, tutorialStartLabel } from '../src/tutorials/index.mjs';
 import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
 import { tuneController, tuneControllerValues } from '../src/tutorials/tuneController.mjs';
 import { heatingRecordCsv } from '../scripts/generateHeatingRecord.mjs';
@@ -18,6 +18,14 @@ import { fixInstabilityValues } from '../src/tutorials/fixInstability.mjs';
 import { optimiseObjectiveValues } from '../src/tutorials/optimiseObjective.mjs';
 import { steerByHandValues } from '../src/tutorials/steerByHand.mjs';
 import { whatIfBranchesValues } from '../src/tutorials/whatIfBranches.mjs';
+import { parametersAndRunsValues } from '../src/tutorials/parametersAndRuns.mjs';
+import { layoutModelValues } from '../src/tutorials/layoutModel.mjs';
+import { equationsThatDoMoreValues } from '../src/tutorials/equationsThatDoMore.mjs';
+import { programRelationshipValues } from '../src/tutorials/programRelationship.mjs';
+import { replayLogValues } from '../src/tutorials/replayLog.mjs';
+import { refitTwinValues } from '../src/tutorials/refitTwin.mjs';
+import { scheduleChangesValues } from '../src/tutorials/scheduleChanges.mjs';
+import { organiseModelValues } from '../src/tutorials/organiseModel.mjs';
 import { objectiveVocabulary } from '../src/renderer/tuningObjective.mjs';
 
 // The first-model tour's tests below were written against its own step list; these bind the shared functions to it.
@@ -169,21 +177,22 @@ test('what a tutorial points at, fills in and starts from exists', () => {
         if (tutorial.start.from === 'example') {
             const { example } = tutorial.start;
             assert.ok(existsSync(join(root, 'examples', example)), `${tutorial.id} starts from ${example}, which is not shipped`);
-            assert.ok(manifest.examples.some((entry) => `${entry.id}.kjt` === example), `${tutorial.id}'s example is not in examples/manifest.json`);
+            // An example in the Examples dialog, or a model beside them (examples/dataSources/) that the loader opens for tutorials alone.
+            assert.ok(manifest.examples.some((entry) => `${entry.id}.kjt` === example) || (example.startsWith('dataSources/') && tutorialModelFiles.includes(example)), `${tutorial.id}'s example is not in examples/manifest.json`);
             assert.ok(tutorialsForExample(example).includes(tutorial));
         } else {
             assert.equal(tutorial.start.from, 'empty');
         }
         for (const fileName of tutorial.data ?? []) assert.ok(existsSync(join(root, 'examples', fileName)), `${tutorial.id} reads ${fileName}, which is not shipped`);
     }
-    assert.deepEqual(tutorialDataFiles, ['tankCalibrationMeasured.csv', 'heatingRecord.csv']);
+    assert.deepEqual([...tutorialDataFiles].sort(), ['dataSources/labVesselLog.csv', 'heatingRecord.csv', 'tankCalibrationMeasured.csv']);
     assert.equal(tutorialById('nope'), null);
-    assert.deepEqual(tutorialsForExample('heatedWaterTank.kjt'), []);
+    assert.deepEqual(tutorialsForExample('twoLinkArm.kjt'), []);
     assert.deepEqual(tutorialsForExample('tankCalibration.kjt').map((tutorial) => tutorial.id), ['calibrateTank', 'optimiseObjective'], 'An example can have several tutorials.');
 });
 
 test('an example is named in the list as the Examples dialog names it', () => {
-    for (const tutorial of tutorials.filter((candidate) => candidate.start.from === 'example')) assert.equal(exampleTitle(tutorial.start.example), exampleLabel(tutorial.start.example));
+    for (const tutorial of tutorials.filter((candidate) => candidate.start.from === 'example')) assert.equal(exampleTitle(tutorial.start.example), exampleLabel(tutorial.start.example.split('/').at(-1)));
     assert.equal(tutorialStartLabel(calibrateTank), 'Starts from the Tank Calibration example');
     assert.equal(tutorialStartLabel(firstModel), 'From an empty canvas');
 });
@@ -195,8 +204,7 @@ test('the list is searched by title, tags, sentence and starting example, every 
     assert.equal(ids('PID')[0], 'tuneController', 'Case does not matter.');
     assert.equal(ids('measured data')[0], 'calibrateTank');
     assert.equal(ids('Tank Calibration')[0], 'calibrateTank', 'The starting example\'s name finds it.');
-    assert.ok(['tuneController', 'steerByHand', 'whatIfBranches'].includes(ids('position controlled joint')[0]), 'An example\'s name finds the tutorials on it.');
-    assert.deepEqual(ids('position controlled joint').sort(), ['steerByHand', 'tuneController', 'whatIfBranches']);
+    assert.deepEqual(ids('position controlled joint').sort(), tutorialsForExample('positionControlledJoint.kjt').map((tutorial) => tutorial.id).sort(), 'An example\'s name finds every tutorial on it.');
     assert.equal(ids('first')[0], 'firstModel');
     assert.equal(ids('fork')[0], 'whatIfBranches');
     assert.equal(ids('what if')[0], 'whatIfBranches');
@@ -350,4 +358,35 @@ test('the names, ids and starting values the newer tutorials\' cards and skips r
         const part = buildFromComponentsValues.parts.find((candidate) => candidate.template === id);
         if (part) assert.equal(template.name, part.name, `The ${id} template places a node called ${part.name}.`);
     }
+});
+
+test('the third wave\'s names, ids and starting values are the shipped models\' own', async () => {
+    const spring = await exampleDocument('springMassDamper.kjt');
+    for (const { relationship, parameterId } of [parametersAndRunsValues.spring, parametersAndRunsValues.damper]) {
+        const parameter = spring.edges.find((edge) => edge.name === relationship).parameters.find((candidate) => candidate.id === parameterId);
+        assert.equal(parameter.symbol, parametersAndRunsValues.mass.symbol);
+        assert.equal(parameter.value, parametersAndRunsValues.mass.from);
+    }
+    const tank = await exampleDocument('heatedWaterTank.kjt');
+    assert.ok(tank.nodes.some((node) => node.name === layoutModelValues.heater) && tank.nodes.some((node) => node.name === layoutModelValues.tank));
+    const shapes = JSON.parse(await readFile(join(root, 'assets', 'shapes', 'manifest.json'), 'utf8'));
+    assert.ok((shapes.shapes ?? shapes).some((shape) => shape.id === layoutModelValues.shape.id && shape.name === layoutModelValues.shape.name));
+    const thermal = await exampleDocument('thermalEquilibrium.kjt');
+    assert.ok(thermal.nodes.some((node) => node.name === equationsThatDoMoreValues.hot));
+    assert.equal(thermal.edges[0].name, programRelationshipValues.relationship);
+    assert.equal(thermal.edges[0].directionality, 'bidirectional');
+    const conductance = thermal.edges[0].parameters.find((parameter) => parameter.symbol === 'conductance').value;
+    const capacitance = thermal.edges[0].parameters.find((parameter) => parameter.symbol === 'thermalCapacitance').value;
+    assert.ok(programRelationshipValues.line.includes(String(conductance / capacitance)), 'The program uses the relationship\'s own conductance over capacitance.');
+    const vessel = await exampleDocument(replayLogValues.capacitance && 'dataSources/labVessel.kjt');
+    for (const { id, from } of [replayLogValues.capacitance, replayLogValues.heatLoss]) assert.equal(vessel.sharedParameters.find((parameter) => parameter.id === id).value, from);
+    const log = await readFile(join(root, 'examples', replayLogValues.log), 'utf8');
+    for (const { column } of replayLogValues.columns) assert.ok(log.split(/\r?\n/)[0].split(';').includes(column), `The log has a ${column} column.`);
+    const rig = await exampleDocument('dataSources/simulatedTankRig.kjt');
+    assert.equal(rig.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === refitTwinValues.heatLoss.parameterId).value, refitTwinValues.heatLoss.from);
+    const joint = await exampleDocument('positionControlledJoint.kjt');
+    assert.equal(joint.edges.flatMap((edge) => edge.parameters).find((parameter) => parameter.id === scheduleChangesValues.setpoint.parameterId).mode, 'live');
+    const mass = JSON.parse(await readFile(join(root, 'assets', 'componentLibrary', `${organiseModelValues.mass.template}.json`), 'utf8'));
+    assert.equal(mass.name, organiseModelValues.mass.name);
+    assert.equal(mass.states[0].initialValue, organiseModelValues.mass.from);
 });

@@ -11,7 +11,7 @@ implementation: complete
 
 # Tutorials
 
-**Status: built**, in the desktop and web editions, with ten tutorials: the first wave of three, and a second of seven. Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
+**Status: built**, in the desktop and web editions, with twenty-three tutorials, in three waves, between them covering every feature of the app (see [What the tutorials cover](#what-the-tutorials-cover)). Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
 
 ## The decision this rests on
 
@@ -108,7 +108,62 @@ The second wave is seven, for the features that set Konjugate apart and that nob
 
 The heating record is written by `scripts/generateHeatingRecord.mjs`, deterministic, and a unit test checks the shipped file is the one it writes. Its settings were chosen by running the engine's inference on it: an earlier, more persistent heater swamped the weather's effect and gave a spurious room-to-heater relationship.
 
-Candidates for a third wave: a relationship that acts both ways (*Thermal Equilibrium*), connecting a data source of one's own (a logger's file, a broker), and the twin's Engineer view (refitting on the latest readings).
+The third wave is thirteen, so that every feature is taught somewhere:
+
+| Tutorial | Starts from | Area | The person… |
+| --- | --- | --- | --- |
+| Organise a larger model | An empty canvas | Modelling | Places a thermal mass, copies and pastes it into three, warms one to 400 K, selects all three, joins them with one edge group (six relationships, one definition) whose shared equation is written once, folds them into a subsystem, steps inside, runs it (all three meet at about 329 K) and steps back out |
+| Equations that do more | *Thermal Equilibrium* | Modelling | Reads its relationship acting both ways, gives the hot body a source term leaking heat to a 290 K room, adds a Celsius state and an equation that sets it directly, runs it and plots |
+| Write a relationship as a program | *Thermal Equilibrium* | Modelling | Turns Conduction into a Python program, binds the two temperatures to keys, writes the one line that adds the heat flow, runs it and gets exactly the equation's 320.07 and 319.93 K (checked by running it: a program relationship still acts both ways). Desktop |
+| Ask the model assistant | *Thermal Management* | Modelling | Sets the assistant up with a model (Ollama, or a cloud provider and a key), asks for an ambient boundary in plain words, reads the proposal and applies it. Desktop |
+| Parameters and run settings | *Spring Mass Damper* | Modelling | Opens the Parameters table, makes the two relationships' separate copies of the mass one shared parameter, changes it to 2 kg in the table, reads the run settings, runs it, opens the execution summary and plots a bounce √2 slower |
+| Lay out and dress a model | *Heated Water Tank* | Modelling | Moves the heater with the Move tool, gives the tank the shape library's Tank shape, makes it taller, locks the camera to 2D and changes the labels' detail |
+| Schedule changes during a run | *Position Controlled Joint* | Control | Starts an online run in real time, opens the live controls, gives the target angle a sine wave, reads the Changes record, repeats the run from it and plots the joint chasing the wave. Desktop |
+| Keep and share your work | *Thermal Management* | Results | Reads the project's properties, runs it and (desktop) extends the run, exports the results as CSV and saves the project with its results (answering whose details the copy carries) |
+| Take a model elsewhere | *Spring Mass Damper* | Results | Exports the model as a standalone Python program and (desktop) as an FMI 2.0 FMU |
+| Extend Konjugate | *Thermal Management* | Results | Opens Extensions › Discover, reads Results Analysis, installs it, restarts Konjugate to activate it (the tutorial carries on after the restart), runs the model and opens the add-on on its results. Desktop |
+| Replay a lab's data log | The lab vessel's model (`examples/dataSources/labVessel.kjt`) | Data | Downloads the lab's own log (semicolons, decimal commas, German column names), describes its columns and time zone, reads it, replays the first guesses, calibrates on the first 3.5 hours (finding 501,600 J/K and 15 W/K) and checks on the next 1.5 |
+| Match your signals to the model | An empty canvas | Data | In the twin's window, chooses "A plant's names", reviews the suggested matches and unit conversions, uses them and opens the control room. Desktop |
+| Refit a drifting twin | An empty canvas | Data | Plays "A rig that drifts" at 60×, refits the heat loss in the Engineer view and keeps it in the model, and tries the heater off in the sandbox, kept as a draft scenario. Desktop |
+
+The lab's log is `examples/dataSources/labVesselLog.csv`, written by `labVessel.py` with its default seed (the same file every time); a tutorial may start from a model beside the examples, like the lab vessel's, which the example loader opens for the tutorials that list it and for nothing else.
+
+## What the tutorials cover
+
+Every feature is taught by at least one tutorial, as a step the person does (or skips, which does it):
+
+| Feature | Tutorial |
+| --- | --- |
+| Nodes, states, relationships, equations, running, plotting, the timeline | Build and run your first model |
+| The component library and its relationship templates | Build from components; Organise a larger model |
+| Copy and paste, select all, edge groups, subsystems | Organise a larger model |
+| Source terms, relationships acting both ways, values set directly | Equations that do more |
+| Programs in relationships (Python, C++), program bindings | Write a relationship as a program |
+| The model assistant and its setup | Ask the model assistant |
+| The Parameters table, shared parameters, run settings, the execution summary | Parameters and run settings |
+| Moving, rotating and scaling, the shape library, the 2D lock, label detail | Lay out and dress a model |
+| Validation warnings, numerical stability, substeps | Fix an unstable model |
+| Editing a relationship's parameters, closing results to edit | Tune a controller |
+| Live parameters steered by keys (and gamepads, MIDI), Settings › Controllers | Steer a model by hand |
+| Online runs, real-time pacing, live controls, schedules and waveforms, the Changes record, repeating from it | Schedule changes during a run; Steer a model by hand |
+| Branches: forking, fork parameters, comparing | Ask what if, with branches |
+| Project properties, saving with results, extending a run, exporting results as CSV | Keep and share your work |
+| Exporting code and FMUs | Take a model elsewhere |
+| Extensions: Discover, installing, add-ons on results | Extend Konjugate |
+| Parameter tuning to measured data | Calibrate a model against measured data |
+| Parameter tuning to an objective, with limits | Optimise towards a goal |
+| Replaying a data log, another logger's file, calibrating on a stretch | Replay a lab's data log |
+| Causal inference | Discover equations from data |
+| The live twin, its control room and drift warning | Run a live digital twin |
+| The twin's signal matching and unit conversion | Match your signals to the model |
+| The twin's Engineer view, refitting, the sandbox and scenarios | Refit a drifting twin |
+| The Examples dialog and example guides | every tutorial that starts from an example, and its guide's cards |
+
+What no tutorial teaches is the app's housekeeping: Settings › General, the interface's size, the diagnostics log, Help & feedback, and new windows. Some features are named in a closing card rather than done as a step, where a step would need something the person may not have: encrypted saving (a password of theirs), an FMU used as a node (a plugin), the push service, MQTT and OPC UA sources (equipment or a script of theirs), the state estimator, and installing a package from a file.
+
+## A step for one edition, and a tutorial across a restart
+
+A step can name its editions (`editions: ['desktop']`): the controller leaves it out elsewhere, so a tutorial that plays in both editions can still have a step only the desktop can do (extending a run, which needs the engine's checkpoints; exporting an FMU, which the engine compiles). A tutorial survives Konjugate restarting: just before a restart from the Extensions notice, where it was is kept in the window's storage, and on the next launch, within a quarter of an hour, it starts again at that step. The live twin's window does a tutorial's skips through a small set of named actions the project window asks of it (start a demonstration at a pace, use the suggested matches and open the room, refit and keep, try something and keep it), and nothing else.
 
 ## Later, not now
 

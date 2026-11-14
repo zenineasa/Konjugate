@@ -239,8 +239,9 @@ contextBridge.exposeInMainWorld('engine', {
         stop: () => ipcRenderer.invoke('liveTwinStop'),
         // The demonstration: the simulated rig's model and a recording of it ('steady' or 'drifting'), shipped with the app.
         demo: (variant) => ipcRenderer.invoke('liveTwinDemo', variant),
-        // A demonstration started in this window's twin window, as its own button starts one (a tutorial's "Skip this step").
-        startDemo: (variant) => ipcRenderer.invoke('twinStartDemo', variant),
+        // A tutorial's "Skip this step" done in this window's twin window, as its own buttons do it: 'demo' ({ variant, pace }),
+        // 'useSuggestions', 'refitAndKeep', 'tryAndKeep'.
+        tutorialAction: (action, argument) => ipcRenderer.invoke('twinTutorialAction', action, argument),
         // A tutorial's step shown in the twin window too (null: none), since that window covers this one's card.
         showTutorialStep: (step) => ipcRenderer.invoke('twinTutorialStep', step),
         // The twin's own window (docs/proposals/controlRoom.md): opened with the project's model and the twin's setup; what it

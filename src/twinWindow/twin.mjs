@@ -630,10 +630,45 @@ api.onTutorialStep?.((step) => {
     $('#tutorialBannerTitle').textContent = step.title;
     $('#tutorialBannerText').textContent = step.text;
 });
-// A demonstration the project window asks for (a tutorial's "Skip this step"): its button pressed, once the window has its context.
-api.onStartDemo?.(async (variant) => {
-    for (let waited = 0; !state.context && waited < 50; waited += 1) await new Promise((resolve) => setTimeout(resolve, 100));
-    document.querySelector(`[data-demo="${CSS.escape(variant)}"]`)?.click();
+// A step the project window's tutorial asks of this window ("Skip this step", docs/proposals/tutorials.md): done as its buttons here do
+// it, once the window has its context.
+const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function until(ready, timeout) {
+    const end = Date.now() + timeout;
+    while (!ready() && Date.now() < end) await pause(100);
+    return ready();
+}
+const tutorialActions = {
+    demo: async ({ variant, pace = 'own' } = {}) => {
+        if ([...$('#demoPace').options].some((option) => option.value === pace)) $('#demoPace').value = pace;
+        document.querySelector(`[data-demo="${CSS.escape(variant)}"]`)?.click();
+    },
+    useSuggestions: async () => {
+        await until(() => !$('#useAllSuggestions').hidden || !$('#openRoom').disabled, 15000);
+        if (!$('#useAllSuggestions').hidden) $('#useAllSuggestions').click();
+        await until(() => !$('#openRoom').disabled, 5000);
+        $('#openRoom').click();
+    },
+    refitAndKeep: async () => {
+        if ($('#engineer').hidden) $('#engineerToggle').click();
+        // At 60×, the twin's first move (which a refit needs) comes about a minute in.
+        if (!await until(() => !$('#refitRun').disabled, 180000)) return;
+        $('#refitRun').click();
+        if (!await until(() => !$('#refitKeep').hidden, 60000)) return;
+        $('#refitKeep').click();
+    },
+    tryAndKeep: async () => {
+        if ($('#sandboxBar').hidden) $('#trySomething').click();
+        if (!await until(() => !$('#sandboxBar').hidden && Boolean(document.querySelector('#sandboxInputs input')), 10000)) return;
+        document.querySelector('#sandboxInputs input').value = '0';
+        $('#sandboxRun').click();
+        await until(() => /Ran ahead/.test($('#sandboxStatus').textContent), 30000);
+        $('#sandboxBack').click();
+    }
+};
+api.onTutorialAction?.(async (action, argument) => {
+    for (let waited = 0; !state.context && waited < 50; waited += 1) await pause(100);
+    await tutorialActions[action]?.(argument);
 });
 
 // ---- The window's context ------------------------------------------------------------------------------------------------------

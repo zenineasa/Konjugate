@@ -4,18 +4,31 @@
 // list is searched and grouped. Shared by the desktop and web editions' renderer and by the main process (which checks the ids a window
 // reports and the data files it asks for against this list).
 
+import { askAssistant } from './askAssistant.mjs';
 import { buildFromComponents } from './buildFromComponents.mjs';
 import { calibrateTank } from './calibrateTank.mjs';
 import { discoverEquations } from './discoverEquations.mjs';
+import { equationsThatDoMore } from './equationsThatDoMore.mjs';
+import { exportModel } from './exportModel.mjs';
+import { extendKonjugate } from './extendKonjugate.mjs';
 import { firstModel } from './firstModel.mjs';
+import { keepAndShare } from './keepAndShare.mjs';
+import { layoutModel } from './layoutModel.mjs';
 import { liveTwin } from './liveTwin.mjs';
 import { fixInstability } from './fixInstability.mjs';
+import { matchSignals } from './matchSignals.mjs';
 import { optimiseObjective } from './optimiseObjective.mjs';
+import { organiseModel } from './organiseModel.mjs';
+import { parametersAndRuns } from './parametersAndRuns.mjs';
+import { programRelationship } from './programRelationship.mjs';
+import { refitTwin } from './refitTwin.mjs';
+import { replayLog } from './replayLog.mjs';
+import { scheduleChanges } from './scheduleChanges.mjs';
 import { steerByHand } from './steerByHand.mjs';
 import { tuneController } from './tuneController.mjs';
 import { whatIfBranches } from './whatIfBranches.mjs';
 
-export const tutorials = Object.freeze([firstModel, buildFromComponents, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, whatIfBranches, discoverEquations, liveTwin]);
+export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, scheduleChanges, whatIfBranches, keepAndShare, exportModel, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
 
 // The groups of the list, in order, with the heading each shows. A tutorial's `area` is one of these ids.
 export const tutorialAreas = Object.freeze([
@@ -35,10 +48,13 @@ export const tutorialsForExample = (exampleId) => tutorials.filter((tutorial) =>
 // The files beside the examples that a tutorial reads (a tutorial's measurements): the only ones a window may ask the main process for.
 export const tutorialDataFiles = Object.freeze([...new Set(tutorials.flatMap((tutorial) => tutorial.data ?? []))]);
 
+// The models beside the examples a tutorial starts from (examples/dataSources/labVessel.kjt, say): opened as examples are, and only these.
+export const tutorialModelFiles = Object.freeze([...new Set(tutorials.filter((tutorial) => tutorial.start.from === 'example' && tutorial.start.example.includes('/')).map((tutorial) => tutorial.start.example))]);
+
 // An example's name as people see it ("tankCalibration.kjt" is "Tank Calibration"), as src/exampleCatalog.mjs's exampleLabel names it;
 // that module reads files, so it cannot be loaded in a page, and a test keeps the two the same.
 export const exampleTitle = (fileName) => {
-    const stem = String(fileName).replace(/\.kjt$/, '');
+    const stem = String(fileName).split('/').at(-1).replace(/\.kjt$/, '');
     return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 };
 

@@ -15,6 +15,7 @@ import mqtt from 'mqtt';
 import { readDataLog } from '../src/dataLog.mjs';
 import { createPackageArchive } from '../src/packageArchive.mjs';
 import { startRigServer } from './fixtures/opcuaRigServer.mjs';
+import { groupTutorials } from '../src/tutorials/index.mjs';
 import { startFakeOllama } from './fixtures/fakeOllama.mjs';
 
 // What a scenario checks: what it is about, by ids, data attributes and state (a row's count, a control's value, a
@@ -8149,6 +8150,27 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.__debugTour.stop()`);
     });
 
+    await run('opening a project replaces the edge groups of the one before, and brings its own', async () => {
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        const body = (id, name) => ({ id, name, position: [id, 0, 0], appearance: box, states: [{ id: id + 100, name: 'Temperature', symbol: 'temperature', initialValue: 300, unit: 'K' }], sourceTerms: [] });
+        const grouped = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], subsystems: [],
+            nodes: [body(1, 'A'), body(2, 'B')],
+            edges: [],
+            edgeGroups: [{ id: 50, name: 'Shared heat', memberNodeIds: [1, 2], color: '#2fb8a4', definition: { parameters: [], output: { symbol: 'temperature' }, equation: String.raw`0.1\cdot(\mathrm{sourceTemperature}-\mathrm{targetTemperature})`, implementation: null } }]
+        };
+        const empty = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], subsystems: [], nodes: [], edges: [], edgeGroups: [] };
+        await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'An earlier simulation did not finish.', 30000);
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(grouped)}, 'grouped.kjt')`);
+        await waitFor(window, `window.__debugProject.serialize().edgeGroups.length === 1`, 'The project\'s edge group was not loaded.');
+        // Opened without one (a project saved before edge groups had none to write): none is left from the project before.
+        const { edgeGroups: _dropped, ...withoutGroups } = { ...empty, nodes: [body(7, 'C')] };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(withoutGroups)}, 'plain.kjt')`);
+        await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('1 nodes')`, 'The second project did not load.');
+        assert.deepEqual(await evaluate(window, `window.__debugProject.serialize().edgeGroups`), [], 'The edge group of the project before was kept.');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(empty)}, 'empty.kjt')`);
+    });
+
     // ---- Tutorials (docs/proposals/tutorials.md): the list, and each tutorial that starts from an example, played the whole way.
     const tutorialHelpers = () => {
         const press = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -8158,7 +8180,8 @@ export async function runInteractionTests(driver) {
                 throw new Error(`${error.message} ${facts}`);
             }
         };
-        const clickLabel = (name) => evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)})).click()`);
+        // A node's label by its exact name ("Thermal mass", not "Thermal mass copy"), among those on screen.
+        const clickLabel = (name) => evaluate(window, `(() => { const labels = [...document.querySelectorAll('.objectLabel')].filter((label) => label.getClientRects().length); (labels.find((label) => label.querySelector('strong')?.textContent === ${JSON.stringify(name)}) ?? labels.find((label) => label.textContent.includes(${JSON.stringify(name)}))).click(); })()`);
         const cardOverlaps = (selector) => evaluate(window, `(() => { const a = document.querySelector('.tourFloating').getBoundingClientRect(); const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top); })()`);
         // A clean, empty project, so starting a tutorial asks nothing (the question about unsaved work is a native dialog on the desktop).
         const clean = async () => {
@@ -8171,6 +8194,8 @@ export async function runInteractionTests(driver) {
         return { press, waitForStep, clickLabel, cardOverlaps, clean };
     };
 
+    // The list as the dialog shows it with nothing typed: grouped by area, in the areas' order.
+    const tutorialListOrder = groupTutorials().flatMap((group) => group.tutorials.map((tutorial) => tutorial.id));
     await run('the Tutorials button lists every tutorial, grouped, searchable, and starts one from its example without opening the guide', async () => {
         const { press, waitForStep, clean } = tutorialHelpers();
         await clean();
@@ -8179,8 +8204,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#tutorialsDialog').open`, 'The Tutorials list did not open.');
         assert.equal(await evaluate(window, `document.activeElement === document.querySelector('#tutorialsSearch')`), true, 'The search field is ready to type in.');
         assert.equal(await evaluate(window, `document.querySelector('.tutorialsGroup').textContent`), 'Start here');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['firstModel', 'buildFromComponents', 'fixInstability', 'whatIfBranches', 'calibrateTank', 'optimiseObjective', 'tuneController', 'steerByHand', 'discoverEquations', 'liveTwin'], 'Every tutorial, grouped by area.');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialsGroup')].map((heading) => heading.textContent)`), ['Start here', 'Modelling', 'Results', 'Tuning and calibration', 'Control', 'Data and twins']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), tutorialListOrder, 'Every tutorial, grouped by area.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialsGroup')].map((heading) => heading.textContent)`), groupTutorials().map((group) => group.title));
         // A tutorial only the desktop app can play is listed everywhere, with a note in place of Start where it cannot be played.
         assert.equal(await evaluate(window, `Boolean(document.querySelector('.tutorialEntry[data-tutorial="liveTwin"] .tutorialEditionNote'))`), !driver.capabilities.multiWindow);
         assert.match(await evaluate(window, `document.querySelector('.tutorialEntry[data-tutorial="calibrateTank"] .tutorialEntryMeta').textContent`), /Starts from the Tank Calibration example/);
@@ -8270,7 +8295,7 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /Tutorial finished/);
         await press('#tutorialsButton');
         await waitFor(window, `Boolean(document.querySelector('.tutorialEntry[data-tutorial="calibrateTank"] .tutorialDone'))`, 'The finished tutorial was not ticked.');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['firstModel', 'buildFromComponents', 'fixInstability', 'whatIfBranches', 'calibrateTank', 'optimiseObjective', 'tuneController', 'steerByHand', 'discoverEquations', 'liveTwin'], 'A finished tutorial keeps its place.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), tutorialListOrder, 'A finished tutorial keeps its place.');
         await press('#tutorialsClose');
     });
 
@@ -8361,9 +8386,14 @@ export async function runInteractionTests(driver) {
         await waitForStep('welcome');
         await press('.tourFloating .tourPrimary');
         await waitForStep('stiffen');
-        await evaluate(window, `document.querySelector('.relationshipRow[data-relationship="8"]').click()`);
-        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'The spring did not open.');
-        await evaluate(window, `(() => { const input = document.querySelector('#edgeEditorParameters [data-parameter-id="9"] input[data-field="value"]'); input.value = '400'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        // The spring's row in its relationship label, when the labels show rows (they may be collapsed by an earlier scenario's detail).
+        if (await evaluate(window, `Boolean(document.querySelector('.relationshipRow[data-relationship="8"]'))`)) {
+            await evaluate(window, `document.querySelector('.relationshipRow[data-relationship="8"]').click()`);
+            await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'The spring did not open.');
+            await evaluate(window, `(() => { const input = document.querySelector('#edgeEditorParameters [data-parameter-id="9"] input[data-field="value"]'); input.value = '400'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        } else {
+            await press('.tourFloating .tourSkipStep');
+        }
         await waitForStep('seeWarning');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationIssues').textContent.includes('at least 11')`, 'The pre-run check did not warn about the stiff spring.', 15000);
         await press('#validationSummary');
@@ -8581,10 +8611,70 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'the steering tutorial is for the desktop app' });
 
+    await run('the organising tutorial copies a body into three, meshes them with an edge group, folds them into a subsystem and runs inside it', async () => {
+        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        await clean();
+        assert.equal(await evaluate(window, `window.__debugTour.startTutorial('organiseModel')`), true);
+        await waitForStep('welcome');
+        await press('.tourFloating .tourPrimary');
+        await waitForStep('placeMass');
+        await press('#componentLibraryButton');
+        await waitFor(window, `Boolean(document.querySelector('[data-template-id="thermalMass"]'))`, 'The library did not load.', 10000);
+        await press('[data-template-id="thermalMass"]');
+        await waitForStep('copyPaste');
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Thermal mass'))`, 'The body was not placed.');
+        await clickLabel('Thermal mass');
+        await waitFor(window, `!document.querySelector('#copySelection').disabled`, 'Copy was not offered.');
+        await press('#copySelection');
+        await waitFor(window, `!document.querySelector('#pasteSelection').disabled`, 'Paste was not offered.');
+        await press('#pasteSelection');
+        await waitFor(window, `window.__debugProject.serialize().nodes.length === 2`, 'The first paste did not land.');
+        await press('#pasteSelection');
+        await waitForStep('warmOne');
+        await press('.tourFloating .tourSkipStep');
+        await waitForStep('selectAll');
+        await evaluate(window, `(() => { document.activeElement?.blur?.(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
+        await waitForStep('makeGroup');
+        await press('#createEdgeGroup');
+        await waitForStep('groupEquation');
+        await waitFor(window, `document.querySelectorAll('.modelStatus span')[1].textContent === '6 relationships'`, 'The group did not mesh three bodies into six relationships.');
+        await press('.tourFloating .tourSkipStep');
+        await waitForStep('makeSubsystem', 15000);
+        if (await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length < 3`)) await evaluate(window, `(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true })); })()`);
+        await press('#createSubsystem');
+        await waitFor(window, `document.querySelector('#subsystemDialog').open`, 'The subsystem was not asked for.');
+        await evaluate(window, `(() => { document.querySelector('#subsystemName').value = 'Bodies'; document.querySelector('#subsystemCreate').click(); })()`);
+        await waitForStep('enter');
+        await evaluate(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies')).click()`);
+        await waitForStep('run');
+        await press('.tourFloating .tourSkipStep');
+        await waitFor(window, `['plot', 'leave'].includes(window.__debugTour.step())`, 'The run did not finish.', 60000);
+        if (await evaluate(window, `window.__debugTour.step()`) === 'plot') await clickLabel('Thermal mass');
+        await waitForStep('leave');
+        await press('[data-subsystem-parent]');
+        await waitForStep('finish');
+        const saved = await savedProject();
+        assert.equal(saved.edgeGroups.length, 1);
+        assert.equal(saved.subsystems.length, 1);
+        assert.equal(saved.nodes.filter((node) => node.subsystemId === saved.subsystems[0].id).length, 3);
+        await press('.tourFloating .tourPrimary');
+        await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+    });
+
     await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {
         const { press, clean } = tutorialHelpers();
-        for (const id of ['firstModel', 'buildFromComponents', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', ...(driver.capabilities.multiWindow ? ['liveTwin'] : [])]) {
+        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])]) {
             await clean();
+            // The assistant's model is the person's to set up; here, the fake Ollama's, in use (as an earlier test may have left it).
+            if (id === 'askAssistant') {
+                fakeOllama.models.add('qwen3.5:4b');
+                await evaluate(window, `(async () => {
+                    const { configurations } = await window.aiProviders.listConfigurations();
+                    const kept = configurations.find((configuration) => configuration.model === 'qwen3.5:4b' && configuration.endpoint === ${JSON.stringify(fakeOllama.endpoint)})
+                        ?? await window.aiProviders.saveConfiguration({ name: 'Qwen3.5 4B', provider: 'ollama', endpoint: ${JSON.stringify(fakeOllama.endpoint)}, model: 'qwen3.5:4b', timeoutSeconds: 120, think: false });
+                    await window.aiProviders.setActiveConfiguration(kept.uuid);
+                })()`);
+            }
             assert.equal(await evaluate(window, `window.__debugTour.startTutorial(${JSON.stringify(id)})`), true);
             await waitFor(window, `window.__debugTour.step() === 'welcome'`, `${id} did not start.`);
             await press('.tourFloating .tourPrimary');
@@ -8598,8 +8688,11 @@ export async function runInteractionTests(driver) {
                     continue;
                 }
                 await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${id}/${step} offered no Skip this step.`);
-                await press('.tourFloating .tourSkipStep');
-                await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `${id}: skipping ${step} did not move on.`, 120000);
+                // Exporting and saving ask where, through the system's save dialog: answered with a file of the test's own.
+                const savesAFile = { keepAndShare: { export: 'results.csv', save: 'Thermal management.kjt' }, exportModel: { program: 'springMassDamper.py', fmu: 'springMassDamper.fmu' } }[id]?.[step];
+                if (savesAFile) await driver.captureExport(() => press('.tourFloating .tourSkipStep'), { fileName: savesAFile, maxAttempts: 1200 });
+                else await press('.tourFloating .tourSkipStep');
+                await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `${id}: skipping ${step} did not move on.`, 300000);
                 assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `${id}: after skipping ${step}, a step was reported undone.`);
             }
             assert.equal(await evaluate(window, `window.__debugTour.step()`), 'finish', `${id} did not reach its end.`);
@@ -8614,6 +8707,26 @@ export async function runInteractionTests(driver) {
             } else if (id === 'buildFromComponents') {
                 assert.deepEqual(saved.nodes.map((node) => node.name).sort(), ['Motor', 'Torque load', 'Voltage source']);
                 assert.deepEqual(saved.edges.map((edge) => edge.name).sort(), ['Armature dynamics', 'Shaft dynamics']);
+            } else if (id === 'organiseModel') {
+                assert.equal(saved.edgeGroups.length, 1);
+                assert.equal(saved.nodes.filter((node) => node.subsystemId === saved.subsystems[0]?.id).length, 3);
+            } else if (id === 'equationsThatDoMore') {
+                const hotBody = saved.nodes.find((node) => node.name === 'Hot body');
+                assert.ok(hotBody.states.some((state) => state.symbol === 'temperatureCelsius'));
+                assert.ok(hotBody.sourceTerms.some((term) => term.setsValue === true), 'The Celsius state is set directly.');
+            } else if (id === 'programRelationship') {
+                assert.equal(saved.edges.find((edge) => edge.name === 'Conduction').implementation.kind, 'python');
+            } else if (id === 'askAssistant') {
+                assert.equal(await evaluate(window, `document.querySelector('#applyAssistantProposal').disabled`), true, 'The proposal was applied.');
+                await evaluate(window, `document.querySelector('#closeAssistantPanel')?.click()`);
+            } else if (id === 'parametersAndRuns') {
+                const mass = saved.sharedParameters.find((shared) => shared.symbol === 'mass');
+                assert.equal(mass?.value, 2);
+                assert.ok(saved.edges.every((edge) => edge.parameters.filter((parameter) => parameter.symbol === 'mass').every((parameter) => parameter.sharedParameterId === mass.id)), 'Both masses read the shared one.');
+            } else if (id === 'layoutModel') {
+                assert.equal(saved.nodes.find((node) => node.name === 'Water tank').scale[1], 1.5);
+                // Put the view back for the tests after.
+                await evaluate(window, `(() => { if (document.querySelector('#lock2DButton').getAttribute('aria-pressed') === 'true') document.querySelector('#lock2DButton').click(); })()`);
             } else if (id === 'fixInstability') {
                 assert.equal(saved.nodes.find((node) => node.name === 'Suspended mass').numerics.substepsPerGlobalStep, 11);
                 assert.equal(await evaluate(window, `document.querySelector('#validationIssues').textContent.includes('unstable')`), false, 'The warning is gone.');
@@ -8623,19 +8736,32 @@ export async function runInteractionTests(driver) {
             } else if (id === 'steerByHand') {
                 assert.ok((await evaluate(window, `window.__debugSteering.result().interventions`)).some((change) => change.parameterId === 21), 'The skipped steering was recorded.');
                 await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
-            } else if (id === 'liveTwin') {
+            } else if (id === 'scheduleChanges') {
+                assert.ok((await evaluate(window, `window.__debugSteering.result().interventions`)).some((change) => change.mode === 'waveform'), 'The repeat carried the wave.');
+            } else if (id === 'keepAndShare') {
+                assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /saved with simulation results|Tutorial/);
+            } else if (id === 'refitTwin') {
+                assert.notEqual(saved.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value, 20, 'The refit was kept in the model.');
+            } else if (id === 'liveTwin' || id === 'matchSignals') {
                 assert.ok(saved.nodes.some((node) => node.name === 'Water tank'), 'The skipped demonstration opened the rig\'s model.');
+            } else if (id === 'replayLog') {
+                const capacitance = saved.sharedParameters.find((parameter) => parameter.id === 43).value;
+                assert.ok(Math.abs(capacitance / 501600 - 1) < 0.03, `The skipped calibration found the capacitance: ${capacitance}.`);
             } else if (id === 'discoverEquations') {
                 assert.equal(saved.nodes.length, 3);
                 assert.equal(saved.edges.length, 2);
             } else if (id === 'whatIfBranches') {
                 assert.equal(await evaluate(window, `document.querySelector('#branchesButtonCount').textContent`), '2', 'The skipped fork made a second branch.');
-            } else {
+            } else if (id === 'extendKonjugate') {
+                assert.ok(await evaluate(window, `Boolean(document.querySelector('#addonRailButtons .addonTool[data-addon-id="konjugate.resultPlotViewer"]'))`));
+            } else if (id === 'exportModel') {
+                assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /Exported|Tutorial/);
+            } else if (id === 'tuneController') {
                 assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
             }
             await press('.tourFloating .tourPrimary');
             await waitFor(window, `!window.__debugTour.active()`, `${id} did not finish.`);
-            if (id === 'liveTwin') await closeTutorialTwin();
+            if (['liveTwin', 'matchSignals', 'refitTwin'].includes(id)) await closeTutorialTwin();
         }
     });
 

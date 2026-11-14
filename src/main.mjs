@@ -41,7 +41,7 @@ import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } fr
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
 import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
-import { tutorialById, tutorialDataFiles, tutorialsForExample } from './tutorials/index.mjs';
+import { tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -954,15 +954,18 @@ ipcMain.handle('twinTutorialStep', (event, step) => {
     if (twinWindow.webContents.isLoading()) twinWindow.webContents.once('did-finish-load', send); else send();
     return true;
 });
-// A demonstration started in a project window's twin window, as its own button there starts one: a tutorial's "Skip this step"
-// (docs/proposals/tutorials.md). Sent once the twin window has loaded; only the demonstrations it offers.
-ipcMain.handle('twinStartDemo', async (event, variant) => {
-    requireProjectWindow(event, 'Only a project window can start its twin\'s demonstration.');
-    if (!['steady', 'drifting', 'house', 'plant', 'motor'].includes(variant)) return false;
+// What a tutorial's "Skip this step" asks of a project window's twin window (docs/proposals/tutorials.md), done there as its own buttons
+// do it: a demonstration started (at a pace), the suggested matches used and the room opened, a refit run and kept, something tried in
+// the sandbox and kept as a draft. Sent once the twin window has loaded; only these actions, and only the demonstrations it offers.
+const twinTutorialActions = new Set(['demo', 'useSuggestions', 'refitAndKeep', 'tryAndKeep']);
+ipcMain.handle('twinTutorialAction', async (event, action, argument = null) => {
+    requireProjectWindow(event, 'Only a project window can ask its twin window for a tutorial\'s step.');
+    if (!twinTutorialActions.has(action)) return false;
+    if (action === 'demo' && !['steady', 'drifting', 'house', 'plant', 'motor'].includes(argument?.variant)) return false;
     const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
     if (!twinWindow || twinWindow.isDestroyed()) return false;
     if (twinWindow.webContents.isLoading()) await new Promise((resolve) => twinWindow.webContents.once('did-finish-load', resolve));
-    twinWindow.webContents.send('twinStartDemo', variant);
+    twinWindow.webContents.send('twinTutorialAction', action, argument);
     return true;
 });
 ipcMain.handle('twinOpenDemoModel', (event, variant) => {
@@ -1591,8 +1594,9 @@ ipcMain.handle('projectListExamples', async () => {
 ipcMain.handle('projectLoadExample', async (_event, id) => {
     const pluginExample = (await discoverPluginExamples()).get(id);
     if (pluginExample) return { ...await decodeProjectForRenderer(await readFile(pluginExample.entry)), suggestedFilename: id };
-    if (!(await exampleFiles()).includes(id)) throw new Error('That example is not available.');
-    return { ...await decodeProjectForRenderer(await readFile(join(examplesDir, id))), suggestedFilename: id };
+    // A model a tutorial starts from beside the examples (examples/dataSources/, say) is opened as an example is: only those listed.
+    if (!(await exampleFiles()).includes(id) && !tutorialModelFiles.includes(id)) throw new Error('That example is not available.');
+    return { ...await decodeProjectForRenderer(await readFile(join(examplesDir, id))), suggestedFilename: basename(id) };
 });
 
 // A file a tutorial brings beside the examples (its measurements; only the names the shipped tutorials list). The card's link downloads
@@ -1603,11 +1607,12 @@ ipcMain.handle('projectDownloadTutorialData', async (event, fileName) => {
     if (!tutorialDataFiles.includes(fileName)) throw new Error('That file is not part of a tutorial.');
     const folder = app.getPath('downloads');
     await mkdir(folder, { recursive: true });
-    const dot = fileName.lastIndexOf('.');
-    const [stem, extension] = dot > 0 ? [fileName.slice(0, dot), fileName.slice(dot)] : [fileName, ''];
+    const name = basename(fileName);
+    const dot = name.lastIndexOf('.');
+    const [stem, extension] = dot > 0 ? [name.slice(0, dot), name.slice(dot)] : [name, ''];
     const bytes = await readFile(join(examplesDir, fileName));
     for (let copy = 0; copy < 1000; copy += 1) {
-        const path = join(folder, copy ? `${stem} (${copy})${extension}` : fileName);
+        const path = join(folder, copy ? `${stem} (${copy})${extension}` : name);
         try {
             await writeFile(path, bytes, { flag: 'wx' });
             return { path, fileName: basename(path) };

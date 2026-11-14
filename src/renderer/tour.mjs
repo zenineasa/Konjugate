@@ -242,12 +242,14 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         get active() { return active; },
         get step() { return active ? steps[reached].id : null; },
         get tutorial() { return active ? tutorial : null; },
-        start(played, { start = null } = {}) {
+        // `at` is the step to start on (a tutorial carried on after Konjugate restarted, say); it starts at the beginning otherwise.
+        start(played, { start = null, at = null } = {}) {
             tutorial = played;
-            steps = played.steps;
+            // A step can be for one edition only (one that needs the desktop engine's checkpoints, say): left out of the others.
+            steps = played.steps.filter((step) => !step.editions || step.editions.includes(edition));
             startDocument = start;
             card.setAttribute('aria-label', played.title);
-            reached = 0;
+            reached = Math.max(0, at ? steps.findIndex((step) => step.id === at) : 0);
             play += 1;
             filling = false;
             skipped.clear();

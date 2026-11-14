@@ -98,7 +98,7 @@ export const tutorials = {
         return true;
     },
     loadData: async (fileName) => {
-        const response = await fetch(new URL(`../../examples/${encodeURIComponent(fileName)}`, import.meta.url));
+        const response = await fetch(new URL(`../../examples/${fileName.split('/').map(encodeURIComponent).join('/')}`, import.meta.url));
         if (!response.ok) throw new Error('That file is not part of a tutorial.');
         return response.text();
     },
@@ -107,12 +107,13 @@ export const tutorials = {
         const text = await tutorials.loadData(fileName);
         const link = document.createElement('a');
         link.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-        link.download = fileName;
+        const name = fileName.split('/').at(-1);
+        link.download = name;
         document.body.append(link);
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
-        return { path: null, fileName };
+        return { path: null, fileName: name };
     },
     // There is no example guide window to start one from in the browser.
     onStart: () => {}

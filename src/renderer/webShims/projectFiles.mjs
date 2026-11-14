@@ -165,7 +165,8 @@ async function loadExample(id) {
     const response = await fetch(new URL(`../../examples/${id}`, import.meta.url));
     if (!response.ok) throw new Error('That example is not available.');
     const file = await fileFromBytes(new Uint8Array(await response.arrayBuffer()), id);
-    return { ...file, suggestedFilename: id };
+    // A tutorial's model beside the examples (dataSources/labVessel.kjt) takes its own file name.
+    return { ...file, suggestedFilename: id.split('/').at(-1) };
 }
 
 async function openExampleGuide(id) {

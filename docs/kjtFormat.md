@@ -10,6 +10,8 @@ status: stable
 
 # KJT container format, version 1
 
+A component file (a subsystem saved on its own, [Subsystems](subsystems.md#component-files)) is an ordinary version 1 project in this container whose payload carries a `component` block, so every reader of `.kjt` reads it.
+
 All integer fields are unsigned and big-endian. Limits are part of the format contract.
 
 | Offset | Size | Meaning |

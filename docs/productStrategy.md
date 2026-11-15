@@ -287,20 +287,7 @@ These notebooks should be versioned artifacts, not informal demonstrations. Wher
 
 ### Reusable subsystems from other models
 
-Importing a subsystem from another `.kjt` should be treated as model composition, not file copying hidden behind a canvas gesture.
-
-The import operation should:
-
-- let the user select a source file and subsystem;
-- show the subsystem name, ports and source provenance before import;
-- copy or remap entity IDs according to an explicit policy;
-- remap all internal references atomically;
-- preserve only declared boundary ports at the parent level;
-- create one undoable transaction;
-- record the source file, subsystem identity and import timestamp;
-- offer detach semantics if later refresh is not supported.
-
-Double-clicking an imported or local subsystem should open its focused view in a new project window. The new window should retain the parent context and breadcrumb, while edits should use the same document and undo ownership model as the parent. A live external reference should not be implied unless the product later defines explicit refresh, conflict and offline behavior.
+Built as components: a subsystem saved as a file of its own or to My library and placed in other models, reviewed with its ports, parameters and provenance before it is placed, with explicit id remapping, one undoable step, a recorded source, linked by default with refresh, conflict and missing-file handling, editable in its own window, and detachable. See [Subsystems](subsystems.md#components) and the design, [Subsystem components](proposals/subsystemComponents.md).
 
 ### Deterministic report generation
 

@@ -3,15 +3,15 @@ type: Proposal
 title: "Subsystem components: reusable subsystems with ports, parameters and linked files"
 description: "Re-thinking subsystems as reusable components: one definition with named ports and exposed parameters, placed as instances, saved to and linked from their own .kjt file, and expanded into the flat graph the engine already runs."
 tags: [proposals, subsystems, components, hierarchy, reuse, kjt]
-status: draft
-implementation: partial
+status: stable
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Subsystem components: reusable subsystems with ports, parameters and linked files
 
-**Status: proposal, decided; stage 1 built.** Stage 1, live boundary crossings and terminals inside a subsystem, is implemented (`fab845b`, see [Staged delivery](#staged-delivery)); stages 2 to 4 are not built yet. The decisions the user made before this was written are under [Decisions already made](#decisions-already-made), and the ten questions this proposal raised were settled on review as it recommended, recorded under [Decisions](#decisions).
+**Status: built.** All four stages are implemented; [Subsystems](../subsystems.md) describes what was built and is the reference. Where the build differs from the text below, it says so here: the Reuse tutorial starts from the shipped Thermal Equilibrium example (folding its two bodies into a subsystem) rather than from the end of "Organise a larger model", whose coupling coefficient is written into its equation and so has no parameter to expose; a component in My library is edited in place in the window that placed it (Edit component, then Save to my library or Discard changes) rather than in a window of its own, since the library entry is not a file a window can own; in the web edition Edit component is not offered for a file link (the file is opened as a project, saved, and chosen again with Update from file); and results do not yet record the `sha256` of each component they ran with. The decisions the user made before this was written are under [Decisions already made](#decisions-already-made), and the ten questions this proposal raised were settled on review as it recommended, recorded under [Decisions](#decisions).
 
 ## Problem
 
@@ -232,9 +232,9 @@ Every project saved today has subsystems with no `definitionId` and nodes naming
 Each stage ships on its own, updates [Subsystems](../subsystems.md) and the schema document as it lands, and is covered by unit tests of the pure functions and interaction tests of the entry points.
 
 1. **Boundary terminals and live-derived crossings. Built** (`fab845b`). `subsystemBoundaryCrossings` in `src/subsystems.mjs` derives every relationship crossing a subsystem's boundary from the current edges and membership, counting nested subsystems as inside, and both the proxy's count and the inside terminals use it, replacing the creation-time `deriveSubsystemPorts` snapshot. Stored `ports` in older files are read past, even when stale, and no longer written; `docs/subsystems.md` and `docs/projectSchema.md` describe it. It needed none of the data model above and is compatible with it: the crossings it derives are what the derived ports of a local definition are built from in stage 3.
-2. **Lifecycle.** Select versus open, the subsystem card, rename, dissolve, delete, move in and out; the tutorial's `enter` step updated. Still one subsystem, one place: the data model change can wait.
-3. **Components as documents; save and import as a copy.** The `component` block, `subsystemDefinitions`, instances, `definitionKey` and deterministic expansion, legacy migration, declared ports and exposed parameters, Place another instance, Save as component file, Place component from file (as a copy), Save to my library for a subsystem, copy and paste, instance paths in results, and the Reuse tutorial. Everything is local, so no link, refresh or conflict code yet.
-4. **Linked instances.** File and library links, resolution, refresh on open and on focus, conflicts, cycles, Edit in its own window, Detach, the web edition's manual update, encrypted components, and the Reuse tutorial's linking step.
+2. **Lifecycle. Built.** Select versus open, the subsystem card, rename, dissolve, delete, move in and out; the tutorial's `enter` step updated.
+3. **Components as documents; save and import as a copy. Built.** The `component` block, `subsystemDefinitions`, instances, `definitionKey` and deterministic expansion, legacy migration, declared ports and exposed parameters, Place another instance, Save as component file, Place component from file (as a copy), Save to my library for a subsystem, copy and paste, instance paths in results, and the Reuse tutorial. Everything is local, so no link, refresh or conflict code yet.
+4. **Linked instances. Built.** File and library links, resolution, refresh on open and on focus, conflicts, cycles, Edit in its own window, Detach, the web edition's manual update, encrypted components, and the Reuse tutorial's linking step.
 
 ## Product strategy
 

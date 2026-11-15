@@ -113,6 +113,7 @@ The third wave is thirteen, so that every feature is taught somewhere:
 | Tutorial | Starts from | Area | The person… |
 | --- | --- | --- | --- |
 | Organise a larger model | An empty canvas | Modelling | Places a thermal mass, copies and pastes it into three, warms one to 400 K, selects all three, joins them with one edge group (six relationships, one definition) whose shared equation is written once, folds them into a subsystem, steps inside, runs it (all three meet at about 329 K) and steps back out |
+| Reuse a part of a model | *Thermal Equilibrium* | Modelling | Folds the two bodies into a subsystem, makes Cold body's temperature a port named Outlet, exposes Conductance, places another instance and gives it 10 W/K, connects the two, runs them, saves the component to My library and places it from there, linked |
 | Equations that do more | *Thermal Equilibrium* | Modelling | Reads its relationship acting both ways, gives the hot body a source term leaking heat to a 290 K room, adds a Celsius state and an equation that sets it directly, runs it and plots |
 | Write a relationship as a program | *Thermal Equilibrium* | Modelling | Turns Conduction into a Python program, binds the two temperatures to keys, writes the one line that adds the heat flow, runs it and gets exactly the equation's 320.07 and 319.93 K (checked by running it: a program relationship still acts both ways). Desktop |
 | Ask the model assistant | *Thermal Management* | Modelling | Sets the assistant up with a model (Ollama, or a cloud provider and a key), asks for an ambient boundary in plain words, reads the proposal and applies it. Desktop |
@@ -137,6 +138,7 @@ Every feature is taught by at least one tutorial, as a step the person does (or 
 | Nodes, states, relationships, equations, running, plotting, the timeline | Build and run your first model |
 | The component library and its relationship templates | Build from components; Organise a larger model |
 | Copy and paste, select all, edge groups, subsystems | Organise a larger model |
+| Components: ports, exposed parameters, instances, My library | Reuse a part of a model |
 | Source terms, relationships acting both ways, values set directly | Equations that do more |
 | Programs in relationships (Python, C++), program bindings | Write a relationship as a program |
 | The model assistant and its setup | Ask the model assistant |

@@ -291,3 +291,59 @@ test('a result records the version of every component it ran with, linked or loc
     assert.notEqual(changed.sha256, version.sha256);
     assert.deepEqual(await componentVersions(project(), hash), [], 'A project without components records none.');
 });
+
+// A plant whose nested pump has a terminal moved: Fill, from the pump's motor to the plant's tank, crosses the pump.
+function nestedProject() {
+    return {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+        nodes: [node(1, 'Tank', [state(2, 'level')], 20), node(3, 'Pump motor', [state(4, 'speed')], 21), node(5, 'Heater', [state(6, 'power')])],
+        edges: [edge(14, 'Fill', [3, 4], [1, 2]), edge(12, 'Heat', [5, 6], [1, 2])],
+        subsystems: [
+            { id: 20, name: 'Plant', parentSubsystemId: null, position: [0, 0, 0], terminalPositions: [{ edgeId: 12, position: [-5, 0, 0] }] },
+            { id: 21, name: 'Pump', parentSubsystemId: 20, position: [2, 0, 0], terminalPositions: [{ edgeId: 14, position: [7, 1, 0] }] }
+        ],
+        edgeGroups: []
+    };
+}
+
+test('a copied subsystem takes the moved terminals of the subsystems inside it, renumbered with the relationships they belong to', () => {
+    const source = migrateLegacySubsystems(nestedProject());
+    const component = componentDocumentOf(source, 20);
+    const target = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [node(1, 'Other', [state(2, 'x')])], edges: [], subsystems: [], edgeGroups: [] };
+    const { document, subsystemId } = placeComponent(target, component);
+    const pump = document.subsystems.find((item) => item.parentSubsystemId === subsystemId);
+    const fill = document.edges.find((item) => item.name === 'Fill');
+    assert.deepEqual(pump.terminalPositions, [{ edgeId: fill.id, position: [7, 1, 0] }], 'The pump\'s moved terminal follows the copied Fill.');
+    assert.notEqual(fill.id, 14);
+    assert.equal(document.subsystems.find((item) => item.id === subsystemId).terminalPositions, undefined, 'The plant\'s own terminal was for a relationship outside it, which is not copied.');
+    // A second instance of the same component too.
+    const twice = placeAnotherInstance(document, subsystemId).document;
+    const pumps = twice.subsystems.filter((item) => item.name === 'Pump');
+    assert.equal(pumps.length, 2);
+    pumps.forEach((item) => {
+        const own = twice.edges.find((edge) => edge.id === item.terminalPositions[0].edgeId);
+        assert.equal(own.name, 'Fill');
+        assert.equal(twice.nodes.find((entry) => entry.id === own.source.nodeId).subsystemId, item.id, 'Each pump\'s terminal names its own Fill.');
+    });
+});
+
+test('a pasted instance keeps its own parameter values, and a pasted linked instance is another instance of the same link', async () => {
+    const { pasteComponentCopy, componentCopyOf } = await import('../src/components.mjs');
+    let document = exposeParameter(migrateLegacySubsystems(project()), 20, 30);
+    const [parameter] = instanceParameters(document, 20);
+    document = setInstanceParameter(document, 20, parameter.key, 0.7);
+    // Into another project: a copy of its own, with this instance's value.
+    const copy = componentCopyOf(document, 20);
+    const target = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
+    const pasted = pasteComponentCopy(target, copy, { position: [0, 0, 0] });
+    assert.equal(instanceParameters(pasted.document, pasted.subsystemId)[0].value, 0.7);
+    // A linked instance pasted into its own project is another instance of the same linked definition.
+    document.subsystemDefinitions[0].link = { kind: 'file', fileName: 'Plant.kjt', path: '/p/Plant.kjt', sha256: 'abc' };
+    const linkedCopy = componentCopyOf(document, 20);
+    const again = pasteComponentCopy(document, linkedCopy, { position: [3, 0, 0] });
+    assert.equal(again.document.subsystemDefinitions.length, 1, 'No second definition.');
+    assert.equal(instanceCount(again.document, again.subsystemId), 2);
+    // Into another project it arrives linked, with its cached copy.
+    const elsewhere = pasteComponentCopy(target, linkedCopy, { position: [0, 0, 0] });
+    assert.equal(elsewhere.document.subsystemDefinitions[0].link.path, '/p/Plant.kjt');
+});

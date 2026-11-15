@@ -87,7 +87,7 @@ import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
-    componentDocumentOf, componentVersions, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
+    componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
 } from '../components.mjs';
 import {
@@ -16301,7 +16301,7 @@ function copySelectedGraph() {
         syncComponents();
         const subsystem = subsystemById(selectedSubsystemId);
         if (!subsystem) return false;
-        window.modelClipboard.write({ format: componentClipboardFormat, version: 1, name: subsystem.name, document: componentDocumentOf(serializeProjectDocument(), subsystem.id) });
+        window.modelClipboard.write(componentCopyOf(serializeProjectDocument(), subsystem.id));
         updateSelectionActionControls();
         $('#statusText').textContent = `${subsystem.name} copied`;
         return true;
@@ -16393,10 +16393,10 @@ function pasteComponent(copy) {
     const base = shown.length ? shown[shown.length - 1].toArray() : [0, 0, 0];
     let placed = null;
     applyDocumentChange((document) => {
-        const result = placeComponent(document, copy.document, { parentSubsystemId: activeSubsystemId, name: `${copy.name} copy`, position: base.map((value, index) => value + Number(offset[index] ?? 0) * 2) });
+        const result = pasteComponentCopy(document, copy, { parentSubsystemId: activeSubsystemId, name: `${copy.name} copy`, position: base.map((value, index) => value + Number(offset[index] ?? 0) * 2) });
         placed = result.subsystemId;
         return result.document;
-    }, `${copy.name} pasted as a copy of its own`);
+    }, copy.link ? `${copy.name} pasted, linked to ${copy.link.kind === 'library' ? 'my library' : copy.link.fileName}` : `${copy.name} pasted as a copy of its own`);
     if (placed !== null) selectSubsystem(placed);
     return placed !== null;
 }

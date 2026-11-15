@@ -7886,6 +7886,54 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
     });
 
+    await run('a copied subsystem keeps the moved terminals of the subsystems inside it and its own parameter values when pasted', async () => {
+        const { proxy, open } = hierarchy;
+        await loadHierarchyProject();
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        // Inside the nested Pump, Fill's terminal moved.
+        await clickElement(window, open('Plant'));
+        await waitFor(window, `Boolean(${proxy('Pump')})`, 'Plant was not entered.');
+        await clickElement(window, open('Pump'));
+        await waitFor(window, `Boolean(window.__terminalPosition(14))`, 'Pump was not entered.');
+        await waitForCanvasAtRest(window);
+        const from = await evaluate(window, `window.__terminalScreenPoint(14)`);
+        await window.mouseMove(from);
+        await window.mouseDown(from, { button: 'left', clickCount: 1 });
+        for (let step = 1; step <= 8; step += 1) await window.mouseMove({ x: Math.round(from.x + 10 * step), y: Math.round(from.y - 12 * step) });
+        await window.mouseUp({ x: from.x + 80, y: from.y - 96 }, { button: 'left', clickCount: 1 });
+        await waitFor(window, `document.querySelector('#statusText').textContent === 'Terminal moved'`, 'The terminal was not moved.');
+        const moved = await evaluate(window, `window.__terminalPosition(14)`);
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]')?.click()`);
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').hidden`, 'Did not return to the model.');
+
+        // Plant's Rate exposed and given a value of its own.
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+        await clickElement(window, `${proxy('Plant')}.querySelector('strong')`);
+        await waitFor(window, `document.querySelector('#subsystemEditorHeading').textContent === 'Plant' && !document.querySelector('#subsystemEditor').classList.contains('hidden')`, 'Plant\'s card did not open.');
+        await evaluate(window, `(() => { const select = document.querySelector('#subsystemExposeParameter'); select.value = [...select.options].find((option) => option.textContent.startsWith('Rate (rate)')).value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `Boolean(document.querySelector('#subsystemEditorParameterList [data-parameter-value]'))`, 'Rate was not exposed.');
+        await evaluate(window, `(() => { const input = document.querySelector('#subsystemEditorParameterList [data-parameter-value]'); input.value = '5'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `window.__debugProject.serialize().subsystems.find((item) => item.name === 'Plant').parameterValues?.some((value) => value.value === 5)`, 'Plant\'s value was not set.');
+
+        // Copied and pasted: the copy's nested Pump has Fill's terminal where it was moved, under the copied Fill's new id, and the copy has Rate 5.
+        await evaluate(window, `document.querySelector('#copySelection').click()`);
+        await waitFor(window, `!document.querySelector('#pasteSelection').disabled`, 'Paste was not offered.');
+        await evaluate(window, `document.querySelector('#pasteSelection').click()`);
+        await waitFor(window, `Boolean(${proxy('Plant copy')})`, 'The copy was not pasted.');
+        const after = await saved();
+        const copy = after.subsystems.find((item) => item.name === 'Plant copy');
+        const pump = after.subsystems.find((item) => item.parentSubsystemId === copy.id && item.name === 'Pump');
+        const copiedFill = after.edges.find((item) => item.name === 'Fill' && after.nodes.find((entry) => entry.id === item.source.nodeId)?.subsystemId === pump.id);
+        assert.ok(copiedFill && copiedFill.id !== 14, 'The copy has a Fill of its own.');
+        assert.deepEqual(pump.terminalPositions, [{ edgeId: copiedFill.id, position: moved }], 'The moved terminal follows the copied Fill.');
+        assert.deepEqual(copy.parameterValues?.map((value) => value.value), [5], 'The copy keeps the instance\'s own value.');
+        await clickElement(window, open('Plant copy'));
+        await waitFor(window, `[...document.querySelectorAll('.subsystemLabel')].some((label) => label.querySelector('strong').textContent === 'Pump' && getComputedStyle(label.parentElement).display !== 'none')`, 'The copy was not entered.');
+        await clickElement(window, open('Pump'));
+        await waitFor(window, `JSON.stringify(window.__terminalPosition(${copiedFill.id})) === ${JSON.stringify(JSON.stringify(moved))}`, 'Inside the copy, the terminal is not where it was moved.');
+    });
+
     await run('a subsystem is a component: another instance follows edits, ports are named, parameters exposed per instance, and copies are separate', async () => {
         const { proxy, open } = hierarchy;
         await loadHierarchyProject();

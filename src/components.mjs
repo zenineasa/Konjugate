@@ -400,7 +400,7 @@ export function migrateLegacySubsystems(document, { allocateId = null } = {}) {
 // A copy of a project document as a component placed into another project: `component` (a component document, from a
 // file, the library or another instance) is placed as a new instance under `parentSubsystemId`, with a new local
 // definition. Returns `{ document, subsystemId }`.
-export function placeComponent(document, componentDocument, { parentSubsystemId = null, position = [0, 0, 0], name = null, link = null } = {}) {
+export function placeComponent(document, componentDocument, { parentSubsystemId = null, position = [0, 0, 0], name = null, link = null, parameterValues = null } = {}) {
     const next = clone(document);
     const allocate = idAllocator(next);
     const definitionId = allocate();
@@ -408,10 +408,53 @@ export function placeComponent(document, componentDocument, { parentSubsystemId 
     const sealed = clone(componentDocument);
     next.subsystemDefinitions = [...(next.subsystemDefinitions ?? []), { id: definitionId, document: sealed, ...(link ? { link: clone(link) } : {}) }];
     next.subsystems = [...(next.subsystems ?? []), {
-        id: subsystemId, name: name ?? sealed.component?.name ?? 'Component', parentSubsystemId, position: [...position], definitionId
+        id: subsystemId, name: name ?? sealed.component?.name ?? 'Component', parentSubsystemId, position: [...position], definitionId,
+        ...(usableParameterValues(next, sealed, parameterValues).length ? { parameterValues: usableParameterValues(next, sealed, parameterValues) } : {})
     }];
     const { document: expanded } = expandInstance(next, subsystemId, { allocateId: allocate });
     return { document: expanded, subsystemId, definitionId };
+}
+
+// An instance's own parameter values that still mean something where it is placed: values for parameters the component
+// exposes, and bindings to shared parameters the project has.
+function usableParameterValues(document, componentDocument, parameterValues) {
+    const exposed = new Set((componentDocument.sharedParameters ?? []).filter((shared) => shared.exposed).map((shared) => shared.id));
+    const shared = new Set((document.sharedParameters ?? []).map((item) => item.id));
+    return clone(parameterValues ?? []).filter((value) => exposed.has(value.parameterKey) && (value.sharedParameterId == null || shared.has(value.sharedParameterId)));
+}
+
+// What copying a subsystem puts on the clipboard: its component document, the instance's own parameter values, and, for a
+// linked instance, its link (whose cached document is copied exactly, as the file had it).
+export function componentCopyOf(document, subsystemId) {
+    const working = clone(document);
+    syncDefinitions(working);
+    const record = working.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = (working.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    const link = definition?.link ? clone(definition.link) : null;
+    if (link) { delete link.editing; delete link.behind; }
+    return {
+        format: 'konjugateComponentCopy', version: 1, name: record?.name ?? 'Component',
+        document: link ? clone(definition.document) : componentDocumentOf(working, subsystemId),
+        ...(record?.parameterValues?.length ? { parameterValues: clone(record.parameterValues) } : {}),
+        ...(link ? { link } : {})
+    };
+}
+
+// Pastes a copied subsystem. A local one is an independent copy with a definition of its own (decision 1 of the proposal);
+// a linked one is another instance of the same link: of the definition the project already has for it, or, in another
+// project, of a new definition linked to the same file or library entry, with its cached copy.
+export function pasteComponentCopy(document, copy, { parentSubsystemId = null, position = [0, 0, 0], name = null } = {}) {
+    const sameLink = (link) => copy.link && link && link.kind === copy.link.kind
+        && (link.kind === 'library' ? link.templateId === copy.link.templateId : (link.path ?? link.fileName) === (copy.link.path ?? copy.link.fileName));
+    const existing = (document.subsystemDefinitions ?? []).find((definition) => sameLink(definition.link));
+    if (!existing) return placeComponent(document, copy.document, { parentSubsystemId, position, name: name ?? copy.name, link: copy.link ?? null, parameterValues: copy.parameterValues });
+    const next = clone(document);
+    const allocate = idAllocator(next);
+    const subsystemId = allocate();
+    const values = usableParameterValues(next, existing.document, copy.parameterValues);
+    next.subsystems.push({ id: subsystemId, name: name ?? copy.name, parentSubsystemId, position: [...position], definitionId: existing.id, ...(values.length ? { parameterValues: values } : {}) });
+    const { document: expanded } = expandInstance(next, subsystemId, { allocateId: allocate });
+    return { document: expanded, subsystemId, definitionId: existing.id };
 }
 
 // Another instance of the same local definition, beside the first.

@@ -2282,7 +2282,16 @@ async function readComponentFile(path, { password = null } = {}) {
         throw error;
     }
     const details = await stat(path);
-    if (!password && inspectProjectFile(bytes).encrypted) {
+    // A file being written by another program is read again a moment later, rather than taken for not being a project.
+    let inspection;
+    try {
+        inspection = inspectProjectFile(bytes);
+    } catch (error) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        bytes = await readFile(path);
+        inspection = inspectProjectFile(bytes);
+    }
+    if (!password && inspection.encrypted) {
         pendingEncryptedComponents.add(path);
         return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
     }

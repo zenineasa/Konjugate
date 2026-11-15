@@ -233,3 +233,47 @@ test('every instance\'s copy of a shared parameter has a symbol of its own in th
     syncDefinitions(again);
     assert.deepEqual(again.sharedParameters.map((shared) => shared.symbol).sort(), symbols, 'Each copy keeps its symbol.');
 });
+
+test('a linked component\'s new version: compatible changes reach every instance, a moved port takes its relationships, a removed one is a conflict', async () => {
+    const { interfaceChanges, linkConflicts, refreshDefinition, linkCycle } = await import('../src/components.mjs');
+    let document = migrateLegacySubsystems(project());
+    document = declarePort(document, 20, { stateId: 2, name: 'Inlet' });
+    document = placeAnotherInstance(document, 20).document;
+    const definition = document.subsystemDefinitions[0];
+    definition.link = { kind: 'file', fileName: 'Plant.kjt', path: '/models/Plant.kjt', sha256: 'old' };
+    const other = document.subsystems.find((item) => item.id !== 20).id;
+
+    // Compatible: a value changed inside, the port renamed. Every instance follows; ids are kept.
+    const renamed = structuredClone(definition.document);
+    renamed.nodes.find((item) => item.name === 'Wall').states[0].initialValue = 111;
+    renamed.component.ports[0].name = 'Heat in';
+    assert.equal(interfaceChanges(definition.document, renamed).compatible, true);
+    const wallIds = document.nodes.filter((item) => item.name === 'Wall').map((item) => item.id).sort();
+    let refreshed = refreshDefinition(document, definition.id, renamed, { link: { sha256: 'new' } }).document;
+    assert.deepEqual(refreshed.nodes.filter((item) => item.name === 'Wall').map((item) => [item.id, item.states[0].initialValue]).sort((a, b) => a[0] - b[0]), wallIds.map((id) => [id, 111]));
+    assert.equal(refreshed.subsystemDefinitions[0].link.sha256, 'new');
+
+    // The port moved to Wall's temperature (same symbol and unit): Heat, from outside, now ends at each instance's Wall.
+    const moved = structuredClone(definition.document);
+    moved.component.ports[0].stateId = moved.nodes.find((item) => item.name === 'Wall').states[0].id;
+    assert.equal(interfaceChanges(definition.document, moved).compatible, true);
+    refreshed = refreshDefinition(document, definition.id, moved).document;
+    const heat = refreshed.edges.find((item) => item.name === 'Heat');
+    assert.equal(heat.target.nodeId, 3, 'The relationship follows the port to Wall.');
+    assert.equal(heat.equationModel.output.stateId, 4);
+
+    // Removed: a conflict, listed per instance; "Update and remove" removes what was connected to it.
+    const removed = structuredClone(definition.document);
+    removed.component.ports = [];
+    assert.deepEqual(interfaceChanges(definition.document, removed).conflicts.map((item) => [item.kind, item.change]), [['port', 'removed']]);
+    const conflicts = linkConflicts(document, definition.id, removed);
+    assert.deepEqual(conflicts.map((item) => [item.subsystemId, item.edgeIds]), [[20, [12]]]);
+    refreshed = refreshDefinition(document, definition.id, removed, { removeConflicts: true }).document;
+    assert.equal(refreshed.edges.some((item) => item.name === 'Heat'), false);
+    assert.ok(refreshed.subsystems.some((item) => item.id === other));
+
+    // A file that would contain itself is refused, with the chain named.
+    const nested = { component: { name: 'Outer' }, subsystemDefinitions: [{ id: 1, link: { kind: 'file', fileName: 'Plant.kjt', path: '/models/Plant.kjt' }, document: { component: { name: 'Plant' } } }] };
+    assert.deepEqual(linkCycle(nested, { path: '/models/Plant.kjt' }, { source: { fileName: 'Outer.kjt', path: '/models/Outer.kjt' } }), ['Outer.kjt', 'Plant.kjt']);
+    assert.equal(linkCycle(nested, { path: '/models/Other.kjt' }), null);
+});

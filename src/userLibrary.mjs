@@ -100,12 +100,19 @@ export function buildUserComponentTemplate({ componentDocument, name, descriptio
 }
 
 // The same template with a new name, description or section. Anything left out stays as it was.
-export function changeUserTemplate(template, { name = template.name, description = template.description ?? '', section = template.section ?? [] }) {
+// A component's document can be replaced too (a library component edited and saved again), keeping its id, so every model
+// linked to it follows.
+export function changeUserTemplate(template, { name = template.name, description = template.description ?? '', section = template.section ?? [], document = null }) {
     const title = String(name).trim();
     if (!title) throw new Error('A template needs a name.');
     const rest = { ...template };
     delete rest.section;
     delete rest.description;
+    if (document) {
+        if (template.kind !== 'component') throw new Error('Only a component\'s document can be replaced.');
+        rest.document = { ...structuredClone(document), component: { ...(document.component ?? {}), name: title } };
+        rest.savedAt = new Date().toISOString();
+    }
     return validateComponentTemplate({
         ...rest,
         name: title,

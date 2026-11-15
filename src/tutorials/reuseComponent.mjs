@@ -109,9 +109,16 @@ const steps = Object.freeze([
         done: ({ ui }) => ui.libraryComponents.includes(values.subsystem)
     },
     {
+        id: 'fromLibrary',
+        title: 'Place it from your library',
+        text: `Open the component library (the parts button in the toolbar), find "${values.subsystem}" under My library, click it and press Place. Placed from the library it stays linked: change it there (Edit component, then Save to my library) and every model that uses it follows.`,
+        target: (ui) => (ui.componentPlaceOpen ? '#componentPlaceConfirm' : ui.libraryOpen ? ui.libraryTemplateOf(values.subsystem) ?? '#componentLibrarySearch' : '#componentLibraryButton'), skip: 'placeFromLibrary', subsystem: values.subsystem,
+        done: ({ document }) => (document?.subsystemDefinitions ?? []).some((definition) => definition.link?.kind === 'library')
+    },
+    {
         id: 'finish',
         title: 'You have reused a part',
-        text: 'In another model, open the component library and place "Pair" from My library; it stays linked, so changing it in the library updates every model that uses it. A subsystem can also be saved as a file of its own, with "Save as component file…", and placed from one with Add, then Component from file. "Make this one separate" gives one instance its own copy to change.',
+        text: 'Any model can place "Pair" from My library the same way, and follows it when it changes. A subsystem can also be saved as a file of its own, with "Save as component file…", and placed from one with Add, then Component from file; on the desktop, a model linked to a file follows it when the file is saved. "Make this one separate", or Detach, gives one instance its own copy to change.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

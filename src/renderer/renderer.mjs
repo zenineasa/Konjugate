@@ -87,7 +87,7 @@ import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
-    componentDocumentOf, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, instanceParameters, instancePorts,
+    componentDocumentOf, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
 } from '../components.mjs';
 import {
@@ -1650,6 +1650,7 @@ function enterSubsystem(id) {
     activeSubsystemId = id;
     hideCards();
     refreshSubsystemView();
+    renderComponentLinkBar();
 }
 
 model.nodes.forEach(createNode);
@@ -8138,8 +8139,16 @@ function serializedSharedParameters(visibleNodeIds) {
 // in the model for undo but not written.
 function serializedSubsystemDefinitions() {
     const used = new Set(model.subsystems.filter((subsystem) => !subsystem.deleted && subsystem.definitionId != null).map((subsystem) => subsystem.definitionId));
-    const written = (model.subsystemDefinitions ?? []).filter((definition) => used.has(definition.id));
-    return written.length ? { subsystemDefinitions: structuredClone(written) } : {};
+    const written = structuredClone((model.subsystemDefinitions ?? []).filter((definition) => used.has(definition.id)));
+    written.forEach((definition) => {
+        if (!definition.link) return;
+        // A file link says where its file is from the project's folder, so the two can be moved together.
+        if (definition.link.kind === 'file' && definition.link.path) {
+            const relative = relativeComponentPath(currentProjectPath, definition.link.path);
+            if (relative) definition.link.relativePath = relative;
+        }
+    });
+    return written.length ? { subsystemDefinitions: written } : {};
 }
 
 function serializeProjectDocument() {
@@ -8272,6 +8281,7 @@ async function loadProjectDocument(document, {
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
     document = componentReadyDocument(document);
+    (document.subsystemDefinitions ?? []).forEach((definition) => { if (definition.link) delete definition.link.editing; });
     // A component file opened as a project opens like any project; a bar says what it is.
     $('#componentProjectBar').hidden = !document.component;
     projectComponentBlock = document.component ? structuredClone(document.component) : null;
@@ -8321,6 +8331,10 @@ async function loadProjectDocument(document, {
         activateResult(rootResult);
         selectSuggestedPlaybackRate();
     }
+    // Linked components are checked against their files and the library as the project opens.
+    componentLinkStates.clear();
+    if (linkedDefinitionsInUse().length) checkComponentLinks();
+    else renderComponentLinkBar();
     // The web edition says at once which plugins this project needs and cannot find, instead of leaving a run to fail.
     offerMissingPlugins(document).catch((error) => console.warn(`Could not check the project's plugins: ${error.message}`));
 }
@@ -13033,6 +13047,8 @@ const tour = createTour({
                 subsystemCardFor: currentSubsystemCardId() === null ? null : subsystemById(currentSubsystemCardId())?.name ?? null,
                 edgeBuilderOpen: !$('#edgeBuilder').classList.contains('hidden'),
                 templateDialogOpen: $('#templateDialog').open,
+                componentPlaceOpen: $('#componentPlaceDialog').open,
+                libraryTemplateOf: (name) => [...document.querySelectorAll('#componentLibraryResults [data-template-id]')].find((entry) => entry.textContent.includes(name)) ?? null,
                 libraryComponents: [...tutorialLibraryComponents],
                 insideSubsystem: (() => {
                     if (activeSubsystemId !== null) tutorialEnteredSubsystem = true;
@@ -13849,6 +13865,15 @@ const tour = createTour({
                 return document;
             }, `${step.name} connects the two`);
         },
+        placeFromLibrary: async (step) => {
+            const template = (await window.componentLibrary.list()).find((item) => item.source === 'user' && item.kind === 'component' && item.name === step.subsystem);
+            if (!template) return;
+            if (!$('#componentPlaceDialog').open) applyComponentLibraryTemplate(template);
+            await waitUntil(() => $('#componentPlaceDialog').open, 3000);
+            $('#componentPlaceCopy').checked = false;
+            $('#componentPlaceConfirm').click();
+            await waitUntil(() => model.subsystemDefinitions.some((definition) => definition.link?.kind === 'library'), 5000);
+        },
         saveSubsystemToLibrary: async (step) => {
             await waitUntil(() => !simulationRunning, 60000);
             if (activeResult) await closeResultPlayback({ confirm: false });
@@ -14041,7 +14066,10 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
             if (JSON.stringify(fileOwnership) !== JSON.stringify(savedOwnership)) copyOwnership = fileOwnership;
         }
         syncComponents();
-        const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
+        // Editing a library component in place is this window's state, not the project's: it is not written to the file.
+        const projectDocument = serializeProjectDocument();
+        (projectDocument.subsystemDefinitions ?? []).forEach((definition) => { if (definition.link) delete definition.link.editing; });
+        const content = `${JSON.stringify({ ...projectDocument, ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);
@@ -14074,6 +14102,9 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         demonstrationProject = false;
         documentController.markSaved();
         $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;
+        // An encrypted component kept in a project that is not: said, not refused (docs/subsystems.md#linked-components).
+        const encryptedComponents = linkedDefinitionsInUse().filter((definition) => definition.link.encrypted).map((definition) => definition.link.fileName);
+        if (encryptedComponents.length && !result.encrypted) $('#statusText').textContent += ` · ${encryptedComponents.join(', ')} ${encryptedComponents.length === 1 ? 'is' : 'are'} encrypted, and kept unencrypted in this project`;
         if (result.includesResults && tour.active) tutorialSavedWithResults = true;
         return true;
     } catch (error) {
@@ -16993,9 +17024,20 @@ function deleteSubsystemAction(id, { confirmed = false } = {}) {
 
 // Moves nodes into a subsystem, or out to the top level (null). Relationships stay as they are: any that now cross a
 // boundary are shown as terminals inside and drawn to the box outside. `positions`, from a drag onto a box, is undone with it.
+// Whether a subsystem lies in an instance of a linked component that is not being edited here (its contents are its file's).
+function insideLinkedInstance(subsystemId) {
+    const link = subsystemDefinitionOf(subsystemById(owningInstanceId(subsystemId)))?.link;
+    return Boolean(link && !link.editing);
+}
+
 function moveNodesToSubsystem(nodeIds, targetSubsystemId, { positions = null } = {}) {
     if (activeResult) return false;
     if (targetSubsystemId !== null && !subsystemById(targetSubsystemId)) return false;
+    const linkedEnd = [targetSubsystemId, ...nodeIds.map((nodeId) => model.nodes.find((node) => node.id === nodeId)?.subsystemId ?? null)].find((id) => id !== null && insideLinkedInstance(id));
+    if (linkedEnd !== undefined) {
+        $('#statusText').textContent = `${subsystemById(owningInstanceId(linkedEnd))?.name ?? 'That subsystem'} is linked to its component: nodes are moved in or out with Edit component, or after Detach`;
+        return false;
+    }
     const nodes = nodeIds.map((nodeId) => model.nodes.find((node) => node.id === nodeId && !node.deleted))
         .filter((node) => node && (node.subsystemId ?? null) !== targetSubsystemId);
     if (!nodes.length) return false;
@@ -17399,6 +17441,14 @@ $('#componentPlaceDialog form').addEventListener('submit', (event) => {
 
 // Places a component document as a new instance in the view being looked at, as one undo step. Returns its id, or null.
 function placeComponentDocument(componentDocument, { name, link = null }) {
+    // A component that contains this model (through its own links) cannot be placed in it.
+    const chain = link ? linkCycle(componentDocument, { path: currentProjectPath ?? undefined, templateId: undefined }, { source: link }) : null;
+    if (chain) {
+        $('#componentPlaceError').textContent = chain.at(-1) === '…'
+            ? `${name} is not placed: its components are nested more than 16 deep.`
+            : `${link.fileName ?? name} cannot be placed here: it contains ${chain.slice(1).join(', which contains ')}, which is this model.`;
+        return null;
+    }
     let placed = null;
     applyDocumentChange((document) => {
         const result = placeComponent(document, componentDocument, { parentSubsystemId: activeSubsystemId, position: freePlacementPosition(), name, link });
@@ -17473,6 +17523,328 @@ function linkInstanceToFile(subsystemId, saved) {
         return document;
     });
 }
+
+// ---- Linked components (docs/subsystems.md#linked-components) ---------------------------------------------------------
+// A component placed from a file or from My library stays linked to it: when the project opens, when its window comes back
+// to the front, and when any window saves the file, the link is checked. A change that keeps what the component offers is
+// taken in at once (one undo step); one that removes or changes a port or parameter asks; a file that cannot be found leaves
+// the project running on the copy saved with it. In the browser a file cannot be followed by path, so it is updated by
+// choosing it again.
+
+// What the last check found, by definition id: { state: 'ok' | 'missing' | 'conflict' | 'unchecked' | 'kept', ... }.
+const componentLinkStates = new Map();
+let componentLinkCheck = null;
+
+function linkedDefinitionsInUse() {
+    const used = new Set(model.subsystems.filter((subsystem) => !subsystem.deleted && subsystem.definitionId != null).map((subsystem) => subsystem.definitionId));
+    return (model.subsystemDefinitions ?? []).filter((definition) => definition.link && used.has(definition.id));
+}
+
+function linkLabel(link) {
+    return link?.kind === 'library' ? `“${link.templateName ?? 'component'}” in my library` : link?.fileName ?? 'its file';
+}
+
+// Checks every link (or those to `path`), one at a time; a check asked for while one runs runs after it.
+function checkComponentLinks({ path = null } = {}) {
+    const run = async () => {
+        for (const definition of linkedDefinitionsInUse()) {
+            if (path && definition.link.path !== path) continue;
+            if (definition.link.editing) continue;
+            try {
+                await checkComponentLink(definition.id);
+            } catch (error) {
+                console.warn(`Could not check ${linkLabel(definition.link)}: ${error.message}`);
+            }
+        }
+        renderComponentLinkBar();
+    };
+    componentLinkCheck = (componentLinkCheck ?? Promise.resolve()).then(run, run);
+    return componentLinkCheck;
+}
+
+async function currentLinkSource(link) {
+    if (link.kind === 'library') {
+        const entry = (await window.componentLibrary.list()).find((template) => template.source === 'user' && template.id === link.templateId)
+            ?? (await window.componentLibrary.list()).find((template) => template.id === link.templateId);
+        if (!entry) return { missing: true };
+        return { document: entry.document, sha256: await sha256Text(JSON.stringify(entry.document)), savedAt: entry.savedAt ?? null };
+    }
+    if (!window.componentFiles.followsPaths) return { unchecked: true };
+    const found = await window.componentFiles.resolve(link, currentProjectPath);
+    if (!found) return { missing: true };
+    const file = await window.componentFiles.read(found);
+    if (file.missing) return { missing: true };
+    if (file.requiresPassword) return { encrypted: true, path: found };
+    return { document: JSON.parse(file.content), sha256: file.sha256, savedAt: file.savedAt, path: found };
+}
+
+async function checkComponentLink(definitionId) {
+    const definition = (model.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
+    if (!definition?.link) return;
+    const source = await currentLinkSource(definition.link);
+    if (source.unchecked) { componentLinkStates.set(definitionId, { state: 'unchecked' }); return; }
+    if (source.missing) {
+        if (componentLinkStates.get(definitionId)?.state !== 'kept') componentLinkStates.set(definitionId, { state: 'missing' });
+        return;
+    }
+    if (source.encrypted) { componentLinkStates.set(definitionId, { state: 'locked', path: source.path }); return; }
+    // A file found somewhere new (moved with the project) is remembered there; this is not a change to the model.
+    if (source.path && source.path !== definition.link.path) definition.link.path = source.path;
+    if (definition.link.sha256 == null) {
+        definition.link.sha256 = source.sha256;
+        definition.link.savedAt = source.savedAt;
+    }
+    if (source.sha256 === definition.link.sha256 || source.sha256 === definition.link.behind?.sha256) {
+        componentLinkStates.set(definitionId, { state: 'ok' });
+        return;
+    }
+    const shown = componentLinkStates.get(definitionId);
+    if (shown?.state === 'conflict' && shown.source.sha256 === source.sha256) return;
+    takeLinkedVersion(definitionId, source, { automatic: true });
+}
+
+// A new version of a linked component, from its file or the library (or a file chosen with Locate or Update from file).
+function takeLinkedVersion(definitionId, source, { automatic = false } = {}) {
+    const definition = (model.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
+    if (!definition) return false;
+    const chain = linkCycle(source.document, { path: currentProjectPath ?? undefined }, { source: definition.link });
+    if (chain) {
+        componentLinkStates.set(definitionId, { state: 'cycle', chain });
+        $('#statusText').textContent = chain.at(-1) === '…'
+            ? `${linkLabel(definition.link)} is not taken in: its components are nested more than 16 deep`
+            : `${linkLabel(definition.link)} cannot be taken in: it contains ${chain.slice(1).join(', which contains ')}, which is this model`;
+        return false;
+    }
+    const changes = interfaceChanges(definition.document, source.document);
+    const link = { sha256: source.sha256, savedAt: source.savedAt, ...(source.path ? { path: source.path, relativePath: relativeComponentPath(currentProjectPath, source.path) ?? undefined } : {}) };
+    if (!changes.compatible) {
+        componentLinkStates.set(definitionId, { state: 'conflict', source, changes, conflicts: linkConflicts(serializeProjectDocument(), definitionId, source.document) });
+        renderComponentLinkBar();
+        return false;
+    }
+    const savedAt = source.savedAt ? new Date(source.savedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : null;
+    applyDocumentChange((document) => refreshDefinition(document, definitionId, source.document, { link, allocateId: allocateModelEntityId }).document,
+        `${definition.document.component?.name ?? 'Component'} updated from ${linkLabel(definition.link)}${savedAt ? ` (saved ${savedAt})` : ''}`);
+    componentLinkStates.set(definitionId, { state: 'ok' });
+    if (!automatic) renderComponentLinkBar();
+    return true;
+}
+
+// The linked component the bar is about: the one being looked inside, else the first with something to say.
+function componentLinkBarSubject() {
+    const inside = owningInstanceId(activeSubsystemId);
+    const definitionInside = subsystemDefinitionOf(subsystemById(inside));
+    if (definitionInside?.link) return definitionInside;
+    return linkedDefinitionsInUse().find((definition) => ['missing', 'conflict', 'unchecked', 'locked', 'cycle'].includes(componentLinkStates.get(definition.id)?.state)) ?? null;
+}
+
+function renderComponentLinkBar() {
+    const bar = $('#componentLinkBar');
+    const definition = componentLinkBarSubject();
+    bar.hidden = !definition;
+    if (!definition) return;
+    bar.dataset.definition = definition.id;
+    const link = definition.link;
+    const status = componentLinkStates.get(definition.id) ?? { state: 'ok' };
+    const uses = model.subsystems.filter((subsystem) => !subsystem.deleted && subsystem.definitionId === definition.id).length;
+    const name = definition.document.component?.name ?? 'Component';
+    const show = (buttons) => ['Edit', 'Update', 'Locate', 'Keep', 'Detach', 'Save', 'Discard', 'Remove', 'Old'].forEach((key) => {
+        const button = $(`#componentLink${key}`);
+        if (button) button.hidden = !buttons.includes(key);
+    });
+    let text = `${linkLabel(link)} · linked · used ${uses === 1 ? 'once' : `${uses} times`} here`;
+    let hint = link.kind === 'library' ? 'Changes are made with Edit component, and saved to the library; every model linked to it follows.'
+        : window.componentFiles.followsPaths ? 'Changes are made to the file, in a window of its own (Edit component); this model follows when it is saved.'
+            : 'In the browser, change the component by opening its file as a project, saving it, and choosing it here with Update from file.';
+    let buttons = link.kind === 'library' ? ['Edit', 'Detach'] : window.componentFiles.followsPaths ? ['Edit', 'Detach'] : ['Update', 'Detach'];
+    if (link.editing) {
+        text = `Editing ${name} from my library`;
+        hint = 'Change it here; Save to my library keeps the change for every model linked to it, Discard changes puts it back.';
+        buttons = ['Save', 'Discard'];
+    } else if (status.state === 'missing') {
+        text = link.kind === 'library' ? `${name} is no longer in my library` : `${link.fileName} cannot be found`;
+        hint = 'This model runs on the copy of it saved with the project. Locate the file, detach to keep the copy as your own, or carry on with the saved copy.';
+        buttons = link.kind === 'library' ? ['Keep', 'Detach'] : ['Locate', 'Keep', 'Detach'];
+    } else if (status.state === 'unchecked') {
+        text = `${link.fileName} is linked to a file; the browser cannot check it for changes`;
+        buttons = ['Update', 'Detach'];
+    } else if (status.state === 'locked') {
+        text = `${link.fileName} is encrypted and may have changed`;
+        hint = 'Update from file asks for its password and takes in the new version; until then the copy saved with the project is used.';
+        buttons = ['Update', 'Detach'];
+    } else if (status.state === 'cycle') {
+        text = `${linkLabel(link)} contains this model`;
+        hint = `${status.chain.join(' → ')}: a component cannot contain the model it is placed in. The copy saved with the project is used.`;
+        buttons = ['Detach'];
+    } else if (status.state === 'conflict') {
+        const lost = status.changes.conflicts.map((item) => `${item.kind} ${item.name ?? item.key} ${item.change}`).join(', ');
+        const affected = status.conflicts.map((item) => `${item.name}: ${countText(item.edgeIds.length, 'relationship')}${item.parameterKeys.length ? `, ${countText(item.parameterKeys.length, 'parameter binding')}` : ''}`).join('; ');
+        text = `${linkLabel(link)} has changed what it offers (${lost})`;
+        hint = affected ? `Connected to what is no longer offered: ${affected}. Update and remove takes the new version and removes those; Keep the old version stays on the copy saved with the project.` : 'Nothing here is connected to what changed.';
+        buttons = ['Remove', 'Old', 'Detach'];
+    } else if (link.behind) {
+        text = `${name} is behind ${linkLabel(link)}`;
+        hint = 'The old version is kept; Update from file takes in the new one.';
+        buttons = link.kind === 'library' ? ['Remove', 'Detach'] : ['Update', 'Detach'];
+    }
+    $('#componentLinkBarText').textContent = text;
+    $('#componentLinkBarHint').textContent = hint;
+    show(buttons);
+}
+
+function linkBarDefinition() {
+    return (model.subsystemDefinitions ?? []).find((item) => item.id === Number($('#componentLinkBar').dataset.definition)) ?? null;
+}
+
+$('#componentLinkEdit').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    if (definition.link.kind === 'library') {
+        // Edited here, written back when saved: one window owns the library entry for as long as it is being edited.
+        definition.link.editing = true;
+        $('#statusText').textContent = `Editing ${definition.document.component?.name ?? 'the component'}: Save to my library when done`;
+        renderComponentLinkBar();
+        if (currentSubsystemCardId() !== null) renderSubsystemEditor(currentSubsystemCardId());
+        return;
+    }
+    try {
+        await window.componentFiles.editInWindow(definition.link.path);
+        $('#statusText').textContent = `${definition.link.fileName} opened in a window of its own: this model follows when it is saved`;
+    } catch (error) {
+        $('#statusText').textContent = `${definition.link.fileName} could not be opened: ${friendlyError(error)}`;
+    }
+});
+$('#componentLinkSave').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (!definition?.link.editing) return;
+    syncComponents();
+    const instance = model.subsystems.find((subsystem) => !subsystem.deleted && subsystem.definitionId === definition.id);
+    const componentDocument = componentDocumentOf(serializeProjectDocument(), instance.id);
+    try {
+        const saved = await window.componentLibrary.updateUser(definition.link.templateId, { document: componentDocument });
+        const sha256 = await sha256Text(JSON.stringify(saved.document));
+        // Syncing above may have replaced the definition objects: the one the model holds now is the one changed.
+        const current = (model.subsystemDefinitions ?? []).find((item) => item.id === definition.id);
+        if (current?.link) delete current.link.editing;
+        takeLinkedVersion(definition.id, { document: saved.document, sha256, savedAt: saved.savedAt });
+        $('#statusText').textContent = `${saved.name} saved to my library: every model linked to it follows`;
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+    }
+    renderComponentLinkBar();
+});
+$('#componentLinkDiscard').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (!definition?.link.editing) return;
+    const link = { ...definition.link };
+    delete definition.link.editing;
+    const source = await currentLinkSource(link);
+    if (source.document) takeLinkedVersion(definition.id, { ...source, sha256: `${source.sha256}-discard` });
+    syncComponents();
+    renderComponentLinkBar();
+});
+$('#componentLinkDetach').addEventListener('click', () => {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    const instance = owningInstanceId(activeSubsystemId) ?? model.subsystems.find((subsystem) => !subsystem.deleted && subsystem.definitionId === definition.id)?.id;
+    if (instance == null) return;
+    applyDocumentChange((document) => separateInstance(document, instance), 'Detached: it is now a copy kept in this model');
+    componentLinkStates.delete(definition.id);
+    renderComponentLinkBar();
+});
+$('#componentLinkKeep').addEventListener('click', () => {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    componentLinkStates.set(definition.id, { state: 'kept' });
+    renderComponentLinkBar();
+});
+// Locate (a file that has moved) and Update from file (the browser, an encrypted file, or a kept old version): choose the
+// file, and take it in as a changed version.
+async function chooseLinkedFile() {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    let file;
+    try {
+        file = await chooseComponentFile();
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+        return;
+    }
+    if (!file) return;
+    const document_ = JSON.parse(file.content);
+    if (!document_.component) {
+        $('#statusText').textContent = `${file.fileName} is not a component file`;
+        return;
+    }
+    definition.link.fileName = file.fileName;
+    componentLinkStates.delete(definition.id);
+    if (file.sha256 === definition.link.sha256 && !definition.link.behind) {
+        if (file.path) definition.link.path = file.path;
+        $('#statusText').textContent = `${file.fileName} is the version this model already has`;
+        renderComponentLinkBar();
+        return;
+    }
+    takeLinkedVersion(definition.id, { document: document_, sha256: file.sha256, savedAt: file.savedAt, path: file.path ?? null });
+    renderComponentLinkBar();
+}
+$('#componentLinkLocate').addEventListener('click', chooseLinkedFile);
+$('#componentLinkUpdate').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (definition?.link.kind === 'library' && definition.link.behind) {
+        const source = await currentLinkSource(definition.link);
+        if (source.document) takeLinkedVersion(definition.id, source);
+        return;
+    }
+    await chooseLinkedFile();
+});
+// The version a conflict is about: the one the check found, or, if it has been checked again since, the file as it is now.
+async function conflictSource(definition) {
+    const status = componentLinkStates.get(definition.id);
+    if (status?.state === 'conflict') return status.source;
+    const source = await currentLinkSource(definition.link);
+    return source.document ? source : null;
+}
+
+// Update and remove: the new version taken in, and whatever was connected to what it no longer offers removed.
+$('#componentLinkRemove').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    const source = await conflictSource(definition);
+    if (!source) return;
+    const link = { sha256: source.sha256, savedAt: source.savedAt, ...(source.path ? { path: source.path } : {}) };
+    applyDocumentChange((document) => refreshDefinition(document, definition.id, source.document, { link, removeConflicts: true, allocateId: allocateModelEntityId }).document,
+        `${definition.document.component?.name ?? 'Component'} updated; what was connected to its removed ports and parameters was removed`);
+    componentLinkStates.set(definition.id, { state: 'ok' });
+    renderComponentLinkBar();
+});
+// Keep the old version: the copy saved with the project stays, shown as behind its file until updated.
+$('#componentLinkOld').addEventListener('click', async () => {
+    const definition = linkBarDefinition();
+    if (!definition) return;
+    const source = await conflictSource(definition);
+    if (!source) return;
+    applyDocumentChange((document) => {
+        const target = document.subsystemDefinitions.find((item) => item.id === definition.id);
+        target.link = { ...target.link, behind: { sha256: source.sha256, savedAt: source.savedAt } };
+        return document;
+    }, `${definition.document.component?.name ?? 'Component'} keeps the old version`);
+    componentLinkStates.set(definition.id, { state: 'ok' });
+    renderComponentLinkBar();
+});
+
+// For the interaction tests: what the last link checks found, by definition.
+window.__debugComponentLinks = () => [...componentLinkStates.entries()].map(([definitionId, status]) => ({ definitionId, state: status.state, bar: Number($('#componentLinkBar').dataset.definition) }));
+
+// Links are checked when the project's window comes back to the front (another program or window may have changed a file),
+// and when any window saves a file this project links.
+let componentFocusTimer = null;
+window.addEventListener('focus', () => {
+    clearTimeout(componentFocusTimer);
+    componentFocusTimer = setTimeout(() => { if (linkedDefinitionsInUse().length) checkComponentLinks(); }, 400);
+});
+window.componentFiles?.onChanged?.(({ path }) => {
+    if (linkedDefinitionsInUse().some((definition) => definition.link.path === path)) checkComponentLinks({ path });
+});
 
 // ---- The subsystem card and menu --------------------------------------------------------------------------------------
 
@@ -17665,7 +18037,9 @@ function renderNodeContextMoveTargets() {
     const container = $('#nodeContextMoveTargets');
     container.replaceChildren();
     if (activeResult || !selectedNodeIds.size) return;
+    if (insideLinkedInstance(activeSubsystemId)) return;
     const targets = subsystemMoveTargets({ subsystems: model.subsystems, activeSubsystemId });
+    targets.into = targets.into.filter((id) => !insideLinkedInstance(id));
     const what = selectedNodeIds.size === 1 ? 'this node' : `the ${selectedNodeIds.size} selected nodes`;
     const button = (target, title, detail) => {
         const element = document.createElement('button');

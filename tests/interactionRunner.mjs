@@ -7650,6 +7650,7 @@ export async function runInteractionTests(driver) {
         after = await saved();
         const linked = after.subsystems.filter((item) => item.name === 'Plant').at(-1);
         assert.equal(after.subsystemDefinitions.find((definition) => definition.id === linked.definitionId).link.fileName, 'Plant.kjt', 'Placed linked, it names its file.');
+        if (!desktop) await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('the browser cannot check it for changes')`, 'The browser does not say it cannot follow the file.');
 
         // A project that is not a component offers its subsystems: one is placed, as a copy.
         const projectPath = join(folder, 'Hierarchy.kjt');
@@ -7665,6 +7666,161 @@ export async function runInteractionTests(driver) {
         const placed = after.subsystems.filter((item) => item.name === 'Controls').at(-1);
         assert.deepEqual(after.nodes.filter((item) => item.subsystemId === placed.id).map((item) => item.name), ['Sensor']);
         await rm(folder, { recursive: true, force: true });
+    });
+
+    await run('a linked component follows its file and its library entry: compatible changes are taken in, conflicts ask, a missing file is located, edits are made where it lives', async () => {
+        const { proxy } = hierarchy;
+        const desktop = driver.capabilities.osFileOpen;
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const focus = () => evaluate(window, `window.dispatchEvent(new Event('focus'))`);
+        const barText = () => evaluate(window, `document.querySelector('#componentLinkBar').hidden ? '' : document.querySelector('#componentLinkBarText').textContent`);
+        const shownButtons = () => evaluate(window, `[...document.querySelectorAll('#componentLinkBar .componentBarButtons button')].filter((button) => !button.hidden).map((button) => button.textContent)`);
+        const linkedPlant = async () => {
+            const document_ = await saved();
+            const definition = document_.subsystemDefinitions.find((item) => item.link);
+            const instance = document_.subsystems.find((item) => item.definitionId === definition?.id);
+            return { document_, definition, instance };
+        };
+        const tankOf = async () => {
+            const { document_, instance } = await linkedPlant();
+            return document_.nodes.find((item) => item.subsystemId === instance.id && item.name.startsWith('Tank'));
+        };
+        await loadHierarchyProject();
+
+        if (desktop) {
+            // A file: Plant saved as a component, then placed linked into the model.
+            const folder = await mkdtemp(join(tmpdir(), 'konjugate-links-'));
+            const component = JSON.parse(JSON.stringify(await evaluate(window, `(() => { const project = window.__debugProject.serialize(); return project; })()`)));
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await clickElement(window, `${proxy('Plant')}.querySelector('strong')`);
+            await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden')`, 'Plant\'s card did not open.');
+            const { path: filePath, bytes } = await driver.captureExport(() => evaluate(window, `document.querySelector('#subsystemSaveFile').click()`), { fileName: 'Plant.kjt' });
+            const fileDocument = JSON.parse(await decodeProjectFile(bytes));
+            assert.ok(component.nodes.length);
+            await loadHierarchyProject();
+            await driver.answerDialogs({ open: filePath }, () => evaluate(window, `document.querySelector('#addComponentFromFile').click()`));
+            await waitFor(window, `document.querySelector('#componentPlaceDialog').open`, 'The review card did not open.');
+            await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = false; document.querySelector('#componentPlaceConfirm').click(); })()`);
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.path === ${JSON.stringify(filePath)})`, 'The component was not placed linked.');
+
+            // Changed compatibly in its file, it is taken in when the window comes back to the front.
+            const changed = structuredClone(fileDocument);
+            changed.nodes.find((item) => item.name === 'Tank').states[0].initialValue = 42;
+            await writeFile(filePath, await encodeProjectFile(JSON.stringify(changed)));
+            await focus();
+            await waitFor(window, `document.querySelector('#statusText').textContent.startsWith('Plant updated from Plant.kjt')`, 'The changed file was not taken in.');
+            assert.equal((await tankOf()).states[0].initialValue, 42);
+
+            // An edit inside a linked instance is put back: it is changed in its file.
+            const linked = await linkedPlant();
+            await evaluate(window, `(() => { const document_ = window.__debugProject.serialize(); document_.nodes.find((item) => item.id === ${(await tankOf()).id}).name = 'Tank edited'; window.__debugEdit = document_; })()`);
+            await evaluate(window, `window.__debugProject.load(window.__debugEdit, 'Hierarchy.kjt')`);
+            await waitFor(window, `window.__debugProject.serialize().nodes.some((item) => item.subsystemId === ${linked.instance.id} && item.name === 'Tank')`, 'An edit inside the linked instance was kept.');
+
+            // A relationship from outside to its level port, then a version without that port: a conflict that asks.
+            const withEdge = await saved();
+            const tank = withEdge.nodes.find((item) => item.subsystemId === linked.instance.id && item.name === 'Tank');
+            const template = withEdge.edges.find((item) => item.name === 'Heating');
+            withEdge.edges.push({ ...structuredClone(template), id: 970, name: 'Feed', target: { nodeId: tank.id, stateId: tank.states[0].id }, equationModel: { ...template.equationModel, output: { role: 'target', stateId: tank.states[0].id } }, parameters: [] });
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(withEdge)}, 'Hierarchy.kjt')`);
+            await waitFor(window, `window.__debugProject.serialize().edges.some((item) => item.name === 'Feed')`, 'The relationship to the port was not loaded.');
+            const portless = structuredClone(changed);
+            portless.component.ports = portless.component.ports.filter((port) => portless.nodes.flatMap((item) => item.states).find((state) => state.id === port.stateId)?.symbol !== 'level');
+            await writeFile(filePath, await encodeProjectFile(JSON.stringify(portless)));
+            await focus();
+            await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('has changed what it offers')`, 'The conflict was not shown.');
+            assert.deepEqual(await shownButtons(), ['Update and remove', 'Keep the old version', 'Detach']);
+            await evaluate(window, `document.querySelector('#componentLinkOld').click()`);
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.behind)`, 'Keeping the old version did not mark it behind its file.');
+            assert.ok((await saved()).edges.some((item) => item.name === 'Feed'), 'Keeping the old version kept what was connected.');
+            const portlessAgain = structuredClone(portless);
+            portlessAgain.nodes.find((item) => item.name === 'Tank').states[0].initialValue = 43;
+            await writeFile(filePath, await encodeProjectFile(JSON.stringify(portlessAgain)));
+            await focus();
+            await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('has changed what it offers')`, 'The second conflict was not shown.');
+            await evaluate(window, `document.querySelector('#componentLinkRemove').click()`);
+            await waitFor(window, `!window.__debugProject.serialize().edges.some((item) => item.name === 'Feed')`, 'Update and remove did not remove the relationship to the removed port.');
+            assert.equal((await tankOf()).states[0].initialValue, 43);
+
+            // Moved away, the file is missing: the project runs on its saved copy until it is located.
+            const movedPath = join(folder, 'Moved Plant.kjt');
+            await writeFile(movedPath, await readFile(filePath));
+            await rm(filePath);
+            await focus();
+            await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('cannot be found')`, 'The missing file was not reported.');
+            assert.deepEqual(await shownButtons(), ['Locate…', 'Keep using the saved copy', 'Detach']);
+            await driver.answerDialogs({ open: movedPath }, () => evaluate(window, `document.querySelector('#componentLinkLocate').click()`));
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.path === ${JSON.stringify(movedPath)})`, 'Locate did not follow the file.');
+
+            // Edit component opens the file in a window of its own.
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            const plantInstance = (await linkedPlant()).instance;
+            await evaluate(window, `document.querySelector('[data-subsystem-parent]')?.click()`);
+            await clickElement(window, `[...document.querySelectorAll('.subsystemLabel')].filter((label) => getComputedStyle(label.parentElement).display !== 'none').find((label) => label.querySelector('strong').textContent === ${JSON.stringify(plantInstance.name)} && label === [...document.querySelectorAll('.subsystemLabel')].filter((other) => other.querySelector('strong').textContent === ${JSON.stringify(plantInstance.name)}).at(-1)).querySelector('.subsystemOpen')`);
+            await waitFor(window, `!document.querySelector('#componentLinkBar').hidden && document.querySelector('#componentLinkBarText').textContent.includes('linked')`, 'Inside the linked instance, the bar does not say it is linked.');
+            const before = driver.allHandles();
+            await evaluate(window, `document.querySelector('#componentLinkEdit').click()`);
+            const editor = await driver.waitForNewHandle(before, {}, 15000);
+            await waitFor(editor, `document.querySelector('.documentTitle')?.textContent.includes('Moved Plant')`, 'The component did not open in its own window.', 20000);
+            await closeWhenValidated(editor, 20000);
+            await rm(folder, { recursive: true, force: true });
+        }
+
+        // My library, in both editions: a component placed from it follows the entry, and is edited in place and saved back.
+        await loadHierarchyProject();
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+        await clickElement(window, `${proxy('Controls')}.querySelector('strong')`);
+        await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden')`, 'Controls\' card did not open.');
+        await evaluate(window, `document.querySelector('#saveTemplateButton').click()`);
+        await waitFor(window, `document.querySelector('#templateDialog').open`, 'Save to my library did not open.');
+        await evaluate(window, `(() => { document.querySelector('#templateName').value = 'Sensing'; document.querySelector('#templateSubmit').click(); })()`);
+        await waitFor(window, `window.componentLibrary.list().then((templates) => templates.some((template) => template.name === 'Sensing' && template.kind === 'component'))`, 'The component was not saved to the library.');
+        const entry = (await evaluate(window, `window.componentLibrary.list()`)).find((template) => template.name === 'Sensing');
+        try {
+            await evaluate(window, `(async () => { const template = (await window.componentLibrary.list()).find((item) => item.name === 'Sensing'); document.querySelector('#templateDialog').close(); window.__debugPlaceLibrary = template; })()`);
+            await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-template-id=${JSON.stringify(entry.id)}]'))`, 'The component is not in the library panel.');
+            await evaluate(window, `document.querySelector('[data-template-id=${JSON.stringify(entry.id)}]').click()`);
+            await waitFor(window, `document.querySelector('#componentPlaceDialog').open && document.querySelector('#componentPlaceSource').textContent.startsWith('From my library')`, 'Placing from the library did not review it first.');
+            await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = false; document.querySelector('#componentPlaceConfirm').click(); })()`);
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.kind === 'library')`, 'The component was not placed linked to the library.');
+            await focus();
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.kind === 'library' && definition.link.sha256)`, 'The library link was not checked.');
+
+            // The entry changed (as another window saving it would): the instance follows.
+            const changedDocument = structuredClone(entry.document);
+            changedDocument.nodes[0].states[0].initialValue = 7;
+            await evaluate(window, `window.componentLibrary.updateUser(${JSON.stringify(entry.id)}, { document: ${JSON.stringify(changedDocument)} })`);
+            await focus();
+            await waitFor(window, `(() => { const document_ = window.__debugProject.serialize(); const definition = document_.subsystemDefinitions.find((item) => item.link?.kind === 'library'); const instance = document_.subsystems.find((item) => item.definitionId === definition.id); return document_.nodes.some((item) => item.subsystemId === instance.id && item.states[0].initialValue === 7); })()`, 'The instance did not follow its library entry.');
+
+            // Edited in place and saved back: the entry is changed.
+            const { definition, instance } = await (async () => {
+                const document_ = await saved();
+                const found = document_.subsystemDefinitions.find((item) => item.link?.kind === 'library');
+                return { definition: found, instance: document_.subsystems.find((item) => item.definitionId === found.id) };
+            })();
+            await evaluate(window, `document.querySelectorAll('.contextCard, #componentLibraryPanel').forEach((card) => { if (card.classList.contains('contextCard')) card.classList.add('hidden'); })`);
+            await evaluate(window, `(() => { document.querySelector('#closeComponentLibraryPanel')?.click(); })()`);
+            const openPoint = `[...document.querySelectorAll('.subsystemLabel')].filter((label) => getComputedStyle(label.parentElement).display !== 'none' && label.querySelector('strong').textContent === ${JSON.stringify(instance.name)}).at(-1).querySelector('.subsystemOpen')`;
+            await waitFor(window, `Boolean(${openPoint})`, 'The library instance\'s box is not shown.');
+            await clickElement(window, openPoint);
+            await waitFor(window, `!document.querySelector('#componentLinkBar').hidden && document.querySelector('#componentLinkBarText').textContent.includes('in my library')`, 'Inside the library instance, the bar does not name the library.');
+            await evaluate(window, `document.querySelector('#componentLinkEdit').click()`);
+            await waitFor(window, `document.querySelector('#componentLinkBarText').textContent.startsWith('Editing')`, 'Edit did not start editing in place.');
+            // Its node changed in its editor, then saved back to the library: the entry has the change.
+            await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.getClientRects().length && label.textContent.includes('Sensor'))`, 'The library instance\'s node is not shown.');
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.getClientRects().length && label.textContent.includes('Sensor')).click()`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
+            await evaluate(window, `(() => { const input = document.querySelector('#nodeEditorStates input[data-field="value"]'); input.value = '9'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); })()`);
+            await waitFor(window, `window.__debugProject.serialize().nodes.some((item) => item.subsystemId === ${instance.id} && item.states[0].initialValue === 9)`, 'The value was not changed.');
+            await evaluate(window, `document.querySelector('#componentLinkSave').click()`);
+            await waitFor(window, `window.componentLibrary.list().then((templates) => templates.find((template) => template.id === ${JSON.stringify(entry.id)})?.document.nodes[0].states[0].initialValue === 9)`, 'Saving did not change the library entry.');
+            await waitFor(window, `!document.querySelector('#componentLinkBarText').textContent.startsWith('Editing')`, 'Saving did not end editing.');
+            assert.ok(definition);
+        } finally {
+            await evaluate(window, `window.componentLibrary.list().then((templates) => Promise.all(templates.filter((template) => template.source === 'user' && template.name === 'Sensing').map((template) => window.componentLibrary.removeUser(template.id))))`);
+        }
     });
 
     await run('a subsystem is a component: another instance follows edits, ports are named, parameters exposed per instance, and copies are separate', async () => {
@@ -9244,7 +9400,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('reuseComponent')`), true);
         await waitForStep('welcome', 20000);
         await press('.tourFloating .tourPrimary');
-        for (const step of ['fold', 'openCard', 'port', 'expose', 'another', 'ownValue', 'connect', 'run', 'library']) {
+        for (const step of ['fold', 'openCard', 'port', 'expose', 'another', 'ownValue', 'connect', 'run', 'library', 'fromLibrary']) {
             await waitForStep(step, step === 'library' ? 120000 : 20000);
             await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${step} offered no Skip this step.`);
             await press('.tourFloating .tourSkipStep');
@@ -9253,13 +9409,14 @@ export async function runInteractionTests(driver) {
         }
         assert.equal(await evaluate(window, `window.__debugTour.step()`), 'finish');
         const saved = await evaluate(window, `window.__debugProject.serialize()`);
-        const pairs = saved.subsystems.filter((subsystem) => subsystem.definitionId != null);
+        const pairs = saved.subsystems.filter((subsystem) => subsystem.definitionId != null && !saved.subsystemDefinitions.find((definition) => definition.id === subsystem.definitionId)?.link);
         assert.equal(pairs.length, 2, 'Two instances.');
         assert.equal(new Set(pairs.map((subsystem) => subsystem.definitionId)).size, 1, 'Of one component.');
-        const definition = saved.subsystemDefinitions[0].document;
+        assert.ok(saved.subsystemDefinitions.some((item) => item.link?.kind === 'library'), 'A third, placed from my library, is linked to it.');
+        const definition = saved.subsystemDefinitions.find((item) => item.id === pairs[0].definitionId).document;
         assert.ok(definition.component.ports.some((port) => port.name === 'Outlet'), 'The port is named.');
         assert.ok(definition.sharedParameters.some((shared) => shared.exposed && shared.symbol === 'conductance'), 'Conductance is exposed.');
-        assert.deepEqual(saved.sharedParameters.filter((shared) => shared.symbol.startsWith('conductance')).map((shared) => [shared.symbol, shared.value]).sort((a, b) => a[1] - b[1]), [['conductance2', 10], ['conductance', 50]], 'Each instance has its own conductance, under a symbol of its own.');
+        assert.deepEqual(saved.sharedParameters.filter((shared) => pairs.some((pair) => pair.id === shared.subsystemId) && shared.symbol.startsWith('conductance')).map((shared) => [shared.symbol, shared.value]).sort((a, b) => a[1] - b[1]), [['conductance2', 10], ['conductance', 50]], 'Each instance has its own conductance, under a symbol of its own.');
         assert.ok(saved.edges.some((edge) => edge.name === 'Link'), 'The two are connected.');
         assert.ok((await evaluate(window, `window.componentLibrary.list()`)).some((template) => template.source === 'user' && template.kind === 'component' && template.name === 'Pair'), 'The component is in my library.');
         await press('.tourFloating .tourPrimary');

@@ -330,7 +330,9 @@ export function syncDefinitions(document, { preferredSubsystemId = null, allocat
             }
         });
         if (!differing.length) continue;
-        if (definition.link) {
+        // A linked component is changed where it lives (its file, or the library), unless it is being edited here (a library
+        // component's Edit), when it is written back as a local one is until it is saved or discarded.
+        if (definition.link && !definition.link.editing) {
             for (const extract of differing) {
                 const { document: expanded, removedEdgeIds } = expandInstance(document, extract.id, { allocateId: allocate });
                 Object.assign(document, expanded);
@@ -669,4 +671,139 @@ export function stripComponents(document) {
     (flat.sharedParameters ?? []).forEach((shared) => { delete shared.subsystemId; delete shared.exposed; });
     (flat.edges ?? []).forEach((edge) => delete edge.subsystemId);
     return flat;
+}
+
+// ---- Linked components (docs/proposals/subsystemComponents.md#linked-files-stage-4) -----------------------------------
+
+// What a component offers: its declared ports (key, the state's symbol and unit, direction) and exposed parameters (key,
+// symbol, unit). This, not the inside, is what other models depend on.
+export function componentInterface(componentDocument) {
+    const states = new Map();
+    (componentDocument?.nodes ?? []).forEach((node) => (node.states ?? []).forEach((state) => states.set(state.id, state)));
+    return {
+        ports: (componentDocument?.component?.ports ?? []).map((port) => ({
+            key: port.key, stateId: port.stateId, symbol: states.get(port.stateId)?.symbol ?? null, unit: states.get(port.stateId)?.unit ?? '', direction: port.direction ?? 'both', name: port.name ?? null
+        })),
+        parameters: (componentDocument?.sharedParameters ?? []).filter((shared) => shared.exposed).map((shared) => ({ key: shared.id, symbol: shared.symbol, unit: shared.unit ?? '', name: shared.name }))
+    };
+}
+
+// How a new version of a component differs from the one a project holds, by key: ports and parameters added, renamed or
+// bound to another state of the same symbol and unit are compatible; ones removed, or whose symbol, unit or direction
+// changed, are conflicts.
+export function interfaceChanges(previousDocument, nextDocument) {
+    const before = componentInterface(previousDocument);
+    const after = componentInterface(nextDocument);
+    const conflicts = [];
+    before.ports.forEach((port) => {
+        const next = after.ports.find((candidate) => candidate.key === port.key);
+        if (!next) conflicts.push({ kind: 'port', key: port.key, name: port.name ?? port.symbol, change: 'removed' });
+        else if (next.symbol !== port.symbol || next.unit !== port.unit || next.direction !== port.direction) conflicts.push({ kind: 'port', key: port.key, name: port.name ?? port.symbol, change: 'changed' });
+    });
+    before.parameters.forEach((parameter) => {
+        const next = after.parameters.find((candidate) => candidate.key === parameter.key);
+        if (!next) conflicts.push({ kind: 'parameter', key: parameter.key, name: parameter.name, change: 'removed' });
+        else if (next.symbol !== parameter.symbol || next.unit !== parameter.unit) conflicts.push({ kind: 'parameter', key: parameter.key, name: parameter.name, change: 'changed' });
+    });
+    return {
+        compatible: !conflicts.length, conflicts,
+        added: [...after.ports.filter((port) => !before.ports.some((candidate) => candidate.key === port.key)).map((port) => ({ kind: 'port', key: port.key })),
+            ...after.parameters.filter((parameter) => !before.parameters.some((candidate) => candidate.key === parameter.key)).map((parameter) => ({ kind: 'parameter', key: parameter.key }))]
+    };
+}
+
+// For an incompatible new version: per instance, the relationships from outside connected to ports that are removed or
+// changed, and the parameter bindings to parameters that are. `[{ subsystemId, name, edgeIds, parameterKeys }]`.
+export function linkConflicts(document, definitionId, nextDocument) {
+    const definition = (document.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
+    if (!definition) return [];
+    const { conflicts } = interfaceChanges(definition.document, nextDocument);
+    const portKeys = new Set(conflicts.filter((item) => item.kind === 'port').map((item) => item.key));
+    const parameterKeys = new Set(conflicts.filter((item) => item.kind === 'parameter').map((item) => item.key));
+    const affected = (definition.document.component?.ports ?? []).filter((port) => portKeys.has(port.key)).map((port) => port.stateId);
+    return (document.subsystems ?? []).filter((subsystem) => subsystem.definitionId === definitionId).map((subsystem) => {
+        const members = subsystemMembers(document, subsystem.id);
+        const insideNodes = new Set(members.nodes.map((node) => node.id));
+        const stateIds = new Set(members.nodes.flatMap((node) => (node.states ?? []).filter((state) => affected.includes(state.definitionKey)).map((state) => state.id)));
+        const edgeIds = (document.edges ?? []).filter((edge) => {
+            const sourceInside = insideNodes.has(endpointNodeId(edge.source));
+            const targetInside = insideNodes.has(endpointNodeId(edge.target));
+            if (sourceInside === targetInside) return false;
+            const end = sourceInside ? edge.source : edge.target;
+            return stateIds.has(end?.stateId);
+        }).map((edge) => edge.id);
+        const boundKeys = (subsystem.parameterValues ?? []).filter((value) => parameterKeys.has(value.parameterKey)).map((value) => value.parameterKey);
+        return { subsystemId: subsystem.id, name: subsystem.name, edgeIds, parameterKeys: boundKeys };
+    }).filter((item) => item.edgeIds.length || item.parameterKeys.length);
+}
+
+// Takes a new version of a linked component into the project: the cached document replaced, every instance expanded again
+// from it, and relationships from outside to a port that now names another state moved to that state. With
+// `removeConflicts`, relationships and bindings to what is no longer offered are removed first ("Update and remove").
+// Returns `{ document, removedEdgeIds }`.
+export function refreshDefinition(document, definitionId, nextDocument, { link = null, removeConflicts = false, allocateId = null } = {}) {
+    let next = clone(document);
+    const definition = next.subsystemDefinitions.find((item) => item.id === definitionId);
+    if (!definition) throw new Error('No such component in this project.');
+    const removed = [];
+    if (removeConflicts) {
+        linkConflicts(next, definitionId, nextDocument).forEach((conflict) => {
+            removed.push(...conflict.edgeIds);
+            const record = next.subsystems.find((subsystem) => subsystem.id === conflict.subsystemId);
+            record.parameterValues = (record.parameterValues ?? []).filter((value) => !conflict.parameterKeys.includes(value.parameterKey));
+            if (!record.parameterValues.length) delete record.parameterValues;
+        });
+        next.edges = next.edges.filter((edge) => !removed.includes(edge.id));
+    }
+    // A port bound to another state now: relationships from outside follow it, by the port's key.
+    const before = componentInterface(definition.document).ports;
+    const after = componentInterface(nextDocument).ports;
+    const moved = before.map((port) => [port, after.find((candidate) => candidate.key === port.key)]).filter(([port, nextPort]) => nextPort && nextPort.stateId !== port.stateId);
+    const instanceIds = next.subsystems.filter((subsystem) => subsystem.definitionId === definitionId).map((subsystem) => subsystem.id);
+    const pending = instanceIds.flatMap((subsystemId) => {
+        const members = subsystemMembers(next, subsystemId);
+        const states = new Map(members.nodes.flatMap((node) => (node.states ?? []).map((state) => [state.definitionKey, { stateId: state.id, nodeId: node.id }])));
+        return moved.map(([port, nextPort]) => ({ subsystemId, from: states.get(port.stateId), toKey: nextPort.stateId })).filter((item) => item.from);
+    });
+    definition.document = clone(nextDocument);
+    if (link) definition.link = { ...(definition.link ?? {}), ...clone(link) };
+    delete definition.link?.behind;
+    const allocate = allocateId ?? idAllocator(next);
+    for (const subsystemId of instanceIds) {
+        const { document: expanded, removedEdgeIds } = expandInstance(next, subsystemId, { allocateId: allocate });
+        next = expanded;
+        removed.push(...removedEdgeIds);
+    }
+    pending.forEach(({ subsystemId, from, toKey }) => {
+        const members = subsystemMembers(next, subsystemId);
+        const target = members.nodes.flatMap((node) => (node.states ?? []).map((state) => ({ node, state }))).find((item) => item.state.definitionKey === toKey);
+        if (!target) return;
+        next.edges.forEach((edge) => {
+            ['source', 'target'].forEach((role) => {
+                if (edge[role]?.stateId !== from.stateId) return;
+                edge[role] = { ...edge[role], nodeId: target.node.id, stateId: target.state.id };
+                Object.assign(edge, remapIds(edge, new Map([[from.stateId, target.state.id]])));
+            });
+        });
+    });
+    return { document: next, removedEdgeIds: [...new Set(removed)] };
+}
+
+// The chain of links a component would close into a loop if placed where `here` is (`{ path }` for a file project, or
+// `{ templateId }`), or that is deeper than `maxDepth`: the names along it, or null when there is none.
+export function linkCycle(componentDocument, here, { maxDepth = 16, source = null } = {}) {
+    const same = (link) => link && ((here.path && link.path && link.path === here.path) || (here.templateId && link.templateId === here.templateId));
+    const visit = (document, chain) => {
+        if (chain.length > maxDepth) return [...chain, '…'];
+        for (const definition of document?.subsystemDefinitions ?? []) {
+            const link = definition.link;
+            const name = link?.fileName ?? link?.templateName ?? definition.document?.component?.name ?? 'a component';
+            if (same(link)) return [...chain, name];
+            const deeper = visit(definition.document, [...chain, name]);
+            if (deeper) return deeper;
+        }
+        return null;
+    };
+    if (source && same(source)) return [source.fileName ?? source.templateName ?? 'it'];
+    return visit(componentDocument, [source?.fileName ?? source?.templateName ?? componentDocument?.component?.name ?? 'It']);
 }

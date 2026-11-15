@@ -11,7 +11,7 @@ export const graphFragmentVersion = 1;
 const isIdKey = (key) => key === 'id' || key.endsWith('Id');
 const isIdListKey = (key) => key.endsWith('Ids');
 
-function collectEntityIds(value, found = []) {
+export function collectEntityIds(value, found = []) {
     if (Array.isArray(value)) {
         value.forEach((item) => collectEntityIds(item, found));
     } else if (value && typeof value === 'object') {
@@ -23,7 +23,8 @@ function collectEntityIds(value, found = []) {
     return found;
 }
 
-function remapIds(value, ids) {
+// Exported for components (src/components.mjs), which renumber a whole subsystem by the same rule.
+export function remapIds(value, ids) {
     if (Array.isArray(value)) return value.map((item) => remapIds(item, ids));
     if (!value || typeof value !== 'object') return value;
     return Object.fromEntries(Object.entries(value).map(([key, child]) => {
@@ -60,6 +61,14 @@ export function fragmentSharedParameterReferences(fragment) {
     return [...found];
 }
 
+function forgetDefinitionKeys(value) {
+    if (Array.isArray(value)) value.forEach(forgetDefinitionKeys);
+    else if (value && typeof value === 'object') {
+        delete value.definitionKey;
+        Object.values(value).forEach(forgetDefinitionKeys);
+    }
+}
+
 export function validateGraphFragment(fragment) {
     if (fragment?.format !== graphFragmentFormat || fragment.version !== graphFragmentVersion ||
         !Array.isArray(fragment.nodes) || !fragment.nodes.length || !Array.isArray(fragment.edges) ||
@@ -80,6 +89,8 @@ export function createGraphFragment(document, selectedNodeIds, { includeSharedPa
         includedNodeIds.has(edge.source?.nodeId) && includedNodeIds.has(edge.target?.nodeId)
     )).map((edge) => structuredClone(edge));
     if (!nodes.length) return null;
+    // A copy is made of nothing: it is not part of the component the original was expanded from (src/components.mjs).
+    forgetDefinitionKeys([nodes, edges]);
     const fragment = { format: graphFragmentFormat, version: graphFragmentVersion, nodes, edges };
     if (includeSharedParameters) {
         const linked = new Set(fragmentSharedParameterReferences(fragment));

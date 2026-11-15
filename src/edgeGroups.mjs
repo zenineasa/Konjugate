@@ -123,7 +123,10 @@ export function hydrateEdgeGroups(document, registerId) {
         parameters.forEach((parameter) => {
             registerId(parameter.id, `Every parameter in edge group “${group.name ?? group.id}” must have a unique positive integer id.`);
         });
+        // Fields this module does not know (a component's `definitionKey` and `subsystemId`, or a newer Konjugate's) are kept.
+        const { id: unusedId, name: unusedName, memberNodeIds: unusedMembers, color: unusedColor, definition: unusedDefinition, ...extraFields } = group;
         return {
+            ...(Object.keys(extraFields).length ? { extraFields: structuredClone(extraFields) } : {}),
             id: group.id,
             name: group.name || 'Untitled edge group',
             memberNodeIds,

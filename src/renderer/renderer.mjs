@@ -87,6 +87,10 @@ import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs'
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
+    componentDocumentOf, declarePort, describeComponentDocument, exposeParameter, instanceCount, instanceParameters, instancePorts,
+    migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
+} from '../components.mjs';
+import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
     subsystemLocations, subsystemMoveTargets
 } from '../subsystems.mjs';
@@ -386,6 +390,20 @@ function hydrateProjectDocument(document) {
         stateIdsByNode.set(node.id, stateIds);
     });
     const subsystems = hydrateSubsystems(document, registerId);
+    // Component definitions (src/components.mjs): each a sealed document with ids of its own, so only the entry's id is
+    // the project's.
+    const subsystemDefinitions = (document.subsystemDefinitions ?? []).map((definition) => {
+        registerId(definition.id, 'Every subsystem definition must have a unique positive integer id.');
+        if (!definition.document || typeof definition.document !== 'object' || !Array.isArray(definition.document.nodes)) {
+            throw new Error(`Subsystem definition ${definition.id} has no component document.`);
+        }
+        return structuredClone(definition);
+    });
+    subsystems.forEach((subsystem) => {
+        if (subsystem.definitionId != null && !subsystemDefinitions.some((definition) => definition.id === subsystem.definitionId)) {
+            throw new Error(`Subsystem “${subsystem.name}” names a definition the project does not have.`);
+        }
+    });
     // Registered before the edges loop below: a group's shared parameters are registered exactly
     // once here, against the group's own definition, so a member edge's own copy of those same
     // parameter ids (see edgeGroups.mjs) is recognized and skipped rather than rejected as a
@@ -457,6 +475,7 @@ function hydrateProjectDocument(document) {
         nodes,
         relationships,
         subsystems,
+        subsystemDefinitions,
         edgeGroups
     };
 }
@@ -738,6 +757,7 @@ function updateSelectionActionControls() {
 function recordHistory(action) {
     if (activeResult) return false;
     documentController.record(action);
+    scheduleComponentSync();
     return true;
 }
 
@@ -747,6 +767,7 @@ function undo() {
     clearSelection();
     hideCards();
     documentController.undo();
+    scheduleComponentSync();
 }
 
 function redo() {
@@ -755,6 +776,7 @@ function redo() {
     clearSelection();
     hideCards();
     documentController.redo();
+    scheduleComponentSync();
 }
 
 documentController.subscribe(updateHistoryControls);
@@ -1505,19 +1527,28 @@ function refreshSubsystemView() {
         activeSubsystemId = current?.parentSubsystemId ?? null;
     }
     clearSelection();
-    nodeObjects.forEach((object, id) => {
-        const definition = object.userData.definition;
-        object.visible = !definition.deleted && definition.subsystemId === activeSubsystemId;
-    });
-    subsystemObjects.forEach((object) => {
-        const definition = object.userData.definition;
-        object.visible = !definition.deleted && definition.parentSubsystemId === activeSubsystemId;
-    });
-    renderSubsystemBreadcrumb();
+    applySubsystemVisibility();
     // Laid out afresh for the view just entered, from where its contents are now.
     subsystemTerminalSignature = '';
     updateRelationships();
     updateModelStatus();
+}
+
+// Which nodes and boxes the view being looked at shows, and the path at the top of it.
+function applySubsystemVisibility() {
+    for (let current = model.subsystems.find((item) => item.id === activeSubsystemId); activeSubsystemId !== null && (!current || current.deleted);
+        current = model.subsystems.find((item) => item.id === activeSubsystemId)) {
+        activeSubsystemId = current?.parentSubsystemId ?? null;
+    }
+    nodeObjects.forEach((object) => {
+        const definition = object.userData.definition;
+        object.visible = !definition.deleted && (definition.subsystemId ?? null) === activeSubsystemId;
+    });
+    subsystemObjects.forEach((object) => {
+        const definition = object.userData.definition;
+        object.visible = !definition.deleted && (definition.parentSubsystemId ?? null) === activeSubsystemId;
+    });
+    renderSubsystemBreadcrumb();
 }
 
 // The path at the top of the canvas while inside a subsystem. The current name is a button that renames it in place.
@@ -1555,6 +1586,8 @@ function renderSubsystemBreadcrumb() {
 }
 
 function enterSubsystem(id) {
+    // Leaving an instance is when what was changed in it reaches the others (src/components.mjs).
+    syncComponents();
     activeSubsystemId = id;
     hideCards();
     refreshSubsystemView();
@@ -8033,6 +8066,14 @@ function serializedSharedParameters(visibleNodeIds) {
     return written.length ? { sharedParameters: structuredClone(written) } : {};
 }
 
+// The definitions the subsystems shown in the project use; one no instance uses any longer (deleted, dissolved) is kept
+// in the model for undo but not written.
+function serializedSubsystemDefinitions() {
+    const used = new Set(model.subsystems.filter((subsystem) => !subsystem.deleted && subsystem.definitionId != null).map((subsystem) => subsystem.definitionId));
+    const written = (model.subsystemDefinitions ?? []).filter((definition) => used.has(definition.id));
+    return written.length ? { subsystemDefinitions: structuredClone(written) } : {};
+}
+
 function serializeProjectDocument() {
     const visibleNodes = model.nodes.filter((node) => !node.deleted);
     const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
@@ -8050,6 +8091,7 @@ function serializeProjectDocument() {
                 visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
             ))
             .map((edge) => relationshipToDocument(edge, modelCodecContext)),
+        ...serializedSubsystemDefinitions(),
         subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => subsystemToDocument(subsystem, {
             position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
             // A terminal moved for an edge that no longer crosses the boundary has nothing left to place.
@@ -8068,6 +8110,7 @@ function serializeProjectDocument() {
         edgeGroups: model.edgeGroups
             .filter((group) => !group.deleted)
             .map((group) => ({
+                ...structuredClone(group.extraFields ?? {}),
                 id: group.id,
                 name: group.name,
                 memberNodeIds: group.memberNodeIds.filter((id) => visibleNodeIds.has(id)),
@@ -8157,6 +8200,9 @@ async function loadProjectDocument(document, {
     discardAssistantProposal();
     hideAssistantPanel();
     demonstrationProject = false;
+    // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
+    // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
+    document = componentReadyDocument(document);
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
@@ -8174,6 +8220,7 @@ async function loadProjectDocument(document, {
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
+    model.subsystemDefinitions = nextModel.subsystemDefinitions;
     // Edge groups too: the project's own, or none, never the ones of the project before.
     model.edgeGroups.splice(0, model.edgeGroups.length, ...nextModel.edgeGroups);
     model.sharedParameters = nextModel.sharedParameters;
@@ -8215,6 +8262,7 @@ function replaceModelContents(document) {
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
+    model.subsystemDefinitions = nextModel.subsystemDefinitions;
     // Edge groups too: the project's own, or none, never the ones of the project before.
     model.edgeGroups.splice(0, model.edgeGroups.length, ...nextModel.edgeGroups);
     model.sharedParameters = nextModel.sharedParameters;
@@ -16695,7 +16743,21 @@ function dissolveSubsystemAction(id) {
     const members = model.nodes.filter((node) => node.subsystemId === id);
     const children = model.subsystems.filter((candidate) => candidate.parentSubsystemId === id);
     const contents = subsystemContents({ subsystems: model.subsystems, nodes: model.nodes, subsystemId: id });
+    // Its contents are no longer made from its definition: they lose their keys, and the subsystems in it become plain
+    // (each then gets a definition of its own). Undo puts it all back.
+    const inside = new Set(contents.allNodeIds);
+    const keyed = [
+        ...model.nodes.filter((node) => inside.has(node.id)),
+        ...model.relationships.filter((edge) => inside.has(edge.source) || inside.has(edge.target))
+    ];
+    const keyedBefore = keyed.map((entity) => [entity, structuredClone({ extraFields: entity.extraFields, states: entity.states, sourceTerms: entity.sourceTerms, parameters: entity.parameters })]);
+    const nestedBefore = model.subsystems.filter((candidate) => contents.nestedSubsystemIds.includes(candidate.id)).map((candidate) => [candidate, candidate.definitionKey]);
     const apply = (dissolved) => {
+        keyedBefore.forEach(([entity, saved]) => {
+            if (dissolved) forgetDefinitionKeys(entity);
+            else Object.entries(structuredClone(saved)).forEach(([key, value]) => { if (value === undefined) delete entity[key]; else entity[key] = value; });
+        });
+        nestedBefore.forEach(([candidate, key]) => { if (dissolved) delete candidate.definitionKey; else if (key !== undefined) candidate.definitionKey = key; });
         subsystem.deleted = dissolved;
         members.forEach((node) => { node.subsystemId = dissolved ? parentId : id; });
         children.forEach((child) => { child.parentSubsystemId = dissolved ? parentId : id; });
@@ -16751,7 +16813,16 @@ function moveNodesToSubsystem(nodeIds, targetSubsystemId, { positions = null } =
         .filter((node) => node && (node.subsystemId ?? null) !== targetSubsystemId);
     if (!nodes.length) return false;
     const previous = new Map(nodes.map((node) => [node.id, node.subsystemId ?? null]));
+    // A node that changes instance loses its keys, as do the relationships at it (forgetDefinitionKeys); undo puts them back.
+    const leaving = nodes.filter((node) => owningInstanceId(previous.get(node.id)) !== owningInstanceId(targetSubsystemId));
+    const leavingIds = new Set(leaving.map((node) => node.id));
+    const touched = model.relationships.filter((edge) => leavingIds.has(edge.source) || leavingIds.has(edge.target));
+    const keyedBefore = [...leaving, ...touched].map((entity) => [entity, structuredClone({ extraFields: entity.extraFields, states: entity.states, sourceTerms: entity.sourceTerms, parameters: entity.parameters })]);
     const apply = (moved) => {
+        keyedBefore.forEach(([entity, saved]) => {
+            if (moved) forgetDefinitionKeys(entity);
+            else Object.entries(structuredClone(saved)).forEach(([key, value]) => { if (value === undefined) delete entity[key]; else entity[key] = value; });
+        });
         nodes.forEach((node) => { node.subsystemId = moved ? targetSubsystemId : previous.get(node.id); });
         positions?.[moved ? 'to' : 'from'].forEach((position, nodeId) => nodeObjects.get(nodeId)?.position.copy(position));
         hideCards();
@@ -16761,6 +16832,200 @@ function moveNodesToSubsystem(nodeIds, targetSubsystemId, { positions = null } =
     recordHistory({ undo: () => apply(false), redo: () => apply(true) });
     $('#statusText').textContent = `${nodes.length === 1 ? nodes[0].title : countText(nodes.length, 'node')} moved to ${subsystemPathName(targetSubsystemId)}`;
     return true;
+}
+
+// ---- Components on the canvas (src/components.mjs, docs/subsystems.md#components) ----------------------------------------
+// The canvas edits the flat graph as always. After a change, the instance it was made in is written back to its definition
+// and every other instance of it is expanded again; the result is applied to the canvas in place, entity by entity, so the
+// objects the undo history holds stay the ones on screen. It runs a moment after editing stops (never while a field is
+// being typed in), when the view changes, and before a save or a run.
+
+// A document ready for the canvas: plain subsystems made instances of definitions of their own, definitions in step.
+function componentReadyDocument(document) {
+    const next = structuredClone(document);
+    if (!(next.subsystems ?? []).length) return next;
+    migrateLegacySubsystems(next);
+    syncDefinitions(next);
+    return next;
+}
+
+let componentSyncTimer = null;
+function scheduleComponentSync() {
+    if (!model.subsystems.some((subsystem) => !subsystem.deleted)) return;
+    clearTimeout(componentSyncTimer);
+    componentSyncTimer = setTimeout(() => {
+        componentSyncTimer = null;
+        // Not while a field is being typed in: the editor showing it would be redrawn under the person's cursor.
+        const active = document.activeElement;
+        if (active && active.closest?.('.contextCard') && active.matches?.('input, textarea, math-field, [contenteditable="true"]')) {
+            scheduleComponentSync();
+            return;
+        }
+        syncComponents();
+    }, 700);
+}
+
+// The project-level instance a subsystem lies in (itself, if it is one), or null.
+function owningInstanceId(subsystemId) {
+    const seen = new Set();
+    for (let current = model.subsystems.find((item) => item.id === subsystemId); current && !seen.has(current.id);
+        current = model.subsystems.find((item) => item.id === current.parentSubsystemId)) {
+        seen.add(current.id);
+        if (current.definitionId != null && !current.deleted) return current.id;
+    }
+    return null;
+}
+
+// Brings definitions and instances in step now. Returns true if anything on the canvas changed.
+function syncComponents() {
+    clearTimeout(componentSyncTimer);
+    componentSyncTimer = null;
+    if (activeResult || !model.subsystems.some((subsystem) => !subsystem.deleted)) return false;
+    const current = serializeProjectDocument();
+    const next = structuredClone(current);
+    migrateLegacySubsystems(next, { allocateId: allocateModelEntityId });
+    const report = syncDefinitions(next, { preferredSubsystemId: owningInstanceId(activeSubsystemId), allocateId: allocateModelEntityId });
+    if (JSON.stringify(next) === JSON.stringify(current)) return false;
+    reconcileModel(current, next);
+    if (report.reverted.length) {
+        const names = report.reverted.map((id) => model.subsystems.find((item) => item.id === id)?.name).filter(Boolean);
+        $('#statusText').textContent = `${names.join(', ')} is linked to its component, so it cannot be changed here: use Edit component, or Detach`;
+    } else if (report.removedEdgeIds.length) {
+        $('#statusText').textContent = `${countText(report.removedEdgeIds.length, 'relationship')} to a part no longer in the component removed`;
+    }
+    return true;
+}
+
+function sameJson(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function removeNodeObject(id) {
+    const object = nodeObjects.get(id);
+    if (!object) return;
+    object.traverse((child) => child.element?.remove());
+    scene.remove(object);
+    object.geometry.dispose();
+    object.material.dispose();
+    nodeObjects.delete(id);
+    const pickIndex = nodePickTargets.indexOf(object);
+    if (pickIndex >= 0) nodePickTargets.splice(pickIndex, 1);
+}
+
+// Applies a document to the canvas by difference from `current` (what the canvas would save now): entities that are new
+// are created, ones that changed are updated in place (keeping their objects), and ones that are gone are marked deleted,
+// as deleting them by hand would, so an undo step made before still finds them.
+function reconcileModel(current, next) {
+    const allocatorBefore = nextModelEntityId;
+    const nextModel = hydrateProjectDocument(next);
+    nextModelEntityId = Math.max(nextModelEntityId, allocatorBefore);
+    const byId = (list) => new Map((list ?? []).map((item) => [item.id, item]));
+    const currentNodes = byId(current.nodes);
+    const nextNodes = byId(next.nodes);
+    const replaceNode = (existing, definition) => {
+        removeNodeObject(existing.id);
+        Object.keys(existing).forEach((key) => delete existing[key]);
+        Object.assign(existing, definition);
+        createNode(existing);
+    };
+    nextModel.nodes.forEach((definition) => {
+        const before = currentNodes.get(definition.id);
+        const existing = model.nodes.find((node) => node.id === definition.id);
+        if (!existing) {
+            model.nodes.push(definition);
+            createNode(definition);
+            return;
+        }
+        // Brought back after being deleted on the canvas: the same definition, holding what it holds now.
+        if (!before) { replaceNode(existing, definition); return; }
+        currentNodes.delete(definition.id);
+        if (sameJson(before, nextNodes.get(definition.id))) return;
+        const object = nodeObjects.get(definition.id);
+        if (!object || !sameJson(before.appearance, nextNodes.get(definition.id).appearance)) { replaceNode(existing, definition); return; }
+        applyNodeModel(object, { ...snapshotDefinition(definition, nodeSnapshotExcludedKeys), bindings: [] });
+        existing.subsystemId = definition.subsystemId;
+        existing.enabled = definition.enabled;
+        object.position.fromArray(definition.position);
+        object.rotation.fromArray(definition.rotation ?? [0, 0, 0]);
+        object.scale.fromArray(definition.scale ?? [1, 1, 1]);
+    });
+    currentNodes.forEach((unused, id) => {
+        const existing = model.nodes.find((node) => node.id === id);
+        if (existing) existing.deleted = true;
+    });
+    const currentEdges = byId(current.edges);
+    const nextEdges = byId(next.edges);
+    nextModel.relationships.forEach((definition) => {
+        const before = currentEdges.get(definition.id);
+        const existing = model.relationships.find((edge) => edge.id === definition.id);
+        if (!existing) {
+            model.relationships.push(definition);
+            createRelationship(definition);
+            return;
+        }
+        currentEdges.delete(definition.id);
+        if (before && sameJson(before, nextEdges.get(definition.id)) && !existing.deleted) return;
+        existing.deleted = false;
+        existing.groupId = definition.groupId;
+        existing.enabled = definition.enabled;
+        applyEdgeModel(existing, snapshotDefinition(definition, relationshipSnapshotExcludedKeys));
+    });
+    currentEdges.forEach((unused, id) => {
+        const existing = model.relationships.find((edge) => edge.id === id);
+        if (existing) existing.deleted = true;
+    });
+    nextModel.subsystems.forEach((definition) => {
+        const existing = model.subsystems.find((subsystem) => subsystem.id === definition.id);
+        if (!existing) {
+            model.subsystems.push(definition);
+            createSubsystemObject(definition);
+            return;
+        }
+        ['definitionId', 'parameterValues', 'definitionKey', 'extraFields'].forEach((key) => delete existing[key]);
+        Object.assign(existing, { ...definition, position: existing.position });
+        existing.deleted = false;
+        const object = subsystemObjects.get(definition.id);
+        if (object?.userData.nameElement) object.userData.nameElement.textContent = existing.name;
+    });
+    const nextSubsystemIds = new Set(nextModel.subsystems.map((subsystem) => subsystem.id));
+    model.subsystems.forEach((subsystem) => { if (!subsystem.deleted && !nextSubsystemIds.has(subsystem.id)) subsystem.deleted = true; });
+    nextModel.edgeGroups.forEach((group) => {
+        const existing = model.edgeGroups.find((candidate) => candidate.id === group.id);
+        if (existing) Object.assign(existing, group);
+        else model.edgeGroups.push(group);
+    });
+    const nextGroupIds = new Set(nextModel.edgeGroups.map((group) => group.id));
+    model.edgeGroups.forEach((group) => { if (!group.deleted && !nextGroupIds.has(group.id)) group.deleted = true; });
+    // Shared parameters and definitions no longer written are kept, for the undo steps that may bring back what used them.
+    const nextShared = new Set(nextModel.sharedParameters.map((shared) => shared.id));
+    model.sharedParameters = [...nextModel.sharedParameters, ...model.sharedParameters.filter((shared) => !nextShared.has(shared.id))];
+    const nextDefinitions = new Set(nextModel.subsystemDefinitions.map((definition) => definition.id));
+    model.subsystemDefinitions = [...nextModel.subsystemDefinitions, ...(model.subsystemDefinitions ?? []).filter((definition) => !nextDefinitions.has(definition.id))];
+    applySubsystemVisibility();
+    subsystemTerminalSignature = '';
+    invalidateRelationshipBundles();
+    updateRelationships();
+    updateSelectionOutline();
+    updateModelStatus();
+    updateValidationStatus();
+    const cardId = currentSubsystemCardId();
+    if (cardId !== null) renderSubsystemEditor(cardId);
+}
+
+// A node that leaves an instance (moved out, its instance dissolved, or pasted) is no longer made from its definition:
+// it loses the keys that tied it to it, so it is never mistaken for an entity of another definition it moves into.
+function forgetDefinitionKeys(definition) {
+    const strip = (value) => {
+        if (Array.isArray(value)) value.forEach(strip);
+        else if (value && typeof value === 'object' && !(value instanceof THREE.BufferGeometry)) {
+            delete value.definitionKey;
+            if (value.extraFields) { delete value.extraFields.definitionKey; if (!Object.keys(value.extraFields).length) delete value.extraFields; }
+            Object.values(value).forEach((child) => { if (child && typeof child === 'object') strip(child); });
+        }
+    };
+    ['states', 'sourceTerms', 'parameters', 'implementation'].forEach((key) => strip(definition[key]));
+    delete definition.definitionKey;
+    if (definition.extraFields) { delete definition.extraFields.definitionKey; if (!Object.keys(definition.extraFields).length) delete definition.extraFields; }
 }
 
 // ---- The subsystem card and menu --------------------------------------------------------------------------------------

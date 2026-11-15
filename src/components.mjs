@@ -1,0 +1,632 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+// Subsystem components (docs/proposals/subsystemComponents.md, docs/subsystems.md): a subsystem can be an instance of a
+// definition, a sealed component document held in the project's `subsystemDefinitions`, and several instances share one.
+// Everything here works on project documents (the JSON a .kjt holds), so the canvas, files, the library and the tests all
+// use the same code and none of it needs the DOM.
+//
+// - A definition is `{ id, document, link? }`. Its `document` is a whole project (nodes, edges, shared parameters, edge
+//   groups, its own subsystems and definitions) with a `component` block naming it and its ports. Ids inside `document`
+//   are in the document's own space.
+// - An instance is a subsystem record with `definitionId`, and `parameterValues` for exposed parameters that differ from
+//   the component's defaults (`{ parameterKey, value }`, or `{ parameterKey, sharedParameterId }` to bind one to a shared
+//   parameter of the parent).
+// - The instance's contents are kept in the project's flat graph, as before ("expanded"): every entity made from the
+//   definition carries `definitionKey`, its id in the definition's document, which is how expanding again keeps each
+//   entity's project id. Subsystems nested inside an instance are records with `definitionKey` (and no `definitionId`:
+//   their own definitions live inside the outer document).
+// - Shared parameters made from a definition carry `subsystemId`, the instance they belong to.
+
+import { collectEntityIds, remapIds } from './graphClipboard.mjs';
+
+const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
+const clone = (value) => structuredClone(value);
+
+// Fields of a nested subsystem record that belong to the document it is written in, not to the project it is expanded
+// into: they are left out when expanding and put back from the definition when writing back.
+const nestedStructuralKeys = ['definitionId', 'parameterValues', 'link'];
+
+export const componentDocumentFormat = 'konjugate';
+
+// ---- Membership -------------------------------------------------------------------------------------------------------
+
+// The subsystem and every subsystem nested in it, at any depth.
+function subtreeIds(document, subsystemId) {
+    const ids = [subsystemId];
+    for (let index = 0; index < ids.length; index += 1) {
+        (document.subsystems ?? []).forEach((subsystem) => {
+            if ((subsystem.parentSubsystemId ?? null) === ids[index] && !ids.includes(subsystem.id)) ids.push(subsystem.id);
+        });
+    }
+    return new Set(ids);
+}
+
+// Every sharedParameterId named anywhere in `value`.
+function sharedParameterReferences(value, found = new Set()) {
+    if (Array.isArray(value)) value.forEach((item) => sharedParameterReferences(item, found));
+    else if (value && typeof value === 'object') {
+        for (const [key, child] of Object.entries(value)) {
+            if (key === 'sharedParameterId' && typeof child === 'number') found.add(child);
+            else sharedParameterReferences(child, found);
+        }
+    }
+    return found;
+}
+
+// What belongs to a subsystem in a project document: its nested subsystems, its nodes at any depth, the edges and edge
+// groups whose every end is inside it, and the shared parameters that are its own (made from its definition) or are used
+// only inside it. A shared parameter also used outside stays outside; `outsideParameterIds` lists those used inside.
+export function subsystemMembers(document, subsystemId) {
+    const subsystems = subtreeIds(document, subsystemId);
+    const nodes = (document.nodes ?? []).filter((node) => subsystems.has(node.subsystemId ?? null));
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const inside = (edge) => nodeIds.has(endpointNodeId(edge.source)) && nodeIds.has(endpointNodeId(edge.target));
+    const edges = (document.edges ?? []).filter(inside);
+    const edgeGroups = (document.edgeGroups ?? []).filter((group) => group.memberNodeIds?.length && group.memberNodeIds.every((id) => nodeIds.has(id)));
+    const insideRefs = sharedParameterReferences([nodes, edges, edgeGroups]);
+    const outsideNodes = (document.nodes ?? []).filter((node) => !nodeIds.has(node.id));
+    const outsideEdges = (document.edges ?? []).filter((edge) => !inside(edge));
+    const outsideGroups = (document.edgeGroups ?? []).filter((group) => !edgeGroups.includes(group));
+    const outsideRefs = sharedParameterReferences([outsideNodes, outsideEdges, outsideGroups]);
+    // A parameter of the parent that an instance's exposed parameter is bound to stays the parent's, used here or not.
+    const bound = new Set((document.subsystems ?? []).flatMap((subsystem) => (subsystem.parameterValues ?? []).map((value) => value.sharedParameterId)).filter((id) => id != null));
+    const sharedParameters = (document.sharedParameters ?? []).filter((shared) => (
+        shared.subsystemId != null ? subsystems.has(shared.subsystemId)
+            : insideRefs.has(shared.id) && !outsideRefs.has(shared.id) && !bound.has(shared.id)
+    ));
+    const ownSharedIds = new Set(sharedParameters.map((shared) => shared.id));
+    return {
+        subsystemIds: subsystems,
+        nestedSubsystems: (document.subsystems ?? []).filter((subsystem) => subsystem.id !== subsystemId && subsystems.has(subsystem.id)),
+        nodes, edges, edgeGroups, sharedParameters,
+        outsideParameterIds: [...insideRefs].filter((id) => !ownSharedIds.has(id))
+    };
+}
+
+// ---- Walking entities -------------------------------------------------------------------------------------------------
+
+// Every object with a numeric `id` in `value`, depth first, in array order: the order new ids are given in, so the same
+// document always expands to the same ids.
+function entitiesWithIds(value, found = []) {
+    if (Array.isArray(value)) value.forEach((item) => entitiesWithIds(item, found));
+    else if (value && typeof value === 'object') {
+        if (typeof value.id === 'number') found.push(value);
+        for (const [key, child] of Object.entries(value)) {
+            if (key === 'document') continue;
+            if (child && typeof child === 'object') entitiesWithIds(child, found);
+        }
+    }
+    return found;
+}
+
+function maxId(value) {
+    return collectEntityIds(value).reduce((max, id) => Math.max(max, id), 0);
+}
+
+// The next free id in a project document, counting everything that has one (definitions' documents included, which only
+// makes the number larger).
+export function nextFreeId(document) {
+    return maxId(document) + 1;
+}
+
+export function idAllocator(document) {
+    let next = nextFreeId(document);
+    return () => next++;
+}
+
+// ---- Extracting a definition from an instance -------------------------------------------------------------------------
+
+// The component document of a subsystem as it is in the project now. With `base` (the definition it was expanded from),
+// entities keep the keys they were expanded with and new ones are numbered after the base's; without, the document's ids
+// are the entities' project ids (as when a subsystem first becomes a component, so nothing is renumbered). Returns the
+// document, the instance's exposed-parameter values, and the map from project id to document id.
+export function extractComponent(document, subsystemId, { base = null, name = null } = {}) {
+    const record = (document.subsystems ?? []).find((subsystem) => subsystem.id === subsystemId);
+    if (!record) throw new Error(`No subsystem ${subsystemId} in this project.`);
+    const members = subsystemMembers(document, subsystemId);
+    const baseEntities = new Map(base ? entitiesWithIds([base.nodes, base.edges, base.edgeGroups, base.sharedParameters, base.subsystems]).map((entity) => [entity.id, entity]) : []);
+    let fresh = base ? maxId(base) + 1 : 0;
+    const idMap = new Map();
+    const parts = clone({ nodes: members.nodes, edges: members.edges, edgeGroups: members.edgeGroups, sharedParameters: members.sharedParameters, subsystems: members.nestedSubsystems });
+    const keyed = (entity) => (base ? entity.definitionKey ?? null : null);
+    entitiesWithIds([parts.nodes, parts.edges, parts.edgeGroups, parts.sharedParameters, parts.subsystems]).forEach((entity) => {
+        const key = keyed(entity);
+        idMap.set(entity.id, key !== null && key !== undefined ? key : base ? fresh++ : entity.id);
+    });
+    // A definition of the project placed inside (a subsystem moved into this one) goes into the document with it.
+    const carried = [];
+    parts.subsystems.forEach((subsystem) => {
+        if (subsystem.definitionId == null) return;
+        const definition = (document.subsystemDefinitions ?? []).find((item) => item.id === subsystem.definitionId);
+        if (!definition || carried.some((item) => item.projectId === definition.id)) return;
+        const newId = base ? fresh++ : definition.id;
+        idMap.set(definition.id, newId);
+        carried.push({ projectId: definition.id, definition: { ...clone(definition), id: newId } });
+    });
+    // A shared parameter of the parent used inside becomes an exposed parameter of the component, bound to it here.
+    const parameterValues = [];
+    const exposedFromOutside = members.outsideParameterIds.map((outsideId) => {
+        const outside = (document.sharedParameters ?? []).find((shared) => shared.id === outsideId);
+        if (!outside) return null;
+        const existing = base?.sharedParameters?.find((shared) => shared.exposed && (record.parameterValues ?? []).some((value) => value.parameterKey === shared.id && value.sharedParameterId === outsideId));
+        const key = existing ? existing.id : base ? fresh++ : outsideId;
+        idMap.set(outsideId, key);
+        parameterValues.push({ parameterKey: key, sharedParameterId: outsideId });
+        const { subsystemId: unusedOwner, definitionKey: unusedKey, ...rest } = clone(outside);
+        return { ...rest, id: key, exposed: true };
+    }).filter(Boolean);
+    // Which nodes and nested subsystems sit directly in the instance, decided before renumbering (a new id may equal it).
+    const rootNodes = new Set(parts.nodes.map((node, index) => ((node.subsystemId ?? null) === subsystemId ? index : -1)).filter((index) => index >= 0));
+    const rootSubsystems = new Set(parts.subsystems.map((subsystem, index) => ((subsystem.parentSubsystemId ?? null) === subsystemId ? index : -1)).filter((index) => index >= 0));
+    const remapped = remapIds(parts, idMap);
+    const restore = (entity) => {
+        // Keys and records that belong to definitions inside this one come back from the base, not from the project.
+        const original = baseEntities.get(entity.id);
+        delete entity.definitionKey;
+        if (original?.definitionKey !== undefined) entity.definitionKey = original.definitionKey;
+    };
+    entitiesWithIds([remapped.nodes, remapped.edges, remapped.edgeGroups, remapped.sharedParameters]).forEach(restore);
+    remapped.nodes.forEach((node, index) => { if (rootNodes.has(index)) delete node.subsystemId; });
+    remapped.subsystems.forEach((subsystem, index) => {
+        const original = baseEntities.get(subsystem.id);
+        if (rootSubsystems.has(index)) subsystem.parentSubsystemId = null;
+        delete subsystem.definitionKey;
+        if (original) {
+            nestedStructuralKeys.forEach((key) => { if (original[key] !== undefined && subsystem[key] === undefined) subsystem[key] = clone(original[key]); });
+            if (original.definitionKey !== undefined) subsystem.definitionKey = original.definitionKey;
+        }
+    });
+    remapped.sharedParameters.forEach((shared) => {
+        delete shared.subsystemId;
+        // An exposed parameter's value in the project is this instance's; the component keeps its default.
+        const original = baseEntities.get(shared.id);
+        if (shared.exposed && original && Number(original.value) !== Number(shared.value)) {
+            parameterValues.push({ parameterKey: shared.id, value: shared.value });
+            shared.value = original.value;
+        }
+    });
+    const definitions = [...clone(base?.subsystemDefinitions ?? []), ...carried.map((item) => item.definition)];
+    const component = clone(base?.component ?? { name: name ?? record.name ?? 'Component', ports: [] });
+    if (name) component.name = name;
+    const result = {
+        format: componentDocumentFormat,
+        version: 1,
+        metadata: clone(base?.metadata ?? document.metadata ?? { units: 'SI' }),
+        runConfigurations: clone(base?.runConfigurations ?? []),
+        sharedParameters: [...remapped.sharedParameters, ...exposedFromOutside],
+        nodes: remapped.nodes,
+        edges: remapped.edges,
+        subsystems: remapped.subsystems,
+        edgeGroups: remapped.edgeGroups,
+        subsystemDefinitions: definitions,
+        component
+    };
+    // Instances nested inside keep their definitions in step, by the same rule as the project's.
+    syncDefinitions(result);
+    return { document: result, parameterValues, idMap };
+}
+
+// ---- Expanding an instance from its definition ------------------------------------------------------------------------
+
+// Replaces a subsystem's contents with its definition's, keeping the project id of every entity already made from the
+// same definition entity and giving new ones the next free ids in document order. Relationships outside that ended at
+// an entity no longer there are removed, and listed. Returns a new project document.
+export function expandInstance(document, subsystemId, { allocateId = idAllocator(document) } = {}) {
+    const next = clone(document);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = (next.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    if (!record || !definition) throw new Error('This subsystem has no definition to expand.');
+    const source = definition.document;
+    const members = subsystemMembers(next, subsystemId);
+    const keyMap = new Map();
+    entitiesWithIds([members.nodes, members.edges, members.edgeGroups, members.sharedParameters, members.nestedSubsystems]).forEach((entity) => {
+        if (entity.definitionKey !== undefined && entity.definitionKey !== null) keyMap.set(entity.definitionKey, entity.id);
+    });
+    const bindings = new Map((record.parameterValues ?? []).filter((value) => value.sharedParameterId != null).map((value) => [value.parameterKey, value.sharedParameterId]));
+    const values = new Map((record.parameterValues ?? []).filter((value) => value.value !== undefined).map((value) => [value.parameterKey, value.value]));
+    const parts = clone({
+        nodes: source.nodes ?? [], edges: source.edges ?? [], edgeGroups: source.edgeGroups ?? [],
+        sharedParameters: (source.sharedParameters ?? []).filter((shared) => !bindings.has(shared.id)),
+        subsystems: source.subsystems ?? []
+    });
+    const idMap = new Map(bindings);
+    entitiesWithIds([parts.nodes, parts.edges, parts.edgeGroups, parts.sharedParameters, parts.subsystems]).forEach((entity) => {
+        idMap.set(entity.id, keyMap.get(entity.id) ?? allocateId());
+    });
+    const sourceIds = new Map(entitiesWithIds([parts.nodes, parts.edges, parts.edgeGroups, parts.sharedParameters, parts.subsystems]).map((entity) => [entity, entity.id]));
+    const keys = [...sourceIds.values()];
+    const remapped = remapIds(parts, idMap);
+    entitiesWithIds([remapped.nodes, remapped.edges, remapped.edgeGroups, remapped.sharedParameters, remapped.subsystems]).forEach((entity, index) => {
+        entity.definitionKey = keys[index];
+    });
+    remapped.nodes.forEach((node) => { node.subsystemId = node.subsystemId == null ? subsystemId : node.subsystemId; });
+    remapped.subsystems.forEach((subsystem) => {
+        if (subsystem.parentSubsystemId == null) subsystem.parentSubsystemId = subsystemId;
+        nestedStructuralKeys.forEach((key) => delete subsystem[key]);
+    });
+    remapped.sharedParameters.forEach((shared) => {
+        shared.subsystemId = subsystemId;
+        if (shared.exposed && values.has(shared.definitionKey)) shared.value = values.get(shared.definitionKey);
+    });
+    // Out with the old contents, in with the new, each list keeping its place in the project's order.
+    const drop = (list, old) => {
+        const ids = new Set(old.map((entity) => entity.id));
+        return (list ?? []).filter((entity) => !ids.has(entity.id));
+    };
+    next.nodes = [...drop(next.nodes, members.nodes), ...remapped.nodes];
+    next.edges = [...drop(next.edges, members.edges), ...remapped.edges];
+    next.edgeGroups = [...drop(next.edgeGroups, members.edgeGroups), ...remapped.edgeGroups];
+    next.sharedParameters = [...drop(next.sharedParameters, members.sharedParameters), ...remapped.sharedParameters];
+    next.subsystems = [...drop(next.subsystems, members.nestedSubsystems), ...remapped.subsystems];
+    // A relationship from outside to something the definition no longer has goes with it.
+    const nodeIds = new Set(next.nodes.map((node) => node.id));
+    const removedEdgeIds = next.edges.filter((edge) => !nodeIds.has(endpointNodeId(edge.source)) || !nodeIds.has(endpointNodeId(edge.target))).map((edge) => edge.id);
+    next.edges = next.edges.filter((edge) => !removedEdgeIds.includes(edge.id));
+    next.edgeGroups = next.edgeGroups.map((group) => ({ ...group, memberNodeIds: group.memberNodeIds.filter((id) => nodeIds.has(id)) })).filter((group) => group.memberNodeIds.length >= 2);
+    return { document: next, removedEdgeIds };
+}
+
+// Gives the entities of an instance the keys they have in its definition, after the definition was written from them.
+function assignKeys(document, subsystemId, idMap) {
+    const members = subsystemMembers(document, subsystemId);
+    entitiesWithIds([members.nodes, members.edges, members.edgeGroups, members.sharedParameters, members.nestedSubsystems]).forEach((entity) => {
+        if (idMap.has(entity.id)) entity.definitionKey = idMap.get(entity.id);
+    });
+    members.sharedParameters.forEach((shared) => { if (shared.subsystemId == null) shared.subsystemId = subsystemId; });
+    members.nestedSubsystems.forEach((subsystem) => nestedStructuralKeys.forEach((key) => delete subsystem[key]));
+}
+
+// ---- Keeping definitions and instances in step ------------------------------------------------------------------------
+
+const canonical = (value) => JSON.stringify(value);
+
+// The instances of a project (subsystems with a definition), by definition.
+function instancesByDefinition(document) {
+    const groups = new Map();
+    (document.subsystems ?? []).forEach((subsystem) => {
+        if (subsystem.definitionId == null) return;
+        if (!groups.has(subsystem.definitionId)) groups.set(subsystem.definitionId, []);
+        groups.get(subsystem.definitionId).push(subsystem.id);
+    });
+    return groups;
+}
+
+// After an edit inside an instance, the definition is written from that instance and every other instance of it is
+// expanded again; after undo, the same runs and puts them back. The instance that changed is the one whose contents no
+// longer match its definition; when several do (or none can be told), `preferredSubsystemId` (the instance being edited)
+// wins. Linked definitions are not written to: an instance of one that was changed is expanded again from it, which
+// undoes the change (`reverted` lists them). A definition no instance uses any longer is dropped. Mutates `document` and
+// returns what it did: `{ changed, reverted, removedEdgeIds }`.
+export function syncDefinitions(document, { preferredSubsystemId = null, allocateId = null } = {}) {
+    const report = { changed: false, reverted: [], removedEdgeIds: [] };
+    const allocate = allocateId ?? idAllocator(document);
+    for (const [definitionId, instanceIds] of instancesByDefinition(document)) {
+        const definition = (document.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
+        if (!definition) continue;
+        const extracts = instanceIds.map((id) => ({ id, ...extractComponent(document, id, { base: definition.document }) }));
+        const baseText = canonical(definition.document);
+        const differing = extracts.filter((extract) => canonical(extract.document) !== baseText);
+        const valuesOf = (extract) => extract.parameterValues;
+        // Parameter values are the instance's own: they never count as a change to the definition.
+        extracts.forEach((extract) => {
+            const record = document.subsystems.find((subsystem) => subsystem.id === extract.id);
+            const next = valuesOf(extract);
+            if (canonical(record.parameterValues ?? []) !== canonical(next)) {
+                if (next.length) record.parameterValues = next; else delete record.parameterValues;
+                report.changed = true;
+            }
+        });
+        if (!differing.length) continue;
+        if (definition.link) {
+            for (const extract of differing) {
+                const { document: expanded, removedEdgeIds } = expandInstance(document, extract.id, { allocateId: allocate });
+                Object.assign(document, expanded);
+                report.reverted.push(extract.id);
+                report.removedEdgeIds.push(...removedEdgeIds);
+            }
+            report.changed = true;
+            continue;
+        }
+        // When every instance agrees, the definition is only being brought to the form the canvas writes.
+        const allAgree = extracts.every((extract) => canonical(extract.document) === canonical(extracts[0].document));
+        const source = allAgree ? extracts[0]
+            : differing.find((extract) => extract.id === preferredSubsystemId) ?? differing[0];
+        definition.document = source.document;
+        assignKeys(document, source.id, source.idMap);
+        report.changed = true;
+        if (allAgree) {
+            extracts.forEach((extract) => assignKeys(document, extract.id, extract.idMap));
+            continue;
+        }
+        for (const extract of extracts) {
+            if (extract.id === source.id) continue;
+            const { document: expanded, removedEdgeIds } = expandInstance(document, extract.id, { allocateId: allocate });
+            Object.assign(document, expanded);
+            report.removedEdgeIds.push(...removedEdgeIds);
+        }
+    }
+    const used = new Set((document.subsystems ?? []).map((subsystem) => subsystem.definitionId).filter((id) => id != null));
+    const before = (document.subsystemDefinitions ?? []).length;
+    if (document.subsystemDefinitions) document.subsystemDefinitions = document.subsystemDefinitions.filter((definition) => used.has(definition.id));
+    if ((document.subsystemDefinitions ?? []).length !== before) report.changed = true;
+    return report;
+}
+
+// ---- Making components ------------------------------------------------------------------------------------------------
+
+// Turns every plain subsystem at the top of a project (one that is neither an instance nor inside one) into an instance
+// of its own local definition, keeping every id: the definition's document uses the entities' project ids, so expanding
+// it gives back exactly the same flat graph. Subsystems nested in it stay plain subsystems inside its document (they are
+// part of it). This is how a project from before components opens, and what a new subsystem becomes. Mutates and returns
+// the document.
+export function migrateLegacySubsystems(document, { allocateId = null } = {}) {
+    const allocate = allocateId ?? idAllocator(document);
+    const subsystems = document.subsystems ?? [];
+    const insideInstance = (subsystem) => {
+        for (let current = subsystem; current; current = subsystems.find((item) => item.id === current.parentSubsystemId)) {
+            if (current !== subsystem && (current.definitionId != null || current.definitionKey != null)) return true;
+        }
+        return false;
+    };
+    const plain = subsystems.filter((subsystem) => subsystem.definitionId == null && subsystem.definitionKey == null && !insideInstance(subsystem));
+    // Outermost first: a plain subsystem inside another plain one is made part of the outer one's document.
+    const outermost = plain.filter((subsystem) => !plain.some((other) => other !== subsystem && subtreeIds(document, other.id).has(subsystem.id)));
+    for (const subsystem of outermost) {
+        const { document: componentDocument, parameterValues, idMap } = extractComponent(document, subsystem.id, { name: subsystem.name });
+        const definitionId = allocate();
+        document.subsystemDefinitions = [...(document.subsystemDefinitions ?? []), { id: definitionId, document: componentDocument }];
+        subsystem.definitionId = definitionId;
+        if (parameterValues.length) subsystem.parameterValues = parameterValues;
+        assignKeys(document, subsystem.id, idMap);
+    }
+    return document;
+}
+
+// A copy of a project document as a component placed into another project: `component` (a component document, from a
+// file, the library or another instance) is placed as a new instance under `parentSubsystemId`, with a new local
+// definition. Returns `{ document, subsystemId }`.
+export function placeComponent(document, componentDocument, { parentSubsystemId = null, position = [0, 0, 0], name = null, link = null } = {}) {
+    const next = clone(document);
+    const allocate = idAllocator(next);
+    const definitionId = allocate();
+    const subsystemId = allocate();
+    const sealed = clone(componentDocument);
+    next.subsystemDefinitions = [...(next.subsystemDefinitions ?? []), { id: definitionId, document: sealed, ...(link ? { link: clone(link) } : {}) }];
+    next.subsystems = [...(next.subsystems ?? []), {
+        id: subsystemId, name: name ?? sealed.component?.name ?? 'Component', parentSubsystemId, position: [...position], definitionId
+    }];
+    const { document: expanded } = expandInstance(next, subsystemId, { allocateId: allocate });
+    return { document: expanded, subsystemId, definitionId };
+}
+
+// Another instance of the same local definition, beside the first.
+export function placeAnotherInstance(document, subsystemId, { offset = [3.5, 0, 0] } = {}) {
+    const next = clone(document);
+    syncDefinitions(next);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    if (record?.definitionId == null) throw new Error('Only an instance of a component can be placed again.');
+    const allocate = idAllocator(next);
+    const instanceId = allocate();
+    next.subsystems.push({
+        id: instanceId, name: record.name, parentSubsystemId: record.parentSubsystemId ?? null,
+        position: record.position.map((value, index) => Number(value) + Number(offset[index] ?? 0)), definitionId: record.definitionId,
+        ...(record.parameterValues ? { parameterValues: clone(record.parameterValues) } : {})
+    });
+    const { document: expanded } = expandInstance(next, instanceId, { allocateId: allocate });
+    return { document: expanded, subsystemId: instanceId };
+}
+
+// Makes an instance independent of the others: a definition of its own, a copy of the shared one (with the link dropped,
+// which is also what Detach does to a linked instance). Ids are unchanged.
+export function separateInstance(document, subsystemId) {
+    const next = clone(document);
+    syncDefinitions(next);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = (next.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    if (!definition) throw new Error('This subsystem is not an instance of a component.');
+    const allocate = idAllocator(next);
+    const copy = { id: allocate(), document: clone(definition.document) };
+    next.subsystemDefinitions.push(copy);
+    record.definitionId = copy.id;
+    syncDefinitions(next);
+    return next;
+}
+
+// How many instances share a subsystem's definition (1 for a plain subsystem).
+export function instanceCount(document, subsystemId) {
+    const record = (document.subsystems ?? []).find((subsystem) => subsystem.id === subsystemId);
+    if (record?.definitionId == null) return 1;
+    return (document.subsystems ?? []).filter((subsystem) => subsystem.definitionId === record.definitionId).length;
+}
+
+// ---- The interface: ports and exposed parameters ----------------------------------------------------------------------
+
+// A component's ports, as states inside the instance. Declared ports are the component's (in its block); derived ports,
+// for a local definition, are the inside states that relationships from outside bind to now. Each is
+// `{ key?, stateId, nodeId, name, symbol, unit, direction, declared, connected }`, ids in the project's space.
+export function instancePorts(document, subsystemId) {
+    const record = (document.subsystems ?? []).find((subsystem) => subsystem.id === subsystemId);
+    const definition = (document.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    const members = subsystemMembers(document, subsystemId);
+    const insideNodeIds = new Set(members.nodes.map((node) => node.id));
+    const stateOwner = new Map();
+    members.nodes.forEach((node) => (node.states ?? []).forEach((state) => stateOwner.set(state.id, { node, state })));
+    const byKey = new Map();
+    members.nodes.forEach((node) => (node.states ?? []).forEach((state) => { if (state.definitionKey != null) byKey.set(state.definitionKey, state.id); }));
+    const connectedStates = new Set();
+    (document.edges ?? []).forEach((edge) => {
+        const sourceInside = insideNodeIds.has(endpointNodeId(edge.source));
+        const targetInside = insideNodeIds.has(endpointNodeId(edge.target));
+        if (sourceInside === targetInside) return;
+        const end = sourceInside ? edge.source : edge.target;
+        if (end?.stateId != null && end.stateId !== '') connectedStates.add(end.stateId);
+    });
+    const describe = (stateId, extra) => {
+        const owner = stateOwner.get(stateId);
+        if (!owner) return null;
+        return {
+            stateId, nodeId: owner.node.id, symbol: owner.state.symbol, unit: owner.state.unit ?? '',
+            name: extra.name || `${owner.node.name} · ${owner.state.name ?? owner.state.symbol}`,
+            direction: extra.direction ?? 'both', connected: connectedStates.has(stateId), ...extra
+        };
+    };
+    const declared = (definition?.document.component?.ports ?? [])
+        .map((port) => (byKey.has(port.stateId) ? describe(byKey.get(port.stateId), { key: port.key, name: port.name, direction: port.direction, declared: true }) : null))
+        .filter(Boolean);
+    const declaredStates = new Set(declared.map((port) => port.stateId));
+    const derived = definition?.link ? [] : [...connectedStates].filter((stateId) => !declaredStates.has(stateId))
+        .map((stateId) => describe(stateId, { declared: false })).filter(Boolean);
+    return [...declared, ...derived];
+}
+
+// Declares a port of a local definition (a derived one kept, or a state named as one), or renames a declared one.
+// `stateId` is in the project's space; returns a new document.
+export function declarePort(document, subsystemId, { stateId, name = null, direction = null }) {
+    const next = clone(document);
+    syncDefinitions(next);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = (next.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    if (!definition || definition.link) throw new Error('Ports are declared in a local component.');
+    const members = subsystemMembers(next, subsystemId);
+    const state = members.nodes.flatMap((node) => node.states ?? []).find((candidate) => candidate.id === stateId);
+    if (!state || state.definitionKey == null) throw new Error('A port must be a state inside the subsystem.');
+    const component = definition.document.component ?? (definition.document.component = { name: record.name, ports: [] });
+    component.ports = component.ports ?? [];
+    let port = component.ports.find((item) => item.stateId === state.definitionKey);
+    if (!port) {
+        port = { key: component.ports.reduce((max, item) => Math.max(max, item.key), 0) + 1, stateId: state.definitionKey };
+        component.ports.push(port);
+    }
+    if (name !== null) { if (name.trim()) port.name = name.trim(); else delete port.name; }
+    if (direction !== null) { if (direction && direction !== 'both') port.direction = direction; else delete port.direction; }
+    return next;
+}
+
+export function removePort(document, subsystemId, key) {
+    const next = clone(document);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = (next.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    if (!definition || definition.link) throw new Error('Ports are declared in a local component.');
+    definition.document.component.ports = (definition.document.component.ports ?? []).filter((port) => port.key !== key);
+    return next;
+}
+
+// The exposed parameters of an instance: `{ key, sharedParameterId, name, symbol, unit, value, defaultValue, boundTo }`,
+// `sharedParameterId` the instance's own copy in the project (null when bound to a parameter of the parent).
+export function instanceParameters(document, subsystemId) {
+    const record = (document.subsystems ?? []).find((subsystem) => subsystem.id === subsystemId);
+    const definition = (document.subsystemDefinitions ?? []).find((item) => item.id === record?.definitionId);
+    if (!definition) return [];
+    const bindings = new Map((record.parameterValues ?? []).filter((value) => value.sharedParameterId != null).map((value) => [value.parameterKey, value.sharedParameterId]));
+    return (definition.document.sharedParameters ?? []).filter((shared) => shared.exposed).map((shared) => {
+        const own = (document.sharedParameters ?? []).find((candidate) => candidate.subsystemId === subsystemId && candidate.definitionKey === shared.id);
+        const boundTo = bindings.get(shared.id) ?? null;
+        return {
+            key: shared.id, sharedParameterId: own?.id ?? null, name: shared.name, symbol: shared.symbol, unit: shared.unit ?? '',
+            value: boundTo != null ? null : Number(own?.value ?? shared.value), defaultValue: Number(shared.value), boundTo
+        };
+    });
+}
+
+// Exposes a shared parameter used inside a local instance, so each instance can give it its own value. Returns a new
+// document.
+export function exposeParameter(document, subsystemId, sharedParameterId) {
+    const next = clone(document);
+    const shared = (next.sharedParameters ?? []).find((candidate) => candidate.id === sharedParameterId);
+    if (!shared) throw new Error('No such shared parameter.');
+    if (shared.subsystemId == null) shared.subsystemId = subsystemId;
+    shared.exposed = true;
+    syncDefinitions(next, { preferredSubsystemId: subsystemId });
+    return next;
+}
+
+// Sets an instance's value for an exposed parameter (a number), binds it to a shared parameter of the parent
+// (`{ sharedParameterId }`), or puts it back to the component's default (`null`). Returns a new document.
+export function setInstanceParameter(document, subsystemId, parameterKey, setting) {
+    const next = clone(document);
+    syncDefinitions(next);
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const others = (record.parameterValues ?? []).filter((value) => value.parameterKey !== parameterKey);
+    const entry = setting === null ? null
+        : typeof setting === 'object' ? { parameterKey, sharedParameterId: setting.sharedParameterId }
+            : { parameterKey, value: Number(setting) };
+    record.parameterValues = entry ? [...others, entry] : others;
+    if (!record.parameterValues.length) delete record.parameterValues;
+    const { document: expanded } = expandInstance(next, subsystemId);
+    return expanded;
+}
+
+// ---- Component documents ----------------------------------------------------------------------------------------------
+
+// The component document of a subsystem, ready to be written to a file or the library: every port it has now declared
+// (a file has no outside to derive ports from), its layout centred on its own middle, and its name.
+export function componentDocumentOf(document, subsystemId) {
+    const working = clone(document);
+    if ((working.subsystems ?? []).find((subsystem) => subsystem.id === subsystemId)?.definitionId == null) migrateLegacySubsystems(working);
+    syncDefinitions(working);
+    let next = working;
+    for (const port of instancePorts(next, subsystemId).filter((item) => !item.declared)) next = declarePort(next, subsystemId, { stateId: port.stateId });
+    const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
+    const definition = next.subsystemDefinitions.find((item) => item.id === record.definitionId);
+    const result = clone(definition.document);
+    result.component = { ...result.component, name: record.name };
+    const points = (result.nodes ?? []).map((node) => node.position ?? [0, 0, 0]);
+    if (points.length) {
+        const middle = [0, 1, 2].map((axis) => points.reduce((sum, point) => sum + Number(point[axis] ?? 0), 0) / points.length);
+        result.nodes.forEach((node) => { node.position = (node.position ?? [0, 0, 0]).map((value, axis) => Number(value) - middle[axis]); });
+        (result.subsystems ?? []).forEach((subsystem) => { subsystem.position = (subsystem.position ?? [0, 0, 0]).map((value, axis) => Number(value) - middle[axis]); });
+    }
+    delete result.ownership;
+    return result;
+}
+
+// What a component document offers, for the review card before it is placed: its name, description, ports (with the
+// state each names) and exposed parameters with their defaults. A project without a component block offers its
+// subsystems instead (`subsystems`), any of which can be placed as a component.
+export function describeComponentDocument(componentDocument) {
+    const states = new Map();
+    (componentDocument.nodes ?? []).forEach((node) => (node.states ?? []).forEach((state) => states.set(state.id, { node, state })));
+    const block = componentDocument.component ?? null;
+    return {
+        isComponent: Boolean(block),
+        name: block?.name ?? null,
+        description: block?.description ?? '',
+        ports: (block?.ports ?? []).map((port) => {
+            const owner = states.get(port.stateId);
+            return { key: port.key, name: port.name || (owner ? `${owner.node.name} · ${owner.state.name ?? owner.state.symbol}` : `Port ${port.key}`), symbol: owner?.state.symbol ?? '', unit: owner?.state.unit ?? '', direction: port.direction ?? 'both' };
+        }),
+        parameters: (componentDocument.sharedParameters ?? []).filter((shared) => shared.exposed).map((shared) => ({ key: shared.id, name: shared.name, symbol: shared.symbol, unit: shared.unit ?? '', value: Number(shared.value) })),
+        subsystems: (componentDocument.subsystems ?? []).filter((subsystem) => (subsystem.parentSubsystemId ?? null) === null).map((subsystem) => ({ id: subsystem.id, name: subsystem.name }))
+    };
+}
+
+// A subsystem of any project, as a component document of its own (for placing one subsystem out of a project that is not
+// a component).
+export function componentFromProjectSubsystem(projectDocument, subsystemId) {
+    return componentDocumentOf(projectDocument, subsystemId);
+}
+
+// The path of names from the top to a subsystem ("Pump 2 / Impeller"), for naming states out of context.
+export function subsystemPath(document, subsystemId) {
+    const names = [];
+    const seen = new Set();
+    for (let id = subsystemId ?? null; id !== null && !seen.has(id);) {
+        seen.add(id);
+        const subsystem = (document.subsystems ?? []).find((item) => item.id === id);
+        if (!subsystem) break;
+        names.unshift(subsystem.name);
+        id = subsystem.parentSubsystemId ?? null;
+    }
+    return names.join(' / ');
+}
+
+// What the engine is given: no definitions, no component block, no keys; the flat graph only.
+export function stripComponents(document) {
+    const flat = clone(document);
+    delete flat.subsystemDefinitions;
+    delete flat.component;
+    entitiesWithIds([flat.nodes, flat.edges, flat.edgeGroups, flat.sharedParameters]).forEach((entity) => { delete entity.definitionKey; });
+    (flat.sharedParameters ?? []).forEach((shared) => { delete shared.subsystemId; delete shared.exposed; });
+    (flat.edges ?? []).forEach((edge) => delete edge.subsystemId);
+    return flat;
+}

@@ -1,0 +1,221 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+    componentDocumentOf, declarePort, describeComponentDocument, expandInstance, exposeParameter, extractComponent, instanceCount,
+    instanceParameters, instancePorts, migrateLegacySubsystems, placeAnotherInstance, placeComponent, separateInstance,
+    setInstanceParameter, stripComponents, subsystemPath, syncDefinitions
+} from '../src/components.mjs';
+import { executionProjectDocument } from '../src/subsystems.mjs';
+
+const state = (id, symbol, initialValue = 0) => ({ id, name: symbol, symbol, initialValue, unit: 'K' });
+const node = (id, name, states, subsystemId, position = [0, 0, 0]) => ({
+    id, name, position, states, sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+    ...(subsystemId ? { subsystemId } : {})
+});
+const edge = (id, name, [sourceNodeId, sourceStateId], [targetNodeId, targetStateId], parameters = []) => ({
+    id, name, source: { nodeId: sourceNodeId, stateId: sourceStateId }, target: { nodeId: targetNodeId, stateId: targetStateId },
+    directionality: 'directed', equation: 'k', equationModel: { latex: 'k', output: { role: 'target', stateId: targetStateId } }, parameters
+});
+
+// Heater (outside) heats Tank, inside Plant; Tank warms Wall, inside Plant too; Wall's loss uses the shared coefficient.
+function project() {
+    return {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' },
+        sharedParameters: [{ id: 30, name: 'Loss', symbol: 'loss', value: 0.1, unit: '1/s' }],
+        nodes: [
+            node(1, 'Tank', [state(2, 'temperature', 300)], 20, [-1, 0, 0]),
+            node(3, 'Wall', [state(4, 'temperature', 290)], 20, [1, 0, 0]),
+            node(5, 'Heater', [state(6, 'power', 10)], null, [-6, 0, 0])
+        ],
+        edges: [
+            edge(10, 'Conduct', [1, 2], [3, 4], [{ id: 11, name: 'k', symbol: 'k', value: 0.2, sharedParameterId: 30 }]),
+            edge(12, 'Heat', [5, 6], [1, 2])
+        ],
+        subsystems: [{ id: 20, name: 'Plant', parentSubsystemId: null, position: [0, 0, 0] }],
+        edgeGroups: []
+    };
+}
+
+const flat = (document) => {
+    const result = executionProjectDocument(document);
+    // Order is not meaning: compared by id.
+    const byId = (list) => [...(list ?? [])].sort((a, b) => a.id - b.id);
+    return { nodes: byId(result.nodes), edges: byId(result.edges), sharedParameters: byId(result.sharedParameters) };
+};
+
+test('a project from before components becomes an instance of a local definition with every id and the flat graph unchanged', () => {
+    const before = project();
+    const after = migrateLegacySubsystems(structuredClone(before));
+    const plant = after.subsystems.find((item) => item.id === 20);
+    assert.ok(plant.definitionId, 'Plant has a definition.');
+    assert.equal(after.subsystemDefinitions.length, 1);
+    const definition = after.subsystemDefinitions[0].document;
+    assert.deepEqual(definition.nodes.map((item) => item.id), [1, 3], 'The definition uses the entities\' own ids.');
+    assert.deepEqual(definition.edges.map((item) => item.id), [10], 'Only the relationship inside goes in.');
+    assert.equal(definition.component.name, 'Plant');
+    assert.equal(after.nodes.find((item) => item.id === 1).definitionKey, 1);
+    assert.equal(after.nodes.find((item) => item.id === 5).definitionKey, undefined, 'Outside nodes are not keyed.');
+    assert.deepEqual(flat(after), flat(before), 'The engine sees the same flat graph.');
+});
+
+test('expanding an instance again keeps every id, and another instance gets the same ids every time', () => {
+    const migrated = migrateLegacySubsystems(project());
+    const { document: same } = expandInstance(migrated, 20);
+    assert.deepEqual(flat(same), flat(migrated), 'Expanding from the definition reproduces the instance.');
+    const first = placeAnotherInstance(migrated, 20);
+    const second = placeAnotherInstance(migrated, 20);
+    assert.deepEqual(first.document, second.document, 'The same document expands to the same ids.');
+    const copy = first.document.nodes.filter((item) => item.subsystemId === first.subsystemId);
+    assert.deepEqual(copy.map((item) => item.name), ['Tank', 'Wall']);
+    assert.ok(copy.every((item) => item.id > 30), 'New ids are fresh.');
+    assert.equal(instanceCount(first.document, 20), 2);
+    assert.equal(first.document.edges.filter((item) => item.name === 'Conduct').length, 2, 'The relationship inside is made again; the one from outside is not.');
+});
+
+test('an edit inside one instance reaches the others; undoing it puts them back', () => {
+    let document = placeAnotherInstance(migrateLegacySubsystems(project()), 20).document;
+    const other = document.subsystems.find((item) => item.id !== 20).id;
+    const otherWall = () => document.nodes.find((item) => item.subsystemId === other && item.name === 'Wall');
+    const wallId = otherWall().id;
+    const before = structuredClone(document);
+    document.nodes.find((item) => item.id === 3).states[0].initialValue = 250;
+    syncDefinitions(document, { preferredSubsystemId: 20 });
+    assert.equal(otherWall().states[0].initialValue, 250);
+    assert.equal(otherWall().id, wallId, 'The other instance keeps its ids.');
+    // Undo restores the edited instance; the others follow it back.
+    document = structuredClone(before);
+    syncDefinitions(document);
+    assert.equal(otherWall().states[0].initialValue, 290);
+});
+
+test('a node added inside one instance is added to the others; one removed goes, with relationships from outside to it', () => {
+    const document = placeAnotherInstance(migrateLegacySubsystems(project()), 20).document;
+    const other = document.subsystems.find((item) => item.id !== 20).id;
+    document.nodes.push(node(900, 'Lid', [state(901, 'temperature', 280)], 20));
+    syncDefinitions(document, { preferredSubsystemId: 20 });
+    assert.ok(document.nodes.some((item) => item.subsystemId === other && item.name === 'Lid'), 'The other instance has the new node.');
+    assert.equal(document.nodes.find((item) => item.id === 900).definitionKey !== undefined, true, 'The new node is keyed where it was added.');
+    // A relationship from outside into the other instance's Wall, then Wall removed from the first instance.
+    const otherWall = document.nodes.find((item) => item.subsystemId === other && item.name === 'Wall');
+    document.edges.push(edge(950, 'Probe', [5, 6], [otherWall.id, otherWall.states[0].id]));
+    document.nodes = document.nodes.filter((item) => item.id !== 3);
+    document.edges = document.edges.filter((item) => item.id !== 10);
+    const report = syncDefinitions(document, { preferredSubsystemId: 20 });
+    assert.equal(document.nodes.some((item) => item.subsystemId === other && item.name === 'Wall'), false);
+    assert.deepEqual(report.removedEdgeIds, [950], 'The relationship from outside to the removed node is removed.');
+});
+
+test('a separate instance keeps its own definition', () => {
+    const placed = placeAnotherInstance(migrateLegacySubsystems(project()), 20);
+    const document = separateInstance(placed.document, placed.subsystemId);
+    assert.equal(document.subsystemDefinitions.length, 2);
+    assert.equal(instanceCount(document, 20), 1);
+    document.nodes.find((item) => item.id === 3).states[0].initialValue = 1;
+    syncDefinitions(document, { preferredSubsystemId: 20 });
+    assert.equal(document.nodes.find((item) => item.subsystemId === placed.subsystemId && item.name === 'Wall').states[0].initialValue, 290);
+});
+
+test('a linked instance changed on the canvas is put back from its definition', () => {
+    const document = migrateLegacySubsystems(project());
+    document.subsystemDefinitions[0].link = { kind: 'file', fileName: 'Plant.kjt' };
+    document.nodes.find((item) => item.id === 3).states[0].initialValue = 1;
+    const report = syncDefinitions(document);
+    assert.deepEqual(report.reverted, [20]);
+    assert.equal(document.nodes.find((item) => item.id === 3).states[0].initialValue, 290);
+});
+
+test('a shared parameter used inside and outside becomes an exposed parameter bound to the parent', () => {
+    const document = project();
+    document.nodes[2].sourceTerms = [{ id: 40, state: 'power', expression: 'loss', parameters: [{ id: 41, name: 'loss', symbol: 'loss', value: 0, sharedParameterId: 30 }] }];
+    const { document: component, parameterValues } = extractComponent(document, 20);
+    const exposed = component.sharedParameters.find((item) => item.exposed);
+    assert.equal(exposed.symbol, 'loss');
+    assert.deepEqual(parameterValues, [{ parameterKey: exposed.id, sharedParameterId: 30 }]);
+    const before = structuredClone(document);
+    const migrated = migrateLegacySubsystems(document);
+    assert.deepEqual(flat(migrated), flat(before), 'Binding it leaves the numbers unchanged.');
+});
+
+test('each instance gives an exposed parameter its own value, or binds it to the parent\'s', () => {
+    let document = migrateLegacySubsystems(project());
+    document = exposeParameter(document, 20, 30);
+    const placed = placeAnotherInstance(document, 20);
+    document = setInstanceParameter(placed.document, placed.subsystemId, instanceParameters(placed.document, 20)[0].key, 0.5);
+    const [mine] = instanceParameters(document, 20);
+    const [theirs] = instanceParameters(document, placed.subsystemId);
+    assert.deepEqual([mine.value, theirs.value, theirs.defaultValue], [0.1, 0.5, 0.1]);
+    assert.notEqual(mine.sharedParameterId, theirs.sharedParameterId, 'Each instance has its own copy.');
+    const theirConduct = document.edges.find((item) => item.name === 'Conduct' && item.parameters[0].sharedParameterId === theirs.sharedParameterId);
+    assert.ok(theirConduct, 'The other instance\'s relationship reads its own copy.');
+    document.sharedParameters.push({ id: 999, name: 'Ambient loss', symbol: 'ambientLoss', value: 0.3 });
+    document = setInstanceParameter(document, placed.subsystemId, theirs.key, { sharedParameterId: 999 });
+    assert.equal(instanceParameters(document, placed.subsystemId)[0].boundTo, 999);
+    assert.ok(document.edges.some((item) => item.name === 'Conduct' && item.parameters[0].sharedParameterId === 999), 'Bound, it reads the parent\'s.');
+});
+
+test('ports: derived from what crosses the boundary, declared and named, and all declared in a component document', () => {
+    let document = migrateLegacySubsystems(project());
+    const [heated] = instancePorts(document, 20);
+    assert.deepEqual([heated.declared, heated.connected, heated.name, heated.unit], [false, true, 'Tank · temperature', 'K']);
+    document = declarePort(document, 20, { stateId: 4, name: 'Wall temperature', direction: 'out' });
+    const ports = instancePorts(document, 20);
+    assert.deepEqual(ports.map((port) => [port.name, port.declared, port.connected]), [['Wall temperature', true, false], ['Tank · temperature', false, true]]);
+    const component = componentDocumentOf(document, 20);
+    assert.deepEqual(component.component.ports.map((port) => [port.key, port.stateId, port.name ?? null]), [[1, 4, 'Wall temperature'], [2, 2, null]]);
+    assert.deepEqual(component.nodes.map((item) => item.position), [[-1, 0, 0], [1, 0, 0]], 'Centred on its own middle.');
+    const description = describeComponentDocument(component);
+    assert.deepEqual(description.ports.map((port) => [port.name, port.direction]), [['Wall temperature', 'out'], ['Tank · temperature', 'both']]);
+});
+
+test('a component placed into another project is a new instance with fresh ids and runs as the same flat graph', () => {
+    const component = componentDocumentOf(migrateLegacySubsystems(project()), 20);
+    const target = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [node(1, 'Other', [state(2, 'x')])], edges: [], subsystems: [], edgeGroups: [] };
+    const { document, subsystemId } = placeComponent(target, component, { position: [4, 0, 0] });
+    const placed = document.nodes.filter((item) => item.subsystemId === subsystemId);
+    assert.deepEqual(placed.map((item) => item.name), ['Tank', 'Wall']);
+    assert.ok(placed.every((item) => item.id !== 1 && item.id !== 2), 'Ids do not clash with the project\'s.');
+    assert.equal(document.subsystems.find((item) => item.id === subsystemId).name, 'Plant');
+    assert.equal(subsystemPath(document, subsystemId), 'Plant');
+    const engine = executionProjectDocument(document);
+    assert.equal(engine.nodes.length, 3);
+    assert.ok(engine.nodes.every((item) => item.definitionKey === undefined && item.subsystemId === undefined));
+    assert.equal(engine.subsystemDefinitions, undefined);
+});
+
+test('what reaches the engine has no components left in it', () => {
+    const migrated = migrateLegacySubsystems(project());
+    const stripped = stripComponents(migrated);
+    assert.equal(JSON.stringify(stripped).includes('definitionKey'), false);
+    assert.equal(stripped.subsystemDefinitions, undefined);
+});
+
+test('every shipped example, folded into nested subsystems, becomes components with the same flat graph it runs today', async () => {
+    const { readFile, readdir } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { decodeProjectFile } = await import('../src/projectFile.mjs');
+    const examples = join(import.meta.dirname, '..', 'examples');
+    const files = (await readdir(examples)).filter((file) => file.endsWith('.kjt')).sort();
+    assert.ok(files.length > 5);
+    for (const file of files) {
+        const original = JSON.parse(await decodeProjectFile(await readFile(join(examples, file))));
+        if ((original.nodes ?? []).length < 2) continue;
+        // No example has subsystems, so each is given two: half its nodes in one, and the first of those a level deeper.
+        const folded = structuredClone(original);
+        const top = 9_000_001;
+        const inner = 9_000_002;
+        folded.subsystems = [{ id: top, name: 'Outer', parentSubsystemId: null, position: [0, 0, 0] }, { id: inner, name: 'Inner', parentSubsystemId: top, position: [0, 0, 0] }];
+        const half = folded.nodes.slice(0, Math.ceil(folded.nodes.length / 2));
+        half.forEach((item, index) => { item.subsystemId = index === 0 ? inner : top; });
+        const migrated = migrateLegacySubsystems(structuredClone(folded));
+        assert.deepEqual(flat(migrated), flat(original), `${file} runs differently once its subsystems are components.`);
+        syncDefinitions(migrated);
+        assert.deepEqual(flat(migrated), flat(original), `${file} changed when its definitions were brought in step.`);
+        const placed = placeAnotherInstance(migrated, top);
+        const engine = executionProjectDocument(placed.document);
+        const ids = engine.nodes.flatMap((item) => [item.id, ...(item.states ?? []).map((entry) => entry.id)]);
+        assert.equal(new Set(ids).size, ids.length, `${file}: a second instance reuses an id.`);
+        assert.equal(engine.nodes.length, original.nodes.length + half.length, `${file}: the second instance has the wrong nodes.`);
+    }
+});

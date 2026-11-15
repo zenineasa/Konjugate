@@ -23,6 +23,7 @@ const nodeDocumentKeys = new Set([
     'id', 'name', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
     'states', 'sourceTerms', 'implementation', 'appearance'
 ]);
+const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning']);
 const relationshipDocumentKeys = new Set([
     'id', 'groupId', 'name', 'description', 'source', 'target', 'directionality', 'enabled', 'equation', 'equationModel',
     'implementation', 'parameters', 'appearance'
@@ -74,7 +75,9 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
             value: context.stateValueText(state.initialValue, state.unit).text,
             exactValue: context.stateValueText(state.initialValue, state.unit).exact,
             className: '',
-            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {})
+            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
+            // A state's other fields (its `definitionKey` in a component, a field from a newer Konjugate) are kept too.
+            ...unknownFields(state, stateDocumentKeys)
         })),
         ...unknownFields(node, nodeDocumentKeys)
     };
@@ -99,6 +102,7 @@ export function nodeToDocument(definition, context) {
         ...(rotation.every((angle) => angle === 0) ? {} : { rotation }),
         ...(scale.every((factor) => factor === 1) ? {} : { scale }),
         states: definition.states.map((state) => ({
+            ...structuredClone(state.extraFields ?? {}),
             id: state.id ?? context.newId(),
             name: state.label,
             symbol: state.symbol,
@@ -189,7 +193,7 @@ export function relationshipToDocument(definition, context) {
 // crossing inside the subsystem, as `{ edgeId, position }` entries: a list naming the edge in an `...Id` field, so that
 // copying renumbers it as it does any reference (docs/designPrinciples.md). A subsystem without it lays its terminals out
 // itself. `ports`, written by earlier versions, is read past and not kept: the boundary is derived (subsystemBoundaryCrossings).
-const subsystemDocumentKeys = new Set(['id', 'name', 'parentSubsystemId', 'position', 'terminalPositions', 'ports']);
+const subsystemDocumentKeys = new Set(['id', 'name', 'parentSubsystemId', 'position', 'terminalPositions', 'ports', 'definitionId', 'parameterValues', 'definitionKey']);
 
 const isPoint = (value) => Array.isArray(value) && value.length === 3 && value.every((item) => Number.isFinite(Number(item)));
 
@@ -203,6 +207,11 @@ export function subsystemFromDocument(subsystem) {
         parentSubsystemId: subsystem.parentSubsystemId ?? null,
         position: isPoint(subsystem.position) ? subsystem.position.map(Number) : [0, 0, 0],
         terminalPositions,
+        // A component instance (src/components.mjs): its definition and its exposed-parameter values; or, inside one,
+        // the key of the subsystem it was made from.
+        ...(subsystem.definitionId != null ? { definitionId: subsystem.definitionId } : {}),
+        ...(Array.isArray(subsystem.parameterValues) && subsystem.parameterValues.length ? { parameterValues: structuredClone(subsystem.parameterValues) } : {}),
+        ...(subsystem.definitionKey != null ? { definitionKey: subsystem.definitionKey } : {}),
         deleted: false,
         ...unknownFields(subsystem, subsystemDocumentKeys)
     };
@@ -220,6 +229,9 @@ export function subsystemToDocument(definition, { position = definition.position
         name: definition.name,
         parentSubsystemId: definition.parentSubsystemId ?? null,
         position: [...position],
-        ...(terminalPositions.length ? { terminalPositions } : {})
+        ...(terminalPositions.length ? { terminalPositions } : {}),
+        ...(definition.definitionId != null ? { definitionId: definition.definitionId } : {}),
+        ...(definition.parameterValues?.length ? { parameterValues: structuredClone(definition.parameterValues) } : {}),
+        ...(definition.definitionKey != null ? { definitionKey: definition.definitionKey } : {})
     };
 }

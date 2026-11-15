@@ -1,5 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+import { stripComponents } from './components.mjs';
 import { subsystemFromDocument } from './modelCodec.mjs';
 
 // A subsystem's boundary is not stored: which relationships cross it is derived from the current edges and node membership
@@ -160,8 +161,10 @@ export function normalizeSubsystemName(name) {
     return trimmed || null;
 }
 
+// What the engine is given: the flat graph, with the hierarchy and every trace of components taken out
+// (src/components.mjs), so subsystems never change how a model runs.
 export function executionProjectDocument(document) {
-    const flattened = structuredClone(document);
+    const flattened = stripComponents(document);
     delete flattened.subsystems;
     flattened.nodes.forEach((node) => delete node.subsystemId);
     return flattened;

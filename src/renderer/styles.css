@@ -727,6 +727,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .subsystemPortList li small { display: inline; color: #5f7782; font-size: 8px; }
 .subsystemPortList li b { color: #86ddd5; font-weight: 600; }
 .subsystemPortList:empty::before { color: #5f7782; content: "Nothing crosses its boundary."; }
+.subsystemPortList[data-empty]:empty::before { content: attr(data-empty); }
 .subsystemEditorButtons { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .subsystemEditorButtons button, .subsystemRow button { padding: 4px 8px; color: #9fb7c0; background: transparent; border: 1px solid #31525a; border-radius: 4px; font-size: 8px; cursor: pointer; }
 .subsystemEditorButtons button:hover, .subsystemRow button:hover { color: #d9e8ec; border-color: #4aa99f; }

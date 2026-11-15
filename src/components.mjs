@@ -479,10 +479,11 @@ export function instancePorts(document, subsystemId) {
     const describe = (stateId, extra) => {
         const owner = stateOwner.get(stateId);
         if (!owner) return null;
+        // `named` says the port has a name of its own; otherwise `name` is its node's and state's.
         return {
-            stateId, nodeId: owner.node.id, symbol: owner.state.symbol, unit: owner.state.unit ?? '',
-            name: extra.name || `${owner.node.name} · ${owner.state.name ?? owner.state.symbol}`,
-            direction: extra.direction ?? 'both', connected: connectedStates.has(stateId), ...extra
+            ...extra, stateId, nodeId: owner.node.id, symbol: owner.state.symbol, unit: owner.state.unit ?? '',
+            name: extra.name || `${owner.node.name} · ${owner.state.name ?? owner.state.symbol}`, named: Boolean(extra.name),
+            direction: extra.direction ?? 'both', connected: connectedStates.has(stateId)
         };
     };
     const declared = (definition?.document.component?.ports ?? [])

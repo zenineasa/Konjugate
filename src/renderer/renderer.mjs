@@ -17927,7 +17927,7 @@ function renderSubsystemComponent(subsystem, locked) {
         row.className = 'subsystemRow';
         row.dataset.portState = port.stateId;
         row.innerHTML = `<input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}"><select data-port-direction aria-label="Port direction"><option value="both">In and out</option><option value="in">In</option><option value="out">Out</option></select>${port.declared ? '<button data-port-remove type="button">Remove</button>' : '<button data-port-keep type="button">Keep as a port</button>'}<small>${escapeHtml(port.symbol)}${port.unit ? ` · ${escapeHtml(port.unit)}` : ''} · ${port.connected ? 'connected' : 'not connected'}${port.declared ? '' : ' · found from what is connected'}</small>`;
-        $('[data-port-name]', row).value = port.declared ? port.name : '';
+        $('[data-port-name]', row).value = port.named ? port.name : '';
         $('[data-port-direction]', row).value = port.direction ?? 'both';
         row.querySelectorAll('input, select, button').forEach((control) => { control.disabled = !editable; });
         $('[data-port-name]', row).addEventListener('change', (event) => applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: port.stateId, name: event.target.value }), 'Port named'));

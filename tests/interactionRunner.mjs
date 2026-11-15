@@ -7223,8 +7223,9 @@ export async function runInteractionTests(driver) {
         const proxy = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong').textContent === ${JSON.stringify(name)} && getComputedStyle(label.parentElement).display !== 'none')`;
         const open = (name) => `${proxy(name)}.querySelector('.subsystemOpen')`;
         const proxyText = (name) => evaluate(window, `${proxy(name)}.querySelector('small').textContent`);
+        // A terminal's whole text, its detail line included, which compact labels show only when expanded.
         const terminals = () => evaluate(window, `[...document.querySelectorAll('.subsystemTerminal')].filter((terminal) => getComputedStyle(terminal.parentElement).display !== 'none')
-            .map((terminal) => [Number(terminal.dataset.terminalEdge), terminal.querySelector('.subsystemTerminalEdge').innerText.replace(/\\s+/g, ' ').trim()]).sort((a, b) => a[0] - b[0])`);
+            .map((terminal) => [Number(terminal.dataset.terminalEdge), [...terminal.querySelector('.subsystemTerminalEdge').children].map((part) => part.textContent.trim()).filter(Boolean).join(' ')]).sort((a, b) => a[0] - b[0])`);
         const terminal = (edgeId, part) => `document.querySelector('.subsystemTerminal[data-terminal-edge="${edgeId}"] .${part}')`;
         return { project, proxy, open, proxyText, terminals, terminal };
     })();
@@ -7418,6 +7419,124 @@ export async function runInteractionTests(driver) {
         } finally {
             await evaluate(window, `(() => { window.confirm = window.__realConfirm; })()`);
         }
+    });
+
+    await run('subsystem boxes and boundary terminals follow the Nodes label control and the declutter pass, and terminals are dragged and keep their place', async () => {
+        const { proxy, open } = hierarchy;
+        await loadHierarchyProject();
+        const key = (init) => evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...${JSON.stringify(init)} })); })()`);
+        const undo = () => key({ key: 'z', metaKey: true, ctrlKey: true });
+        const redo = () => key({ key: 'z', shiftKey: true, metaKey: true, ctrlKey: true });
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const placed = async (name) => (await saved()).subsystems.find((subsystem) => subsystem.name === name).terminalPositions ?? [];
+        const nodeLabels = (mode) => evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== ${JSON.stringify(mode)}; guard += 1) button.click(); return button.dataset.mode; })()`);
+        // A box's or terminal's label, shown or not (a label left out keeps its element in the page, out of sight).
+        const boxLabel = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.querySelector('strong').textContent === ${JSON.stringify(name)})`;
+        const terminalLabel = (edgeId) => `document.querySelector('.subsystemTerminal[data-terminal-edge="${edgeId}"]')`;
+        const onScreen = (element) => `(() => { const element = ${element}; return Boolean(element) && getComputedStyle(element.parentElement).display !== 'none' && getComputedStyle(element).visibility !== 'hidden'; })()`;
+        const detailShown = (element) => evaluate(window, `getComputedStyle(${element}.querySelector('small')).display !== 'none'`);
+        const near = (a, b) => a.every((value, index) => Math.abs(value - b[index]) < 1e-6);
+        const drag = async (from, to) => {
+            await window.mouseMove(from);
+            await window.mouseDown(from, { button: 'left', clickCount: 1 });
+            for (let step = 1; step <= 8; step += 1) await window.mouseMove({ x: Math.round(from.x + (to.x - from.x) * step / 8), y: Math.round(from.y + (to.y - from.y) * step / 8) });
+            await window.mouseUp(to, { button: 'left', clickCount: 1 });
+        };
+        try {
+            // Compact is the name alone; expanded adds the detail line; hidden leaves the label out unless selected.
+            assert.equal(await nodeLabels('compact'), 'compact');
+            assert.equal(await detailShown(boxLabel('Plant')), false, 'A compact box label shows its detail line.');
+            assert.equal(await nodeLabels('expanded'), 'expanded');
+            await waitFor(window, `getComputedStyle(${boxLabel('Plant')}.querySelector('small')).display !== 'none'`, 'An expanded box label hides its detail line.');
+            assert.equal(await nodeLabels('hidden'), 'hidden');
+            await waitFor(window, `!${onScreen(boxLabel('Plant'))} && !${onScreen(boxLabel('Controls'))}`, 'Hidden labels still show on the boxes.');
+            await waitForCanvasAtRest(window);
+            const plant = await evaluate(window, `window.__subsystemScreenPoint('Plant')`);
+            await window.mouseMove(plant);
+            await window.mouseDown(plant, { button: 'left', clickCount: 1 });
+            await window.mouseUp(plant, { button: 'left', clickCount: 1 });
+            await waitFor(window, `${onScreen(boxLabel('Plant'))} && !${onScreen(boxLabel('Controls'))}`, 'A selected box did not show its hidden label.');
+
+            // Inside, terminals' labels are hidden too, but their diamonds stay: pointing at one shows its label, clicking it selects its relationship.
+            await evaluate(window, `document.querySelector('#subsystemEditorOpen').click()`);
+            // A label never shown has no element in the page yet, so the terminals are counted by their diamonds.
+            await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden && [11, 12, 13, 15, 16].every((edgeId) => window.__terminalPosition(edgeId))`, 'Plant was not entered.');
+            await waitFor(window, `!${onScreen(terminalLabel(11))}`, 'A hidden terminal label still shows.');
+            await waitForCanvasAtRest(window);
+            const heating = await evaluate(window, `window.__terminalScreenPoint(11)`);
+            assert.ok(heating, 'The terminal has no diamond on the canvas.');
+            await window.mouseMove({ x: heating.x + 30, y: heating.y + 30 });
+            await window.mouseMove(heating);
+            await waitFor(window, onScreen(terminalLabel(11)), 'Pointing at a terminal did not show its label.');
+            await window.mouseDown(heating, { button: 'left', clickCount: 1 });
+            await window.mouseUp(heating, { button: 'left', clickCount: 1 });
+            await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === 'Heating'`, 'Clicking a terminal\'s diamond did not select its relationship.');
+            await window.mouseMove({ x: heating.x + 200, y: heating.y + 200 });
+            await waitFor(window, onScreen(terminalLabel(11)), 'A selected terminal\'s label did not stay.');
+            assert.equal(await nodeLabels('compact'), 'compact');
+            await waitFor(window, `${onScreen(terminalLabel(12))} && getComputedStyle(${terminalLabel(12)}.querySelector('small')).display === 'none'`, 'A compact terminal label is not its name alone.');
+
+            // Dragged, a terminal stays where it is put, in the subsystem's record; undo puts it back in the automatic layout.
+            await evaluate(window, `(() => { document.querySelector('#edgeEditor').classList.add('hidden'); })()`);
+            const before = await evaluate(window, `window.__terminalPosition(11)`);
+            await waitForCanvasAtRest(window);
+            const from = await evaluate(window, `window.__terminalScreenPoint(11)`);
+            await drag(from, { x: from.x - 60, y: from.y - 90 });
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Terminal moved'`, 'Dragging the terminal did not move it.');
+            const moved = await evaluate(window, `window.__terminalPosition(11)`);
+            assert.ok(!near(moved, before), 'The terminal did not move.');
+            assert.deepEqual(await placed('Plant'), [{ edgeId: 11, position: moved }]);
+            await undo();
+            await waitFor(window, `JSON.stringify(window.__terminalPosition(11)) === ${JSON.stringify(JSON.stringify(before))}`, 'Undo did not put the terminal back.');
+            assert.deepEqual(await placed('Plant'), []);
+            await redo();
+            await waitFor(window, `JSON.stringify(window.__terminalPosition(11)) === ${JSON.stringify(JSON.stringify(moved))}`, 'Redo did not move the terminal again.');
+
+            // Leaving and coming back, and saving and opening, keep it there.
+            await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+            await waitFor(window, `document.querySelector('#subsystemBreadcrumb').hidden`, 'Did not leave Plant.');
+            await clickElement(window, open('Plant'));
+            await waitFor(window, `JSON.stringify(window.__terminalPosition(11)) === ${JSON.stringify(JSON.stringify(moved))}`, 'The terminal did not keep its place on coming back.');
+            const document_ = await saved();
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(document_)}, 'Hierarchy.kjt')`);
+            await waitFor(window, `Boolean(${proxy('Plant')})`, 'The saved project did not open.');
+            await clickElement(window, open('Plant'));
+            await waitFor(window, `JSON.stringify(window.__terminalPosition(11)) === ${JSON.stringify(JSON.stringify(moved))}`, 'The terminal did not keep its place through save and open.');
+
+            // A terminal whose edge no longer crosses the boundary is not saved; undoing the delete brings it back.
+            await waitForCanvasAtRest(window);
+            const sense = await evaluate(window, `window.__terminalScreenPoint(12)`);
+            await drag(sense, { x: sense.x + 20, y: sense.y - 150 });
+            await waitFor(window, `window.__debugProject.serialize().subsystems.find((subsystem) => subsystem.name === 'Plant').terminalPositions?.length === 2`, 'The second terminal was not kept.');
+            await waitForCanvasAtRest(window);
+            const senseMoved = await evaluate(window, `window.__terminalScreenPoint(12)`);
+            await window.mouseMove(senseMoved);
+            await window.mouseDown(senseMoved, { button: 'left', clickCount: 1 });
+            await window.mouseUp(senseMoved, { button: 'left', clickCount: 1 });
+            await waitFor(window, `document.querySelector('#editEdgeName').value === 'Sense level'`, 'The moved terminal\'s diamond did not select its relationship.');
+            await key({ key: 'Delete' });
+            await waitFor(window, `!document.querySelector('.subsystemTerminal[data-terminal-edge="12"]')`, 'The relationship was not deleted.');
+            assert.deepEqual((await placed('Plant')).map((entry) => entry.edgeId), [11]);
+            await undo();
+            await waitFor(window, `window.__debugProject.serialize().subsystems.find((subsystem) => subsystem.name === 'Plant').terminalPositions?.length === 2`, 'Undoing the delete did not keep the terminal\'s place.');
+        } finally {
+            await nodeLabels('compact');
+        }
+
+        // In a crowded view, box labels are left out where they would overlap, as node labels are, and a selected box keeps its own.
+        const crowd = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], nodes: [],
+            subsystems: Array.from({ length: 31 }, (unused, index) => ({ id: 200 + index, name: `Crowd ${index + 1}`, parentSubsystemId: null, position: [0, 0, 0] }))
+        };
+        const boxesShown = `[...document.querySelectorAll('.subsystemLabel')].filter((label) => getComputedStyle(label.parentElement).display !== 'none' && getComputedStyle(label).visibility !== 'hidden')`;
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(crowd)}, 'Crowd.kjt')`);
+        await waitFor(window, `Number(document.querySelector('#canvas').dataset.labelsLeftOut) >= 30 && ${boxesShown}.length === 1`, 'Overlapping box labels were not left out.', 10000);
+        await waitForCanvasAtRest(window);
+        const crowdBox = await evaluate(window, `window.__subsystemScreenPoint('Crowd 1')`);
+        await window.mouseMove(crowdBox);
+        await window.mouseDown(crowdBox, { button: 'left', clickCount: 1 });
+        await window.mouseUp(crowdBox, { button: 'left', clickCount: 1 });
+        await waitFor(window, `${boxesShown}.some((label) => label.classList.contains('selected'))`, 'A selected box did not keep its label.', 10000);
     });
 
     await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {

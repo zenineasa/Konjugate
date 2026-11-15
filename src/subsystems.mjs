@@ -1,5 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+import { subsystemFromDocument } from './modelCodec.mjs';
+
 // A subsystem's boundary is not stored: which relationships cross it is derived from the current edges and node membership
 // whenever it is needed (see subsystemBoundaryCrossings). A document written before that may still carry a `ports` array on
 // each subsystem; it is read past and never written again (docs/subsystems.md).
@@ -8,14 +10,7 @@ export function hydrateSubsystems(document, registerId) {
     const subsystems = (document.subsystems ?? []).map((subsystem) => {
         registerId(subsystem.id, 'Every subsystem must have a unique positive integer id.');
         subsystemIds.add(subsystem.id);
-        return {
-            id: subsystem.id,
-            name: subsystem.name || 'Untitled subsystem',
-            parentSubsystemId: subsystem.parentSubsystemId ?? null,
-            position: Array.isArray(subsystem.position) && subsystem.position.length === 3
-                ? subsystem.position.map(Number) : [0, 0, 0],
-            deleted: false
-        };
+        return subsystemFromDocument(subsystem);
     });
     subsystems.forEach((subsystem) => {
         if (subsystem.parentSubsystemId !== null && !subsystemIds.has(subsystem.parentSubsystemId)) {

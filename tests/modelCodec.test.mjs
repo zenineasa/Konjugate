@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../src/modelCodec.mjs';
+import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemFromDocument, subsystemToDocument } from '../src/modelCodec.mjs';
 
 // The canvas and the editor's normalisers, replaced by stand-ins that change nothing, so what these tests see is the codec.
 const context = {
@@ -80,4 +80,34 @@ test('fields the codec has never heard of survive and are not shared with the li
     const written = nodeToDocument(definition, context);
     written.futureNodeField.added = 'changed';
     assert.equal(definition.extraFields.futureNodeField.added, 'later');
+});
+
+// A subsystem with every field the schema gives one, and one a newer Konjugate might add.
+const subsystem = {
+    id: 20, name: 'Plant', parentSubsystemId: 19, position: [1, 2, 3],
+    terminalPositions: [{ edgeId: 6, position: [-4, 0.5, 0] }, { edgeId: 11, position: [5, 1, 0] }],
+    futureSubsystemField: { added: 'later' }
+};
+
+test('a subsystem written to a document and read back is the same subsystem, its terminal positions included', () => {
+    const definition = subsystemFromDocument(subsystem);
+    assert.deepEqual(subsystemToDocument(definition), subsystem);
+    definition.terminalPositions[0].position[0] = 99;
+    assert.equal(subsystem.terminalPositions[0].position[0], -4, 'The definition shares its positions with the document.');
+});
+
+test('a subsystem drops the terminal positions of edges that no longer cross it, and the ports of earlier versions', () => {
+    const definition = subsystemFromDocument({ ...subsystem, ports: [{ id: 50, edgeId: 6, internalNodeId: 1, externalNodeId: 2, role: 'source' }] });
+    const saved = subsystemToDocument(definition, { position: [7, 8, 9], crossingEdgeIds: new Set([11]) });
+    assert.deepEqual(saved.terminalPositions, [{ edgeId: 11, position: [5, 1, 0] }]);
+    assert.deepEqual(saved.position, [7, 8, 9]);
+    assert.equal('ports' in saved, false);
+    assert.equal('terminalPositions' in subsystemToDocument(definition, { crossingEdgeIds: new Set() }), false, 'An empty list is not written.');
+});
+
+test('a subsystem with only the required fields comes back with nothing invented, and unusable terminal positions are dropped', () => {
+    assert.deepEqual(subsystemToDocument(subsystemFromDocument({ id: 3, name: 'Box', parentSubsystemId: null, position: [0, 0, 0] })),
+        { id: 3, name: 'Box', parentSubsystemId: null, position: [0, 0, 0] });
+    const definition = subsystemFromDocument({ id: 3, name: 'Box', position: [0, 0, 0], terminalPositions: [{ edgeId: 'x', position: [0, 0, 0] }, { edgeId: 4, position: [1, 2] }, { edgeId: 5, position: ['1', 2, 3] }] });
+    assert.deepEqual(definition.terminalPositions, [{ edgeId: 5, position: [1, 2, 3] }]);
 });

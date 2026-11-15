@@ -184,3 +184,42 @@ export function relationshipToDocument(definition, context) {
         }
     };
 }
+
+// A subsystem record (docs/subsystems.md). `terminalPositions` is where the person has put the terminal of each boundary
+// crossing inside the subsystem, as `{ edgeId, position }` entries: a list naming the edge in an `...Id` field, so that
+// copying renumbers it as it does any reference (docs/designPrinciples.md). A subsystem without it lays its terminals out
+// itself. `ports`, written by earlier versions, is read past and not kept: the boundary is derived (subsystemBoundaryCrossings).
+const subsystemDocumentKeys = new Set(['id', 'name', 'parentSubsystemId', 'position', 'terminalPositions', 'ports']);
+
+const isPoint = (value) => Array.isArray(value) && value.length === 3 && value.every((item) => Number.isFinite(Number(item)));
+
+export function subsystemFromDocument(subsystem) {
+    const terminalPositions = (Array.isArray(subsystem.terminalPositions) ? subsystem.terminalPositions : [])
+        .filter((entry) => Number.isSafeInteger(entry?.edgeId) && entry.edgeId > 0 && isPoint(entry.position))
+        .map((entry) => ({ edgeId: entry.edgeId, position: entry.position.map(Number) }));
+    return {
+        id: subsystem.id,
+        name: subsystem.name || 'Untitled subsystem',
+        parentSubsystemId: subsystem.parentSubsystemId ?? null,
+        position: isPoint(subsystem.position) ? subsystem.position.map(Number) : [0, 0, 0],
+        terminalPositions,
+        deleted: false,
+        ...unknownFields(subsystem, subsystemDocumentKeys)
+    };
+}
+
+// `position` is where the box stands on the canvas now; `crossingEdgeIds`, when given, are the edges crossing the boundary
+// now, and a terminal position for any other edge is dropped, since its edge no longer ends at a terminal.
+export function subsystemToDocument(definition, { position = definition.position, crossingEdgeIds = null } = {}) {
+    const terminalPositions = (definition.terminalPositions ?? [])
+        .filter((entry) => !crossingEdgeIds || crossingEdgeIds.has(entry.edgeId))
+        .map((entry) => ({ edgeId: entry.edgeId, position: [...entry.position] }));
+    return {
+        ...structuredClone(definition.extraFields ?? {}),
+        id: definition.id,
+        name: definition.name,
+        parentSubsystemId: definition.parentSubsystemId ?? null,
+        position: [...position],
+        ...(terminalPositions.length ? { terminalPositions } : {})
+    };
+}

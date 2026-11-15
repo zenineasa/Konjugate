@@ -1690,6 +1690,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Hidden labels vanish unless they are selected, hovered (.peek), flagged, pinned, or needed to pick an endpoint. */
 .hideNodeLabels:not(.pickingEndpoint) .node-label-container:not(.selected):not(.peek):not(.hasStabilityFinding),
 .hideEdgeLabels .bundleLabel:not(.pinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
+/* Subsystem boxes and boundary terminals follow the Nodes label control: compact is the name, expanded adds the detail
+   line, and hidden leaves them out unless selected or pointed at. A hidden terminal keeps its diamond on the canvas. */
+#canvas:not(.showNodesDetails) .subsystemLabel small, #canvas:not(.showNodesDetails) .subsystemTerminalEdge small { display: none; }
+.hideNodeLabels:not(.pickingEndpoint) .subsystemLabel:not(.selected):not(.peek),
+.hideNodeLabels:not(.pickingEndpoint) .subsystemTerminal:not(.selected):not(.peek) { visibility: hidden; pointer-events: none; }
 
 /* A relationship with several equations: a row per intermediate quantity and per equation. */
 .severalRow { margin-bottom: 9px; padding: 7px; background: rgb(255 255 255 / 1.5%); border: 1px solid #1f2c33; border-radius: 6px; }

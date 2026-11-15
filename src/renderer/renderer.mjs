@@ -84,7 +84,7 @@ import { generateStandaloneProgram } from '../codeExport.mjs';
 import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
 import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
-import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument } from '../modelCodec.mjs';
+import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -563,6 +563,10 @@ let labelSystemReady = false;
 // The node labels left out because they would overlap another (labelDeclutter.mjs), on a model too large to show
 // them all: by node id. A label that must stay is never among them.
 const declutteredNodeIds = new Set();
+// The same for subsystem boxes and boundary terminals, which follow the Nodes control: keys `s<subsystem id>`, `t<edge id>`.
+const declutteredLabelKeys = new Set();
+// The box or terminal pointed at while their labels are hidden or left out, by the same key.
+let hoveredLabelKey = null;
 const nodeLabelSizes = new Map();
 // The same for the edge labels, by bundle key (phones only).
 const declutteredBundleKeys = new Set();
@@ -1266,9 +1270,11 @@ function createSubsystemObject(definition) {
     const label = new CSS2DObject(wrapper);
     label.renderOrder = 20;
     label.position.set(0, 0.35, 0);
+    object.userData.labelObject = label;
     object.add(label);
     scene.add(object);
     subsystemObjects.set(definition.id, object);
+    refreshHierarchyLabelVisibility();
 }
 
 function subsystemForNodeInView(node) {
@@ -1337,6 +1343,8 @@ function describeBoundaryCrossing(crossing) {
 
 function removeSubsystemTerminals() {
     subsystemTerminals.forEach(({ object, label }) => {
+        const pickIndex = nodePickTargets.indexOf(object);
+        if (pickIndex >= 0) nodePickTargets.splice(pickIndex, 1);
         object.remove(label);
         label.element.remove();
         scene.remove(object);
@@ -1375,6 +1383,11 @@ function layoutSubsystemTerminals(descriptions) {
             positions.set(item.edgeId, { position, side });
         });
     });
+    // Where the person has put a terminal, it stays (subsystem.terminalPositions, saved with the project).
+    subsystemById(activeSubsystemId)?.terminalPositions?.forEach((entry) => {
+        const placed = positions.get(entry.edgeId);
+        if (placed) placed.position = new THREE.Vector3(...entry.position);
+    });
     return positions;
 }
 
@@ -1385,7 +1398,7 @@ function createSubsystemTerminal(description, { position, side }) {
     );
     object.renderOrder = 9;
     object.position.copy(position);
-    object.userData = { kind: 'subsystemTerminal', edgeId: description.edgeId };
+    object.userData = { restPosition: position.clone(), kind: 'subsystemTerminal', edgeId: description.edgeId, subsystemId: activeSubsystemId };
     const element = document.createElement('div');
     element.className = `subsystemTerminal ${description.direction} ${side}`;
     element.dataset.terminalEdge = description.edgeId;
@@ -1394,12 +1407,7 @@ function createSubsystemTerminal(description, { position, side }) {
     element.addEventListener('pointerdown', (event) => event.stopPropagation());
     $('.subsystemTerminalEdge', element).addEventListener('click', (event) => {
         event.stopPropagation();
-        const definition = model.relationships.find((relationship) => relationship.id === description.edgeId && !relationship.deleted);
-        if (!definition) return;
-        selectRelationship(definition);
-        transformControls.detach();
-        openRelationshipEditor(definition);
-        $('#statusText').textContent = description.tooltip.replace(/ Click to select it\.$/, '');
+        selectSubsystemTerminal(description.edgeId);
     });
     $('.subsystemTerminalJump', element).addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1412,7 +1420,37 @@ function createSubsystemTerminal(description, { position, side }) {
     label.position.set(side === 'left' ? -0.3 : 0.3, 0, 0);
     object.add(label);
     scene.add(object);
+    // Dragged like a node (DragControls drags whatever is in nodePickTargets), and clicked to select its relationship.
+    nodePickTargets.push(object);
     subsystemTerminals.set(description.edgeId, { object, label, crossing: description });
+}
+
+// Selects a terminal's relationship and opens its editor: a click on the terminal's label or on its diamond.
+function selectSubsystemTerminal(edgeId) {
+    const terminal = subsystemTerminals.get(edgeId);
+    const definition = model.relationships.find((relationship) => relationship.id === edgeId && !relationship.deleted);
+    if (!definition) return;
+    selectRelationship(definition);
+    transformControls.detach();
+    openRelationshipEditor(definition);
+    if (terminal) $('#statusText').textContent = terminal.crossing.tooltip.replace(/ Click to select it\.$/, '');
+}
+
+// Puts a terminal where it was dragged to, in the subsystem's record, as one undo step; undone, it goes back to where it
+// was, or to the automatic layout if it had never been moved.
+function moveSubsystemTerminal(subsystemId, edgeId, position) {
+    const subsystem = subsystemById(subsystemId);
+    if (activeResult || !subsystem) return false;
+    const previous = subsystem.terminalPositions?.find((entry) => entry.edgeId === edgeId)?.position ?? null;
+    const apply = (point) => {
+        const others = (subsystem.terminalPositions ?? []).filter((entry) => entry.edgeId !== edgeId);
+        subsystem.terminalPositions = point ? [...others, { edgeId, position: [...point] }] : others;
+        updateRelationships();
+    };
+    apply(position);
+    recordHistory({ undo: () => apply(previous), redo: () => apply(position) });
+    $('#statusText').textContent = 'Terminal moved';
+    return true;
 }
 
 // Leaves the subsystem for the view that shows the outside node itself, and selects it there.
@@ -1442,12 +1480,14 @@ function syncSubsystemBoundaries() {
         if (object.userData.summary.textContent !== text) object.userData.summary.textContent = text;
     });
     const descriptions = activeSubsystemId === null ? [] : liveBoundaryCrossings(activeSubsystemId).map(describeBoundaryCrossing);
-    const signature = JSON.stringify([activeSubsystemId, descriptions.map(({ edgeId, role, direction, badge, name, detail, tooltip }) => [edgeId, role, direction, badge, name, detail, tooltip])]);
+    const signature = JSON.stringify([activeSubsystemId, subsystemById(activeSubsystemId)?.terminalPositions ?? [],
+        descriptions.map(({ edgeId, role, direction, badge, name, detail, tooltip }) => [edgeId, role, direction, badge, name, detail, tooltip])]);
     if (signature !== subsystemTerminalSignature) {
         subsystemTerminalSignature = signature;
         removeSubsystemTerminals();
         const positions = layoutSubsystemTerminals(descriptions);
         descriptions.forEach((description) => createSubsystemTerminal(description, positions.get(description.edgeId)));
+        refreshHierarchyLabelVisibility();
     }
     relationshipObjects.forEach((relationship) => {
         const source = relationshipEndObject(relationship.definition, 'source');
@@ -1793,8 +1833,14 @@ dragControls.recursive = false;
 let dragStartPositions = null;
 let dragLastPosition = null;
 let waypointDragStart = null;
+let terminalDragStart = null;
 dragControls.addEventListener('dragstart', (event) => {
     orbitControls.enabled = false;
+    if (event.object.userData.kind === 'subsystemTerminal') {
+        // A terminal is moved within the subsystem it belongs to; results mode locks the layout as it does nodes.
+        terminalDragStart = activeResult ? null : event.object.position.clone();
+        return;
+    }
     if (event.object.userData.kind === 'waypoint') {
         waypointDragStart = event.object.position.clone();
         return;
@@ -1804,6 +1850,15 @@ dragControls.addEventListener('dragstart', (event) => {
     dragLastPosition = event.object.position.clone();
 });
 dragControls.addEventListener('drag', (event) => {
+    if (event.object.userData.kind === 'subsystemTerminal') {
+        if (!terminalDragStart) {
+            event.object.position.copy(event.object.userData.restPosition ?? event.object.position);
+            return;
+        }
+        // Only the object moves while dragging; the subsystem's record changes once, when it is let go.
+        updateRelationships();
+        return;
+    }
     if (event.object.userData.kind === 'waypoint') {
         const { relationshipId, index } = event.object.userData;
         const definition = relationshipObjects.get(relationshipId)?.definition;
@@ -1825,6 +1880,13 @@ dragControls.addEventListener('drag', (event) => {
 });
 dragControls.addEventListener('dragend', (event) => {
     orbitControls.enabled = true;
+    if (event.object.userData.kind === 'subsystemTerminal') {
+        const { subsystemId, edgeId } = event.object.userData;
+        const start = terminalDragStart;
+        terminalDragStart = null;
+        if (start && !event.object.position.equals(start)) moveSubsystemTerminal(subsystemId, edgeId, event.object.position.toArray());
+        return;
+    }
     if (event.object.userData.kind === 'waypoint') {
         const { relationshipId, index } = event.object.userData;
         const definition = relationshipObjects.get(relationshipId)?.definition;
@@ -1918,6 +1980,13 @@ window.__subsystemScreenPoint = (name) => {
     const object = [...subsystemObjects.values()].find((candidate) => candidate.userData.definition.name === name && !candidate.userData.definition.deleted);
     return object ? screenPointFor(object.position) : null;
 };
+
+// A boundary terminal's diamond inside the subsystem being viewed, by its edge's id: where it is on screen, and in the scene.
+window.__terminalScreenPoint = (edgeId) => {
+    const terminal = subsystemTerminals.get(edgeId);
+    return terminal ? screenPointFor(terminal.object.position) : null;
+};
+window.__terminalPosition = (edgeId) => subsystemTerminals.get(edgeId)?.object.position.toArray() ?? null;
 
 // Whether a relationship is drawn in the current view, by title (subsystem scoping hides some).
 window.__relationshipVisible = (title) => [...relationshipObjects.values()].find((entry) => entry.definition.title === title)?.line.visible ?? null;
@@ -7965,11 +8034,10 @@ function serializeProjectDocument() {
                 visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target)
             ))
             .map((edge) => relationshipToDocument(edge, modelCodecContext)),
-        subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => ({
-            id: subsystem.id,
-            name: subsystem.name,
-            parentSubsystemId: subsystem.parentSubsystemId,
-            position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position
+        subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => subsystemToDocument(subsystem, {
+            position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
+            // A terminal moved for an edge that no longer crosses the boundary has nothing left to place.
+            crossingEdgeIds: new Set(liveBoundaryCrossings(subsystem.id).map((crossing) => crossing.edgeId))
         })),
         // Node deletion (deleteSelected) only toggles visibility -- it has no reason to know
         // about edgeGroups, and doesn't touch group.memberNodeIds -- so a group whose members
@@ -11763,6 +11831,7 @@ function fireLongPress() {
 }
 
 let subsystemPointerDown = null;
+let terminalPointerDown = null;
 // Where the pointer last was over the canvas, for a drag of nodes dropped onto a subsystem box (DragControls' dragend has none).
 let lastCanvasPointer = null;
 renderer.domElement.addEventListener('pointermove', (event) => { lastCanvasPointer = { clientX: event.clientX, clientY: event.clientY }; });
@@ -11808,6 +11877,12 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
     if (activeEndpointPick) return;
     if (event.shiftKey) return;
 
+    // A terminal's diamond: a click selects its relationship (on release, once it is known not to be a drag), and a drag
+    // moves it, which DragControls' own pointerdown starts.
+    if (nodeIntersection?.object.userData.kind === 'subsystemTerminal') {
+        terminalPointerDown = { edgeId: nodeIntersection.object.userData.edgeId, x: event.clientX, y: event.clientY };
+        return;
+    }
     // A waypoint handle isn't reachable via rootNodeFromIntersection's node-only walk (by
     // design -- it degrades to null for any non-'node' kind), so it falls through to here just
     // like empty canvas would. Bail out without touching selection and let DragControls' own
@@ -11851,6 +11926,12 @@ renderer.domElement.addEventListener('pointermove', (event) => {
 });
 
 renderer.domElement.addEventListener('pointerup', (event) => {
+    if (terminalPointerDown) {
+        const { edgeId, x, y } = terminalPointerDown;
+        terminalPointerDown = null;
+        if (event.button === 0 && Math.hypot(event.clientX - x, event.clientY - y) <= 4) selectSubsystemTerminal(edgeId);
+        return;
+    }
     if (subsystemPointerDown) {
         const { id, x, y } = subsystemPointerDown;
         subsystemPointerDown = null;
@@ -15450,6 +15531,26 @@ function refreshLabelObjectVisibility() {
         label.visible = mustStay || (labelModes.nodes !== 'hidden' && !declutteredNodeIds.has(id));
     });
     relationshipBundleObjects.forEach((overlay) => { overlay.anchor.visible = (overlay.baseVisible ?? true) && bundleLabelAllowed(overlay); });
+    refreshHierarchyLabelVisibility();
+}
+
+// Subsystem boxes and boundary terminals obey the Nodes label control as node labels do: hidden, or left out where they
+// would overlap, they show again while selected or pointed at. A terminal's diamond stays on the canvas either way, so it
+// can still be found, clicked and dragged.
+function refreshHierarchyLabelVisibility() {
+    const allowed = (key, mustStay) => mustStay || Boolean(activeEndpointPick) || (labelModes.nodes !== 'hidden' && !declutteredLabelKeys.has(key));
+    subsystemObjects.forEach((object, id) => {
+        const element = object.userData.labelElement;
+        if (!element || !object.userData.labelObject) return;
+        element.classList.toggle('peek', hoveredLabelKey === `s${id}`);
+        object.userData.labelObject.visible = allowed(`s${id}`, element.classList.contains('selected') || element.classList.contains('peek'));
+    });
+    subsystemTerminals.forEach(({ label }, edgeId) => {
+        const classes = label.element.classList;
+        classes.toggle('selected', selectedRelationship?.id === edgeId);
+        classes.toggle('peek', hoveredLabelKey === `t${edgeId}`);
+        label.visible = allowed(`t${edgeId}`, classes.contains('selected') || classes.contains('peek'));
+    });
 }
 
 // Works out again which labels to leave out, from where they fall on screen now: called a few times a second, since
@@ -15461,19 +15562,24 @@ function refreshLabelDeclutter() {
     const say = () => {
         const button = $('[data-detail="nodes"]');
         const base = button.dataset.baseTitle ?? button.title;
-        button.title = declutteredNodeIds.size ? `${base} · ${declutteredNodeIds.size} left out where they would overlap: zoom in, or point at a shape` : base;
-        canvas.dataset.labelsLeftOut = String(declutteredNodeIds.size + declutteredBundleKeys.size);
+        const leftOut = declutteredNodeIds.size + declutteredLabelKeys.size;
+        button.title = leftOut ? `${base} · ${leftOut} left out where they would overlap: zoom in, or point at a shape` : base;
+        canvas.dataset.labelsLeftOut = String(leftOut + declutteredBundleKeys.size);
     };
     const clear = () => {
-        if (!declutteredNodeIds.size && !declutteredBundleKeys.size) return;
+        if (!declutteredNodeIds.size && !declutteredBundleKeys.size && !declutteredLabelKeys.size) return;
         declutteredNodeIds.clear();
         declutteredBundleKeys.clear();
+        declutteredLabelKeys.clear();
         refreshLabelObjectVisibility();
         updateHoverTracking();
         say();
     };
     const phone = isPhoneLayout();
-    const declutterNodes = nodeObjects.size > (phone ? declutterAbovePhone : declutterAbove) && labelModes.nodes !== 'hidden' && !activeEndpointPick;
+    // Boxes and terminals are labels in the same pass as nodes, and count towards the size at which it starts.
+    const shownBoxes = [...subsystemObjects.values()].filter((object) => object.visible);
+    const labelCount = nodeObjects.size + shownBoxes.length + subsystemTerminals.size;
+    const declutterNodes = labelCount > (phone ? declutterAbovePhone : declutterAbove) && labelModes.nodes !== 'hidden' && !activeEndpointPick;
     const declutterEdges = phone && labelModes.edges !== 'hidden' && !activeEndpointPick;
     if (!declutterNodes && !declutterEdges) { clear(); return; }
     const interfaceZoom = Number.parseFloat(document.documentElement.style.zoom) || 1;
@@ -15489,7 +15595,8 @@ function refreshLabelDeclutter() {
     // the phone's default), so what is measured of a label is scaled to match.
     nodeObjects.forEach((object, id) => {
         const label = object.children.find((child) => child.element?.classList.contains('node-label-container'));
-        if (!label) return;
+        // A node in another subsystem has no label on screen, so it takes no room from the labels that are.
+        if (!label || !object.visible) return;
         const element = label.element;
         // A label left out has no size to measure: its last, or a card's usual.
         if (element.offsetWidth) nodeLabelSizes.set(id, [element.offsetWidth * interfaceZoom, element.offsetHeight * interfaceZoom]);
@@ -15503,6 +15610,29 @@ function refreshLabelDeclutter() {
             priority: 1000 + (degree.get(id) ?? 0), shown: !declutteredNodeIds.has(id),
             keep: !declutterNodes || classes.contains('selected') || classes.contains('peek') || classes.contains('hasStabilityFinding')
         });
+    });
+    const hierarchyLabel = (key, labelObject, element, priority, keep, centred) => {
+        if (element.offsetWidth) nodeLabelSizes.set(key, [element.offsetWidth * interfaceZoom, element.offsetHeight * interfaceZoom]);
+        const [labelWidth, labelHeight] = nodeLabelSizes.get(key) ?? [150, 40];
+        labelObject.getWorldPosition(labelProbe).project(camera);
+        if (labelProbe.z > 1 || Math.abs(labelProbe.x) > 1.5 || Math.abs(labelProbe.y) > 1.5) return;
+        const x = (labelProbe.x * 0.5 + 0.5) * width;
+        labels.push({
+            id: key, left: centred === 'left' ? x - labelWidth : centred === 'right' ? x : x - labelWidth / 2,
+            top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2, width: labelWidth, height: labelHeight,
+            priority, shown: !declutteredLabelKeys.has(key), keep: !declutterNodes || keep
+        });
+    };
+    shownBoxes.forEach((object) => {
+        const element = object.userData.labelElement;
+        if (!element || !object.userData.labelObject) return;
+        hierarchyLabel(`s${object.userData.id}`, object.userData.labelObject, element, 1000 + liveBoundaryCrossings(object.userData.id).length,
+            element.classList.contains('selected') || element.classList.contains('peek'));
+    });
+    subsystemTerminals.forEach(({ label, crossing }, edgeId) => {
+        // Written after nodes and boxes: a terminal stands in for something that is not here.
+        hierarchyLabel(`t${edgeId}`, label, label.element, 900, label.element.classList.contains('selected') || label.element.classList.contains('peek'),
+            label.element.classList.contains('left') ? 'left' : 'right');
     });
     if (declutterEdges) {
         relationshipBundleObjects.forEach((overlay, key) => {
@@ -15523,10 +15653,13 @@ function refreshLabelDeclutter() {
     const hidden = declutterLabels(labels);
     const hiddenNodes = new Set([...hidden].filter((id) => id.startsWith('n')).map((id) => Number(id.slice(1))));
     const hiddenBundles = new Set([...hidden].filter((id) => id.startsWith('b')).map((id) => id.slice(1)));
+    const hiddenHierarchy = new Set([...hidden].filter((id) => id.startsWith('s') || id.startsWith('t')));
     const same = (previous, next) => previous.size === next.size && [...next].every((id) => previous.has(id));
-    if (same(declutteredNodeIds, hiddenNodes) && same(declutteredBundleKeys, hiddenBundles)) return;
+    if (same(declutteredNodeIds, hiddenNodes) && same(declutteredBundleKeys, hiddenBundles) && same(declutteredLabelKeys, hiddenHierarchy)) return;
     declutteredNodeIds.clear();
     hiddenNodes.forEach((id) => declutteredNodeIds.add(id));
+    declutteredLabelKeys.clear();
+    hiddenHierarchy.forEach((key) => declutteredLabelKeys.add(key));
     declutteredBundleKeys.clear();
     hiddenBundles.forEach((key) => declutteredBundleKeys.add(key));
     refreshLabelObjectVisibility();
@@ -15551,37 +15684,50 @@ function updateLabelPeek() {
 // the only thing that says what it is. Only tracked while something is hidden, and only when the pointer
 // is not dragging.
 function hoverTrackingNeeded() {
-    return labelModes.nodes === 'hidden' || labelModes.edges === 'hidden' || declutteredNodeIds.size > 0;
+    return labelModes.nodes === 'hidden' || labelModes.edges === 'hidden' || declutteredNodeIds.size > 0 || declutteredLabelKeys.size > 0;
 }
 function updateHoverTracking() {
     if (hoverTrackingNeeded()) return;
-    if (hoveredNodeId !== null || hoveredRelationshipId !== null) {
+    if (hoveredNodeId !== null || hoveredRelationshipId !== null || hoveredLabelKey !== null) {
         hoveredNodeId = null;
         hoveredRelationshipId = null;
+        hoveredLabelKey = null;
         updateLabelPeek();
     }
 }
+// The latest pointer position, read when the frame comes: moves made while one is pending are not dropped, so the label
+// that shows is the one under the pointer now, not where it was a frame ago (which on a busy machine can be far off).
+let hoverEvent = null;
 renderer.domElement.addEventListener('pointermove', (event) => {
-    if (!hoverTrackingNeeded() || event.buttons !== 0 || hoverFrame) return;
+    if (!hoverTrackingNeeded() || event.buttons !== 0) return;
+    hoverEvent = { clientX: event.clientX, clientY: event.clientY };
+    if (hoverFrame) return;
     hoverFrame = requestAnimationFrame(() => {
         hoverFrame = null;
-        setPointerFromEvent(event);
+        setPointerFromEvent(hoverEvent);
         const node = labelModes.nodes === 'hidden' || declutteredNodeIds.size ? rootNodeFromIntersection(firstIntersection(nodePickTargets)) : null;
         // A relationship's label sits on top of the line it names, so it is revealed on hover only while
         // that group is hidden; otherwise it would intercept the click the user is about to make.
         const relationship = !node && labelModes.edges === 'hidden' ? firstIntersection(relationshipPickTargets)?.object.userData.definition : null;
+        // A subsystem box or a terminal's diamond pointed at shows its label as a node's does.
+        const nodesHidden = labelModes.nodes === 'hidden' || declutteredLabelKeys.size > 0;
+        const terminal = !node && nodesHidden ? firstIntersection([...subsystemTerminals.values()].map(({ object }) => object)) : null;
+        const box = !node && !terminal && nodesHidden ? firstIntersection([...subsystemObjects.values()].filter((object) => object.visible)) : null;
+        const nextLabel = terminal ? `t${terminal.object.userData.edgeId}` : box ? `s${box.object.userData.id}` : null;
         const nextNode = node?.userData.id ?? null;
         const nextRelationship = relationship?.id ?? null;
-        if (nextNode === hoveredNodeId && nextRelationship === hoveredRelationshipId) return;
+        if (nextNode === hoveredNodeId && nextRelationship === hoveredRelationshipId && nextLabel === hoveredLabelKey) return;
         hoveredNodeId = nextNode;
         hoveredRelationshipId = nextRelationship;
+        hoveredLabelKey = nextLabel;
         updateLabelPeek();
     });
 });
 renderer.domElement.addEventListener('pointerleave', () => {
-    if (hoveredNodeId === null && hoveredRelationshipId === null) return;
+    if (hoveredNodeId === null && hoveredRelationshipId === null && hoveredLabelKey === null) return;
     hoveredNodeId = null;
     hoveredRelationshipId = null;
+    hoveredLabelKey = null;
     updateLabelPeek();
 });
 
@@ -16461,6 +16607,7 @@ function createSubsystemFromSelection(name) {
         name: name.trim() || `Subsystem ${model.subsystems.filter((item) => !item.deleted).length + 1}`,
         parentSubsystemId: activeSubsystemId,
         position: center.toArray(),
+        terminalPositions: [],
         deleted: false
     };
     const previousMembership = new Map(nodeIds.map((nodeId) => [nodeId,

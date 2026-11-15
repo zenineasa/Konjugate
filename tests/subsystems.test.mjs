@@ -98,7 +98,7 @@ test('opens a document whose subsystems still carry stored ports, and does not k
         ] }]
     };
     assert.deepEqual(hydrateSubsystems(document, registerId), [
-        { id: 9, name: 'Plant', parentSubsystemId: null, position: [1, 2, 3], deleted: false }
+        { id: 9, name: 'Plant', parentSubsystemId: null, position: [1, 2, 3], terminalPositions: [], deleted: false }
     ]);
     assert.deepEqual(subsystemBoundaryCrossings({ subsystemId: 9, subsystems: [{ id: 9 }], nodes: document.nodes, edges: document.edges }),
         [{ edgeId: 3, internalNodeId: 1, externalNodeId: 2, role: 'source', direction: 'outgoing' }]);

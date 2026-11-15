@@ -7862,6 +7862,28 @@ export async function runInteractionTests(driver) {
         }
     });
 
+    await run('a result records the version of every component it ran with, and keeps it when saved with the project', async () => {
+        await loadHierarchyProject();
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '0.5'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `(() => { const facts = window.__debugTour.blockers(); return facts.hasResult && !facts.simulationRunning; })()`, 'The run did not finish.', 60000);
+        const recorded = await evaluate(window, `window.__debugResultComponents()`);
+        assert.equal(recorded.length, 1);
+        assert.deepEqual(recorded[0].components.map((item) => [item.name, item.instances, item.sha256.length]).sort(), [['Controls', 1, 64], ['Plant', 1, 64]], 'The run records each component and its version.');
+        if (driver.capabilities.osFileOpen) {
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            await waitFor(window, `document.querySelector('#saveContentDialog').open`, 'Saving with results did not ask what to keep.');
+            const { path, bytes } = await driver.captureExport(() => evaluate(window, `document.querySelector('#saveContentDialog form').requestSubmit()`), { fileName: 'Ran.kjt' });
+            const document_ = JSON.parse(await decodeProjectFile(bytes));
+            assert.deepEqual(document_.resultComponents.map((entry) => entry.components.map((item) => item.sha256)), [recorded[0].components.map((item) => item.sha256)], 'The saved project keeps them with its result.');
+            await rm(path, { force: true });
+        }
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await evaluate(window, `document.querySelector('#confirmCloseResults')?.click()`);
+        await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+    });
+
     await run('a subsystem is a component: another instance follows edits, ports are named, parameters exposed per instance, and copies are separate', async () => {
         const { proxy, open } = hierarchy;
         await loadHierarchyProject();

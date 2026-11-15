@@ -21,6 +21,7 @@ The decoded `.kjt` payload is UTF-8 JSON with these top-level fields:
 - `subsystems`: array of authoring-hierarchy records grouping nodes into navigable containers, each an instance of a component definition -- see [Subsystems](subsystems.md)
 - `subsystemDefinitions`: array of component definitions the subsystems are instances of -- see below and [Subsystems](subsystems.md#components)
 - `component`: present only in a component (a subsystem saved as a file of its own) -- see below
+- `resultComponents`: present only in a project saved with its results: the components each result ran with -- see [Embedded binary result storage](resultFileFormat.md#components-a-result-ran-with)
 - `edgeGroups`: array of shared-relationship records that expand into a mesh of edges across a live member-node set -- see [Edge groups](edgeGroups.md)
 - `sharedParameters`: optional array of project-level parameters that relationship and source-term parameters link to -- see below
 - `ownership`: optional object naming who made the project, its copyright notice, license and contact, and when it was first and last saved -- see below

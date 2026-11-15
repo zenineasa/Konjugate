@@ -30,4 +30,8 @@ Completed-result playback follows a wall-clock playhead rather than creating one
 
 The bounded renderer projection does not limit active playback cadence. While playing, the renderer advances its wall-clock playhead at a preferred 10 frames per second and requests the nearest exact full-resolution stored sample from the main process. The playhead remains time-driven, so faster rates naturally skip recorded samples instead of slowing playback to render every value. Visible state updates are limited by this presentation cadence, the configured output interval and IPC response time; no interpolated numerical values are invented.
 
+## Components a result ran with
+
+A run records which version of every component its model used ([Subsystems](subsystems.md#components)): for each component definition its instances use, its name, the sha256 of its document as the run had it, how many instances use it, and, for a linked component, where it came from (`{ kind: "file", fileName, sha256 }` or `{ kind: "library", templateId, sha256 }`, the version of the file or library entry the definition was taken from). So a result can always be told apart from one made before a component was updated, and the branch it belongs to names them in its tooltip. The record is kept beside the result, not inside the result segment: a project saved with its results carries it as `resultComponents` in its JSON payload, an array of `{ branchUuid?, components }` (one entry without `branchUuid` for a single result, one per branch for a tree, matching `resultSections`), and opening the project gives each result its record back. A project saved without its results does not write it.
+
 There is intentionally no user-facing standalone result-file workflow yet, in beta.

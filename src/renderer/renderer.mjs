@@ -87,7 +87,7 @@ import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
-    componentDocumentOf, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
+    componentDocumentOf, componentVersions, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
 } from '../components.mjs';
 import {
@@ -5485,14 +5485,28 @@ function setResultModeLocked(locked) {
     refreshAddonRailContributions();
 }
 
+// The components a run used (docs/resultFileFormat.md#components-a-result-ran-with), by the engine job that ran it.
+const componentVersionsByJob = new Map();
+
+// Every component definition the run's instances used, with the sha256 of its document (src/components.mjs).
+function componentVersionsOf(document) {
+    return componentVersions(document, sha256Text);
+}
+
+function componentVersionsText(versions) {
+    return (versions ?? []).map((version) => `${version.name} ${version.sha256.slice(0, 8)}${version.link ? ` (from ${version.link.kind === 'library' ? 'my library' : version.link.fileName})` : ''}`).join(', ');
+}
+
 function registerActiveBranch({ parentBranchUuid = null, forkTime = null } = {}) {
     const existing = branches.get(activeBranchUuid);
     if (existing) {
         existing.result = activeResult;
         existing.jobId = activeEngineJobId;
+        existing.components = componentVersionsByJob.get(activeEngineJobId) ?? existing.components ?? null;
         return;
     }
     branches.set(activeBranchUuid, {
+        components: componentVersionsByJob.get(activeEngineJobId) ?? null,
         branchUuid: activeBranchUuid,
         parentBranchUuid,
         forkTime,
@@ -5605,7 +5619,7 @@ function renderBranchSwitcher() {
             button.classList.toggle('active', isActive);
             button.disabled = simulationRunning && !isActive;
             button.style.setProperty('--branch-color', branch.color);
-            button.title = branch.label;
+            button.title = branch.components?.length ? `${branch.label} · ran with ${componentVersionsText(branch.components)}` : branch.label;
             button.textContent = branch.label;
             button.addEventListener('click', () => activateBranch(branch.branchUuid));
             item.append(compareCheckbox, button);
@@ -7469,6 +7483,8 @@ async function startSimulation() {
         });
         if (!execution.available) throw new Error('The C++ simulation engine is unavailable.');
         activeEngineJobId = execution.jobId;
+        // Which version of every component the run used, so a result can be told apart from one made before an update.
+        componentVersionsByJob.set(execution.jobId, await componentVersionsOf(runDocument));
         if (tutorialRunModel?.document === runDocument) tutorialRunModel.jobId = execution.jobId;
         if (tour.active && pendingFork) tutorialForkValues.set(execution.jobId, (pendingFork.overrides ?? []).map(({ entry }) => Number(entry.value)));
         // A fork must keep the parent's job/result alive as an immutable sibling branch rather
@@ -8331,6 +8347,16 @@ async function loadProjectDocument(document, {
         activeResultPersistedInProject = true;
         const rootResult = embeddedBranches ? restoreBranchesFromSave(embeddedBranches) : embeddedResult.result;
         if (!embeddedBranches) activeEngineJobId = embeddedResult.sessionId;
+        // The components the saved results ran with, kept with them.
+        (Array.isArray(document.resultComponents) ? document.resultComponents : []).forEach((entry) => {
+            if (!Array.isArray(entry?.components)) return;
+            if (entry.branchUuid) {
+                const branch = branches.get(entry.branchUuid);
+                if (branch) { branch.components = entry.components; componentVersionsByJob.set(branch.jobId, entry.components); }
+            } else {
+                componentVersionsByJob.set(activeEngineJobId, entry.components);
+            }
+        });
         activateResult(rootResult);
         selectSuggestedPlaybackRate();
     }
@@ -14075,6 +14101,10 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         // Editing a library component in place is this window's state, not the project's: it is not written to the file.
         const projectDocument = serializeProjectDocument();
         (projectDocument.subsystemDefinitions ?? []).forEach((definition) => { if (definition.link) delete definition.link.editing; });
+        // With its results, the components each result ran with (one entry for a single result, one per branch for a tree).
+        const resultComponents = includeResults ? [...branches.values()].filter((branch) => branch.components?.length).map((branch) => (branches.size > 1
+            ? { branchUuid: branch.branchUuid, components: branch.components } : { components: branch.components })) : [];
+        if (resultComponents.length) projectDocument.resultComponents = resultComponents;
         const content = `${JSON.stringify({ ...projectDocument, ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
@@ -17859,6 +17889,9 @@ $('#componentLinkOld').addEventListener('click', async () => {
     componentLinkStates.set(definition.id, { state: 'ok' });
     renderComponentLinkBar();
 });
+
+// For the interaction tests: the components each result ran with.
+window.__debugResultComponents = () => [...branches.values()].map((branch) => ({ label: branch.label, components: branch.components ?? null }));
 
 // For the interaction tests: what the last link checks found, by definition.
 window.__debugComponentLinks = () => [...componentLinkStates.entries()].map(([definitionId, status]) => ({ definitionId, state: status.state, bar: Number($('#componentLinkBar').dataset.definition) }));

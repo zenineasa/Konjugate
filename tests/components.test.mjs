@@ -277,3 +277,17 @@ test('a linked component\'s new version: compatible changes reach every instance
     assert.deepEqual(linkCycle(nested, { path: '/models/Plant.kjt' }, { source: { fileName: 'Outer.kjt', path: '/models/Outer.kjt' } }), ['Outer.kjt', 'Plant.kjt']);
     assert.equal(linkCycle(nested, { path: '/models/Other.kjt' }), null);
 });
+
+test('a result records the version of every component it ran with, linked or local, and a changed component reads differently', async () => {
+    const { componentVersions } = await import('../src/components.mjs');
+    const { createHash } = await import('node:crypto');
+    const hash = async (text) => createHash('sha256').update(text).digest('hex');
+    let document = placeAnotherInstance(migrateLegacySubsystems(project()), 20).document;
+    document.subsystemDefinitions[0].link = { kind: 'file', fileName: 'Plant.kjt', path: '/p/Plant.kjt', sha256: 'abc' };
+    const [version] = await componentVersions(document, hash);
+    assert.deepEqual({ ...version, sha256: version.sha256.length }, { definitionId: document.subsystemDefinitions[0].id, name: 'Plant', sha256: 64, instances: 2, link: { kind: 'file', fileName: 'Plant.kjt', sha256: 'abc' } });
+    document.subsystemDefinitions[0].document.nodes[0].states[0].initialValue = 1;
+    const [changed] = await componentVersions(document, hash);
+    assert.notEqual(changed.sha256, version.sha256);
+    assert.deepEqual(await componentVersions(project(), hash), [], 'A project without components records none.');
+});

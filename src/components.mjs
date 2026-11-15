@@ -808,3 +808,26 @@ export function linkCycle(componentDocument, here, { maxDepth = 16, source = nul
     if (source && same(source)) return [source.fileName ?? source.templateName ?? 'it'];
     return visit(componentDocument, [source?.fileName ?? source?.templateName ?? componentDocument?.component?.name ?? 'It']);
 }
+
+// The version of every component a project's instances use, as a result records it (docs/resultFileFormat.md): each
+// definition's name, the sha256 of its document (`hash`, async, given the text: the canvas and the tests each bring their
+// own), how many instances use it, and for a linked one where it came from and that source's version.
+export async function componentVersions(document, hash) {
+    const used = new Map();
+    (document.subsystems ?? []).forEach((subsystem) => {
+        if (subsystem.definitionId != null) used.set(subsystem.definitionId, (used.get(subsystem.definitionId) ?? 0) + 1);
+    });
+    const versions = [];
+    for (const definition of document.subsystemDefinitions ?? []) {
+        if (!used.has(definition.id)) continue;
+        const link = definition.link;
+        versions.push({
+            definitionId: definition.id,
+            name: definition.document?.component?.name ?? 'Component',
+            sha256: await hash(JSON.stringify(definition.document)),
+            instances: used.get(definition.id),
+            ...(link ? { link: { kind: link.kind, ...(link.kind === 'library' ? { templateId: link.templateId } : { fileName: link.fileName }), sha256: link.sha256 ?? null } } : {})
+        });
+    }
+    return versions;
+}

@@ -3206,10 +3206,12 @@ function renderEdgeEditor(definition) {
     $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
     const source = $('#editEdgeSource');
     const target = $('#editEdgeTarget');
-    const options = model.nodes.filter((node) => nodeObjects.get(node.id)?.visible === true);
-    source.replaceChildren(...options.map((node) => new Option(node.title, node.id)));
-    target.replaceChildren(...options.map((node) => new Option(node.title, node.id)));
+    // Every node, not only those in view: an edge ending at a terminal has its other end outside, and a list without it
+    // would show (and, changed, write) the wrong node.
+    source.replaceChildren(...endpointNodeChoices());
+    target.replaceChildren(...endpointNodeChoices());
     source.value = definition.source;
+    target.value = definition.target;
     target.value = definition.target;
     $('#editEdgeDirectionality').value = definition.directionality;
     $('#editEdgeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
@@ -4894,16 +4896,30 @@ function addEdgeParameterRow(values = {}) {
     refreshStateReferences();
 }
 
+// The nodes a relationship's end can be: those shown in the view first, then, inside a subsystem, every other node in the
+// model, named with where it is ("Heater · Model", "Sensor · Model / Controls"), so a relationship can be drawn out of a
+// subsystem from inside it (it then ends at a terminal). Used by Add edge and by the relationship editor alike.
+function endpointNodeChoices() {
+    const live = model.nodes.filter((node) => !node.deleted);
+    const shown = live.filter((node) => nodeObjects.get(node.id)?.visible === true);
+    const elsewhere = live.filter((node) => nodeObjects.get(node.id)?.visible !== true);
+    const choices = shown.map((node) => new Option(node.title, node.id));
+    if (elsewhere.length) {
+        const group = document.createElement('optgroup');
+        group.label = 'Elsewhere in the model';
+        group.append(...elsewhere.map((node) => new Option(`${node.title} · ${subsystemPathName(node.subsystemId)}`, node.id)));
+        choices.push(group);
+    }
+    return choices;
+}
+
 function refreshEndpointOptions() {
-    const nodeOptions = model.nodes
-        .filter((node) => nodeObjects.get(node.id)?.visible !== false)
-        .map((node) => new Option(node.title, node.id));
     const source = $('#edgeSource');
     const target = $('#edgeTarget');
     const previousSource = source.value;
     const previousTarget = target.value;
-    source.replaceChildren(new Option('Choose a node…', ''), ...nodeOptions.map((option) => option.cloneNode(true)));
-    target.replaceChildren(new Option('Choose a node…', ''), ...nodeOptions.map((option) => option.cloneNode(true)));
+    source.replaceChildren(new Option('Choose a node…', ''), ...endpointNodeChoices());
+    target.replaceChildren(new Option('Choose a node…', ''), ...endpointNodeChoices());
     if (model.nodes.some((node) => node.id === Number(previousSource))) source.value = previousSource;
     if (model.nodes.some((node) => node.id === Number(previousTarget))) target.value = previousTarget;
     refreshStateReferences();
@@ -11874,6 +11890,12 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 
     nodePointerDown = null;
 
+    // Picking an end, a terminal's diamond stands for the node outside it.
+    if (activeEndpointPick && nodeIntersection?.object.userData.kind === 'subsystemTerminal') {
+        const terminal = subsystemTerminals.get(nodeIntersection.object.userData.edgeId);
+        if (terminal) chooseEndpointNode(terminal.crossing.externalNodeId);
+        return;
+    }
     if (activeEndpointPick) return;
     if (event.shiftKey) return;
 
@@ -12194,14 +12216,16 @@ $('#editEdgeDescription').addEventListener('change', (event) => {
 $('#editEdgeSource').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.source = event.target.value;
+        // A node's id is a number; the list's value is its text.
+        snapshot.source = Number(event.target.value);
         snapshot.sourceStateId = null;
     });
 });
 $('#editEdgeTarget').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.target = event.target.value;
+        // A node's id is a number; the list's value is its text.
+        snapshot.target = Number(event.target.value);
         snapshot.targetStateId = null;
     });
 });

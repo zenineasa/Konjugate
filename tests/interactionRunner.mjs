@@ -7539,6 +7539,43 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `${boxesShown}.some((label) => label.classList.contains('selected'))`, 'A selected box did not keep its label.', 10000);
     });
 
+    await run('inside a subsystem, a relationship can be drawn to a node outside it, and a terminal\'s relationship shows its real ends', async () => {
+        const { open } = hierarchy;
+        await loadHierarchyProject();
+        await clickElement(window, open('Plant'));
+        await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden && window.__terminalPosition(11)`, 'Plant was not entered.');
+
+        // Add edge offers the nodes elsewhere, by where they are.
+        await evaluate(window, `document.querySelector('[data-add-kind="edge"]').click()`);
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Add edge did not open.');
+        const choices = await evaluate(window, `[...document.querySelector('#edgeSource').querySelectorAll('option, optgroup')].map((item) => item.tagName === 'OPTGROUP' ? '[' + item.label + ']' : item.textContent)`);
+        assert.deepEqual(choices, ['Choose a node…', 'Tank', '[Elsewhere in the model]', 'Pump motor · Model / Plant / Pump', 'Heater · Model', 'Sensor · Model / Controls', 'Ambient · Model']);
+        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+
+        // The relationship of a terminal shows both its ends, the outside one included.
+        await waitFor(window, `Boolean(document.querySelector('.subsystemTerminal[data-terminal-edge="11"] .subsystemTerminalEdge'))`, 'The terminal\'s label was not drawn.');
+        await evaluate(window, `document.querySelector('.subsystemTerminal[data-terminal-edge="11"] .subsystemTerminalEdge').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeName').value === 'Heating'`, 'The terminal did not open its relationship.');
+        assert.deepEqual(await evaluate(window, `[document.querySelector('#editEdgeSource').value, document.querySelector('#editEdgeSource').selectedOptions[0].textContent, document.querySelector('#editEdgeTarget').value]`), ['5', 'Heater · Model', '1']);
+
+        // Pointed from inside at a node outside, a relationship crosses the boundary and gets a terminal; undo takes it back.
+        // Fill runs from Pump motor, in the nested Pump, to Tank: inside Plant, it has no terminal there.
+        assert.equal(await evaluate(window, `Boolean(window.__terminalPosition(14))`), false, 'Fill is inside Plant and has no terminal.');
+        await evaluate(window, `(() => { document.querySelector('#edgeEditor').classList.add('hidden'); })()`);
+        await clickElement(window, open('Pump'));
+        await waitFor(window, `document.querySelector('#subsystemBreadcrumb').textContent.includes('Pump') && Boolean(document.querySelector('.subsystemTerminal[data-terminal-edge="14"] .subsystemTerminalEdge'))`, 'Pump was not entered.');
+        await evaluate(window, `document.querySelector('.subsystemTerminal[data-terminal-edge="14"] .subsystemTerminalEdge').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeName').value === 'Fill'`, 'Fill did not open.');
+        await evaluate(window, `(() => { const select = document.querySelector('#editEdgeTarget'); select.value = '5'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `[...document.querySelectorAll('.subsystemTerminal')].some((terminal) => terminal.dataset.terminalEdge === '14' && terminal.textContent.includes('Heater'))`, 'The terminal did not follow the new end.');
+        const fill = (await evaluate(window, `window.__debugProject.serialize()`)).edges.find((item) => item.name === 'Fill');
+        assert.equal(fill.target.nodeId, 5, 'The new end is saved as a node id, a number.');
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await waitFor(window, `Boolean(window.__terminalPosition(14))`, 'Drawn out of Plant, the relationship got no terminal in Plant.');
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true })); })()`);
+        await waitFor(window, `!window.__terminalPosition(14)`, 'Undo did not take the relationship back inside.');
+    });
+
     await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {
         await loadAuthoringProject();
         await openRelationship('Sense');
@@ -8999,6 +9036,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#subsystemDialog').open`, 'The subsystem was not asked for.');
         await evaluate(window, `(() => { document.querySelector('#subsystemName').value = 'Bodies'; document.querySelector('#subsystemCreate').click(); })()`);
         await waitForStep('enter');
+        // A box's label is put in the page when it is next drawn, so its Open button is waited for.
+        await waitFor(window, `Boolean([...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies'))?.querySelector('.subsystemOpen'))`, 'The Bodies box has no Open button.');
         await evaluate(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies')).querySelector('.subsystemOpen').click()`);
         await waitForStep('run');
         await press('.tourFloating .tourSkipStep');

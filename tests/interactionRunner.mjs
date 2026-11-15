@@ -7582,6 +7582,91 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!window.__terminalPosition(14)`, 'Undo did not take the relationship back inside.');
     });
 
+    await run('a subsystem is saved as a component file, opens as a project, and is placed from a file as a copy or linked, or picked out of any project', async () => {
+        const { proxy } = hierarchy;
+        const desktop = driver.capabilities.osFileOpen;
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-components-'));
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const box = (name) => `${proxy(name)}.querySelector('strong')`;
+        const select = async (name) => {
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await waitFor(window, `Boolean(${proxy(name)})`, `${name}'s box is not shown.`);
+            await clickElement(window, box(name));
+            await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === ${JSON.stringify(name)}`, `${name}'s card did not open.`);
+        };
+        // A file chosen in the picker: on the desktop the open dialog is answered with it; in the browser it is handed to the page.
+        const choosing = async (path, content, trigger) => {
+            if (desktop) return driver.answerDialogs({ open: path }, trigger);
+            await evaluate(window, `window.__debugComponentFiles.provide(${JSON.stringify(content)}, ${JSON.stringify(path.split('/').at(-1))})`);
+            return trigger();
+        };
+
+        // Saved: the file is an ordinary project with a component block, every port it has declared.
+        await loadHierarchyProject();
+        await select('Plant');
+        let componentContent;
+        let componentPath = join(folder, 'Plant.kjt');
+        if (desktop) {
+            const { path, bytes } = await driver.captureExport(() => evaluate(window, `document.querySelector('#subsystemSaveFile').click()`), { fileName: 'Plant.kjt' });
+            componentPath = path;
+            componentContent = await decodeProjectFile(bytes);
+        } else {
+            await evaluate(window, `(() => { window.__debugComponentFiles.capture = true; document.querySelector('#subsystemSaveFile').click(); })()`);
+            await waitFor(window, `Boolean(window.__debugComponentFiles.lastSaved())`, 'The component was not saved.');
+            componentContent = (await evaluate(window, `window.__debugComponentFiles.lastSaved()`)).content;
+        }
+        await waitFor(window, `document.querySelector('#statusText').textContent.startsWith('Plant saved as Plant.kjt')`, 'Saving did not say so.');
+        const component = JSON.parse(componentContent);
+        assert.equal(component.component.name, 'Plant');
+        // A port is a state: the five relationships crossing Plant reach two (Tank's level and Pump motor's speed).
+        assert.deepEqual(component.component.ports.map((port) => component.nodes.flatMap((item) => item.states).find((state) => state.id === port.stateId)?.symbol).sort(), ['level', 'speed'], 'Every port it has is declared in the file.');
+        assert.deepEqual(component.nodes.map((item) => item.name).sort(), ['Pump motor', 'Tank']);
+        if (desktop) {
+            await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.fileName === 'Plant.kjt')`, 'Plant was not linked to the file it was saved as.');
+        }
+
+        // Opened as a project, a component file says what it is, and runs on its own.
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(component)}, 'Plant.kjt')`);
+        await waitFor(window, `!document.querySelector('#componentProjectBar').hidden`, 'A component opened as a project does not say so.');
+        assert.equal((await saved()).component.name, 'Plant', 'Saved again, it stays a component.');
+
+        // Placed from a file into another model: reviewed first, then as a copy, then linked.
+        await loadHierarchyProject();
+        await choosing(componentPath, componentContent, () => evaluate(window, `document.querySelector('#addComponentFromFile').click()`));
+        await waitFor(window, `document.querySelector('#componentPlaceDialog').open`, 'The review card did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#componentPlaceName').textContent`), 'Plant');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#componentPlacePorts li').length`), 2, 'The review card lists the ports.');
+        assert.match(await evaluate(window, `document.querySelector('#componentPlaceSource').textContent`), /^From Plant\.kjt/);
+        await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = true; document.querySelector('#componentPlaceConfirm').click(); })()`);
+        await waitFor(window, `!document.querySelector('#componentPlaceDialog').open && window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Plant').length === 2`, 'The copy was not placed.');
+        let after = await saved();
+        const copy = after.subsystems.filter((item) => item.name === 'Plant').at(-1);
+        assert.equal(after.subsystemDefinitions.find((definition) => definition.id === copy.definitionId).link, undefined, 'Placed as a copy, it is not linked.');
+        assert.deepEqual(after.nodes.filter((item) => item.subsystemId === copy.id).map((item) => item.name), ['Tank']);
+        await choosing(componentPath, componentContent, () => evaluate(window, `document.querySelector('#componentLibraryPlaceFile').click()`));
+        await waitFor(window, `document.querySelector('#componentPlaceDialog').open`, 'The review card did not open from the library panel.');
+        await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = false; document.querySelector('#componentPlaceConfirm').click(); })()`);
+        await waitFor(window, `window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Plant').length === 3`, 'The linked instance was not placed.');
+        after = await saved();
+        const linked = after.subsystems.filter((item) => item.name === 'Plant').at(-1);
+        assert.equal(after.subsystemDefinitions.find((definition) => definition.id === linked.definitionId).link.fileName, 'Plant.kjt', 'Placed linked, it names its file.');
+
+        // A project that is not a component offers its subsystems: one is placed, as a copy.
+        const projectPath = join(folder, 'Hierarchy.kjt');
+        const projectContent = JSON.stringify(hierarchy.project);
+        if (desktop) await writeFile(projectPath, await encodeProjectFile(projectContent));
+        await choosing(projectPath, projectContent, () => evaluate(window, `document.querySelector('#addComponentFromFile').click()`));
+        await waitFor(window, `document.querySelector('#componentPlaceDialog').open && !document.querySelector('#componentPlaceSubsystemField').hidden`, 'The project\'s subsystems were not offered.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelector('#componentPlaceSubsystem').options].map((option) => option.textContent)`), ['Plant', 'Controls']);
+        assert.equal(await evaluate(window, `document.querySelector('#componentPlaceCopyField').hidden`), true, 'A subsystem out of a project is always a copy.');
+        await evaluate(window, `(() => { const select = document.querySelector('#componentPlaceSubsystem'); select.value = [...select.options].find((option) => option.textContent === 'Controls').value; select.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#componentPlaceConfirm').click(); })()`);
+        await waitFor(window, `window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Controls').length === 2`, 'The chosen subsystem was not placed.');
+        after = await saved();
+        const placed = after.subsystems.filter((item) => item.name === 'Controls').at(-1);
+        assert.deepEqual(after.nodes.filter((item) => item.subsystemId === placed.id).map((item) => item.name), ['Sensor']);
+        await rm(folder, { recursive: true, force: true });
+    });
+
     await run('a subsystem is a component: another instance follows edits, ports are named, parameters exposed per instance, and copies are separate', async () => {
         const { proxy, open } = hierarchy;
         await loadHierarchyProject();
@@ -7647,7 +7732,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelectorAll('#subsystemEditorParameterList .subsystemRow').length === 1`, 'The other instance does not list the exposed parameter.');
         await typeIn(`document.querySelector('#subsystemEditorParameterList [data-parameter-value]')`, 5);
         await waitFor(window, `(() => { const document_ = window.__debugProject.serialize(); const plant2 = document_.subsystems.find((item) => item.name === 'Plant 2'); return document_.sharedParameters.some((shared) => shared.subsystemId === plant2.id && shared.value === 5); })()`, 'The value was not set for Plant 2.');
-        const values = (await saved()).sharedParameters.filter((shared) => shared.symbol === 'rate').map((shared) => shared.value).sort();
+        const values = (await saved()).sharedParameters.filter((shared) => shared.symbol.startsWith('rate')).map((shared) => shared.value).sort();
         assert.deepEqual(values, [2, 5], 'Each instance has its own value.');
 
         // Made separate, an instance no longer shares the component.
@@ -9151,6 +9236,36 @@ export async function runInteractionTests(driver) {
         assert.equal(saved.nodes.filter((node) => node.subsystemId === saved.subsystems[0].id).length, 3);
         await press('.tourFloating .tourPrimary');
         await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+    });
+
+    await run('the reuse tutorial makes a component with a port and a parameter, places it twice, connects and runs them, and keeps it in my library', async () => {
+        const { press, waitForStep, clean } = tutorialHelpers();
+        await clean();
+        assert.equal(await evaluate(window, `window.__debugTour.startTutorial('reuseComponent')`), true);
+        await waitForStep('welcome', 20000);
+        await press('.tourFloating .tourPrimary');
+        for (const step of ['fold', 'openCard', 'port', 'expose', 'another', 'ownValue', 'connect', 'run', 'library']) {
+            await waitForStep(step, step === 'library' ? 120000 : 20000);
+            await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${step} offered no Skip this step.`);
+            await press('.tourFloating .tourSkipStep');
+            await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `Skipping ${step} did not move on.`, 180000);
+            assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `After skipping ${step}, a step was reported undone.`);
+        }
+        assert.equal(await evaluate(window, `window.__debugTour.step()`), 'finish');
+        const saved = await evaluate(window, `window.__debugProject.serialize()`);
+        const pairs = saved.subsystems.filter((subsystem) => subsystem.definitionId != null);
+        assert.equal(pairs.length, 2, 'Two instances.');
+        assert.equal(new Set(pairs.map((subsystem) => subsystem.definitionId)).size, 1, 'Of one component.');
+        const definition = saved.subsystemDefinitions[0].document;
+        assert.ok(definition.component.ports.some((port) => port.name === 'Outlet'), 'The port is named.');
+        assert.ok(definition.sharedParameters.some((shared) => shared.exposed && shared.symbol === 'conductance'), 'Conductance is exposed.');
+        assert.deepEqual(saved.sharedParameters.filter((shared) => shared.symbol.startsWith('conductance')).map((shared) => [shared.symbol, shared.value]).sort((a, b) => a[1] - b[1]), [['conductance2', 10], ['conductance', 50]], 'Each instance has its own conductance, under a symbol of its own.');
+        assert.ok(saved.edges.some((edge) => edge.name === 'Link'), 'The two are connected.');
+        assert.ok((await evaluate(window, `window.componentLibrary.list()`)).some((template) => template.source === 'user' && template.kind === 'component' && template.name === 'Pair'), 'The component is in my library.');
+        await press('.tourFloating .tourPrimary');
+        await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+        // My library is the machine's: the component saved here is taken out again, so the scenarios after this find it as they expect.
+        await evaluate(window, `window.componentLibrary.list().then((templates) => Promise.all(templates.filter((template) => template.source === 'user' && template.name === 'Pair').map((template) => window.componentLibrary.removeUser(template.id))))`);
     });
 
     await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {

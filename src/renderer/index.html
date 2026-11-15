@@ -200,6 +200,23 @@
         </form>
     </dialog>
 
+    <dialog id="componentPlaceDialog" class="passwordDialog componentPlaceDialog">
+        <form method="dialog">
+            <span class="contextKicker" id="componentPlaceKicker">Place a component</span>
+            <strong id="componentPlaceName">Component</strong>
+            <p id="componentPlaceDescription"></p>
+            <p id="componentPlaceSource" class="builderHint"></p>
+            <label class="editorField" id="componentPlaceSubsystemField" hidden><span>Subsystem to place</span><select id="componentPlaceSubsystem"></select></label>
+            <div class="componentPlaceLists">
+                <div><h3>Ports</h3><ul id="componentPlacePorts" class="subsystemPortList"></ul></div>
+                <div><h3>Parameters</h3><ul id="componentPlaceParameters" class="subsystemPortList"></ul></div>
+            </div>
+            <label class="editorField checkboxField" id="componentPlaceCopyField"><input id="componentPlaceCopy" type="checkbox"><span>Place as a copy (not linked to the file)</span></label>
+            <p id="componentPlaceError" class="builderHint" role="alert"></p>
+            <footer><button id="componentPlaceCancel" type="button">Cancel</button><button id="componentPlaceConfirm" class="doneButton" type="submit">Place</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="subsystemDialog" class="passwordDialog">
         <form method="dialog">
             <span class="contextKicker">Selected nodes</span>
@@ -792,12 +809,15 @@
         <div id="css2dContainer" class="css2dContainer"></div>
         <div id="selectionRectangle" class="selectionRectangle" aria-hidden="true" hidden></div>
         <nav id="subsystemBreadcrumb" class="subsystemBreadcrumb" aria-label="Subsystem location" hidden></nav>
+        <div id="componentProjectBar" class="endpointPickBanner componentBar" role="status" hidden><span>Component</span><strong id="componentProjectBarText">This is a component, used by other models when placed from a file.</strong><small>Its ports and parameters are edited in a subsystem's card when it is placed; here it opens and runs on its own.</small></div>
+        <div id="componentLinkBar" class="endpointPickBanner componentBar" role="status" hidden><span>Linked component</span><strong id="componentLinkBarText"></strong><small id="componentLinkBarHint"></small><div class="componentBarButtons"><button id="componentLinkEdit" type="button">Edit component</button><button id="componentLinkUpdate" type="button">Update from file…</button><button id="componentLinkLocate" type="button">Locate…</button><button id="componentLinkKeep" type="button">Keep using the saved copy</button><button id="componentLinkDetach" type="button">Detach</button></div></div>
         <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
         <aside id="componentLibraryPanel" class="componentLibraryPanel" aria-label="Component library" hidden>
             <header><div><span class="contextKicker">Reusable components</span><strong>Component library</strong></div><button id="closeComponentLibraryPanel" type="button" aria-label="Close component library">×</button></header>
+            <button id="componentLibraryPlaceFile" class="componentLibraryPlaceFile" type="button">Place component from file…</button>
             <input id="componentLibrarySearch" type="search" placeholder="Search nodes and edges…" autocomplete="off">
             <div id="componentLibraryTypeChips" class="componentLibraryChips" role="group" aria-label="Filter by type"></div>
             <div id="componentLibraryDomainChips" class="componentLibraryChips" role="group" aria-label="Filter by domain"></div>
@@ -1064,12 +1084,14 @@
                 <h3>Component</h3>
                 <p id="subsystemEditorUsage" class="builderHint"></p>
                 <div class="subsystemEditorButtons">
+                    <button id="subsystemSaveFile" type="button" title="Save it as a .kjt of its own, which opens and runs alone and can be placed in other models">Save as component file…</button>
                     <button id="subsystemPlaceAnother" type="button" title="A second instance of the same component, kept identical: a change inside one reaches every one">Place another instance</button>
                     <button id="subsystemMakeSeparate" type="button" title="Give this instance a component of its own, so changes to it no longer reach the others">Make this one separate</button>
                 </div>
                 <h3>Ports</h3>
                 <p class="builderHint">The states it offers outside. A state something outside is connected to is a port already; name it, or keep it, to make it part of the component.</p>
                 <div id="subsystemEditorPortList" class="subsystemRowList"></div>
+                <label class="editorField"><span>Make a state a port</span><select id="subsystemAddPort" aria-label="Make a state inside a port"></select></label>
                 <h3>Parameters</h3>
                 <p class="builderHint">Exposed parameters can differ between instances, or follow a shared parameter of the model.</p>
                 <div id="subsystemEditorParameterList" class="subsystemRowList"></div>
@@ -1337,6 +1359,7 @@
             <span class="contextKicker">Add to model</span>
             <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and source terms</small></span><b>›</b></button>
             <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Edge</strong><small>Connect nodes with an equation</small></span><b>›</b></button>
+            <button id="addComponentFromFile" type="button"><i class="primitiveIcon">▤</i><span><strong>Component from file…</strong><small>Place a subsystem saved as a .kjt, or one from any project</small></span><b>›</b></button>
             <hr>
             <span class="contextKicker">Selection</span>
             <button data-action="select-all" type="button"><i class="primitiveIcon">▦</i><span><strong>Select all</strong><small>Select every node in the model</small></span><kbd id="selectAllShortcutHint">Ctrl+A</kbd></button>
@@ -1361,6 +1384,7 @@
             <span class="contextKicker">Subsystem</span>
             <button id="subsystemContextOpen" type="button"><i class="primitiveIcon">▤</i><span><strong>Open subsystem</strong><small>Step inside to see and edit what it holds</small></span><b>›</b></button>
             <button id="subsystemContextRename" type="button"><i class="primitiveIcon">✎</i><span><strong>Rename subsystem</strong><small>Give it a name of its own</small></span><b>›</b></button>
+            <button id="subsystemContextSaveFile" type="button"><i class="primitiveIcon">⤓</i><span><strong>Save as component file…</strong><small>A .kjt of its own, to place in other models</small></span><b>›</b></button>
             <button id="subsystemContextDissolve" type="button"><i class="primitiveIcon">⇲</i><span><strong>Dissolve subsystem</strong><small>Put its contents in the level above, as they are</small></span><b>›</b></button>
             <hr>
             <button id="subsystemContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete subsystem</strong><small>With everything inside it</small></span><b>›</b></button>

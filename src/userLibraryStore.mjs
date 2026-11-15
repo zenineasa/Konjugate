@@ -22,7 +22,10 @@ export function createUserLibraryStore({ readAll, write, remove, otherTemplateId
         // Saves a template; if its id is taken by now, it is given the next free one. Returns what was saved.
         async save(template) {
             const valid = validateComponentTemplate(template);
-            if (valid.kind !== 'fragment') throw new Error('Only a selection of nodes and relationships can be saved to the library.');
+            // A selection of nodes and relationships (an assembly), or one subsystem saved as a component.
+            if (!['fragment', 'component'].includes(valid.kind)) throw new Error('Only a selection of nodes and relationships, or a subsystem, can be saved to the library.');
+            // A component placed from the library links to the entry by id and to what it held by its savedAt.
+            if (valid.kind === 'component') valid.savedAt = new Date().toISOString();
             const taken = new Set([...await otherTemplateIds(), ...(await readAll()).map((saved) => saved.id)]);
             const saved = taken.has(valid.id) ? { ...valid, id: userTemplateId(valid.name, taken) } : valid;
             await write(saved);

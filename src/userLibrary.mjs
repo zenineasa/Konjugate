@@ -78,6 +78,27 @@ export function buildUserTemplate({ document, selectedNodeIds, name, description
     });
 }
 
+// A subsystem saved to the library as a component: its component document (componentDocumentOf in src/components.mjs),
+// the same one a component file holds, so a component in the library and in a file are one thing in two containers.
+export function buildUserComponentTemplate({ componentDocument, name, description = '', section = [], takenIds = [] }) {
+    const title = String(name ?? '').trim();
+    if (!title) throw new Error('A template needs a name.');
+    const sectionProblem = sectionPathProblem(section);
+    if (sectionProblem) throw new Error(sectionProblem);
+    const document = structuredClone(componentDocument);
+    document.component = { ...(document.component ?? {}), name: title, ...(description.trim() ? { description: description.trim() } : {}) };
+    return validateComponentTemplate({
+        id: userTemplateId(title, takenIds),
+        kind: 'component',
+        name: title,
+        ...(description.trim() ? { description: description.trim() } : {}),
+        domains: ['custom'],
+        ...(section.length ? { section } : {}),
+        color: document.nodes[0]?.appearance?.color ?? '#195b60',
+        document
+    });
+}
+
 // The same template with a new name, description or section. Anything left out stays as it was.
 export function changeUserTemplate(template, { name = template.name, description = template.description ?? '', section = template.section ?? [] }) {
     const title = String(name).trim();

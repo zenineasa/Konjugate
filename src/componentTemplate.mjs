@@ -151,7 +151,7 @@ function validateBundleTemplate(template) {
 // Deliberately hand-rolled like validateAddonManifest rather than a schema library -- the shape
 // is small and stable.
 export function validateComponentTemplate(template) {
-    if (!template || !['node', 'edge', 'bundle', 'fragment'].includes(template.kind)) throw new Error('A template must have kind "node", "edge", "bundle" or "fragment".');
+    if (!template || !['node', 'edge', 'bundle', 'fragment', 'component'].includes(template.kind)) throw new Error('A template must have kind "node", "edge", "bundle", "fragment" or "component".');
     if (!componentTemplateIdPattern.test(template.id ?? '')) throw new Error('A template needs a valid id.');
     if (!template.name) throw new Error('A template needs a name.');
     if (template.description !== undefined && typeof template.description !== 'string') throw new Error('A template description must be a string.');
@@ -163,7 +163,15 @@ export function validateComponentTemplate(template) {
     if (!Array.isArray(domains) || !domains.length || !domains.every((domain) => typeof domain === 'string' && domain)) {
         throw new Error('A template needs a non-empty domains array.');
     }
-    if (template.kind === 'fragment') {
+    if (template.kind === 'component') {
+        // A subsystem saved as a component (src/components.mjs): a project document with a component block, the same
+        // document a component file holds.
+        const document = template.document;
+        if (!document || document.format !== 'konjugate' || document.version !== 1 || !Array.isArray(document.nodes) || !document.nodes.length || !Array.isArray(document.edges)) {
+            throw new Error('A component template needs a project document with at least one node.');
+        }
+        if (!document.component || typeof document.component !== 'object') throw new Error('A component template\'s document needs a component block.');
+    } else if (template.kind === 'fragment') {
         validateFragmentTemplate(template);
     } else if (template.kind === 'bundle') {
         validateBundleTemplate(template);

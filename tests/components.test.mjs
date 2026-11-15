@@ -219,3 +219,17 @@ test('every shipped example, folded into nested subsystems, becomes components w
         assert.equal(engine.nodes.length, original.nodes.length + half.length, `${file}: the second instance has the wrong nodes.`);
     }
 });
+
+test('every instance\'s copy of a shared parameter has a symbol of its own in the project, and the component keeps its own', () => {
+    let document = exposeParameter(migrateLegacySubsystems(project()), 20, 30);
+    document = placeAnotherInstance(document, 20).document;
+    document = placeAnotherInstance(document, 20).document;
+    const symbols = document.sharedParameters.map((shared) => shared.symbol).sort();
+    assert.deepEqual(symbols, ['loss', 'loss2', 'loss3']);
+    assert.equal(new Set(symbols).size, symbols.length);
+    syncDefinitions(document);
+    assert.deepEqual(document.subsystemDefinitions[0].document.sharedParameters.map((shared) => shared.symbol), ['loss'], 'The component\'s own symbol is kept.');
+    const again = structuredClone(document);
+    syncDefinitions(again);
+    assert.deepEqual(again.sharedParameters.map((shared) => shared.symbol).sort(), symbols, 'Each copy keeps its symbol.');
+});

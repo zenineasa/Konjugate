@@ -2262,7 +2262,106 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         throw new Error('The saved project could not be verified.');
     }
     await atomicWriteFile(path, bytes);
+    announceComponentFileChanged(path);
     return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resolvedBranches.length) };
+});
+
+// ---- Component files (docs/subsystems.md#component-files) -------------------------------------------------------------
+// A subsystem saved on its own is an ordinary .kjt project whose payload carries a `component` block; placing one reads it
+// back. Reading by path (for a linked component) is limited to .kjt files, and only their decoded JSON is returned, with
+// the sha256 of that JSON, which is how a link tells whether the file has changed.
+const pendingEncryptedComponents = new Set();
+
+async function readComponentFile(path, { password = null } = {}) {
+    if (!path || !path.toLowerCase().endsWith('.kjt')) throw new Error('A component file is a .kjt file.');
+    let bytes;
+    try {
+        bytes = await readFile(path);
+    } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return { path, fileName: basename(path), missing: true };
+        throw error;
+    }
+    const details = await stat(path);
+    if (!password && inspectProjectFile(bytes).encrypted) {
+        pendingEncryptedComponents.add(path);
+        return { path, fileName: basename(path), encrypted: true, requiresPassword: true };
+    }
+    const { content } = await decodeProjectBundle(bytes, { password });
+    JSON.parse(content);
+    return {
+        path, fileName: basename(path), encrypted: Boolean(password), content,
+        sha256: createHash('sha256').update(content).digest('hex'), savedAt: details.mtime.toISOString()
+    };
+}
+
+ipcMain.handle('componentOpen', async (event) => {
+    const result = await dialog.showOpenDialog(getWindowFromEvent(event), {
+        title: 'Place component from file',
+        properties: ['openFile'],
+        filters: [{ name: 'Konjugate project or component', extensions: ['kjt'] }]
+    });
+    if (result.canceled) return null;
+    return readComponentFile(result.filePaths[0]);
+});
+
+ipcMain.handle('componentUnlock', async (_event, { path, password }) => {
+    if (!pendingEncryptedComponents.has(path)) throw new Error('Choose the encrypted component again.');
+    const component = await readComponentFile(path, { password });
+    pendingEncryptedComponents.delete(path);
+    return component;
+});
+
+ipcMain.handle('componentRead', async (_event, { path }) => readComponentFile(path));
+
+// A link's file, looked for where the project's folder says it is (so a project and its components moved or cloned together
+// keep working), then where it was last found. Returns the path found, or null.
+ipcMain.handle('componentResolve', async (_event, { relativePath, path, projectPath }) => {
+    const candidates = [];
+    if (relativePath && projectPath) candidates.push(resolve(dirname(projectPath), relativePath));
+    if (path) candidates.push(path);
+    for (const candidate of candidates) {
+        try {
+            if ((await stat(candidate)).isFile() && candidate.toLowerCase().endsWith('.kjt')) return candidate;
+        } catch {
+            // Not there: the next place.
+        }
+    }
+    return null;
+});
+
+ipcMain.handle('componentSave', async (event, { suggestedFilename, content, path: existingPath = null }) => {
+    let path = existingPath;
+    if (!path) {
+        const result = await dialog.showSaveDialog(getWindowFromEvent(event), {
+            title: 'Save component file',
+            defaultPath: suggestedFilename || 'Component.kjt',
+            filters: [{ name: 'Konjugate component', extensions: ['kjt'] }]
+        });
+        if (result.canceled) return null;
+        path = result.filePath;
+    }
+    if (!path.toLowerCase().endsWith('.kjt')) path += '.kjt';
+    const bytes = await encodeProjectFile(content, { publicNotice: publicNoticeOf(content) });
+    const verification = await decodeProjectBundle(bytes);
+    if (verification.content !== content) throw new Error('The saved component could not be verified.');
+    await atomicWriteFile(path, bytes);
+    announceComponentFileChanged(path);
+    return { path, fileName: basename(path), sha256: createHash('sha256').update(content).digest('hex'), savedAt: (await stat(path)).mtime.toISOString() };
+});
+
+// Every project window is told when a .kjt it may link is written, by any window, so linked instances refresh.
+function announceComponentFileChanged(path) {
+    for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send('componentFileChanged', { path });
+    }
+}
+
+// A linked component edited in a window of its own, as a project.
+ipcMain.handle('componentEditInWindow', async (_event, { path }) => {
+    if (!path || !path.toLowerCase().endsWith('.kjt')) throw new Error('A component file is a .kjt file.');
+    await access(path);
+    openOrFocusProjectFile(path);
+    return true;
 });
 
 ipcMain.handle('projectExportResultsCsv', async (event, { suggestedFilename, csv }) => {

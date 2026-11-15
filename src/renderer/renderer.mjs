@@ -79,11 +79,11 @@ import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogD
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { suggestedPlaybackRate } from '../resultSession.mjs';
-import { seriesToCsv } from '../resultExport.mjs';
+import { seriesToCsv, withInstancePaths } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
-import { createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
+import { remapIds, createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
 import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
-import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
+import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
@@ -512,6 +512,9 @@ let currentProjectPath = null;
 // model rather than in it: it is read when a project is loaded and written when it is saved, and never reaches
 // the engine, validation, copy and paste, or the undo history.
 let projectAddonData = {};
+// A component file opened as a project keeps its component block (its name, description and declared ports), written back
+// when it is saved, so it stays a component (docs/subsystems.md#component-files).
+let projectComponentBlock = null;
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
@@ -739,7 +742,7 @@ function updateHistoryControls() {
 function updateSelectionActionControls() {
     const locked = Boolean(activeResult);
     $('#copySelection').disabled = locked || (!selectedNodeIds.size && selectedSubsystemId === null);
-    $('#saveTemplateButton').disabled = locked || !selectedNodeIds.size;
+    $('#saveTemplateButton').disabled = locked || (!selectedNodeIds.size && selectedSubsystemId === null);
     $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
     $('#createEdgeGroup').disabled = locked || selectedNodeIds.size < 2;
     $('[data-action="delete"]').disabled = locked || (!selectedNodeIds.size && !selectedRelationship && selectedSubsystemId === null);
@@ -1593,6 +1596,16 @@ function applySubsystemVisibility() {
         object.visible = !definition.deleted && (definition.parentSubsystemId ?? null) === activeSubsystemId;
     });
     renderSubsystemBreadcrumb();
+}
+
+// A node's name where it is listed out of context: with its subsystem's path when another node has the same name (two
+// instances of one component), as "Pump 2 / Impeller"; otherwise its name alone, as always.
+function qualifiedNodeTitle(node) {
+    const definition = node?.title !== undefined ? node : model.nodes.find((candidate) => candidate.id === node?.id);
+    if (!definition) return node?.title ?? node?.name ?? '';
+    const repeated = model.nodes.some((other) => other !== definition && !other.deleted && other.title === definition.title);
+    const path = subsystemPathName(definition.subsystemId).replace(/^Model( \/ )?/, '');
+    return repeated && path ? `${path} / ${definition.title}` : definition.title;
 }
 
 // The path at the top of the canvas while inside a subsystem. The current name is a button that renames it in place.
@@ -4381,6 +4394,10 @@ let pendingEdgeTemplate = null;
 
 function componentLibraryKindLabel(template) {
     if (template.kind === 'bundle') return `Bundle · ${template.edges.length} edges`;
+    if (template.kind === 'component') {
+        const ports = template.document.component?.ports?.length ?? 0;
+        return `Component · ${ports} port${ports === 1 ? '' : 's'}`;
+    }
     if (template.kind === 'fragment') {
         const { nodes, edges } = template.fragment;
         return `Assembly · ${nodes.length} node${nodes.length === 1 ? '' : 's'}${edges.length ? `, ${edges.length} edge${edges.length === 1 ? '' : 's'}` : ''}`;
@@ -4830,6 +4847,7 @@ function applyComponentTemplate(template) {
     if (template.kind === 'node') applyNodeTemplate(template);
     else if (template.kind === 'bundle') applyBundleTemplate(template);
     else if (template.kind === 'fragment') applyFragmentTemplate(template);
+    else if (template.kind === 'component') applyComponentLibraryTemplate(template);
     else applyEdgeTemplate(template);
 }
 
@@ -7034,10 +7052,12 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
 
 async function exportResultsCsv() {
     if (!activeResult || !activeEngineJobId) return;
-    const signals = model.nodes.filter((node) => !node.deleted).flatMap((node) => node.states.map((state) => ({
+    // Columns that would share a header (two instances of one component) are told apart by their subsystem's path.
+    const signals = withInstancePaths(model.nodes.filter((node) => !node.deleted).flatMap((node) => node.states.map((state) => ({
         signalId: state.id,
-        header: `${node.title} — ${state.label}${state.unit ? ` (${state.unit})` : ''}`
-    })));
+        header: `${node.title} — ${state.label}${state.unit ? ` (${state.unit})` : ''}`,
+        path: subsystemPathName(node.subsystemId).replace(/^Model( \/ )?/, '')
+    }))));
     if (!signals.length) return;
     $('#exportCsvButton').disabled = true;
     try {
@@ -7426,6 +7446,8 @@ async function startSimulation() {
     const tutorialRunBefore = tutorialRunModel;
     try {
         const configuration = { ...activeRunConfiguration(), ...runLaunchSettings.configurationOverride };
+        // Every instance as its component has it now, before the engine is given the flat graph.
+        syncComponents();
         const runDocument = serializeProjectDocument();
         // A tutorial's step can ask what the latest run was run with (after a change it asked for, say). The run is the latest from the
         // moment it is asked for, so nothing seen with the one before counts as seen with it while the engine is starting.
@@ -8138,6 +8160,7 @@ function serializeProjectDocument() {
             ))
             .map((edge) => relationshipToDocument(edge, modelCodecContext)),
         ...serializedSubsystemDefinitions(),
+        ...(projectComponentBlock ? { component: structuredClone(projectComponentBlock) } : {}),
         subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => subsystemToDocument(subsystem, {
             position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
             // A terminal moved for an edge that no longer crosses the boundary has nothing left to place.
@@ -8249,6 +8272,9 @@ async function loadProjectDocument(document, {
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
     document = componentReadyDocument(document);
+    // A component file opened as a project opens like any project; a bar says what it is.
+    $('#componentProjectBar').hidden = !document.component;
+    projectComponentBlock = document.component ? structuredClone(document.component) : null;
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
@@ -8718,7 +8744,7 @@ function renderCausalInferenceMapping() {
         nodesForMapping.forEach((node) => {
             const modelNode = model.nodes.find((candidate) => candidate.id === node.id);
             node.states.forEach((state) => {
-                select.append(new Option(`${modelNode.title} · ${state.name}`, causalMappingValue(node.id, state.id)));
+                select.append(new Option(`${qualifiedNodeTitle(modelNode)} · ${state.name}`, causalMappingValue(node.id, state.id)));
             });
         });
         select.value = entry.createNew ? causalMappingCreateValue : causalMappingValue(entry.nodeId, entry.stateId);
@@ -11016,7 +11042,7 @@ async function renderParameterTuningObjectiveOutcome(run, objective) {
             const id = stateIds[index];
             const owner = model.nodes.flatMap((node) => node.states.map((candidate) => ({ node, candidate }))).find((entry) => entry.candidate.id === id);
             return {
-                name: owner ? `${owner.node.title} · ${owner.candidate.label}` : state.label, unit: owner?.candidate.unit ?? '',
+                name: owner ? `${qualifiedNodeTitle(owner.node)} · ${owner.candidate.label}` : state.label, unit: owner?.candidate.unit ?? '',
                 times: (beforeSeries.get(id) ?? []).map((sample) => sample.time),
                 before: (beforeSeries.get(id) ?? []).map((sample) => sample.value),
                 after: (afterSeries.get(id) ?? []).map((sample) => sample.value)
@@ -12818,6 +12844,9 @@ const tutorialTwin = { sawRunning: false, movesSeen: 0, sawAlarm: false };
 let tutorialStepInTwin = false;
 // The live parameters changed by hand during a run while a tutorial ran (kept: the results are closed before the model can change).
 const tutorialSteered = new Set();
+// The components saved to My library while a tutorial ran, by name (the library itself is read asynchronously).
+const tutorialLibraryComponents = new Set();
+
 // Whether the person has been inside a subsystem while a tutorial ran.
 let tutorialEnteredSubsystem = false;
 let tutorialExecutionSummaryShown = false;
@@ -13000,6 +13029,11 @@ const tour = createTour({
                 selectedCount: selectedNodeIds.size,
                 canPaste: !$('#pasteSelection').disabled,
                 subsystemDialogOpen: $('#subsystemDialog').open,
+                // The subsystem whose card is open, by name; the dialogs and lists the components tutorial points at.
+                subsystemCardFor: currentSubsystemCardId() === null ? null : subsystemById(currentSubsystemCardId())?.name ?? null,
+                edgeBuilderOpen: !$('#edgeBuilder').classList.contains('hidden'),
+                templateDialogOpen: $('#templateDialog').open,
+                libraryComponents: [...tutorialLibraryComponents],
                 insideSubsystem: (() => {
                     if (activeSubsystemId !== null) tutorialEnteredSubsystem = true;
                     return activeSubsystemId !== null;
@@ -13751,6 +13785,84 @@ const tour = createTour({
             if (subsystem) enterSubsystem(subsystem.id);
         },
         leaveSubsystem: async () => { if (activeSubsystemId !== null) enterSubsystem(null); },
+        // The components tutorial's steps, each through the card's own controls.
+        openSubsystemCard: async (step) => {
+            const subsystem = model.subsystems.find((candidate) => !candidate.deleted && candidate.name === step.name && candidate.parentSubsystemId == null);
+            if (activeSubsystemId !== null) enterSubsystem(null);
+            if (subsystem) { selectSubsystem(subsystem.id); openSubsystemEditor(subsystem.id); }
+        },
+        declarePort: async (step) => {
+            const subsystem = model.subsystems.find((candidate) => !candidate.deleted && candidate.name === step.subsystem && candidate.parentSubsystemId == null);
+            if (!subsystem) return;
+            selectSubsystem(subsystem.id);
+            openSubsystemEditor(subsystem.id);
+            const node = model.nodes.find((candidate) => !candidate.deleted && candidate.title === step.node && owningInstanceId(candidate.subsystemId) === subsystem.id);
+            const state = node?.states.find((candidate) => candidate.symbol === step.symbol);
+            if (!state) return;
+            applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: state.id, name: step.name }), 'Port named');
+        },
+        exposeParameter: async (step) => {
+            const subsystem = model.subsystems.find((candidate) => !candidate.deleted && candidate.name === step.subsystem && candidate.parentSubsystemId == null);
+            if (!subsystem) return;
+            const choice = exposableParameters(serializeProjectDocument(), subsystem.id).find((item) => item.label.includes(`(${step.symbol})`));
+            if (choice) applyDocumentChange((document) => exposeParameter(document, subsystem.id, typeof choice.target === 'number' ? choice.target : { ...choice.target, newId: allocateModelEntityId() }), 'Parameter exposed');
+            openSubsystemEditor(subsystem.id);
+        },
+        placeAnotherInstance: async (step) => {
+            const subsystem = model.subsystems.find((candidate) => !candidate.deleted && candidate.name === step.subsystem && candidate.parentSubsystemId == null);
+            if (!subsystem) return;
+            selectSubsystem(subsystem.id);
+            openSubsystemEditor(subsystem.id);
+            $('#subsystemPlaceAnother').click();
+        },
+        setInstanceParameter: async (step) => {
+            const document_ = serializeProjectDocument();
+            const definitionIds = new Set(model.subsystems.filter((candidate) => !candidate.deleted && candidate.definitionId != null).map((candidate) => candidate.definitionId));
+            for (const definitionId of definitionIds) {
+                const shared = model.subsystems.filter((candidate) => !candidate.deleted && candidate.definitionId === definitionId);
+                if (shared.length < 2) continue;
+                const second = shared[shared.length - 1];
+                const parameter = instanceParameters(document_, second.id).find((item) => item.symbol === step.symbol);
+                if (!parameter) continue;
+                applyDocumentChange((document) => setInstanceParameter(document, second.id, parameter.key, step.value), `${parameter.name} set`);
+                return;
+            }
+        },
+        connectInstances: async (step) => {
+            // A copy of the relationship inside the first instance, from its node to the matching node of the second.
+            const document_ = serializeProjectDocument();
+            const placed = model.subsystems.filter((candidate) => !candidate.deleted && candidate.definitionId != null && candidate.parentSubsystemId == null);
+            const [first, second] = placed.filter((candidate) => candidate.definitionId === placed.find((other) => placed.filter((item) => item.definitionId === other.definitionId).length >= 2)?.definitionId);
+            if (!first || !second) return;
+            const from = document_.nodes.find((node) => node.subsystemId === first.id && node.name === step.from);
+            const to = document_.nodes.find((node) => node.subsystemId === second.id && node.name === step.to);
+            const template = document_.edges.find((edge) => edge.source.nodeId === document_.nodes.find((node) => node.subsystemId === first.id && node.name === step.to)?.id);
+            if (!from || !to || !template) return;
+            applyDocumentChange((document) => {
+                const map = new Map([[template.id, allocateModelEntityId()], [template.source.nodeId, from.id], [template.source.stateId, from.states[0].id], [template.target.nodeId, to.id], [template.target.stateId, to.states[0].id]]);
+                (template.parameters ?? []).forEach((parameter) => map.set(parameter.id, allocateModelEntityId()));
+                const edge = remapIds(structuredClone(template), map);
+                delete edge.definitionKey;
+                (edge.parameters ?? []).forEach((parameter) => { delete parameter.definitionKey; delete parameter.sharedParameterId; });
+                edge.name = step.name;
+                document.edges.push(edge);
+                return document;
+            }, `${step.name} connects the two`);
+        },
+        saveSubsystemToLibrary: async (step) => {
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            if (activeSubsystemId !== null) enterSubsystem(null);
+            const subsystem = model.subsystems.find((candidate) => !candidate.deleted && candidate.name === step.subsystem && candidate.parentSubsystemId == null);
+            if (!subsystem) return;
+            selectSubsystem(subsystem.id);
+            if (!$('#templateDialog').open) {
+                await openTemplateDialog({ kind: 'create' });
+                await waitUntil(() => $('#templateDialog').open, 3000);
+            }
+            $('#templateSubmit').click();
+            await waitUntil(() => tutorialLibraryComponents.has(step.subsystem) || !$('#templateDialog').open, 8000);
+        },
         closeResults: async () => {
             document.querySelectorAll('.contextCard.editorCard:not(.hidden) > header [data-close-card]').forEach((button) => button.click());
             await waitUntil(() => !simulationRunning, 60000);
@@ -13928,6 +14040,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
             fileOwnership = choice.strip ? null : stampOwnership(choice.block, stampOptions);
             if (JSON.stringify(fileOwnership) !== JSON.stringify(savedOwnership)) copyOwnership = fileOwnership;
         }
+        syncComponents();
         const content = `${JSON.stringify({ ...serializeProjectDocument(), ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
@@ -17129,6 +17242,238 @@ function subsystemDefinitionOf(subsystem) {
     return subsystem?.definitionId == null ? null : (model.subsystemDefinitions ?? []).find((definition) => definition.id === subsystem.definitionId) ?? null;
 }
 
+// ---- Component files and the library (docs/subsystems.md#component-files) ---------------------------------------------
+// A subsystem saved on its own is an ordinary project with a component block: it opens and runs alone, and placing it
+// puts an instance of it in the model, linked to the file (or to the library entry) unless placed as a copy.
+
+// Where a new instance goes: beside what the view shows.
+function freePlacementPosition() {
+    const shown = [...nodeObjects.values(), ...subsystemObjects.values()].filter((object) => object.visible);
+    if (!shown.length) return [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z];
+    const box = new THREE.Box3();
+    shown.forEach((object) => box.expandByPoint(object.position));
+    return [box.max.x + 4, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2];
+}
+
+// The file name of a component saved from a subsystem.
+function componentFileName(name) {
+    return `${String(name || 'Component').replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'Component'}.kjt`;
+}
+
+async function saveSubsystemAsComponentFile(id) {
+    syncComponents();
+    const subsystem = subsystemById(id);
+    if (!subsystem) return;
+    const content = JSON.stringify({ ...componentDocumentOf(serializeProjectDocument(), id), ...(projectOwnership ? { ownership: structuredClone(projectOwnership) } : {}) });
+    try {
+        const saved = await window.componentFiles.save(componentFileName(subsystem.name), content);
+        if (!saved) return;
+        // The instance becomes linked to the file just written, so editing that file updates this model (stage 4's default).
+        linkInstanceToFile(id, { ...saved, content });
+        $('#statusText').textContent = `${subsystem.name} saved as ${saved.fileName}${window.componentFiles.followsPaths ? ', and linked to it' : ''}`;
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+    }
+}
+
+// A file chosen in the picker, unlocked if it is encrypted. Null if the person cancels.
+async function chooseComponentFile() {
+    let file = await window.componentFiles.open();
+    let passwordError = '';
+    while (file?.requiresPassword) {
+        const password = await requestProjectPassword({ error: passwordError, title: `Unlock ${file.fileName}`, hint: `Enter the password for ${file.fileName}.` });
+        if (password === null) return null;
+        try {
+            file = await window.componentFiles.unlock(file.path, password);
+            file.password = password;
+        } catch {
+            passwordError = 'Incorrect password, or this file has been modified.';
+        }
+    }
+    return file;
+}
+
+async function placeComponentFromFile() {
+    if (activeResult) return;
+    hideCards();
+    let file;
+    try {
+        file = await chooseComponentFile();
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+        return;
+    }
+    if (!file) return;
+    let document_;
+    try {
+        document_ = JSON.parse(file.content);
+        if (document_?.format !== 'konjugate' || !Array.isArray(document_.nodes)) throw new Error(`${file.fileName} is not a Konjugate project.`);
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+        return;
+    }
+    openComponentPlaceDialog({
+        document: document_,
+        source: { kind: 'file', fileName: file.fileName, path: file.path ?? null, sha256: file.sha256, savedAt: file.savedAt, encrypted: Boolean(file.encrypted) }
+    });
+}
+
+let pendingComponentPlacement = null;
+
+// The review card before a component is placed: what it is, what it offers, and where it came from.
+function openComponentPlaceDialog({ document: componentDocument, source }) {
+    const description = describeComponentDocument(componentDocument);
+    pendingComponentPlacement = { componentDocument, source, description };
+    const fromLibrary = source.kind === 'library';
+    $('#componentPlaceKicker').textContent = fromLibrary ? 'Place from my library' : 'Place component from file';
+    $('#componentPlaceError').textContent = '';
+    const chooser = $('#componentPlaceSubsystemField');
+    chooser.hidden = description.isComponent || !description.subsystems.length;
+    $('#componentPlaceSubsystem').replaceChildren(...description.subsystems.map((subsystem) => new Option(subsystem.name, String(subsystem.id))));
+    // A subsystem out of a project that is not a component is placed as a copy: a linked file is one component.
+    const canLink = description.isComponent && (fromLibrary || window.componentFiles.followsPaths || source.kind === 'file');
+    $('#componentPlaceCopyField').hidden = !canLink;
+    $('#componentPlaceCopy').checked = !canLink;
+    $('#componentPlaceCopy').nextElementSibling.textContent = fromLibrary ? 'Place as a copy (not linked to my library)' : 'Place as a copy (not linked to the file)';
+    renderComponentPlaceDetails();
+    if (!description.isComponent && !description.subsystems.length) {
+        $('#componentPlaceError').textContent = `${source.fileName} is a project with no subsystems: it has no component to place. Open it as a project, or fold part of it into a subsystem and save that.`;
+    }
+    $('#componentPlaceConfirm').disabled = !description.isComponent && !description.subsystems.length;
+    $('#componentPlaceDialog').showModal();
+}
+
+function componentPlacementDocument() {
+    const { componentDocument, description } = pendingComponentPlacement;
+    if (description.isComponent) return componentDocument;
+    return componentDocumentOf(componentDocument, Number($('#componentPlaceSubsystem').value));
+}
+
+function renderComponentPlaceDetails() {
+    const { source } = pendingComponentPlacement;
+    let shown;
+    try {
+        shown = describeComponentDocument(componentPlacementDocument());
+    } catch (error) {
+        $('#componentPlaceError').textContent = friendlyError(error);
+        return;
+    }
+    const name = shown.name ?? $('#componentPlaceSubsystem').selectedOptions[0]?.textContent ?? 'Component';
+    $('#componentPlaceName').textContent = name;
+    $('#componentPlaceDescription').textContent = shown.description || (pendingComponentPlacement.description.isComponent ? '' : `A subsystem of ${source.fileName}, placed as a copy.`);
+    const savedAt = source.savedAt ? new Date(source.savedAt).toLocaleString() : null;
+    $('#componentPlaceSource').textContent = source.kind === 'library' ? `From my library${savedAt ? ` · saved ${savedAt}` : ''}` : `From ${source.fileName}${savedAt ? ` · saved ${savedAt}` : ''}${source.encrypted ? ' · encrypted: its contents will be kept in this project, which is not' : ''}`;
+    const item = (text) => {
+        const element = document.createElement('li');
+        element.textContent = text;
+        return element;
+    };
+    $('#componentPlacePorts').replaceChildren(...shown.ports.map((port) => item(`${port.name}${port.unit ? ` · ${port.unit}` : ''}${port.direction !== 'both' ? ` · ${port.direction}` : ''}`)));
+    $('#componentPlaceParameters').replaceChildren(...shown.parameters.map((parameter) => item(`${parameter.name} (${parameter.symbol}) = ${parameter.value}${parameter.unit ? ` ${parameter.unit}` : ''}`)));
+}
+
+$('#componentPlaceSubsystem').addEventListener('change', renderComponentPlaceDetails);
+$('#componentPlaceCancel').addEventListener('click', () => {
+    pendingComponentPlacement = null;
+    $('#componentPlaceDialog').close();
+});
+$('#componentPlaceDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!pendingComponentPlacement) return;
+    let componentDocument;
+    try {
+        componentDocument = componentPlacementDocument();
+    } catch (error) {
+        $('#componentPlaceError').textContent = friendlyError(error);
+        return;
+    }
+    const { source } = pendingComponentPlacement;
+    const asCopy = $('#componentPlaceCopy').checked || !pendingComponentPlacement.description.isComponent;
+    const link = asCopy ? null : linkRecordFor(source);
+    const name = componentDocument.component?.name ?? $('#componentPlaceSubsystem').selectedOptions[0]?.textContent ?? 'Component';
+    if (placeComponentDocument(componentDocument, { name, link })) {
+        $('#componentPlaceDialog').close();
+        pendingComponentPlacement = null;
+    }
+});
+
+// Places a component document as a new instance in the view being looked at, as one undo step. Returns its id, or null.
+function placeComponentDocument(componentDocument, { name, link = null }) {
+    let placed = null;
+    applyDocumentChange((document) => {
+        const result = placeComponent(document, componentDocument, { parentSubsystemId: activeSubsystemId, position: freePlacementPosition(), name, link });
+        placed = result.subsystemId;
+        return result.document;
+    }, `${name} placed${link ? `, linked to ${link.kind === 'library' ? 'my library' : link.fileName}` : ' as a copy'}`);
+    if (placed !== null) {
+        selectSubsystem(placed);
+        openSubsystemEditor(placed);
+    }
+    return placed;
+}
+
+$('#addComponentFromFile').addEventListener('click', () => placeComponentFromFile());
+$('#componentLibraryPlaceFile').addEventListener('click', () => placeComponentFromFile());
+$('#subsystemSaveFile').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id !== null) saveSubsystemAsComponentFile(id);
+});
+$('#subsystemContextSaveFile').addEventListener('click', () => {
+    $('#subsystemContextMenu').classList.add('hidden');
+    if (contextSubsystemId !== null) saveSubsystemAsComponentFile(contextSubsystemId);
+});
+
+// A component from the library is placed through the same review, linked to its entry unless placed as a copy.
+function applyComponentLibraryTemplate(template) {
+    openComponentPlaceDialog({
+        document: template.document,
+        source: { kind: 'library', templateId: template.id, fileName: template.name, sha256: null, savedAt: template.savedAt ?? null }
+    });
+}
+
+// A path relative to the project's folder, written into a link so a project and its components moved together still find
+// each other. Works with / and \ alike; null when there is no project path (an unsaved project) or no common root.
+function relativeComponentPath(projectPath, filePath) {
+    if (!projectPath || !filePath) return null;
+    const split = (path) => path.split(/[\\/]+/);
+    const from = split(projectPath).slice(0, -1);
+    const to = split(filePath);
+    if (from[0] !== to[0]) return null;
+    let common = 0;
+    while (common < from.length && common < to.length - 1 && from[common] === to[common]) common += 1;
+    return [...from.slice(common).map(() => '..'), ...to.slice(common)].join('/');
+}
+
+async function sha256Text(text) {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// The link a placed component keeps to where it came from (docs/proposals/subsystemComponents.md#linked-files-stage-4).
+function linkRecordFor(source) {
+    if (source.kind === 'library') return { kind: 'library', templateId: source.templateId, templateName: source.fileName, sha256: source.sha256 ?? null, savedAt: source.savedAt ?? null };
+    return {
+        kind: 'file', fileName: source.fileName, ...(source.path ? { path: source.path } : {}),
+        ...(relativeComponentPath(currentProjectPath, source.path) ? { relativePath: relativeComponentPath(currentProjectPath, source.path) } : {}),
+        sha256: source.sha256 ?? null, savedAt: source.savedAt ?? null, ...(source.encrypted ? { encrypted: true } : {})
+    };
+}
+
+// After "Save as component file", the instance's component is the file's: its definition becomes the saved document,
+// linked to the file, and every instance of it follows (one undo step).
+function linkInstanceToFile(subsystemId, saved) {
+    const subsystem = subsystemById(subsystemId);
+    if (!subsystem || subsystem.definitionId == null) return;
+    applyDocumentChange((document) => {
+        const definition = document.subsystemDefinitions.find((item) => item.id === subsystem.definitionId);
+        definition.document = JSON.parse(saved.content);
+        delete definition.document.ownership;
+        definition.link = linkRecordFor({ kind: 'file', fileName: saved.fileName, path: saved.path, sha256: saved.sha256, savedAt: saved.savedAt });
+        syncDefinitions(document, { allocateId: allocateModelEntityId });
+        return document;
+    });
+}
+
 // ---- The subsystem card and menu --------------------------------------------------------------------------------------
 
 function currentSubsystemCardId() {
@@ -17197,6 +17542,16 @@ function renderSubsystemComponent(subsystem, locked) {
         $('[data-port-remove]', row)?.addEventListener('click', () => applyDocumentChange((document) => removePort(document, subsystem.id, port.key), 'Port removed'));
         return row;
     }));
+    // Any state inside can be made a port, connected or not: a component's interface is what it offers, not only what is wired.
+    const portStates = new Set(instancePorts(document_, subsystem.id).filter((port) => port.declared).map((port) => port.stateId));
+    const insideStates = document_.nodes.filter((node) => owningInstanceId(node.subsystemId) === subsystem.id)
+        .flatMap((node) => (node.states ?? []).filter((state) => !portStates.has(state.id)).map((state) => ({ label: `${node.name} · ${state.name ?? state.symbol}`, stateId: state.id })));
+    const addPort = $('#subsystemAddPort');
+    addPort.replaceChildren(new Option(insideStates.length ? 'Choose a state…' : 'Every state is a port', ''), ...insideStates.map((choice) => new Option(choice.label, String(choice.stateId))));
+    addPort.disabled = !editable || !insideStates.length;
+    addPort.onchange = () => {
+        if (addPort.value) applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: Number(addPort.value) }), 'Made a port');
+    };
     const parents = document_.sharedParameters?.filter((shared) => shared.subsystemId == null || shared.subsystemId !== subsystem.id) ?? [];
     $('#subsystemEditorParameterList').replaceChildren(...instanceParameters(document_, subsystem.id).map((parameter) => {
         const row = document.createElement('div');
@@ -17377,7 +17732,9 @@ async function showUserLibrary() {
 }
 
 async function openTemplateDialog(mode) {
-    if (mode.kind === 'create' && (activeResult || !selectedNodeIds.size)) return;
+    if (mode.kind === 'create' && (activeResult || (!selectedNodeIds.size && selectedSubsystemId === null))) return;
+    // Exactly one subsystem selected: it is saved as a component (src/userLibrary.mjs's buildUserComponentTemplate).
+    if (mode.kind === 'create' && selectedSubsystemId !== null && !selectedNodeIds.size) mode = { ...mode, subsystemId: selectedSubsystemId };
     templateDialogMode = mode;
     const mine = (await window.componentLibrary.list()).filter((template) => template.source === 'user');
     const creating = mode.kind === 'create';
@@ -17391,7 +17748,12 @@ async function openTemplateDialog(mode) {
     $$('[data-template-field="name"], [data-template-field="description"]').forEach((field) => { field.hidden = filing; });
     $('#templateSectionLabel').textContent = filing ? 'Section name' : 'Section';
     const firstSelected = model.nodes.find((node) => selectedNodeIds.has(node.id));
-    $('#templateName').value = creating ? (selectedNodeIds.size === 1 ? firstSelected?.title ?? '' : 'My component') : filing ? '' : mode.template.name;
+    const savingSubsystem = creating && mode.subsystemId != null ? subsystemById(mode.subsystemId) : null;
+    if (savingSubsystem) {
+        $('#templateDialogKicker').textContent = 'Selected subsystem';
+        $('#templateDialogHint').textContent = 'The subsystem is saved as a component, with its ports and exposed parameters, to place in any model. Placed from the library, it stays linked to it unless placed as a copy.';
+    }
+    $('#templateName').value = savingSubsystem ? savingSubsystem.name : creating ? (selectedNodeIds.size === 1 ? firstSelected?.title ?? '' : 'My component') : filing ? '' : mode.template.name;
     $('#templateDescription').value = creating || filing ? '' : mode.template.description ?? '';
     $('#templateSection').value = sectionPathText(filing ? mode.path : creating ? [] : mode.template.section ?? []);
     $('#templateSectionChoices').replaceChildren(...sectionPaths(mine).map((path) => {
@@ -17410,7 +17772,17 @@ async function submitTemplateDialog() {
     const section = parseSectionPath($('#templateSection').value);
     const name = $('#templateName').value;
     const description = $('#templateDescription').value;
-    if (mode.kind === 'create') {
+    if (mode.kind === 'create' && mode.subsystemId != null) {
+        syncComponents();
+        const takenIds = (await window.componentLibrary.list()).map((template) => template.id);
+        const componentDocument = componentDocumentOf(serializeProjectDocument(), mode.subsystemId);
+        const template = buildUserComponentTemplate({ componentDocument, name, description, section, takenIds });
+        const saved = await window.componentLibrary.saveUser(template);
+        const ports = template.document.component.ports?.length ?? 0;
+        const parameters = (template.document.sharedParameters ?? []).filter((shared) => shared.exposed).length;
+        $('#statusText').textContent = `Saved “${saved.name}” to my library as a component with ${countText(ports, 'port')} and ${countText(parameters, 'parameter')}`;
+        tutorialLibraryComponents.add(saved.name);
+    } else if (mode.kind === 'create') {
         const takenIds = (await window.componentLibrary.list()).map((template) => template.id);
         const template = buildUserTemplate({ document: serializeProjectDocument(), selectedNodeIds: [...selectedNodeIds], name, description, section, takenIds });
         const saved = await window.componentLibrary.saveUser(template);

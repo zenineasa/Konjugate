@@ -23,12 +23,13 @@ import { parametersAndRuns } from './parametersAndRuns.mjs';
 import { programRelationship } from './programRelationship.mjs';
 import { refitTwin } from './refitTwin.mjs';
 import { replayLog } from './replayLog.mjs';
+import { reuseComponent } from './reuseComponent.mjs';
 import { scheduleChanges } from './scheduleChanges.mjs';
 import { steerByHand } from './steerByHand.mjs';
 import { tuneController } from './tuneController.mjs';
 import { whatIfBranches } from './whatIfBranches.mjs';
 
-export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, scheduleChanges, whatIfBranches, keepAndShare, exportModel, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
+export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, reuseComponent, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, scheduleChanges, whatIfBranches, keepAndShare, exportModel, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
 
 // The groups of the list, in order, with the heading each shows. A tutorial's `area` is one of these ids.
 export const tutorialAreas = Object.freeze([

@@ -1007,6 +1007,14 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     box-shadow: 0 12px 30px rgb(0 0 0 / 38%); backdrop-filter: blur(10px); transform: translateX(-50%);
 }
 .endpointPickBanner[hidden] { display: none; }
+.componentBar { top: 60px; max-width: 560px; }
+.componentBarButtons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.componentBarButtons button { padding: 4px 8px; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px solid #4aa99f; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.componentBarButtons button[hidden] { display: none; }
+.componentPlaceDialog { width: min(520px, 92vw); }
+.componentPlaceLists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
+.componentPlaceLists h3 { margin: 0 0 5px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
+.componentLibraryPlaceFile { margin: 0 12px 8px; padding: 6px 9px; color: #86ddd5; background: rgb(98 225 213 / 8%); border: 1px solid #31525a; border-radius: 5px; font-size: 9px; cursor: pointer; }
 .endpointPickBanner span, .endpointPickBanner strong, .endpointPickBanner small { display: block; }
 .endpointPickBanner strong { color: #d7e7eb; font-size: 9px; }
 .endpointPickBanner small { margin-top: 2px; color: #6f858f; font-size: 7px; }

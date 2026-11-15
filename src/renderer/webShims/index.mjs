@@ -9,6 +9,7 @@
 
 import engine from './engine.mjs';
 import projectFiles, { setPendingDroppedFile } from './projectFiles.mjs';
+import { componentFiles } from './componentFiles.mjs';
 import providerEditor from './providerEditor.mjs';
 import { installOffline } from './offline.mjs';
 import { version } from './buildInfo.mjs';
@@ -19,6 +20,7 @@ import {
 
 window.engine = engine;
 window.projectFiles = projectFiles;
+window.componentFiles = componentFiles;
 window.uiZoom = uiZoom;
 window.windowControls = windowControls;
 window.applicationInfo = applicationInfo;

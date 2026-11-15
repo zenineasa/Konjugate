@@ -51,3 +51,17 @@ test('resultSignalsToCsv reads samples straight from a decoded engine result', (
     const csv = resultSignalsToCsv(result, [{ signalId: 2, header: 'Tank — Surface pressure (Pa)' }]);
     assert.equal(csv, 'time (s),Tank — Surface pressure (Pa)\n0,99973.98\n0.5,99500.12');
 });
+
+test('two instances of one component are told apart in CSV headers by their path; other columns are unchanged', async () => {
+    const { projectDocumentSignals, withInstancePaths } = await import('../src/resultExport.mjs');
+    const document = {
+        nodes: [
+            { id: 1, name: 'Impeller', subsystemId: 10, states: [{ id: 2, name: 'Speed', unit: 'rad/s' }] },
+            { id: 3, name: 'Impeller', subsystemId: 11, states: [{ id: 4, name: 'Speed', unit: 'rad/s' }] },
+            { id: 5, name: 'Tank', states: [{ id: 6, name: 'Level', unit: 'm' }] }
+        ],
+        subsystems: [{ id: 10, name: 'Pump 1', parentSubsystemId: null }, { id: 11, name: 'Pump 2', parentSubsystemId: null }]
+    };
+    assert.deepEqual(projectDocumentSignals(document).map((signal) => signal.header), ['Pump 1 / Impeller — Speed (rad/s)', 'Pump 2 / Impeller — Speed (rad/s)', 'Tank — Level (m)']);
+    assert.deepEqual(withInstancePaths([{ signalId: 1, header: 'A', path: 'P' }]), [{ signalId: 1, header: 'A' }]);
+});

@@ -98,6 +98,19 @@ contextBridge.exposeInMainWorld('projectFiles', {
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });
 
+// Component files (docs/subsystems.md#component-files): a subsystem saved as a .kjt of its own, placed from one, and, for a
+// linked component, read again by path and refreshed when it changes.
+contextBridge.exposeInMainWorld('componentFiles', {
+    open: () => ipcRenderer.invoke('componentOpen'),
+    unlock: (path, password) => ipcRenderer.invoke('componentUnlock', { path, password }),
+    read: (path) => ipcRenderer.invoke('componentRead', { path }),
+    resolve: (link, projectPath) => ipcRenderer.invoke('componentResolve', { relativePath: link?.relativePath ?? null, path: link?.path ?? null, projectPath }),
+    save: (suggestedFilename, content, path = null) => ipcRenderer.invoke('componentSave', { suggestedFilename, content, path }),
+    editInWindow: (path) => ipcRenderer.invoke('componentEditInWindow', { path }),
+    onChanged: (callback) => ipcRenderer.on('componentFileChanged', (_event, detail) => callback(detail)),
+    followsPaths: true
+});
+
 contextBridge.exposeInMainWorld('extensions', {
     list: () => ipcRenderer.invoke('packageList'),
     // An installed FMU's input and output ports, for wiring it into a node.

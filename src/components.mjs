@@ -180,6 +180,8 @@ export function extractComponent(document, subsystemId, { base = null, name = nu
         delete shared.subsystemId;
         // An exposed parameter's value in the project is this instance's; the component keeps its default.
         const original = baseEntities.get(shared.id);
+        // So are its symbol and name, when the project needed them changed to keep them unique; the component keeps its own.
+        if (original) { shared.symbol = original.symbol; shared.name = original.name; }
         if (shared.exposed && original && Number(original.value) !== Number(shared.value)) {
             parameterValues.push({ parameterKey: shared.id, value: shared.value });
             shared.value = original.value;
@@ -244,9 +246,20 @@ export function expandInstance(document, subsystemId, { allocateId = idAllocator
         if (subsystem.parentSubsystemId == null) subsystem.parentSubsystemId = subsystemId;
         nestedStructuralKeys.forEach((key) => delete subsystem[key]);
     });
+    // A shared parameter's symbol must be unique in the project (the validator says so), and every instance has its own copy:
+    // a copy keeps the symbol it had, and a new one takes the definition's symbol, or the first free one after it
+    // ("conductance2"), with the instance's name after its own so the two can be told apart in tables and tuning.
+    const kept = new Map(members.sharedParameters.map((shared) => [shared.id, shared]));
+    const taken = new Set((next.sharedParameters ?? []).filter((shared) => !kept.has(shared.id)).map((shared) => shared.symbol));
     remapped.sharedParameters.forEach((shared) => {
         shared.subsystemId = subsystemId;
         if (shared.exposed && values.has(shared.definitionKey)) shared.value = values.get(shared.definitionKey);
+        const previous = kept.get(shared.id);
+        let symbol = previous && !taken.has(previous.symbol) ? previous.symbol : shared.symbol;
+        for (let suffix = 2; taken.has(symbol); suffix += 1) symbol = `${shared.symbol}${suffix}`;
+        if (symbol !== shared.symbol) shared.name = previous?.name && previous.symbol === symbol ? previous.name : `${shared.name} (${record.name})`;
+        shared.symbol = symbol;
+        taken.add(symbol);
     });
     // Out with the old contents, in with the new, each list keeping its place in the project's order.
     const drop = (list, old) => {

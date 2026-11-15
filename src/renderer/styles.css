@@ -1008,10 +1008,23 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     box-shadow: 0 12px 30px rgb(0 0 0 / 38%); backdrop-filter: blur(10px); transform: translateX(-50%);
 }
 .endpointPickBanner[hidden] { display: none; }
-.componentBar { top: 60px; max-width: 560px; }
-.componentBarButtons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
-.componentBarButtons button { padding: 4px 8px; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px solid #4aa99f; border-radius: 4px; font-size: 8px; cursor: pointer; }
+/* A component's bar (a linked component, or a component opened as a project): stacked, not the endpoint banner's row, so the
+   title, the explanation and the actions each have the whole width and no button's words wrap. */
+.componentBar { top: 60px; display: grid; width: min(560px, calc(100% - 32px)); min-width: 0; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 3px; padding: 11px 14px 12px; }
+.componentBar > span { color: #6fa89f; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
+.componentBar > strong { font-size: 10px; line-height: 1.35; overflow-wrap: anywhere; }
+.componentBar > small { margin-top: 1px; font-size: 8px; line-height: 1.45; }
+.componentBar > small:empty { display: none; }
+.componentBarButtons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.componentBar .componentBarButtons button { height: auto; padding: 5px 10px; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px solid #4aa99f; border-radius: 4px; font-size: 8px; white-space: nowrap; cursor: pointer; }
+.componentBar .componentBarButtons button:hover, .componentBar .componentBarButtons button:focus-visible { border-color: #86ddd5; }
 .componentBarButtons button[hidden] { display: none; }
+/* On a phone the bar spans the screen under the toolbar, and its actions share the row evenly, as large as a finger needs. */
+@media (max-width: 700px), (pointer: coarse) and (max-height: 500px) {
+    /* Left of the selection actions that float down the canvas's right edge on a phone, which would otherwise cover its end. */
+    .componentBar { top: 52px; left: 8px; right: 56px; width: auto; padding: 10px 12px; transform: none; }
+    .componentBar .componentBarButtons button { flex: 1 1 auto; min-height: 36px; font-size: 10px; }
+}
 .componentPlaceDialog { width: min(520px, 92vw); }
 .componentPlaceLists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
 .componentPlaceLists h3 { margin: 0 0 5px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }

@@ -7767,6 +7767,8 @@ export async function runInteractionTests(driver) {
             await focus();
             await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('has changed what it offers')`, 'The conflict was not shown.');
             assert.deepEqual(await shownButtons(), ['Update and remove', 'Keep the old version', 'Detach']);
+            // Laid out cleanly: every button on one line, inside the bar.
+            assert.equal(await evaluate(window, `(() => { const bar = document.querySelector('#componentLinkBar').getBoundingClientRect(); return [...document.querySelectorAll('#componentLinkBar .componentBarButtons button')].filter((button) => !button.hidden).every((button) => { const box = button.getBoundingClientRect(); return box.height < 32 && box.right <= bar.right && box.left >= bar.left; }); })()`), true, 'The bar\'s buttons wrap or overflow it.');
             await evaluate(window, `document.querySelector('#componentLinkOld').click()`);
             await waitFor(window, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.link?.behind)`, 'Keeping the old version did not mark it behind its file.');
             assert.ok((await saved()).edges.some((item) => item.name === 'Feed'), 'Keeping the old version kept what was connected.');

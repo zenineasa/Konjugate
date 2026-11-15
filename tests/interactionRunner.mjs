@@ -1738,7 +1738,8 @@ export async function runInteractionTests(driver) {
     });
 
     await run('left-click opens node and relationship inspectors', async () => {
-        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        // The label shown, by its exact name (an undone paste leaves a hidden "Battery module copy" in the page).
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.getClientRects().length && label.querySelector('strong')?.textContent === 'Battery module').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#nodeEditorTitle').textContent`), 'Battery module');
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);

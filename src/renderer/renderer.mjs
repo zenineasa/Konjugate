@@ -17125,6 +17125,11 @@ function syncComponents() {
     return true;
 }
 
+// A copy of a document entity without its component keys, for telling a change of keys alone from a real change.
+function withoutKeys(value) {
+    return JSON.parse(JSON.stringify(value, (key, child) => (key === 'definitionKey' ? undefined : child)));
+}
+
 function sameJson(a, b) {
     return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -17169,6 +17174,17 @@ function reconcileModel(current, next) {
         if (!before) { replaceNode(existing, definition); return; }
         currentNodes.delete(definition.id);
         if (sameJson(before, nextNodes.get(definition.id))) return;
+        // Only its keys changed (it became part of a component, or left one): they are copied in, and nothing on screen is redrawn.
+        if (sameJson(withoutKeys(before), withoutKeys(nextNodes.get(definition.id)))) {
+            existing.extraFields = definition.extraFields;
+            if (!existing.extraFields) delete existing.extraFields;
+            existing.states.forEach((state, index) => {
+                const extra = definition.states[index]?.extraFields;
+                if (extra) state.extraFields = extra; else delete state.extraFields;
+            });
+            existing.sourceTerms = definition.sourceTerms;
+            return;
+        }
         const object = nodeObjects.get(definition.id);
         if (!object || !sameJson(before.appearance, nextNodes.get(definition.id).appearance)) { replaceNode(existing, definition); return; }
         applyNodeModel(object, { ...snapshotDefinition(definition, nodeSnapshotExcludedKeys), bindings: [] });
@@ -17458,6 +17474,8 @@ function placeComponentDocument(componentDocument, { name, link = null }) {
     if (placed !== null) {
         selectSubsystem(placed);
         openSubsystemEditor(placed);
+        // A new link is checked at once: in the browser, that says the file cannot be followed by path.
+        if (link) checkComponentLinks();
     }
     return placed;
 }
@@ -17522,6 +17540,7 @@ function linkInstanceToFile(subsystemId, saved) {
         syncDefinitions(document, { allocateId: allocateModelEntityId });
         return document;
     });
+    checkComponentLinks();
 }
 
 // ---- Linked components (docs/subsystems.md#linked-components) ---------------------------------------------------------
@@ -17579,9 +17598,12 @@ async function currentLinkSource(link) {
 }
 
 async function checkComponentLink(definitionId) {
+    const asked = (model.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
+    if (!asked?.link) return;
+    const source = await currentLinkSource(asked.link);
+    // Read again after waiting: a decision made meanwhile (Keep the old version, an update, Detach) replaced the definition.
     const definition = (model.subsystemDefinitions ?? []).find((item) => item.id === definitionId);
-    if (!definition?.link) return;
-    const source = await currentLinkSource(definition.link);
+    if (!definition?.link || definition.link.editing) return;
     if (source.unchecked) { componentLinkStates.set(definitionId, { state: 'unchecked' }); return; }
     if (source.missing) {
         if (componentLinkStates.get(definitionId)?.state !== 'kept') componentLinkStates.set(definitionId, { state: 'missing' });

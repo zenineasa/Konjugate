@@ -7854,6 +7854,8 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#componentLinkSave').click()`);
             await waitFor(window, `window.componentLibrary.list().then((templates) => templates.find((template) => template.id === ${JSON.stringify(entry.id)})?.document.nodes[0].states[0].initialValue === 9)`, 'Saving did not change the library entry.');
             await waitFor(window, `!document.querySelector('#componentLinkBarText').textContent.startsWith('Editing')`, 'Saving did not end editing.');
+            // The library is listed by the panel and the link checks at once: no listing reports another's templates as duplicates.
+            assert.equal(await evaluate(window, `window.diagnostics.list().then((entries) => entries.filter((entry) => entry.message.includes('Duplicate template ID')).length)`), 0, 'Overlapping library listings reported duplicate templates.');
             assert.ok(definition);
         } finally {
             await evaluate(window, `window.componentLibrary.list().then((templates) => Promise.all(templates.filter((template) => template.source === 'user' && template.name === 'Sensing').map((template) => window.componentLibrary.removeUser(template.id))))`);

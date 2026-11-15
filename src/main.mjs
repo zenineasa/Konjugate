@@ -1702,8 +1702,17 @@ const userComponentLibrary = createUserLibraryStore({
     }
 });
 
-async function discoverComponentLibrary() {
-    componentLibraryRegistry.clear();
+// One discovery at a time, building a fresh list and putting it in place whole: two listings that overlapped (the library
+// panel and a linked component's check, say) used to clear and refill the one registry together, so each reported every
+// template the other had just added as a duplicate, and one could be handed a list half filled.
+let componentLibraryDiscovery = null;
+function discoverComponentLibrary() {
+    componentLibraryDiscovery ??= discoverComponentLibraryNow().finally(() => { componentLibraryDiscovery = null; });
+    return componentLibraryDiscovery;
+}
+
+async function discoverComponentLibraryNow() {
+    const found = new Map();
     const componentLibraryRoots = [
         [join(currentDir, '..', 'assets', 'componentLibrary'), 'bundled'],
         [userComponentLibraryDirectory(), 'user']
@@ -1714,8 +1723,8 @@ async function discoverComponentLibrary() {
             if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
             try {
                 const template = validateComponentTemplate(JSON.parse(await readFile(join(componentLibraryDirectory, entry.name), 'utf8')));
-                if (componentLibraryRegistry.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
-                componentLibraryRegistry.set(template.id, { ...template, source });
+                if (found.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
+                found.set(template.id, { ...template, source });
             } catch (error) {
                 console.warn(`Skipping component template ${entry.name}: ${error.message}`);
             }
@@ -1741,8 +1750,8 @@ async function discoverComponentLibrary() {
                     if (contribution.kind !== 'component') continue;
                     const template = validateComponentTemplate(JSON.parse(await readFile(join(pluginDirectory, contribution.entry), 'utf8')));
                     if (template.id !== contribution.componentId) throw new Error(`Component ID mismatch: ${contribution.componentId}.`);
-                    if (componentLibraryRegistry.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
-                    componentLibraryRegistry.set(template.id, {
+                    if (found.has(template.id)) throw new Error(`Duplicate template ID: ${template.id}.`);
+                    found.set(template.id, {
                         ...template,
                         source: 'plugin',
                         pluginId: manifest.pluginId,
@@ -1754,6 +1763,8 @@ async function discoverComponentLibrary() {
             }
         }
     }
+    componentLibraryRegistry.clear();
+    found.forEach((template, id) => componentLibraryRegistry.set(id, template));
 }
 
 ipcMain.handle('componentLibraryList', async () => {

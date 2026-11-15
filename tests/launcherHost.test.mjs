@@ -61,16 +61,18 @@ test('a launcher manifest is rejected when it breaks the contract', () => {
 
 test('an importer runs in a worker, can read its own package JSON, and its output is checked', async () => {
     const importer = { entry: 'echoImporter.mjs' };
-    const run = (text) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], timeoutMilliseconds: 1500 });
+    // Runs that finish get the importer's own time budget: a worker can take over a second just to start on a busy machine.
+    // Only the run that never finishes gets a short one, which it outlasts however busy the machine is.
+    const run = (text, timeoutMilliseconds = null) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], timeoutMilliseconds });
     assert.deepEqual((await run('hello')).report.summary, { text: 'hello', extra: 7 });
     await assert.rejects(() => run('boom'), /The importer failed: boom/);
     await assert.rejects(() => run('bad'), /unexpected result/);
-    await assert.rejects(() => run('hang'), /did not finish within/);
+    await assert.rejects(() => run('hang', 1500), /did not finish within 1.5 seconds/);
 });
 
 test('an importer can return only data, receive options, and build a model from construction operations', async () => {
     const importer = { entry: 'echoImporter.mjs' };
-    const run = (text, options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], options, timeoutMilliseconds: 1500 });
+    const run = (text, options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'data', name: 'data.csv', text }], options });
     const first = await run('data-only', { stage: 'read' });
     assert.deepEqual(first.data, { received: 'read', files: 1 });
     assert.equal(first.document, undefined);
@@ -482,7 +484,7 @@ test('a launcher may require parameterSchedules', () => {
 
 test('an importer may take a large file as bytes and return text files derived from it, which are checked', async () => {
     const importer = { entry: 'echoImporter.mjs', files: [{ role: 'data', label: 'Data', multiple: true }, { role: 'notes', label: 'Notes' }, { role: 'extract', label: 'Extract', binary: true }] };
-    const run = (options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'extract', name: 'region.bin', data: Uint8Array.from([1, 2, 3, 250]) }], options, timeoutMilliseconds: 5000 });
+    const run = (options) => runImporter({ addonDirectory: fixtureDirectory, importer, files: [{ role: 'extract', name: 'region.bin', data: Uint8Array.from([1, 2, 3, 250]) }], options });
     const result = await run();
     assert.deepEqual(result.data, { bytes: 4, isBytes: true, text: null });
     assert.deepEqual(result.derived, [{ role: 'data', name: 'from-extract.csv', text: 'bytes,sum\n4,256\n', source: 'region.bin' }]);
@@ -551,7 +553,7 @@ test('binary files are given to an importer only for a run that asks for them, a
 
 test('an importer says how far it has got, and the host passes it on checked, apart from its result', async () => {
     const heard = [];
-    const result = await runImporter({ addonDirectory: fixtureDirectory, importer: { entry: 'echoImporter.mjs' }, files: [{ role: 'data', name: 'data.csv', text: 'progress' }], timeoutMilliseconds: 5000, onProgress: (progress) => heard.push(progress) });
+    const result = await runImporter({ addonDirectory: fixtureDirectory, importer: { entry: 'echoImporter.mjs' }, files: [{ role: 'data', name: 'data.csv', text: 'progress' }], onProgress: (progress) => heard.push(progress) });
     assert.deepEqual(result.data, { reported: true });
     assert.deepEqual(heard.map((item) => [item.done, item.total, item.message]), [[0, 4, 'part 0'], [1, 4, 'part 1'], [2, 4, 'part 2'], [3, 4, 'part 3'], [4, 4, 'part 4']], 'what is not a number is not passed on');
     assert.deepEqual(checkedProgress({ done: 7, total: 4, message: 'x'.repeat(300) }), { done: 4, total: 4, message: 'x'.repeat(200) });

@@ -1059,6 +1059,21 @@
                 <p id="subsystemEditorSummary" class="builderHint"></p>
                 <h3>Boundary</h3>
                 <ul id="subsystemEditorPorts" class="subsystemPortList"></ul>
+            </section>
+            <section id="subsystemEditorComponent">
+                <h3>Component</h3>
+                <p id="subsystemEditorUsage" class="builderHint"></p>
+                <div class="subsystemEditorButtons">
+                    <button id="subsystemPlaceAnother" type="button" title="A second instance of the same component, kept identical: a change inside one reaches every one">Place another instance</button>
+                    <button id="subsystemMakeSeparate" type="button" title="Give this instance a component of its own, so changes to it no longer reach the others">Make this one separate</button>
+                </div>
+                <h3>Ports</h3>
+                <p class="builderHint">The states it offers outside. A state something outside is connected to is a port already; name it, or keep it, to make it part of the component.</p>
+                <div id="subsystemEditorPortList" class="subsystemRowList"></div>
+                <h3>Parameters</h3>
+                <p class="builderHint">Exposed parameters can differ between instances, or follow a shared parameter of the model.</p>
+                <div id="subsystemEditorParameterList" class="subsystemRowList"></div>
+                <label class="editorField"><span>Expose a parameter</span><select id="subsystemExposeParameter" aria-label="Expose a parameter used inside"></select></label>
                 <p class="builderHint">To move nodes in, select them and right-click, choose a subsystem in a node's editor, or drag them onto the box.</p>
             </section>
             <footer class="subsystemEditorActions">

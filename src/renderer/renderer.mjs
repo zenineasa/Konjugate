@@ -87,7 +87,7 @@ import { buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs'
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
-    componentDocumentOf, declarePort, describeComponentDocument, exposeParameter, instanceCount, instanceParameters, instancePorts,
+    componentDocumentOf, declarePort, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
 } from '../components.mjs';
 import {
@@ -738,7 +738,7 @@ function updateHistoryControls() {
 
 function updateSelectionActionControls() {
     const locked = Boolean(activeResult);
-    $('#copySelection').disabled = locked || !selectedNodeIds.size;
+    $('#copySelection').disabled = locked || (!selectedNodeIds.size && selectedSubsystemId === null);
     $('#saveTemplateButton').disabled = locked || !selectedNodeIds.size;
     $('#createSubsystem').disabled = locked || !selectedNodeIds.size;
     $('#createEdgeGroup').disabled = locked || selectedNodeIds.size < 2;
@@ -746,7 +746,8 @@ function updateSelectionActionControls() {
     let canPaste = false;
     if (!locked) {
         try {
-            canPaste = validateGraphFragment(window.modelClipboard.read());
+            const copied = window.modelClipboard.read();
+            canPaste = copied?.format === componentClipboardFormat ? Boolean(copied.document?.nodes) : validateGraphFragment(copied);
         } catch {
             canPaste = false;
         }
@@ -1343,6 +1344,26 @@ function subsystemPathName(subsystemId) {
     return ['Model', ...names].join(' / ');
 }
 
+// The declared ports of an instance, by the project id of the state each names: `{ name, port, node, state }`. Read from
+// the canvas's own definitions (a state's key in the component), so it is cheap enough to run as terminals are drawn.
+function declaredPortsOf(subsystemId) {
+    const subsystem = model.subsystems.find((item) => item.id === subsystemId && !item.deleted);
+    const ports = subsystemDefinitionOf(subsystem)?.document.component?.ports ?? [];
+    if (!ports.length) return new Map();
+    const byKey = new Map();
+    model.nodes.forEach((node) => {
+        if (node.deleted || owningInstanceId(node.subsystemId) !== subsystemId) return;
+        node.states.forEach((state) => {
+            const key = state.extraFields?.definitionKey;
+            if (key != null) byKey.set(key, { node, state });
+        });
+    });
+    return new Map(ports.map((port) => {
+        const owner = byKey.get(port.stateId);
+        return owner ? [owner.state.id, { name: port.name || `${owner.node.title} · ${owner.state.label}`, port, node: owner.node, state: owner.state }] : null;
+    }).filter(Boolean));
+}
+
 function describeBoundaryCrossing(crossing) {
     const edge = model.relationships.find((relationship) => relationship.id === crossing.edgeId);
     const outside = model.nodes.find((node) => node.id === crossing.externalNodeId);
@@ -1354,11 +1375,14 @@ function describeBoundaryCrossing(crossing) {
     const badge = crossing.direction === 'incoming' ? '→ In' : crossing.direction === 'outgoing' ? 'Out →' : '⇄ Both';
     const relation = crossing.direction === 'incoming' ? 'from' : crossing.direction === 'outgoing' ? 'to' : 'with';
     const kind = crossing.direction === 'bidirectional' ? 'Bidirectional relationship' : `${crossing.direction === 'incoming' ? 'Incoming' : 'Outgoing'} relationship`;
+    // The port the relationship reaches inside, if the subsystem declares one there.
+    const insideStateId = crossing.role === 'source' ? edge.sourceStateId : edge.targetStateId;
+    const port = declaredPortsOf(activeSubsystemId).get(insideStateId);
     return {
         ...crossing, edge, outside,
         badge,
         name: outside.title,
-        detail: [state?.symbol, location, group ? `group ${group.name}` : null].filter(Boolean).join(' · '),
+        detail: [state?.symbol, location, group ? `group ${group.name}` : null, port ? `port ${port.name}` : null].filter(Boolean).join(' · '),
         tooltip: `${kind} “${edge.title}” ${relation} ${outside.title}${state ? ` (${state.symbol})` : ''}, in ${location}. Click to select it.`
     };
 }
@@ -1429,9 +1453,19 @@ function createSubsystemTerminal(description, { position, side }) {
     element.addEventListener('pointerdown', (event) => event.stopPropagation());
     $('.subsystemTerminalEdge', element).addEventListener('click', (event) => {
         event.stopPropagation();
+        if (description.emptyPort) {
+            const node = nodeObjects.get(description.internalNodeId);
+            if (node?.visible) selectNode(node);
+            $('#statusText').textContent = description.tooltip.replace(/ Click to select .*$/, '');
+            return;
+        }
         selectSubsystemTerminal(description.edgeId);
     });
-    $('.subsystemTerminalJump', element).addEventListener('click', (event) => {
+    if (description.emptyPort) {
+        $('.subsystemTerminalJump', element).remove();
+        element.classList.add('emptyPort');
+    }
+    $('.subsystemTerminalJump', element)?.addEventListener('click', (event) => {
         event.stopPropagation();
         goToOutsideNode(description.externalNodeId);
     });
@@ -1443,7 +1477,7 @@ function createSubsystemTerminal(description, { position, side }) {
     object.add(label);
     scene.add(object);
     // Dragged like a node (DragControls drags whatever is in nodePickTargets), and clicked to select its relationship.
-    nodePickTargets.push(object);
+    if (!description.emptyPort) nodePickTargets.push(object);
     subsystemTerminals.set(description.edgeId, { object, label, crossing: description });
 }
 
@@ -1498,10 +1532,20 @@ function relationshipEndObject(definition, role) {
 function syncSubsystemBoundaries() {
     subsystemObjects.forEach((object) => {
         if (!object.visible || !object.userData.summary) return;
-        const text = boundaryPortCountText(liveBoundaryCrossings(object.userData.id).length);
+        const declared = [...declaredPortsOf(object.userData.id).values()].map((entry) => entry.name);
+        const text = `${boundaryPortCountText(liveBoundaryCrossings(object.userData.id).length)}${declared.length ? ` · ports: ${declared.join(', ')}` : ''}`;
         if (object.userData.summary.textContent !== text) object.userData.summary.textContent = text;
     });
-    const descriptions = activeSubsystemId === null ? [] : liveBoundaryCrossings(activeSubsystemId).map(describeBoundaryCrossing);
+    const crossings = activeSubsystemId === null ? [] : liveBoundaryCrossings(activeSubsystemId).map(describeBoundaryCrossing);
+    // A declared port nothing is connected to shows as an empty terminal, keyed by its port's key, negated.
+    const bound = new Set(crossings.map((crossing) => (crossing.role === 'source' ? crossing.edge.sourceStateId : crossing.edge.targetStateId)));
+    const emptyPorts = activeSubsystemId === null ? [] : [...declaredPortsOf(activeSubsystemId).entries()].filter(([stateId]) => !bound.has(stateId)).map(([, entry]) => ({
+        edgeId: -entry.port.key, emptyPort: true, internalNodeId: entry.node.id, externalNodeId: null,
+        role: entry.port.direction === 'in' ? 'target' : 'source', direction: entry.port.direction === 'in' ? 'incoming' : entry.port.direction === 'out' ? 'outgoing' : 'bidirectional',
+        badge: '○ Port', name: entry.name, detail: `${entry.state.symbol}${entry.state.unit ? ` · ${entry.state.unit}` : ''} · not connected`,
+        tooltip: `Port “${entry.name}” of this subsystem, not connected outside. Click to select ${entry.node.title}.`
+    }));
+    const descriptions = [...crossings, ...emptyPorts];
     const signature = JSON.stringify([activeSubsystemId, subsystemById(activeSubsystemId)?.terminalPositions ?? [],
         descriptions.map(({ edgeId, role, direction, badge, name, detail, tooltip }) => [edgeId, role, direction, badge, name, detail, tooltip])]);
     if (signature !== subsystemTerminalSignature) {
@@ -1557,7 +1601,9 @@ function renderSubsystemBreadcrumb() {
     breadcrumb.hidden = activeSubsystemId === null;
     if (activeSubsystemId === null) return;
     const current = model.subsystems.find((item) => item.id === activeSubsystemId);
-    breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" data-subsystem-rename title="Rename this subsystem">${escapeHtml(current?.name ?? 'Subsystem')}</button>`;
+    const uses = current?.definitionId == null ? 1 : model.subsystems.filter((item) => !item.deleted && item.definitionId === current.definitionId).length;
+    const linked = Boolean(subsystemDefinitionOf(current)?.link);
+    breadcrumb.innerHTML = `<button type="button" data-subsystem-parent>← ${current?.parentSubsystemId === null ? 'Model' : 'Parent'}</button><span>/</span><button type="button" data-subsystem-rename title="Rename this subsystem">${escapeHtml(current?.name ?? 'Subsystem')}</button>${uses > 1 ? `<em data-subsystem-uses>used ${uses} times</em>` : ''}${linked ? '<em data-subsystem-linked>linked</em>' : ''}`;
     $('[data-subsystem-parent]', breadcrumb).addEventListener('click', () => enterSubsystem(current?.parentSubsystemId ?? null));
     $('[data-subsystem-rename]', breadcrumb).addEventListener('click', (event) => {
         if (activeResult || !current) return;
@@ -16066,7 +16112,20 @@ function deleteSelected() {
     }
 }
 
+// A copied subsystem is its component document; pasted, it is an independent copy (a new local definition), as a pasted
+// node is a new node. "Place another instance" is the way to a second instance that stays identical.
+const componentClipboardFormat = 'konjugateComponentCopy';
+
 function copySelectedGraph() {
+    if (!activeResult && selectedSubsystemId !== null) {
+        syncComponents();
+        const subsystem = subsystemById(selectedSubsystemId);
+        if (!subsystem) return false;
+        window.modelClipboard.write({ format: componentClipboardFormat, version: 1, name: subsystem.name, document: componentDocumentOf(serializeProjectDocument(), subsystem.id) });
+        updateSelectionActionControls();
+        $('#statusText').textContent = `${subsystem.name} copied`;
+        return true;
+    }
     if (activeResult || !selectedNodeIds.size) return false;
     const fragment = createGraphFragment(serializeProjectDocument(), selectedNodeIds);
     if (!fragment) return false;
@@ -16135,6 +16194,7 @@ function insertGraphFragment(remapped, { sharedParameters = [] } = {}) {
 function pasteGraph() {
     if (activeResult) return false;
     const fragment = window.modelClipboard.read();
+    if (fragment?.format === componentClipboardFormat) return pasteComponent(fragment);
     if (!validateGraphFragment(fragment)) return false;
     try {
         const count = insertGraphFragment(remapGraphFragment(fragment, nextModelEntityId, pasteOffsetForCurrentView()));
@@ -16145,6 +16205,20 @@ function pasteGraph() {
         $('#statusText').textContent = error.message;
         return false;
     }
+}
+
+function pasteComponent(copy) {
+    const offset = pasteOffsetForCurrentView();
+    const shown = [...subsystemObjects.values()].filter((object) => object.visible).map((object) => object.position);
+    const base = shown.length ? shown[shown.length - 1].toArray() : [0, 0, 0];
+    let placed = null;
+    applyDocumentChange((document) => {
+        const result = placeComponent(document, copy.document, { parentSubsystemId: activeSubsystemId, name: `${copy.name} copy`, position: base.map((value, index) => value + Number(offset[index] ?? 0) * 2) });
+        placed = result.subsystemId;
+        return result.document;
+    }, `${copy.name} pasted as a copy of its own`);
+    if (placed !== null) selectSubsystem(placed);
+    return placed !== null;
 }
 
 // A library assembly: a piece of model as the canvas holds it, placed whole, with its programs and the shared parameters
@@ -17028,6 +17102,33 @@ function forgetDefinitionKeys(definition) {
     if (definition.extraFields) { delete definition.extraFields.definitionKey; if (!Object.keys(definition.extraFields).length) delete definition.extraFields; }
 }
 
+// Applies a change made to the project as a document (src/components.mjs) as one undo step: definitions are brought in
+// step first, then the canvas is reconciled to the result, and undo reconciles it back.
+function applyDocumentChange(transform, message) {
+    if (activeResult) return false;
+    syncComponents();
+    const before = serializeProjectDocument();
+    let after;
+    try {
+        after = transform(structuredClone(before));
+    } catch (error) {
+        $('#statusText').textContent = error.message;
+        return false;
+    }
+    if (!after || sameJson(before, after)) return false;
+    reconcileModel(before, after);
+    recordHistory({
+        undo: () => reconcileModel(serializeProjectDocument(), before),
+        redo: () => reconcileModel(serializeProjectDocument(), after)
+    });
+    if (message) $('#statusText').textContent = typeof message === 'function' ? message(after) : message;
+    return true;
+}
+
+function subsystemDefinitionOf(subsystem) {
+    return subsystem?.definitionId == null ? null : (model.subsystemDefinitions ?? []).find((definition) => definition.id === subsystem.definitionId) ?? null;
+}
+
 // ---- The subsystem card and menu --------------------------------------------------------------------------------------
 
 function currentSubsystemCardId() {
@@ -17061,7 +17162,91 @@ function renderSubsystemEditor(id) {
     }));
     const locked = Boolean(activeResult);
     ['#subsystemEditorName', '#subsystemEditorDissolve', '#subsystemEditorDelete'].forEach((selector) => { $(selector).disabled = locked; });
+    renderSubsystemComponent(subsystem, locked);
 }
+
+// The card's component section: how many instances share the definition, its ports and its exposed parameters.
+function renderSubsystemComponent(subsystem, locked) {
+    const document_ = serializeProjectDocument();
+    const definition = subsystemDefinitionOf(subsystem);
+    const section = $('#subsystemEditorComponent');
+    section.hidden = !definition || subsystem.definitionKey != null;
+    if (section.hidden) return;
+    const linked = Boolean(definition.link);
+    const uses = instanceCount(document_, subsystem.id);
+    $('#subsystemEditorUsage').textContent = [
+        uses === 1 ? 'Used once in this model' : `Used ${uses} times in this model: a change inside one reaches every one`,
+        linked ? `linked to ${definition.link.fileName ?? definition.link.templateName ?? 'its component'}` : 'kept in this model'
+    ].join(' · ');
+    $('#subsystemPlaceAnother').disabled = locked;
+    $('#subsystemMakeSeparate').disabled = locked || (uses < 2 && !linked);
+    $('#subsystemMakeSeparate').hidden = uses < 2 && !linked;
+    $('#subsystemMakeSeparate').textContent = linked ? 'Detach' : 'Make this one separate';
+    const editable = !locked && !linked;
+    $('#subsystemEditorPortList').replaceChildren(...instancePorts(document_, subsystem.id).map((port) => {
+        const row = document.createElement('div');
+        row.className = 'subsystemRow';
+        row.dataset.portState = port.stateId;
+        row.innerHTML = `<input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}"><select data-port-direction aria-label="Port direction"><option value="both">In and out</option><option value="in">In</option><option value="out">Out</option></select>${port.declared ? '<button data-port-remove type="button">Remove</button>' : '<button data-port-keep type="button">Keep as a port</button>'}<small>${escapeHtml(port.symbol)}${port.unit ? ` · ${escapeHtml(port.unit)}` : ''} · ${port.connected ? 'connected' : 'not connected'}${port.declared ? '' : ' · found from what is connected'}</small>`;
+        $('[data-port-name]', row).value = port.declared ? port.name : '';
+        $('[data-port-direction]', row).value = port.direction ?? 'both';
+        row.querySelectorAll('input, select, button').forEach((control) => { control.disabled = !editable; });
+        $('[data-port-name]', row).addEventListener('change', (event) => applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: port.stateId, name: event.target.value }), 'Port named'));
+        $('[data-port-direction]', row).addEventListener('change', (event) => applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: port.stateId, direction: event.target.value }), 'Port direction set'));
+        $('[data-port-keep]', row)?.addEventListener('click', () => applyDocumentChange((document) => declarePort(document, subsystem.id, { stateId: port.stateId }), 'Kept as a port'));
+        $('[data-port-remove]', row)?.addEventListener('click', () => applyDocumentChange((document) => removePort(document, subsystem.id, port.key), 'Port removed'));
+        return row;
+    }));
+    const parents = document_.sharedParameters?.filter((shared) => shared.subsystemId == null || shared.subsystemId !== subsystem.id) ?? [];
+    $('#subsystemEditorParameterList').replaceChildren(...instanceParameters(document_, subsystem.id).map((parameter) => {
+        const row = document.createElement('div');
+        row.className = 'subsystemRow';
+        row.dataset.parameterKey = parameter.key;
+        row.innerHTML = `<input data-parameter-value type="number" step="any" aria-label="${escapeHtml(parameter.name)} in this instance"><select data-parameter-binding aria-label="Where ${escapeHtml(parameter.name)} comes from"><option value="">Its own value</option></select><button data-parameter-default type="button">Default</button><small>${escapeHtml(parameter.name)} (${escapeHtml(parameter.symbol)})${parameter.unit ? ` · ${escapeHtml(parameter.unit)}` : ''} · default ${parameter.defaultValue}</small>`;
+        const binding = $('[data-parameter-binding]', row);
+        parents.filter((shared) => shared.symbol || shared.name).forEach((shared) => binding.append(new Option(`Follows ${shared.name} (${shared.symbol})`, String(shared.id))));
+        binding.value = parameter.boundTo == null ? '' : String(parameter.boundTo);
+        const value = $('[data-parameter-value]', row);
+        value.value = parameter.boundTo == null ? String(parameter.value) : '';
+        value.disabled = locked || parameter.boundTo != null;
+        binding.disabled = locked;
+        $('[data-parameter-default]', row).disabled = locked;
+        value.addEventListener('change', () => applyDocumentChange((document) => setInstanceParameter(document, subsystem.id, parameter.key, Number(value.value)), `${parameter.name} set for ${subsystem.name}`));
+        binding.addEventListener('change', () => applyDocumentChange((document) => setInstanceParameter(document, subsystem.id, parameter.key, binding.value ? { sharedParameterId: Number(binding.value) } : Number(parameter.defaultValue)), `${parameter.name} of ${subsystem.name} ${binding.value ? 'follows a shared parameter' : 'has its own value'}`));
+        $('[data-parameter-default]', row).addEventListener('click', () => applyDocumentChange((document) => setInstanceParameter(document, subsystem.id, parameter.key, null), `${parameter.name} back to its default`));
+        return row;
+    }));
+    const expose = $('#subsystemExposeParameter');
+    const choices = editable ? exposableParameters(document_, subsystem.id) : [];
+    expose.replaceChildren(new Option(choices.length ? 'Choose a parameter used inside…' : 'Nothing inside to expose', ''), ...choices.map((choice, index) => new Option(choice.label, String(index))));
+    expose.disabled = !choices.length;
+    expose.onchange = () => {
+        const choice = choices[Number(expose.value)];
+        if (choice) applyDocumentChange((document) => exposeParameter(document, subsystem.id, typeof choice.target === 'number' ? choice.target : { ...choice.target, newId: allocateModelEntityId() }), 'Parameter exposed');
+    };
+}
+
+$('#subsystemPlaceAnother').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id === null) return;
+    let placed = null;
+    applyDocumentChange((document) => {
+        const result = placeAnotherInstance(document, id);
+        placed = result.subsystemId;
+        return result.document;
+    }, 'Another instance placed beside it: a change inside one reaches both');
+    if (placed !== null) {
+        selectSubsystem(placed);
+        openSubsystemEditor(placed);
+    }
+});
+$('#subsystemMakeSeparate').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id === null) return;
+    const linked = Boolean(subsystemDefinitionOf(subsystemById(id))?.link);
+    applyDocumentChange((document) => separateInstance(document, id), linked ? 'Detached: it is now a copy kept in this model' : 'This instance now has a component of its own');
+    renderSubsystemEditor(id);
+});
 
 function openSubsystemEditor(id, clientX, clientY) {
     const card = $('#subsystemEditor');
@@ -17598,7 +17783,7 @@ window.addEventListener('keydown', (event) => {
         saveProject(event.shiftKey);
         return;
     }
-    if (!isEditing && commandKey && event.key.toLowerCase() === 'c' && selectedNodeIds.size) {
+    if (!isEditing && commandKey && event.key.toLowerCase() === 'c' && (selectedNodeIds.size || selectedSubsystemId !== null)) {
         event.preventDefault();
         copySelectedGraph();
         return;

@@ -530,14 +530,41 @@ export function instanceParameters(document, subsystemId) {
 
 // Exposes a shared parameter used inside a local instance, so each instance can give it its own value. Returns a new
 // document.
-export function exposeParameter(document, subsystemId, sharedParameterId) {
+// `target` is a shared parameter's id, or `{ parameterId }` for a relationship's or source term's own parameter inside,
+// which is first made a shared parameter (as linking it to a new shared parameter would).
+export function exposeParameter(document, subsystemId, target) {
     const next = clone(document);
+    let sharedParameterId = typeof target === 'number' ? target : target?.sharedParameterId;
+    if (target?.parameterId != null) {
+        const members = subsystemMembers(next, subsystemId);
+        const parameter = [...members.edges.flatMap((edge) => edge.parameters ?? []), ...members.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => term.parameters ?? []))]
+            .find((candidate) => candidate.id === target.parameterId);
+        if (!parameter) throw new Error('No such parameter inside this subsystem.');
+        sharedParameterId = target.newId ?? nextFreeId(next);
+        next.sharedParameters = [...(next.sharedParameters ?? []), {
+            id: sharedParameterId, name: parameter.name ?? parameter.symbol, symbol: parameter.symbol, value: Number(parameter.value) || 0,
+            unit: parameter.unit ?? '', ...(parameter.mode ? { mode: parameter.mode } : {}), ...(parameter.control ? { control: clone(parameter.control) } : {})
+        }];
+        parameter.sharedParameterId = sharedParameterId;
+    }
     const shared = (next.sharedParameters ?? []).find((candidate) => candidate.id === sharedParameterId);
     if (!shared) throw new Error('No such shared parameter.');
     if (shared.subsystemId == null) shared.subsystemId = subsystemId;
     shared.exposed = true;
     syncDefinitions(next, { preferredSubsystemId: subsystemId });
     return next;
+}
+
+// The parameters inside a local instance that could be exposed: its shared parameters not exposed yet, and the
+// relationships' and source terms' own parameters. Each `{ label, target }`, `target` as exposeParameter takes it.
+export function exposableParameters(document, subsystemId) {
+    const members = subsystemMembers(document, subsystemId);
+    const shared = members.sharedParameters.filter((item) => !item.exposed).map((item) => ({ label: `${item.name} (${item.symbol}) · shared`, target: item.id }));
+    const own = [
+        ...members.edges.flatMap((edge) => (edge.parameters ?? []).filter((parameter) => parameter.sharedParameterId == null).map((parameter) => ({ label: `${parameter.name ?? parameter.symbol} (${parameter.symbol}) · ${edge.name}`, target: { parameterId: parameter.id } }))),
+        ...members.nodes.flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? []).filter((parameter) => parameter.sharedParameterId == null).map((parameter) => ({ label: `${parameter.name ?? parameter.symbol} (${parameter.symbol}) · ${node.name}`, target: { parameterId: parameter.id } }))))
+    ];
+    return [...shared, ...own];
 }
 
 // Sets an instance's value for an exposed parameter (a number), binds it to a shared parameter of the parent

@@ -7208,7 +7208,7 @@ export async function runInteractionTests(driver) {
                 node(9, 'Ambient', [0, -4, 0], 10, 'temperature')
             ],
             edges: [
-                edge(11, 'Heating', heater, tank), edge(12, 'Sense level', tank, sensor), edge(13, 'Drive', sensor, motor), edge(14, 'Fill', motor, tank),
+                edge(11, 'Heating', heater, tank), edge(12, 'Sense level', tank, sensor), edge(13, 'Drive', sensor, motor), edge(14, 'Fill', motor, tank, { parameters: [{ id: 60, name: 'Rate', symbol: 'rate', value: 2, unit: '', mode: 'constant' }] }),
                 edge(15, 'Loss out', tank, ambient, { groupId: 40 }), edge(16, 'Loss in', ambient, tank, { groupId: 40 })
             ],
             edgeGroups: [{ id: 40, name: 'Losses', memberNodeIds: [1, 9], color: '#2fb8a4', definition: { parameters: [], output: { symbol: '' }, equation: '' } }],
@@ -7233,6 +7233,8 @@ export async function runInteractionTests(driver) {
         const { project, proxy } = hierarchy;
         await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Hierarchy.kjt')`);
         await waitFor(window, `Boolean(${proxy('Plant')}) && Boolean(${proxy('Controls')})`, 'The hierarchy project did not load.');
+        // A card an earlier scenario left open would sit over the boxes.
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
     };
 
     await run('inside a subsystem, relationships crossing its boundary end at terminals that follow the model', async () => {
@@ -7465,8 +7467,12 @@ export async function runInteractionTests(driver) {
             await waitForCanvasAtRest(window);
             const heating = await evaluate(window, `window.__terminalScreenPoint(11)`);
             assert.ok(heating, 'The terminal has no diamond on the canvas.');
+            // A pointer resting on the diamond moves a little, as a hand does, until the label shows.
             await window.mouseMove({ x: heating.x + 30, y: heating.y + 30 });
-            await window.mouseMove(heating);
+            for (let attempt = 0; attempt < 20 && !await evaluate(window, onScreen(terminalLabel(11))); attempt += 1) {
+                await window.mouseMove({ x: heating.x + (attempt % 2), y: heating.y });
+                await new Promise((resolve) => setTimeout(resolve, 150));
+            }
             await waitFor(window, onScreen(terminalLabel(11)), 'Pointing at a terminal did not show its label.');
             await window.mouseDown(heating, { button: 'left', clickCount: 1 });
             await window.mouseUp(heating, { button: 'left', clickCount: 1 });
@@ -7574,6 +7580,99 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `Boolean(window.__terminalPosition(14))`, 'Drawn out of Plant, the relationship got no terminal in Plant.');
         await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', metaKey: true, ctrlKey: true, bubbles: true })); })()`);
         await waitFor(window, `!window.__terminalPosition(14)`, 'Undo did not take the relationship back inside.');
+    });
+
+    await run('a subsystem is a component: another instance follows edits, ports are named, parameters exposed per instance, and copies are separate', async () => {
+        const { proxy, open } = hierarchy;
+        await loadHierarchyProject();
+        const key = (init) => evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...${JSON.stringify(init)} })); })()`);
+        const undo = () => key({ key: 'z', metaKey: true, ctrlKey: true });
+        const saved = () => evaluate(window, `window.__debugProject.serialize()`);
+        const instancesOf = async (name) => (await saved()).subsystems.filter((subsystem) => subsystem.name === name);
+        const box = (name) => `${proxy(name)}.querySelector('strong')`;
+        const select = async (name) => {
+            // A card left open may sit over the box.
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await waitFor(window, `Boolean(${proxy(name)})`, `${name}'s box is not shown.`);
+            await clickElement(window, box(name));
+            await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === ${JSON.stringify(name)}`, `${name}'s card did not open.`);
+        };
+        const typeIn = (selector, value) => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(String(value))}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); })()`);
+
+        // Every subsystem opens as an instance of a component of its own.
+        const first = await saved();
+        assert.equal(first.subsystemDefinitions.length, 2, 'Plant and Controls each have a definition.');
+        assert.ok(first.subsystems.find((subsystem) => subsystem.name === 'Plant').definitionId);
+        await select('Plant');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemEditorComponent').hidden`), false);
+        assert.match(await evaluate(window, `document.querySelector('#subsystemEditorUsage').textContent`), /^Used once in this model/);
+
+        // Another instance, renamed so the two can be told apart.
+        await evaluate(window, `document.querySelector('#subsystemPlaceAnother').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.subsystemLabel strong')].filter((name) => name.textContent === 'Plant' && getComputedStyle(name.closest('.subsystem-label')).display !== 'none').length === 2`, 'No second instance appeared.');
+        assert.match(await evaluate(window, `document.querySelector('#subsystemEditorUsage').textContent`), /^Used 2 times/);
+        await typeIn(`document.querySelector('#subsystemEditorName')`, 'Plant 2');
+        await waitFor(window, `Boolean(${proxy('Plant 2')})`, 'The new instance was not renamed.');
+        const tanks = async () => (await saved()).nodes.filter((item) => item.name.startsWith('Tank') && item.subsystemId != null).map((item) => item.name).sort();
+        assert.deepEqual(await tanks(), ['Tank', 'Tank']);
+
+        // A change inside one reaches the other when the edit is left; undo takes it back from both.
+        await clickElement(window, open('Plant 2'));
+        await waitFor(window, `document.querySelector('[data-subsystem-rename]')?.textContent === 'Plant 2' && Boolean(document.querySelector('[data-subsystem-uses]'))`, 'Plant 2 was not entered, or does not say it is used twice.');
+        await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.getClientRects().length && label.textContent.includes('Tank'))`, 'Plant 2\'s Tank is not shown.');
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.getClientRects().length && label.textContent.includes('Tank')).click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Tank\'s editor did not open.');
+        await typeIn(`document.querySelector('#editNodeName')`, 'Tank B');
+        await evaluate(window, `document.querySelector('[data-subsystem-parent]').click()`);
+        await waitFor(window, `window.__debugProject.serialize().nodes.filter((item) => item.name === 'Tank B').length === 2`, 'The other instance did not follow the edit.');
+        await undo();
+        await waitFor(window, `window.__debugProject.serialize().nodes.filter((item) => item.name === 'Tank').length === 2`, 'Undo did not take the edit back from both.', 8000);
+
+        // A port named in the card is declared, and shown on the box.
+        await select('Plant');
+        await waitFor(window, `document.querySelectorAll('#subsystemEditorPortList .subsystemRow').length > 0`, 'The card lists no ports.');
+        const portStates = await evaluate(window, `[...document.querySelectorAll('#subsystemEditorPortList .subsystemRow')].map((row) => row.querySelector('small').textContent)`);
+        assert.ok(portStates.every((text) => text.includes('connected')), 'Ports found from what is connected are listed.');
+        await typeIn(`document.querySelector('#subsystemEditorPortList .subsystemRow [data-port-name]')`, 'Inlet');
+        await waitFor(window, `${proxy('Plant')}.querySelector('small').textContent.includes('ports: Inlet')`, 'The named port is not on the box.');
+        assert.equal((await saved()).subsystemDefinitions.find((definition) => definition.document.component.ports?.some((port) => port.name === 'Inlet')) !== undefined, true);
+
+        // An exposed parameter takes a value per instance.
+        await select('Plant');
+        const exposable = await evaluate(window, `[...document.querySelector('#subsystemExposeParameter').options].map((option) => option.textContent)`);
+        assert.ok(exposable.some((label) => label.startsWith('Rate (rate)')), `Rate cannot be exposed: ${exposable.join(' | ')}`);
+        await evaluate(window, `(() => { const select = document.querySelector('#subsystemExposeParameter'); select.value = [...select.options].find((option) => option.textContent.startsWith('Rate (rate)')).value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `document.querySelectorAll('#subsystemEditorParameterList .subsystemRow').length === 1`, 'The exposed parameter is not listed.');
+        await select('Plant 2');
+        await waitFor(window, `document.querySelectorAll('#subsystemEditorParameterList .subsystemRow').length === 1`, 'The other instance does not list the exposed parameter.');
+        await typeIn(`document.querySelector('#subsystemEditorParameterList [data-parameter-value]')`, 5);
+        await waitFor(window, `(() => { const document_ = window.__debugProject.serialize(); const plant2 = document_.subsystems.find((item) => item.name === 'Plant 2'); return document_.sharedParameters.some((shared) => shared.subsystemId === plant2.id && shared.value === 5); })()`, 'The value was not set for Plant 2.');
+        const values = (await saved()).sharedParameters.filter((shared) => shared.symbol === 'rate').map((shared) => shared.value).sort();
+        assert.deepEqual(values, [2, 5], 'Each instance has its own value.');
+
+        // Made separate, an instance no longer shares the component.
+        await select('Plant 2');
+        await evaluate(window, `document.querySelector('#subsystemMakeSeparate').click()`);
+        await waitFor(window, `document.querySelector('#subsystemEditorUsage').textContent.startsWith('Used once')`, 'Plant 2 was not made separate.');
+        assert.equal(new Set((await saved()).subsystems.filter((item) => item.name.startsWith('Plant')).map((item) => item.definitionId)).size, 2);
+
+        // Copied and pasted, a subsystem is a copy of its own.
+        await select('Plant');
+        await evaluate(window, `document.querySelector('#copySelection').click()`);
+        await waitFor(window, `!document.querySelector('#pasteSelection').disabled`, 'Paste was not offered.');
+        await evaluate(window, `document.querySelector('#pasteSelection').click()`);
+        await waitFor(window, `Boolean(${proxy('Plant copy')})`, 'The copy was not pasted.');
+        const afterPaste = await saved();
+        const copy = afterPaste.subsystems.find((item) => item.name === 'Plant copy');
+        assert.ok(copy.definitionId && afterPaste.subsystems.filter((item) => item.definitionId === copy.definitionId).length === 1, 'The copy has a component of its own.');
+        assert.equal(afterPaste.nodes.filter((item) => item.subsystemId === copy.id).length, 1, 'The copy holds Tank (Pump motor is in its nested Pump).');
+
+        // Saved and opened, the components are kept.
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify('__SAVED__')}, 'Hierarchy.kjt')`.replace(JSON.stringify('__SAVED__'), JSON.stringify(afterPaste)));
+        await waitFor(window, `Boolean(${proxy('Plant copy')})`, 'The saved project did not open.');
+        const reopened = await saved();
+        assert.deepEqual(reopened.subsystemDefinitions.map((definition) => definition.id).sort(), afterPaste.subsystemDefinitions.map((definition) => definition.id).sort());
+        assert.deepEqual(reopened.nodes.map((item) => item.id).sort(), afterPaste.nodes.map((item) => item.id).sort(), 'Opening keeps every id.');
     });
 
     await run('atan2 is typed as most people write it, and the equation help lists every function', async () => {

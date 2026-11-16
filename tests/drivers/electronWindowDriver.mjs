@@ -8,7 +8,7 @@
 // sendInputEvent calls, dialog.showSaveDialog stubbing, and BrowserWindow.getAllWindows() polling
 // into the shared handle/driver shape -- not new behavior.
 
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -168,9 +168,23 @@ function createRendererCoverage(directory) {
     };
 }
 
+// Restarting Konjugate (to start an add-on just installed) relaunches the app and exits this one, which would end the suite with
+// it, and leave the relaunched copy running the suite again on its own. For the tests it is done in place instead: the other
+// windows closed and the project window loaded again, as a restarted Konjugate opens it, so what carries on after a restart (a
+// tutorial at the step it was on) is still what is tested, and the window the scenarios hold stays the same.
+function restartInPlace(mainWindow) {
+    ipcMain.removeHandler('applicationRestart');
+    ipcMain.handle('applicationRestart', () => {
+        console.log('  (Konjugate was restarted in place: its other windows closed and the project window loaded again)');
+        for (const win of BrowserWindow.getAllWindows()) if (win !== mainWindow && !win.isDestroyed()) win.destroy();
+        mainWindow.webContents.reload();
+    });
+}
+
 export function createElectronDriver(mainWindow) {
     const mainHandle = wrapWindow(mainWindow);
     answerNativeDialogs();
+    restartInPlace(mainWindow);
     const coverage = process.env.KONJUGATE_INTERACTION_COVERAGE ? createRendererCoverage(process.env.KONJUGATE_INTERACTION_COVERAGE) : null;
     windowCoverage = coverage;
 

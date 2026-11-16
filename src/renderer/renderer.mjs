@@ -12888,10 +12888,11 @@ let tutorialDiscoverSeen = false;
 // Whether an assistant proposal has been applied while a tutorial ran.
 let tutorialAssistantApplied = false;
 const tutorialAddonsOpened = new Set();
+// Returns the read, for a tutorial that must not start before it has it.
 function refreshTutorialInstalledPackages(force = false) {
-    if (!window.extensions?.list || (!force && Date.now() - tutorialInstalledReadAt < 3000)) return;
+    if (!window.extensions?.list || (!force && Date.now() - tutorialInstalledReadAt < 3000)) return Promise.resolve();
     tutorialInstalledReadAt = Date.now();
-    window.extensions.list().then((packages) => { tutorialInstalledPackages = packages.filter((entry) => entry.enabled !== false).map((entry) => entry.packageId); }).catch(() => {});
+    return window.extensions.list().then((packages) => { tutorialInstalledPackages = packages.filter((entry) => entry.enabled !== false).map((entry) => entry.packageId); }).catch(() => {});
 }
 $('#addonRailButtons').addEventListener('click', (event) => {
     const button = event.target.closest('.addonTool');
@@ -13973,7 +13974,9 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     tutorialAddonsOpened.clear();
     tutorialAssistantApplied = false;
     if (pendingAssistantProposal) discardAssistantProposal();
-    refreshTutorialInstalledPackages(true);
+    // What is installed is read before the tutorial starts: a tutorial carried on after a restart judges its earlier steps by it (an
+    // add-on installed), and until it was read they read as undone ("Something from step 1 is no longer there").
+    await refreshTutorialInstalledPackages(true);
     tutorialNodeLabelDetail = $('#nodeLabelsButton').title;
     tour.start(tutorial, { start: serializeProjectDocument(), at: resumeAt });
     return true;

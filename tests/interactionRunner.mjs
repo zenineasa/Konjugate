@@ -9478,13 +9478,17 @@ export async function runInteractionTests(driver) {
                     await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `${id}: Next on ${step} did not move on.`);
                     continue;
                 }
-                await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${id}/${step} offered no Skip this step.`);
+                // The card can move on while the skip before is still at work (a run's step is done once the run starts, and its skip
+                // waits for the run to end, up to three minutes), with this step's buttons off until it has finished.
+                await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${id}/${step} offered no Skip this step.`, 180000);
                 // Exporting and saving ask where, through the system's save dialog: answered with a file of the test's own.
                 const savesAFile = { keepAndShare: { export: 'results.csv', save: 'Thermal management.kjt' }, exportModel: { program: 'springMassDamper.py', fmu: 'springMassDamper.fmu' } }[id]?.[step];
                 if (savesAFile) await driver.captureExport(() => press('.tourFloating .tourSkipStep'), { fileName: savesAFile, maxAttempts: 1200 });
                 else await press('.tourFloating .tourSkipStep');
-                await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(step)}`, `${id}: skipping ${step} did not move on.`, 300000);
-                assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `${id}: after skipping ${step}, a step was reported undone.`);
+                // Skipping a restart loads the window again, and the tutorial carries on a moment after: until then there is no step, which
+                // is not the next one.
+                await waitFor(window, `Boolean(window.__debugTour?.active()) && ![null, ${JSON.stringify(step)}].includes(window.__debugTour.step())`, `${id}: skipping ${step} did not move on.`, 300000);
+                assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `${id}: after skipping ${step}, a step was reported undone: ${await evaluate(window, `document.querySelector('.tourFloating .tourNotice').textContent`)}`);
             }
             assert.equal(await evaluate(window, `window.__debugTour.step()`), 'finish', `${id} did not reach its end.`);
             // Each skip did its step: the model is what the tutorial builds, whatever the person skipped.

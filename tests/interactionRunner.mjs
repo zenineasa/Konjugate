@@ -143,7 +143,7 @@ async function clickElement(window, expression, modifiers = []) {
     // the next render, which is throttled and comes late on a busy machine, so until then its box is not where it will be.
     // Its own box holding still over a few render ticks is.
     await waitForStableRect(window, `(() => { const bounds = (${expression})?.getBoundingClientRect(); return bounds && bounds.width > 0 ? [bounds.left, bounds.top, bounds.width, bounds.height].map(Math.round).join(',') : null; })()`,
-        'The element to click did not settle on the screen.');
+        'The element to click did not settle on the screen.', 5000);
     const point = await evaluate(window, `(() => {
         const element = ${expression};
         const bounds = element.getBoundingClientRect();

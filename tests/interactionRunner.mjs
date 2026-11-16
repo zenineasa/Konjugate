@@ -2914,10 +2914,13 @@ export async function runInteractionTests(driver) {
             await window.mouseUp(dragTo, { button: 'left', clickCount: 1 });
         };
         const readTarget = async () => (await evaluate(window, cameraTargetExpression)).split(',').map(Number);
-        // OrbitControls' damping (dampingFactor 0.07) eases a pan's momentum into the target
-        // exponentially and never reaches an exact fixed point to poll for -- unlike the
-        // deterministic 650ms snap animation below, comparing "close enough" after a generous
-        // settle is the reliable check here, not exact equality.
+        // OrbitControls' damping (dampingFactor 0.07) eases a pan's momentum into the target a
+        // fraction per rendered frame, not per second: a fixed wait is many frames on an idle
+        // machine and few on a busy one, where the pan was still easing when the unlocked drag
+        // began and its tail read as that drag moving the target. So each drag is followed until
+        // the target, as the view cube gives it (to four places), holds still over several render
+        // ticks; what is left of the momentum by then is far under the "close enough" below.
+        const targetAtRest = (message) => waitForStableRect(window, cameraTargetExpression, message, 15000);
         const targetsClose = (a, b, epsilon = 0.02) => a.every((value, index) => Math.abs(value - b[index]) < epsilon);
 
         assert.equal(await evaluate(window, `document.querySelector('#lock2DButton').ariaPressed`), 'false');
@@ -2925,23 +2928,26 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#lock2DButton').ariaPressed === 'true'`, '2D lock button did not report itself pressed.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.cubeCorner')].every((corner) => corner.disabled)`), true, 'Isometric corner buttons should be disabled while locked.');
         // Engaging the lock snaps to the nearest orthogonal view via the existing 650ms animated
-        // camera transition, which sets orbitControls.target once and then only lerps
-        // camera.position -- genuinely stable to poll for, unlike a damped pan/rotate.
-        await waitForStableRect(window, cameraTargetExpression, '2D lock camera snap did not settle.');
+        // camera transition, which sets orbitControls.target once and then lerps camera.position,
+        // with the controls off until it ends: a drag begun while it runs is not taken. So the whole
+        // camera is waited on (distance and turn as well as target), not the target alone, which
+        // holds still from the snap's first frame.
+        await waitForCanvasAtRest(window);
 
         const targetBeforeLockedDrag = await readTarget();
         await drag();
         await waitFor(window, `${cameraTargetExpression} !== ${JSON.stringify(targetBeforeLockedDrag.map((v) => v.toFixed(4)).join(','))}`, 'A left-drag while 2D-locked did not pan the camera.');
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await targetAtRest('The locked drag\'s pan did not come to rest.');
         assert.ok(!targetsClose(targetBeforeLockedDrag, await readTarget()), 'A left-drag while 2D-locked did not pan the camera by a meaningful amount.');
 
         await evaluate(window, `document.querySelector('#lock2DButton').click()`);
         await waitFor(window, `document.querySelector('#lock2DButton').ariaPressed === 'false'`, '2D lock button did not report itself unpressed.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.cubeCorner')].every((corner) => !corner.disabled)`), true, 'Isometric corner buttons should re-enable once unlocked.');
 
+        await waitForCanvasAtRest(window);
         const targetBeforeUnlockedDrag = await readTarget();
         await drag();
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        await targetAtRest('The unlocked drag\'s turn did not come to rest.');
         assert.ok(targetsClose(targetBeforeUnlockedDrag, await readTarget()), 'An unlocked left-drag should rotate around a fixed target, not pan it.');
     });
 

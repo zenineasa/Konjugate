@@ -5621,6 +5621,19 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
         await evaluate(twin, `document.querySelector('#openRoom').click()`);
         await waitFor(twin, `window.__debugTwinWindow.summary()?.ended === 'played'`, 'The live twin did not play the logger\'s file through.', 120000);
+        // Its timing follows the readings, about five seconds apart: a move every two minutes on a twelve-minute window.
+        assert.ok((await twinEvents(twin)).some((text) => /timing follows the readings.*a 12 min window, moving every 2 min/.test(text)), 'The twin did not say the timing it chose from the readings.');
+        // The trial is judged at the timing it was designed for (as tests/engine/labTrial.mjs runs it): an hour's window moving every
+        // ten minutes, set under Engineer, Timing, and played again.
+        const { startedAt } = await evaluate(twin, `window.__debugTwinWindow.summary()`);
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        await setField(twin, '#timingUnit', '60');
+        await setField(twin, '#timingWindow', '60');
+        await setField(twin, '#timingStride', '10');
+        await setField(twin, '#timingHorizon', '60');
+        await waitFor(twin, `!document.querySelector('#restartTwin').disabled`, 'The trial\'s timing was not taken.');
+        await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+        await waitFor(twin, `window.__debugTwinWindow.summary()?.startedAt !== ${JSON.stringify(startedAt)} && window.__debugTwinWindow.summary()?.ended === 'played'`, 'The live twin did not play the logger\'s file through at the trial\'s timing.', 120000);
         const live = await evaluate(twin, `window.__debugTwinWindow.summary()`);
         assert.equal(live.moves, 43);
         assert.equal(live.last.trend.direction, 'above', 'By the end the model runs warmer than the vessel: the heater has scaled up.');

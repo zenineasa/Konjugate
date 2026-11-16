@@ -1426,7 +1426,8 @@ export async function runInteractionTests(driver) {
     let analysisHandle = null;
 
     await run('Run invokes the C++ simulation and displays state results', async () => {
-        assert.equal(await evaluate(window, `document.querySelector('#runButton').disabled`), false);
+        // Run is off while the model is validated again after an edit (the scenario before edits it), so it is waited for.
+        await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available.', 15000);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
         await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1.5'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);

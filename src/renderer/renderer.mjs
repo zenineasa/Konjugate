@@ -8045,6 +8045,9 @@ function createRelationshipBundleOverlay(key) {
                 : bundle?.relationships[0];
             if (!definition) return;
             selectRelationship(definition);
+            // A label is not a point on the line: no waypoint to add here, and none left staged by an earlier right-click on the
+            // line (whose menu was dismissed) to add at that old point instead.
+            pendingWaypoint = null;
             openEdgeContextMenu(event.clientX, event.clientY);
         });
     });

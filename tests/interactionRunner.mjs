@@ -2729,6 +2729,22 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(window, `window.__relationshipWaypoints(${JSON.stringify(name)})`), []);
     };
 
+    // Right-clicks the edge's line itself, until its menu offers to add a waypoint there. Its label (at the middle) and its direction
+    // cone (at 0.64 of the way) sit on the line too, and a right-click on either opens the same menu but with nothing to add, since
+    // no point of the line was picked; how much of the line they cover changes with the camera earlier tests leave. So points clear
+    // of both are tried in turn, and a menu that opened without the action does not count as the click landing.
+    const rightClickEdgeLine = (name) => {
+        let attempt = 0;
+        return retryGesture(window, async () => {
+            const t = [0.75, 0.85, 0.3, 0.2, 0.9][attempt++ % 5];
+            const linePoint = await canvasPoint(window, `window.__relationshipScreenPoint(${JSON.stringify(name)}, ${t})`);
+            await window.mouseMove(linePoint);
+            await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
+            await new Promise((resolve) => setTimeout(resolve, 60));
+            await window.mouseUp(linePoint, { button: 'right', clickCount: 1 });
+        }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden') && !document.querySelector('#edgeContextAddWaypoint').hidden`);
+    };
+
     const pressAndHold = async (point) => {
         await window.mouseMove(point);
         await window.mouseDown(point, { button: 'left', clickCount: 1 });
@@ -2777,15 +2793,8 @@ export async function runInteractionTests(driver) {
         }, `document.querySelector('#statusText').textContent === 'Editing waypoints · Waypoint drag test edge' && document.querySelector('#edgeEditor').classList.contains('hidden')`);
         assert.ok(held, 'Press-and-hold did not report entering waypoint mode without opening the edge editor after 5 attempts.');
 
-        const added = await retryGesture(window, async () => {
-            const linePoint = await canvasPoint(window, `window.__relationshipScreenPoint('Waypoint drag test edge', 0.75)`);
-            await window.mouseMove(linePoint);
-            await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
-            await new Promise((resolve) => setTimeout(resolve, 60));
-            await window.mouseUp(linePoint, { button: 'right', clickCount: 1 });
-        }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
-        assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
+        const added = await rightClickEdgeLine('Waypoint drag test edge');
+        assert.ok(added, 'Right-clicking the edge line did not open its context menu offering to add a waypoint after 5 attempts.');
         await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').click()`);
 
         const initialWaypoints = await evaluate(window, `window.__relationshipWaypoints('Waypoint drag test edge')`);
@@ -2837,15 +2846,8 @@ export async function runInteractionTests(driver) {
         await selectWaypointTestTool();
         await createWaypointTestEdge('Waypoint add-remove test edge');
 
-        const added = await retryGesture(window, async () => {
-            const linePoint = await canvasPoint(window, `window.__relationshipScreenPoint('Waypoint add-remove test edge', 0.75)`);
-            await window.mouseMove(linePoint);
-            await window.mouseDown(linePoint, { button: 'right', clickCount: 1 });
-            await new Promise((resolve) => setTimeout(resolve, 60));
-            await window.mouseUp(linePoint, { button: 'right', clickCount: 1 });
-        }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`);
-        assert.ok(added, 'Right-clicking the edge line did not open its context menu after 5 attempts.');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').hidden`), false, 'Add-waypoint action was not offered for a click on the edge line.');
+        const added = await rightClickEdgeLine('Waypoint add-remove test edge');
+        assert.ok(added, 'Right-clicking the edge line did not open its context menu offering to add a waypoint after 5 attempts.');
         await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').click()`);
         await waitFor(window, `window.__relationshipWaypoints('Waypoint add-remove test edge').length === 1`, 'Right-clicking the edge line did not add a waypoint.');
         // See the drag test above for why this delay matters: the label hiding that keeps a

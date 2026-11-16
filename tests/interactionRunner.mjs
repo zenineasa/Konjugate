@@ -353,7 +353,11 @@ export async function runInteractionTests(driver) {
     await run('examples explorer loads a project copy', async () => {
         await evaluate(window, `document.querySelector('#exampleButton').click()`);
         await waitFor(window, `document.querySelector('#examplesExplorerDialog').open`, 'Examples explorer did not open.');
-        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management'))`, 'Examples explorer did not populate.');
+        // Seen once in a full run and not since (2026-11-16): the explorer open, but without this example. What it showed is said.
+        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management'))`, 'Examples explorer did not populate.').catch(async (error) => {
+            const shown = await evaluate(window, `({ examples: [...document.querySelectorAll('.examplesExplorerItem b')].map((title) => title.textContent), search: document.querySelector('#examplesExplorerSearch').value, domain: document.querySelector('#examplesExplorerDomains .active')?.textContent ?? null })`);
+            throw new Error(`${error.message} It showed ${JSON.stringify(shown)}.`);
+        });
         await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Thermal Management').click()`);
         await waitFor(window, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Thermal Management'`, 'Selecting the example did not populate the detail preview.');
         assert.equal(await evaluate(window, `document.querySelector('#examplesExplorerDetailContent').hidden`), false);

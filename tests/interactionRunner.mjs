@@ -5317,8 +5317,12 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `document.querySelector('${button}').click()`);
         const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
         await waitFor(twin, `document.querySelector('#modelSummary').textContent.length > 0`, 'The twin window did not show the model.');
+        await twinWindowSettled(twin);
         return twin;
     };
+    // A twin window opens and is then maximized, which on macOS is animated: it is resized for a moment after its content shows, and
+    // a menu opened then is closed by the resize (a menu is placed where its button was). Used once its size holds still.
+    const twinWindowSettled = (twin) => waitForStableRect(twin, `innerWidth + 'x' + innerHeight`, 'The twin window did not settle at its size.', 5000);
     const twinEvents = (twin) => evaluate(twin, `[...document.querySelectorAll('#eventsList li')].map((item) => item.className + ': ' + item.innerText.replace(/\\s+/g, ' '))`);
     const setField = (handle, selector, value, kind = 'change') => evaluate(handle, `(() => { const field = document.querySelector(${JSON.stringify(selector)}); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('${kind}', { bubbles: true })); })()`);
 
@@ -5737,6 +5741,7 @@ export async function runInteractionTests(driver) {
         await evaluate(opened, `document.querySelector('#liveTwinButton').click()`);
         const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
         await waitFor(twin, `document.querySelector('#modelSummary').textContent.length > 0`, 'The twin window did not show the model.');
+        await twinWindowSettled(twin);
         assert.equal(await evaluate(twin, `document.querySelectorAll('.sourceTiles [data-source]').length`), 4, 'Four places the readings can come from.');
 
         // The drifting rig's readings against the vessel's model match nothing: one click opens the rig's model in the project window,

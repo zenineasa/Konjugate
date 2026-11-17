@@ -137,6 +137,33 @@ async function canvasPoint(window, expression) {
     return evaluate(window, expression);
 }
 
+// The element's centre, once a click there would reach it: inside the window, and not under something else (an
+// editor card in a small window, a toast, another label). A real mouse event goes to whatever is on top, so a
+// click on a covered element would quietly land on the cover instead, and the test would fail later, somewhere
+// unrelated. This fails at the click instead, naming what is in the way.
+async function clickablePoint(window, expression, timeout = 2000) {
+    const probe = `(() => {
+        const element = ${expression};
+        if (!element) return 'it is not in the page';
+        const bounds = element.getBoundingClientRect();
+        const x = Math.round(bounds.left + bounds.width / 2), y = Math.round(bounds.top + bounds.height / 2);
+        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return \`its centre (\${x}, \${y}) is outside the \${innerWidth}x\${innerHeight} window\`;
+        const hit = document.elementFromPoint(x, y);
+        if (hit && (hit === element || element.contains(hit))) return { x, y };
+        const describe = (node) => node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + [...node.classList].map((name) => '.' + name).join('') : 'nothing';
+        const cover = hit?.closest('[id]');
+        return \`at (\${x}, \${y}) it is covered by \${describe(hit)}\${cover && cover !== hit ? ' inside ' + describe(cover) : ''} (the window is \${innerWidth}x\${innerHeight})\`;
+    })()`;
+    const startedAt = Date.now();
+    let result;
+    while (Date.now() - startedAt < timeout) {
+        result = await evaluate(window, probe);
+        if (typeof result === 'object') return result;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`The element to click cannot be clicked: ${result}. (${expression})`);
+}
+
 async function clickElement(window, expression, modifiers = []) {
     await waitForCanvasAtRest(window);
     // The canvas at rest is not enough for a label made a moment ago (an undo or redo rebuilds every label): it is placed on
@@ -144,11 +171,7 @@ async function clickElement(window, expression, modifiers = []) {
     // Its own box holding still over a few render ticks is.
     await waitForStableRect(window, `(() => { const bounds = (${expression})?.getBoundingClientRect(); return bounds && bounds.width > 0 ? [bounds.left, bounds.top, bounds.width, bounds.height].map(Math.round).join(',') : null; })()`,
         'The element to click did not settle on the screen.', 5000);
-    const point = await evaluate(window, `(() => {
-        const element = ${expression};
-        const bounds = element.getBoundingClientRect();
-        return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
-    })()`);
+    const point = await clickablePoint(window, expression);
     await window.mouseMove(point, { modifiers });
     await window.mouseDown(point, { button: 'left', clickCount: 1, modifiers });
     await window.mouseUp(point, { button: 'left', clickCount: 1, modifiers });
@@ -160,11 +183,7 @@ async function clickElement(window, expression, modifiers = []) {
 // later right-click in the same test.
 async function rightClickElement(window, expression) {
     await waitForCanvasAtRest(window);
-    const point = await evaluate(window, `(() => {
-        const element = ${expression};
-        const bounds = element.getBoundingClientRect();
-        return { x: Math.round(bounds.left + bounds.width / 2), y: Math.round(bounds.top + bounds.height / 2) };
-    })()`);
+    const point = await clickablePoint(window, expression);
     await window.mouseMove(point);
     await window.mouseDown(point, { button: 'right', clickCount: 1 });
     await window.mouseUp(point, { button: 'right', clickCount: 1 });
@@ -1449,7 +1468,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Paused · model locked'`, 'Simulation did not pause at a synchronization boundary.', 3000);
         assert.equal(await evaluate(window, `document.querySelector('#closeResults').hidden`), true);
         await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
-        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete.', 5000);
+        // A 1.5 s real-time run, but a slow runner (GitHub's Intel Macs) takes well over 5 s from resume to the end.
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'Live simulation did not complete.', 15000);
         assert.equal(await evaluate(window, `document.querySelector('#simulationPacing').hidden && !document.querySelector('#resultPlaybackRate').hidden`), true);
         assert.equal(await evaluate(window, `!document.querySelector('#resultPlaybackControls').hidden && document.querySelector('#simulationExecutionControls').hidden`), true);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.reviewControl')].every((control) => !control.hidden) && !document.querySelector('#continueRun').hidden`), true);
@@ -7974,7 +7994,9 @@ export async function runInteractionTests(driver) {
         const tanks = async () => (await saved()).nodes.filter((item) => item.name.startsWith('Tank') && item.subsystemId != null).map((item) => item.name).sort();
         assert.deepEqual(await tanks(), ['Tank', 'Tank']);
 
-        // A change inside one reaches the other when the edit is left; undo takes it back from both.
+        // A change inside one reaches the other when the edit is left; undo takes it back from both. Plant 2's
+        // editor card is still open from the rename, and in a small window it covers Plant 2's own open button.
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
         await clickElement(window, open('Plant 2'));
         await waitFor(window, `document.querySelector('[data-subsystem-rename]')?.textContent === 'Plant 2' && Boolean(document.querySelector('[data-subsystem-uses]'))`, 'Plant 2 was not entered, or does not say it is used twice.');
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.getClientRects().length && label.textContent.includes('Tank'))`, 'Plant 2\'s Tank is not shown.');

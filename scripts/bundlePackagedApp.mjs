@@ -22,9 +22,10 @@ import { build, transform } from 'esbuild';
 import { existsSync } from 'node:fs';
 import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const rootDirectory = resolve(dirname(new URL(import.meta.url).pathname), '..');
+// fileURLToPath, not URL.pathname: on Windows the pathname is /D:/..., which is no path there.
+const rootDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // Modules Node or Electron start by file name: each becomes a bundle at its own path.
 const mainEntries = ['src/main.mjs', 'src/importerWorker.mjs', 'src/pushServiceProcess.mjs'];
@@ -87,7 +88,7 @@ function testDependenciesFromCheckout() {
 async function bundleMainProcess(buildPath, includeTests) {
     const result = await build({
         absWorkingDir: rootDirectory,
-        entryPoints: mainEntries,
+        entryPoints: mainEntries.map((entry) => join(rootDirectory, entry)),
         outdir: join(buildPath, 'src'),
         outbase: 'src',
         outExtension: { '.js': '.mjs' },
@@ -230,7 +231,7 @@ export async function bundlePackagedApp(buildPath, { includeTests = false } = {}
 }
 
 // Run by hand against a copied app directory: node scripts/bundlePackagedApp.mjs <dir> [--tests]
-if (process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const directory = process.argv[2];
     if (!directory || !(await stat(directory)).isDirectory()) {
         console.error('Usage: node scripts/bundlePackagedApp.mjs <copied app directory> [--tests]');

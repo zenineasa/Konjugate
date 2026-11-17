@@ -67,7 +67,7 @@ jobs:
               run: npm run test:interaction
             - name: Run Electron interaction tests with a virtual display
               if: runner.os == 'Linux'
-              run: xvfb-run -a npm run test:interaction
+              run: xvfb-run -a --server-args="-screen 0 1920x1080x24" npm run test:interaction
             - run: npm run build:engine:no-metis
             - name: Test dependency-free partitioner
               working-directory: engine

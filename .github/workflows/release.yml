@@ -254,7 +254,7 @@ jobs:
             # The whole interaction suite against the packaged, bundled app. Last, because it packages the app
             # again with the test runner inside (scripts/bundlePackagedApp.mjs), and everything shipped from
             # out/package must have been taken before that. A failure here stops the release job below. A
-            # scenario that fails is run once more (scripts/interactionRetry.mjs): failing twice fails the job,
+            # failure runs the whole suite once more (scripts/interactionRetry.mjs): failing twice fails the job,
             # passing the second time is shown as a flaky-test warning.
             - name: Install Linux interaction test prerequisites
               if: runner.os == 'Linux'
@@ -264,7 +264,7 @@ jobs:
               shell: bash
               run: |
                   if [ "$RUNNER_OS" = Linux ]; then
-                      xvfb-run -a make verifyPackagedInteraction
+                      xvfb-run -a --server-args="-screen 0 1920x1080x24" make verifyPackagedInteraction
                   else
                       make verifyPackagedInteraction
                   fi

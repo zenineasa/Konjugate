@@ -129,14 +129,20 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         if (!busy) { clearInterval(ticker); ticker = null; }
     }
 
+    // Each save shows its bindings at once and then takes what the store kept. Two quick saves (removing two bindings
+    // one after the other) can come back out of order, so only the newest one's answer is taken: an older answer
+    // would put back a binding the newer save had removed.
+    let latestSave = 0;
     async function save(next) {
         const kept = normalizeInputBindings(next);
+        const thisSave = ++latestSave;
         bindings = kept;
         refreshReading();
         refreshAllChips();
         notify();
         try {
-            bindings = normalizeInputBindings(await store.set(kept));
+            const stored = normalizeInputBindings(await store.set(kept));
+            if (thisSave === latestSave) bindings = stored;
         } catch (error) {
             status(`The controller bindings could not be kept: ${error.message}`);
         }

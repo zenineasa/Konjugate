@@ -253,9 +253,10 @@ verifyPackagedEngine: packageApp
 	node scripts/testPackagedEngine.mjs
 
 # Packages the app again with the --interaction-test runner bundled in (scripts/bundlePackagedApp.mjs),
-# which a package for users leaves out.
+# which a package for users leaves out, so run it after anything that ships out/package. The variable is
+# given on make's command line, which puts it in the recipes' environment on every shell, cmd.exe included.
 verifyPackagedInteraction:
-	KONJUGATE_PACKAGE_INTERACTION_TESTS=1 $(MAKE) packageApp
+	$(MAKE) packageApp KONJUGATE_PACKAGE_INTERACTION_TESTS=1
 	node scripts/runPackagedInteractionTests.mjs
 
 verifyPackage: verifyPackagedEngine verifyPackagedInteraction

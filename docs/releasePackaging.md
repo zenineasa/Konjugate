@@ -12,6 +12,8 @@ status: stable
 
 Release packaging uses the same pinned, METIS-required engine configuration as development. CMake installs the executable and its required runtime libraries into `out/packageResources/engine`; Electron packages that install layout rather than the complete CMake build tree.
 
+Electron Packager copies the app into an asar archive, leaving out what is never read at run time: build files, tests, and dependencies' TypeScript, source maps and documentation (`scripts/packageElectron.mjs`). Then `scripts/bundlePackagedApp.mjs` works on that copy, never on the source tree. It bundles and minifies the main process and the two modules it starts on their own (the importer worker and the push service process) with esbuild, each into the place its source had, so paths resolved from `import.meta.url` still land where they did. It minifies the modules the renderer pages reach in place, since the pages load files by path through their import maps. It then removes whatever nothing reaches any more: the dependencies only the main process used, which are inside its bundle now, and the web edition's modules and dependencies. Code splitting stays off: with it, esbuild loses the named exports of a CommonJS package loaded with `import()` (`@peculiar/x509`), which plain Node keeps.
+
 The package verifier starts the installed engine, reads its `capabilities` response and requires an available METIS version. It also verifies the tracked METIS attribution and Apache 2.0 text. A package therefore fails if the METIS runtime cannot load, even when a library file happens to be present.
 
 Run the host package with:

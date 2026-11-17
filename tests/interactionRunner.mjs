@@ -287,6 +287,9 @@ export async function runInteractionTests(driver) {
     const only = process.env.KONJUGATE_INTERACTION_ONLY?.split('||').filter(Boolean);
     // How long each scenario takes, said on its line and the slowest listed at the end: the suite is kept quick by seeing where its time goes.
     const durations = [];
+    // Each scenario reached and how it went, in order: written to KONJUGATE_INTERACTION_RESULTS (a JSON file) when that is set,
+    // for a script that retries the failures (scripts/runPackagedInteractionTests.mjs).
+    const outcomes = [];
     let startedAt = 0;
     const run = async (name, task, { skip } = {}) => {
         if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
@@ -298,6 +301,7 @@ export async function runInteractionTests(driver) {
         if (skip) {
             console.log(`○ ${name} (skipped: ${skip})`);
             skippedCount += 1;
+            outcomes.push({ name, status: 'skipped' });
             return;
         }
         try {
@@ -311,6 +315,7 @@ export async function runInteractionTests(driver) {
             startedAt = performance.now();
             await task();
             passedCount += 1;
+            outcomes.push({ name, status: 'passed' });
             console.log(`✓ ${name} · ${took()}`);
             // A native dialog the test did not expect was answered for it, not left on the screen: said, so it can be looked at.
             for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
@@ -320,6 +325,7 @@ export async function runInteractionTests(driver) {
             const named = `${name}: ${error?.message ?? error}`;
             try { error.message = named; } catch { /* read-only */ }
             const failure = error?.message === named ? error : new Error(named, { cause: error });
+            outcomes.push({ name, status: 'failed' });
             if (stopOnFailure) throw failure;
             failures.push({ name, error: failure });
             console.log(`✗ ${name} · ${took()}`);
@@ -9672,6 +9678,7 @@ export async function runInteractionTests(driver) {
         for (const { name, seconds } of [...durations].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${seconds.toFixed(1).padStart(6)} s  ${name.slice(0, 110)}`);
     }
     console.log(`Interaction tests: ${passedCount} passed, ${failures.length} failed, ${skippedCount} skipped, ${passedCount + failures.length + skippedCount} total`);
+    if (process.env.KONJUGATE_INTERACTION_RESULTS) await writeFile(process.env.KONJUGATE_INTERACTION_RESULTS, `${JSON.stringify({ outcomes }, null, 2)}\n`);
     if (failures.length) {
         console.log(`\nFailed (${failures.length}):`);
         for (const { name, error } of failures) console.log(`  ✗ ${name}\n      ${String(error?.message ?? error).split('\n').slice(0, 3).join('\n      ')}`);

@@ -1,6 +1,7 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 import { packager } from '@electron/packager';
+import { bundlePackagedApp } from './bundlePackagedApp.mjs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -18,6 +19,9 @@ const ignoredTopLevelDirectories = new Set([
     'packaging',
     'evals',
     'welcome',
+    'scripts',
+    'distribution',
+    'vcpkgOverlays',
 ]);
 
 // tests/ is otherwise entirely test-authoring machinery that has no business in a package shipped
@@ -43,17 +47,61 @@ const packagedTestAncestorDirectories = new Set(
 // but an entry's screenshots don't: they are only shown next to an Install button, which needs the
 // network anyway, so the app downloads and caches them on demand instead (see
 // registryScreenshotPathPattern in src/packageArchive.mjs and scripts/verifyPackagedRegistry.mjs).
-const ignoredPathPrefixes = ['registry/screenshots'];
+const ignoredPathPrefixes = [
+    'registry/screenshots',
+    // Parts of dependencies nothing loads at run time. The renderers load dependencies by file
+    // path (see the import maps in src/*/index.html): three is build/three.module.js and
+    // three.core.js plus a few examples/jsm addons, and the compute engine is dist/esm-min.
+    'node_modules/@types',
+    'node_modules/three/src',
+    'node_modules/three/build/three.tsl.js',
+    'node_modules/three/build/three.webgpu.js',
+    'node_modules/three/build/three.webgpu.nodes.js',
+    'node_modules/@cortex-js/compute-engine/dist/types',
+    'node_modules/@cortex-js/compute-engine/dist/esm-min/cli',
+    'node_modules/pyodide/console.html',
+    'node_modules/pyodide/console-v2.html',
+];
 
-export function shouldIgnorePackagePath(filePath) {
+// Top-level files that build or document the app and are never read by it.
+const ignoredTopLevelFiles = new Set([
+    'Makefile',
+    'package-lock.json',
+    'vcpkg.json',
+    'ReadMe.md',
+    'Privacy.md',
+    'CONTRIBUTING.md',
+    'CLA.md',
+    // Shipped beside the app as an extraResource; the copy inside it was never read.
+    'ThirdPartyNotices.md',
+]);
+
+// Files inside node_modules that are never run: TypeScript sources and declarations, source maps
+// and documentation. Licence and notice files are kept whatever their extension.
+const ignoredDependencyFilePattern = /\.(?:map|ts|mts|cts|md|markdown)$|^(?:changelog|history)(?:\.|$)/i;
+const keptDependencyFilePattern = /^(?:licen[cs]e|notice|copying|authors)(?:[.-]|$)/i;
+
+// Native prebuilds for other platforms (bufferutil ships one per platform).
+const prebuildPattern = /^node_modules\/(?:.+\/)?prebuilds\/([^/]+)(?:\/|$)/;
+
+export function shouldIgnorePackagePath(filePath, { platform, arch } = {}) {
     const normalized = filePath.replaceAll('\\', '/').replace(/^\/+/, '');
     if (packagedTestFiles.has(normalized) || packagedTestAncestorDirectories.has(normalized)) return false;
     if (ignoredPathPrefixes.some((prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`))) return true;
+    if (ignoredTopLevelFiles.has(normalized)) return true;
+    if (normalized.startsWith('node_modules/')) {
+        const fileName = normalized.slice(normalized.lastIndexOf('/') + 1);
+        if (ignoredDependencyFilePattern.test(fileName) && !keptDependencyFilePattern.test(fileName)) return true;
+        const prebuild = prebuildPattern.exec(normalized);
+        if (prebuild && platform && arch && prebuild[1] !== `${platform}-${arch}`) return true;
+    }
     const [topLevelDirectory] = normalized.split('/').filter(Boolean);
     return ignoredTopLevelDirectories.has(topLevelDirectory);
 }
 
-export function createPackageOptions({ platform, arch, appVersion, icon, name, appBundleId }) {
+// KONJUGATE_PACKAGE_INTERACTION_TESTS=1 bundles the --interaction-test runner into the app (see
+// scripts/bundlePackagedApp.mjs), for `make verifyPackagedInteraction`; a package for users leaves it out.
+export function createPackageOptions({ platform, arch, appVersion, icon, name, appBundleId, includeTests = process.env.KONJUGATE_PACKAGE_INTERACTION_TESTS === '1' }) {
     return {
         dir: '.',
         name,
@@ -87,10 +135,11 @@ export function createPackageOptions({ platform, arch, appVersion, icon, name, a
             'docs/welcome.md',
             'docs/causalInferenceInteractionHelp.md',
         ],
-        ignore: shouldIgnorePackagePath,
+        ignore: (filePath) => shouldIgnorePackagePath(filePath, { platform, arch }),
         out: 'out/package',
         overwrite: true,
         prune: true,
+        afterPrune: [({ buildPath }) => bundlePackagedApp(buildPath, { includeTests })],
     };
 }
 

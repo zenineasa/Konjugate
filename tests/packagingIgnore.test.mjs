@@ -93,5 +93,30 @@ test('Electron Packager options retain resources and macOS bundle ID', () => {
         'docs/welcome.md',
         'docs/causalInferenceInteractionHelp.md',
     ]);
-    assert.equal(options.ignore, shouldIgnorePackagePath);
+    assert.equal(options.ignore('/node_modules/bufferutil/prebuilds/darwin-arm64/bufferutil.node'), false);
+    assert.equal(options.ignore('/node_modules/bufferutil/prebuilds/win32-x64/bufferutil.node'), true);
+    assert.equal(options.ignore('/src/main.mjs'), false);
+});
+
+test('Electron Packager leaves build files and dependency sources, maps and docs out of the app', () => {
+    for (const excluded of [
+        '/scripts/buildEngine.mjs', '/distribution/snap/snapcraft.yaml', '/vcpkgOverlays/x', '/Makefile', '/package-lock.json', '/ReadMe.md', '/ThirdPartyNotices.md',
+        '/node_modules/three/build/three.module.js.map', '/node_modules/foo/index.d.ts', '/node_modules/foo/src/index.ts', '/node_modules/foo/README.md', '/node_modules/foo/CHANGELOG.md', '/node_modules/foo/History',
+        '/node_modules/@types/node/index.d.ts', '/node_modules/three/src/Three.js', '/node_modules/three/build/three.webgpu.js', '/node_modules/@cortex-js/compute-engine/dist/types/x.d.ts',
+    ]) assert.equal(shouldIgnorePackagePath(excluded, { platform: 'darwin', arch: 'arm64' }), true, excluded);
+    for (const kept of [
+        '/LICENSE', '/package.json', '/src/renderer/index.html', '/node_modules/foo/LICENSE.md', '/node_modules/foo/license', '/node_modules/foo/NOTICE.md', '/node_modules/foo/index.js', '/node_modules/foo/package.json',
+        '/node_modules/three/build/three.module.js', '/node_modules/three/build/three.core.js', '/node_modules/three/examples/jsm/controls/OrbitControls.js', '/node_modules/style-mod/src/style-mod.js',
+        '/node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js', '/node_modules/pyodide/pyodide.asm.wasm', '/node_modules/foo/data.tsx.json',
+    ]) assert.equal(shouldIgnorePackagePath(kept, { platform: 'darwin', arch: 'arm64' }), false, kept);
+});
+
+test('Electron Packager bundles the main process after pruning, with the interaction-test runner only when asked', () => {
+    const base = { platform: 'darwin', arch: 'arm64', appVersion: '1.2.3', icon: 'app.icns', name: 'Konjugate', appBundleId: 'com.konjugate' };
+    for (const includeTests of [false, true]) {
+        const options = createPackageOptions({ ...base, includeTests });
+        assert.equal(options.prune, true);
+        assert.equal(options.afterPrune.length, 1);
+        assert.equal(typeof options.afterPrune[0], 'function');
+    }
 });

@@ -81,6 +81,7 @@
         "@electron/packager": "^20.3.0",
         "aedes": "^1.2.0",
         "electron": "^43.8.3",
+        "esbuild": "^0.28.2",
         "js-yaml": "^5.4.3",
         "node-opcua-server": "^2.187.23",
         "playwright": "^1.64.0",

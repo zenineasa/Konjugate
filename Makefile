@@ -252,7 +252,10 @@ endif
 verifyPackagedEngine: packageApp
 	node scripts/testPackagedEngine.mjs
 
-verifyPackagedInteraction: packageApp
+# Packages the app again with the --interaction-test runner bundled in (scripts/bundlePackagedApp.mjs),
+# which a package for users leaves out.
+verifyPackagedInteraction:
+	KONJUGATE_PACKAGE_INTERACTION_TESTS=1 $(MAKE) packageApp
 	node scripts/runPackagedInteractionTests.mjs
 
 verifyPackage: verifyPackagedEngine verifyPackagedInteraction

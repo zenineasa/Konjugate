@@ -794,7 +794,11 @@ public:
     void writeResult(const std::string& lifecycle, double simulationTime, bool completeSnapshot = false);
     void settleIfParametersChanged();
     void integrateStep(std::size_t step, double synchronizationStep, double elapsed);
-    void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double synchronizationStep);
+    void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double stepStartTime, double stepEndTime);
+    // Where real-time and limited-ratio pacing measure from: the wall-clock moment a simulated time was due, at the pace
+    // then set. Reset by a pause, a change of pace, and a run falling far behind (see paceStep).
+    struct PacingAnchor { std::chrono::steady_clock::time_point wall; double simulationTime; PacingMode mode; double ratio; };
+    std::optional<PacingAnchor> pacingAnchor;
     void recordStepOutput(std::size_t step, double elapsed);
     // Answers commands until the control stream closes.
     void serveSession();
@@ -1484,18 +1488,32 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     }
 }
 
-// Real-time and limited-ratio pacing: waits out what is left of the step's share of wall time, reading commands meanwhile.
-void Simulation::paceStep(std::chrono::steady_clock::time_point wallStepStarted, double synchronizationStep) {
+// Real-time and limited-ratio pacing, against a deadline: the step ending at simulated time t is due at the anchor's
+// wall-clock moment plus (t - the anchor's simulated time) / ratio, and the step waits until then, reading commands
+// meanwhile. A wait that wakes late (a busy or throttled machine, whose timers can fire tens of milliseconds late) is
+// made up by the steps after it not waiting, so the run keeps to the clock. Pacing each step by its own share of wall
+// time, as before, lost every late wake-up for good: on a throttled macOS virtual machine a 3 s real-time run of 10 ms
+// steps took 27 s. A run that falls more than a quarter of a second behind (its steps cost more than the pace allows,
+// or the process was stopped) is not raced to catch up: the anchor moves to now, so it carries on at the pace from there.
+void Simulation::paceStep(std::chrono::steady_clock::time_point wallStepStarted, double stepStartTime, double stepEndTime) {
+    constexpr auto mostBehind = std::chrono::milliseconds(250);
     while (pacing.mode != PacingMode::fastest) {
-        const auto targetDuration = std::chrono::duration<double>(synchronizationStep / pacing.ratio);
-        const auto spent = std::chrono::steady_clock::now() - wallStepStarted;
-        if (spent >= targetDuration) break;
-        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(targetDuration - spent);
-        pacingWait(std::min(remaining, std::chrono::milliseconds(20)));
+        if (!pacingAnchor || pacingAnchor->mode != pacing.mode || pacingAnchor->ratio != pacing.ratio) {
+            pacingAnchor = PacingAnchor{pacingAnchor ? std::chrono::steady_clock::now() : wallStepStarted, stepStartTime, pacing.mode, pacing.ratio};
+        }
+        const auto due = pacingAnchor->wall + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::chrono::duration<double>((stepEndTime - pacingAnchor->simulationTime) / pacing.ratio));
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= due) {
+            if (now - due > mostBehind) pacingAnchor = PacingAnchor{now, stepEndTime, pacing.mode, pacing.ratio};
+            break;
+        }
+        pacingWait(std::min(std::chrono::duration_cast<std::chrono::milliseconds>(due - now), std::chrono::milliseconds(20)));
         refreshRunControl(true);
         pacing = runControl.pacing;
         if (runControl.executionState != RunState::running) break;
     }
+    if (pacing.mode == PacingMode::fastest) pacingAnchor.reset();
 }
 
 // At an output boundary (and at the last step): the sample, a checkpoint, and now and then the result file.
@@ -1798,6 +1816,8 @@ void runSimulation(const boost::property_tree::ptree& document,
                 if (simulation.runControl.interventions.size() != changesBefore) simulation.writeResult("paused", simulation.currentTime);
             }
             simulation.pacing = simulation.runControl.pacing;
+            // The pause took wall time no step should be paced against: the pace starts again from here.
+            simulation.pacingAnchor.reset();
             if (simulation.runControl.executionState == RunState::stopped) {
                 simulation.writeResult("stopped", simulation.currentTime, true);
                 return;
@@ -1815,7 +1835,7 @@ void runSimulation(const boost::property_tree::ptree& document,
             : std::min(simulation.globalTimeStep, simulation.targetTime - simulation.startTime - static_cast<double>(step) * simulation.globalTimeStep);
         const auto elapsed = std::min(simulation.targetTime, simulation.startTime + static_cast<double>(step + 1) * simulation.globalTimeStep);
         simulation.integrateStep(step, synchronizationStep, elapsed);
-        simulation.paceStep(wallStepStarted, synchronizationStep);
+        simulation.paceStep(wallStepStarted, elapsed - synchronizationStep, elapsed);
         simulation.recordStepOutput(step, elapsed);
     }
 }

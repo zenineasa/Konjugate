@@ -331,7 +331,7 @@ await window.konjugateVisualizer.requestPacing({
 });
 ```
 
-`realTime` always means one simulation second per wall second. `fastest` removes the wall-clock limit. A limited ratio is a cap, not a guarantee: computationally expensive models may advance more slowly. Simulation pacing controls engine execution; it is separate from the completed-result playback rate and must not be presented as playback speed.
+`realTime` always means one simulation second per wall second. `fastest` removes the wall-clock limit. A limited ratio is a cap, not a guarantee: computationally expensive models may advance more slowly. The pace is kept against the clock from the start of the run (and from each resume or change of pace), so a step that finishes late is made up by the next ones rather than lost; a run that falls more than a quarter of a second behind carries on at the pace from where it is, without racing to catch up. Simulation pacing controls engine execution; it is separate from the completed-result playback rate and must not be presented as playback speed.
 
 ### `exportCsv(suggestedFilename, csv)`
 

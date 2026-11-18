@@ -254,7 +254,7 @@ jobs:
             # The whole interaction suite against the packaged, bundled app. Last, because it packages the app
             # again with the test runner inside (scripts/bundlePackagedApp.mjs), and everything shipped from
             # out/package must have been taken before that. A failure here stops the release job below. A
-            # failure runs the whole suite once more (scripts/interactionRetry.mjs): failing twice fails the job,
+            # failure is run once more, with the members of its group before it (scripts/interactionRetry.mjs): failing twice fails the job,
             # passing the second time is shown as a flaky-test warning.
             - name: Install Linux interaction test prerequisites
               if: runner.os == 'Linux'

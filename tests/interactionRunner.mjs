@@ -315,9 +315,53 @@ export async function runInteractionTests(driver) {
     // Each scenario reached and how it went, in order: written to KONJUGATE_INTERACTION_RESULTS (a JSON file) when that is set,
     // for a script that retries the failures (scripts/runPackagedInteractionTests.mjs).
     const outcomes = [];
+    // Scenarios that carry on from the one before them, so they only make sense together, in this order: a set-up made
+    // in one (the assistant's model, a finished run, a saved copy, an add-on's window) is what the next works on. Every
+    // other scenario sets itself up (freshExample(), clean(), or a project of its own), and runs the same alone. A
+    // scenario that fails is run again with the members of its group before it (scripts/interactionRetry.mjs).
+    const scenarioGroups = {
+        'the example guide': ['examples explorer loads a project copy', 'example selection opens its companion guide'],
+        'the assistant': [
+            'with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it',
+            'local assistant prepares, validates and applies one undoable transaction',
+            'local assistant can disable and enable a node and a relationship',
+            'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
+            'dismissing a clarification and starting a new conversation both clear it without submitting'
+        ],
+        'a subsystem from the selection': [
+            'rectangle tool selects visible nodes without opening an inspector',
+            'selected nodes become a navigable undoable subsystem'
+        ],
+        'a parameter\'s mode': [
+            'live parameters expose labelled live-range bounds with validation',
+            'a live-mode parameter cannot also be marked tunable, and switching to live clears any existing tuning bounds'
+        ],
+        'a copy with its own ownership': [
+            'saving a new project offers its ownership details for that copy alone',
+            'a project saved as a copy with other ownership details keeps writing that copy, and keeps its own details'
+        ],
+        'a run and its results': [
+            'Run invokes the C++ simulation and displays state results',
+            'Results Analysis add-on inspects and exports a completed run',
+            'closing results clears the main window and any add-on it opened'
+        ],
+        'the provider editor': [
+            'relationship editor authors an inline C++ provider implementation',
+            'provider editor window syntax-highlights, validates and applies C++ source'
+        ],
+        'the Pose Visualizer': [
+            'Pose Visualizer add-on auto-detects and renders a 6-DOF free body node',
+            'Pose Visualizer add-on inspects a completed run with two free bodies',
+            'Pose Visualizer add-on keeps body mappings with the project and naming conventions for the user',
+            'closing results and removing the free-body nodes cleans up the pose scenario'
+        ]
+    };
+    const groupOf = new Map(Object.entries(scenarioGroups).flatMap(([group, names]) => names.map((name) => [name, group])));
+    const scenariosSeen = new Set();
     let startedAt = 0;
     const scenarioMinutes = Number(process.env.KONJUGATE_INTERACTION_SCENARIO_MINUTES) || 15;
     const run = async (name, task, { skip } = {}) => {
+        scenariosSeen.add(name);
         if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
         const took = () => {
             const seconds = (performance.now() - startedAt) / 1000;
@@ -327,7 +371,7 @@ export async function runInteractionTests(driver) {
         if (skip) {
             console.log(`○ ${name} (skipped: ${skip})`);
             skippedCount += 1;
-            outcomes.push({ name, status: 'skipped' });
+            outcomes.push({ name, status: 'skipped', ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
             return;
         }
         try {
@@ -351,7 +395,7 @@ export async function runInteractionTests(driver) {
                 clearTimeout(timer);
             }
             passedCount += 1;
-            outcomes.push({ name, status: 'passed' });
+            outcomes.push({ name, status: 'passed', ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
             console.log(`✓ ${name} · ${took()}`);
             // A native dialog the test did not expect was answered for it, not left on the screen: said, so it can be looked at.
             for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
@@ -361,19 +405,20 @@ export async function runInteractionTests(driver) {
             const named = `${name}: ${error?.message ?? error}`;
             try { error.message = named; } catch { /* read-only */ }
             const failure = error?.message === named ? error : new Error(named, { cause: error });
-            outcomes.push({ name, status: 'failed' });
+            outcomes.push({ name, status: 'failed', ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
             if (stopOnFailure) throw failure;
             failures.push({ name, error: failure });
             console.log(`✗ ${name} · ${took()}`);
             console.error(failure);
-            await tidyAfterFailure();
+            await putAwayLeftovers();
         }
         // Coverage, when it is on, is taken a scenario at a time where the driver needs it (the web edition's).
         await driver.afterScenario?.(name);
     };
-    // What a failed scenario may have left behind, put away so the next one starts as the others do: windows it opened,
-    // dialogs and Settings left open, a simulation result left showing. Best effort: whatever cannot be put away is left.
-    const tidyAfterFailure = async () => {
+    // What a scenario may have left behind, put away so the next one starts as the others do: windows it opened, dialogs
+    // and Settings left open, a simulation result left showing. Best effort: whatever cannot be put away is left. Done
+    // after a failure, and by freshExample() before a scenario that starts from an example.
+    const putAwayLeftovers = async () => {
         for (const handle of driver.allHandles?.() ?? []) {
             if (handle === window || handle._raw === window._raw) continue;
             try { if (!await handle.isDestroyed()) await handle.close(); } catch { /* already gone */ }
@@ -390,6 +435,27 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click()`);
         } catch { /* the window may be gone */ }
         driver.takeNativeDialogs?.();
+    };
+
+    // An example as it is when loaded, for a scenario that works on it: the scenario then runs the same alone (a retry,
+    // KONJUGATE_INTERACTION_ONLY) as after the ones before it, rather than on whatever they left. It is loaded into the
+    // open window, which takes a fraction of a second; nothing is restarted.
+    const freshExample = async (name = 'thermalManagement') => {
+        await putAwayLeftovers();
+        const content = await decodeProjectFile(await readFile(join(process.cwd(), 'examples', `${name}.kjt`)));
+        const nodes = JSON.parse(content).nodes.filter((node) => node.subsystemId == null).length;
+        await evaluate(window, `(async () => {
+            if (window.__debugTour?.active()) window.__debugTour.stop();
+            document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'));
+            await window.__debugProject.load(${content}, ${JSON.stringify(`${name}.kjt`)});
+        })()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === ${nodes} && document.querySelector('.documentTitle')?.textContent === ${JSON.stringify(name)} && !window.__debugTour.blockers().dirty`, `The ${name} example did not load.`);
+    };
+    // The thermal example, fresh, with its Battery module relationship's editor open, as a left-click on its label leaves it.
+    const freshRelationshipEditor = async () => {
+        await freshExample();
+        await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'The relationship editor did not open.');
     };
 
     await run('examples explorer loads a project copy', async () => {
@@ -688,6 +754,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('local assistant prepares, validates and applies one undoable transaction', async () => {
+        await freshExample(); // the assistant's model is kept from the scenario before; the battery it edits is the example's
         await evaluate(window, `window.dispatchEvent(new Event('resize')); document.querySelector('#assistantButton').click(); (() => {
             const prompt = document.querySelector('#assistantPrompt');
             prompt.value = 'Add an ambient boundary at 298 K and connect it to the battery with a conductance of 15 W/K.';
@@ -878,6 +945,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.aiProviderCredentials && 'the credential-vault/provider-adapter architecture (window.aiProviders) has no web-edition equivalent' });
 
     await run('run configuration and node substeps are editable', async () => {
+        await freshExample();
         // The numerics and execution settings live in the Run dialog; "Save settings" stores them with the
         // model without starting a run.
         await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available to open the run settings.', 10000);
@@ -1468,6 +1536,7 @@ export async function runInteractionTests(driver) {
     let analysisHandle = null;
 
     await run('Run invokes the C++ simulation and displays state results', async () => {
+        await freshExample();
         // Run is off while the model is validated again after an edit (the scenario before edits it), so it is waited for.
         await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available.', 15000);
         const before = await evaluate(window, `document.querySelector('.node-label-container dd').textContent`);
@@ -1646,6 +1715,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('multi-selection copies, pastes and deletes a connected graph fragment transactionally', async () => {
+        await freshExample();
         const before = await evaluate(window, `({
             nodes: [...document.querySelectorAll('.node-label-container')].filter((label) => getComputedStyle(label).display !== 'none').length,
             relationships: document.querySelectorAll('.modelStatus span')[1].textContent
@@ -1685,6 +1755,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('Cmd/Ctrl+V pastes a single copied node', async () => {
+        await freshExample();
         // Regression test: same root cause as the multi-selection test above (modelClipboard.read()
         // in src/preload.mjs used to decode the clipboard buffer with a bare `bytes.toString('utf8')`,
         // but `bytes` crosses the IPC boundary as a plain Uint8Array rather than a Node Buffer, so
@@ -1710,6 +1781,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('rectangle tool selects visible nodes without opening an inspector', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('[data-tool="rectangleSelect"]').click()`);
         // The preceding paste/undo tests leave the CSS2DRenderer mid-reposition (same cause as the
         // bundle-label wait in the multi-selection test above); under SwiftShader software rendering
@@ -1791,6 +1863,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('left-click opens node and relationship inspectors', async () => {
+        await freshExample();
         // The label shown, by its exact name (an undone paste leaves a hidden "Battery module copy" in the page).
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.getClientRects().length && label.querySelector('strong')?.textContent === 'Battery module').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
@@ -1801,6 +1874,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('live parameters expose labelled live-range bounds with validation', async () => {
+        await freshRelationshipEditor();
         const labels = await evaluate(window, `[...document.querySelectorAll('.editorParameterRow:first-child .parameterField > span')].map((label) => label.textContent)`);
         assert.deepEqual(labels.slice(0, 5), ['Name', 'Symbol', 'Initial value', 'Unit', 'Mode']);
         await evaluate(window, `(() => {
@@ -1868,6 +1942,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('relationship editor authors an inline C++ provider implementation', async () => {
+        await freshRelationshipEditor();
         const kindSelect = `document.querySelector('#editEdgeImplementationKind')`;
         await evaluate(window, `(() => {
             const select = ${kindSelect};
@@ -2002,6 +2077,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('C++ validation rejects unknown equation symbols while typing', async () => {
+        await freshRelationshipEditor();
         const originalEquation = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
         await evaluate(window, `(() => {
             const field = document.querySelector('#editEdgeMathField');
@@ -2019,6 +2095,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('C++ validation accepts \\operatorname{} LaTeX for named functions like Max', async () => {
+        await freshRelationshipEditor();
         // Regression test: an AI-generated equation once used \operatorname{Max}(...) --
         // standard LaTeX for an unfamiliar function name, and a reasonable thing for a model to
         // write even after being steered toward the shorter \max(...) form -- which the engine's
@@ -2052,10 +2129,13 @@ export async function runInteractionTests(driver) {
     });
 
     await run('Backspace edits MathLive without deleting the relationship', async () => {
+        await freshRelationshipEditor();
         const equationBefore = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
         // A real pointer click (rather than a bare .focus() call) reliably restores keyboard
         // routing into MathLive's custom element, matching how an actual user would interact
-        // with it after switching this relationship away from and back to Equation mode.
+        // with it after switching this relationship away from and back to Equation mode. The field can be below the
+        // card's fold, as a person would find it, so it is scrolled to first.
+        await evaluate(window, `document.querySelector('#editEdgeMathField').scrollIntoView({ block: 'center' })`);
         await clickElement(window, `document.querySelector('#editEdgeMathField')`);
         await evaluate(window, `(() => {
             const field = document.querySelector('#editEdgeMathField');
@@ -2075,6 +2155,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('node editor authors a source term with a programmable C++ implementation', async () => {
+        await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
         await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
         await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
@@ -2119,6 +2200,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('node appearance changes and participates in undo', async () => {
+        await freshExample();
         const reopenAppearanceTab = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`;
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false);
@@ -2158,6 +2240,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('shape library searches, filters by domain and previews and applies a shape', async () => {
+        await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`);
         const statusBeforeSelect = await evaluate(window, `document.querySelector('#editGeometryStatus').textContent`);
         await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
@@ -2251,6 +2334,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('disabling a node greys it out, cascades to its edges, and is undoable', async () => {
+        await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#toggleNodeEnabled').textContent`), 'Disable node');
         assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
@@ -2275,6 +2359,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('disabling an edge directly is independent of its endpoint nodes and is undoable', async () => {
+        await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
 
@@ -2291,6 +2376,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('Connect to chooses a canvas endpoint and creates through the shared relationship inspector', async () => {
+        await freshExample();
         const relationshipCountBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses')).click()`);
         await evaluate(window, `document.querySelector('#connectFromNode').click()`);
@@ -2317,6 +2403,7 @@ export async function runInteractionTests(driver) {
     const batteryBundleLabel = `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module') && !label.textContent.includes('copy'))`;
 
     await run('right-clicking a node opens a context menu with connect, disable and delete', async () => {
+        await freshExample();
         await rightClickElement(window, electricalLossesLabel);
         await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden')`, 'Right-clicking a node did not open its context menu.');
         assert.equal(await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').classList.contains('selected')`), true);
@@ -2352,6 +2439,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('right-clicking a multi-selected node offers bulk disable/enable all', async () => {
+        await freshExample();
         // Shift-clicks both nodes rather than a plain click + shift-click: a plain click also
         // opens the node editor, and this deep into the suite the editor panel can overlap
         // where the second label renders, making a real mouse click land on the panel instead.
@@ -2393,6 +2481,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('right-clicking an edge label opens a context menu with disable and delete', async () => {
+        await freshExample();
         await waitFor(window, `Boolean(${batteryBundleLabel})`, 'Battery module bundle label was not available.');
         await rightClickElement(window, batteryBundleLabel);
         await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking an edge did not open its context menu.');
@@ -2452,6 +2541,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('node creation closes its dialog and supports undo and redo', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
         await evaluate(window, `(() => {
             document.querySelector('#newNodeName').value = 'Interaction node';
@@ -2471,6 +2561,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('an invalid state symbol shows a visible error instead of silently failing to create the node', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
         await evaluate(window, `(() => {
             document.querySelector('#newNodeName').value = 'Interaction temperature node';
@@ -2494,6 +2585,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('node builder creates a node with an inline Python source term', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
         await evaluate(window, `(() => {
             document.querySelector('#newNodeName').value = 'Interaction source node';
@@ -2539,6 +2631,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('edge creation composes state references and supports undo', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {
             const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
@@ -2559,6 +2652,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('edge creation accepts a constant zero equation', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {
             const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
@@ -2578,6 +2672,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('edge creation offers a directionality choice, defaulting to directed', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#newEdgeDirectionality').value`), 'directed');
         await evaluate(window, `(() => {
@@ -2603,6 +2698,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('an invalid edge parameter symbol shows a visible error instead of silently failing to create the edge', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {
             const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
@@ -2634,6 +2730,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('edge builder creates a new relationship with an inline Python provider', async () => {
+        await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
         await evaluate(window, `(() => {
             const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
@@ -2673,6 +2770,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('a point read once the canvas stops sliding is where a click lands', async () => {
+        await freshExample();
         // Opening and closing an editor card slides the canvas; every scenario that clicks the canvas waits for the slide
         // to finish (waitForCanvasAtRest). Checked here so a change to the slide (its timing, or how it is done) cannot
         // quietly turn those clicks back into misses.
@@ -2690,6 +2788,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('clicking a relationship after replacing a deleted one selects the new edge', async () => {
+        await freshExample();
         // Regression test: deleting a relationship only soft-deletes it (definition.deleted =
         // true, line/marker hidden via .visible = false) -- its mesh is never removed from
         // relationshipPickTargets, which is only ever cleared on a full project reload. A new
@@ -2820,6 +2919,7 @@ export async function runInteractionTests(driver) {
     };
 
     await run('pressing and holding an edge enters waypoint mode, and dragging a waypoint reroutes it with undo/redo', async () => {
+        await freshExample();
         await selectWaypointTestTool();
         await createWaypointTestEdge('Waypoint drag test edge');
 
@@ -2896,6 +2996,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('right-click adds and removes an edge waypoint via its own context menus', async () => {
+        await freshExample();
         await selectWaypointTestTool();
         await createWaypointTestEdge('Waypoint add-remove test edge');
 
@@ -2924,6 +3025,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('deleting a node hides connected relationships and undo restores them', async () => {
+        await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses')).click(); document.querySelector('[data-action="delete"]').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '2 nodes');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '2 relationships');
@@ -3612,6 +3714,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('importing a node shape file also saves it into the user shape library', async () => {
+        await freshExample();
         // Deliberately operates on whatever node is already on the canvas at this point in the
         // suite, rather than loading a fresh example -- by now the document is dirty from many
         // earlier tests, and loading a new example would raise a native "Discard changes?"
@@ -3645,6 +3748,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('rotate and scale tools transform a node with undo/redo and persist through copy/paste', async () => {
+        await freshExample();
         await waitFor(window, `document.querySelectorAll('.objectLabel').length > 0`, 'No node available to select.');
         await evaluate(window, `document.querySelector('.objectLabel').click()`);
         const nodeId = await evaluate(window, `window.__debugTransform.selectedId()`);
@@ -3752,6 +3856,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('shift held during a scale drag forces uniform scaling, even mid-drag', async () => {
+        await freshExample();
         // window.__debugTransform.scaleDrag drives the real objectChange handler's Shift-uniform
         // override step by step (mouseDown / move / mouseUp), letting a test toggle Shift
         // between movement steps the same way a real drag would -- rather than real screen
@@ -4487,6 +4592,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('digital-twin tuning fits source-term and edge parameters together from CSV and applies them atomically', async () => {
+        await freshExample();
         // Add an independently-owned source-term parameter to Enclosed air. Its constant
         // derivative contribution and the edge's transfer coefficient affect the measured
         // target trajectory differently, so the optimizer can identify both in one fit.
@@ -4851,6 +4957,7 @@ export async function runInteractionTests(driver) {
     }, { skip: (!driver.capabilities.multiWindow && 'duplicates coverage #5/#15 already provide on the web driver; the addon-specific redraw-gating behavior itself has no web-edition equivalent') || addonMissing('konjugate.resultPlotViewer', 'konjugate-resultplotviewer') });
 
     await run('source terms expose parameters to equations and programmable bindings', async () => {
+        await freshExample();
         await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`, 'The "Enclosed air" label was not in the DOM.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
         await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
@@ -9718,6 +9825,9 @@ export async function runInteractionTests(driver) {
         for (const { name, seconds } of [...durations].sort((a, b) => b.seconds - a.seconds).slice(0, 10)) console.log(`  ${seconds.toFixed(1).padStart(6)} s  ${name.slice(0, 110)}`);
     }
     console.log(`Interaction tests: ${passedCount} passed, ${failures.length} failed, ${skippedCount} skipped, ${passedCount + failures.length + skippedCount} total`);
+    // A renamed scenario would quietly leave its group, and then be retried without what it needs: said instead.
+    const missing = [...groupOf.keys()].filter((name) => !scenariosSeen.has(name));
+    if (missing.length) throw new Error(`scenarioGroups names scenarios the runner does not have (renamed?): ${missing.join('; ')}`);
     if (process.env.KONJUGATE_INTERACTION_RESULTS) await writeFile(process.env.KONJUGATE_INTERACTION_RESULTS, `${JSON.stringify({ outcomes }, null, 2)}\n`);
     if (failures.length) {
         console.log(`\nFailed (${failures.length}):`);

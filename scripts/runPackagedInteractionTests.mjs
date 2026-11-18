@@ -8,11 +8,10 @@
 // resources bundle. Requires a package built for the host platform with the test runner bundled in
 // -- `make verifyPackagedInteraction` builds one and runs this; this does not build one itself.
 //
-// When a scenario fails, the whole suite is run once more (scripts/interactionRetry.mjs): a break in
-// packaging fails both times and fails the run, while one that only passes the second time is reported
-// as flaky (a warning on GitHub Actions) without failing it. All of it, not just what failed: many
-// scenarios work on what the ones before them left (the nodes, a finished run), so one run alone is not
-// a fair second try. KONJUGATE_INTERACTION_RETRY=0
+// The scenarios that fail are run once more, each with the members of its group before it
+// (scripts/interactionRetry.mjs; the groups are scenarioGroups in tests/interactionRunner.mjs, and every
+// other scenario sets itself up): a break in packaging fails both times and fails the run, while one that
+// only passes the second time is reported as flaky (a warning on GitHub Actions) without failing it. KONJUGATE_INTERACTION_RETRY=0
 // turns the second pass off, as when a failure itself is being looked at.
 
 import { spawn } from 'node:child_process';
@@ -22,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rootDirectory } from './developmentEnvironment.mjs';
 import { installInteractionAddons } from './interactionAddons.mjs';
-import { combineOutcomes } from './interactionRetry.mjs';
+import { combineOutcomes, onlyFilter, scenariosToRetry } from './interactionRetry.mjs';
 import { packagedAppExecutable } from './packagedPaths.mjs';
 
 const executable = packagedAppExecutable(rootDirectory);
@@ -99,9 +98,10 @@ if (process.env.KONJUGATE_INTERACTION_RETRY === '0') {
     process.exit(1);
 }
 
-console.log(`\n${firstFailures.length} scenario${firstFailures.length === 1 ? '' : 's'} failed; running the suite again:`);
-for (const { name } of firstFailures) console.log(`  ${name}`);
-const secondPass = await runPass(process.env.KONJUGATE_INTERACTION_ONLY);
+const retry = scenariosToRetry(firstPass);
+console.log(`\n${firstFailures.length} scenario${firstFailures.length === 1 ? '' : 's'} failed; running ${retry.length} again (each failure with the scenarios of its group before it):`);
+for (const name of retry) console.log(`  ${name}`);
+const secondPass = await runPass(onlyFilter(retry));
 if (!secondPass) {
     annotate('error', 'Packaged interaction tests', 'The packaged app ended before the second pass finished (see the log).');
     console.error('The packaged app ended before the second pass finished.');

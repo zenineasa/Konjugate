@@ -138,7 +138,7 @@ async function canvasPoint(window, expression) {
 }
 
 // The element's centre, once a click there would reach it: inside the window, and not under something else (an
-// editor card in a small window, a toast, another label). A real mouse event goes to whatever is on top, so a
+// editor card in a small window, a toast, another label) when the element takes clicks itself. A real mouse event goes to whatever is on top, so a
 // click on a covered element would quietly land on the cover instead, and the test would fail later, somewhere
 // unrelated. This fails at the click instead, naming what is in the way.
 async function clickablePoint(window, expression, timeout = 2000) {
@@ -150,6 +150,9 @@ async function clickablePoint(window, expression, timeout = 2000) {
         if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) return \`its centre (\${x}, \${y}) is outside the \${innerWidth}x\${innerHeight} window\`;
         const hit = document.elementFromPoint(x, y);
         if (hit && (hit === element || element.contains(hit))) return { x, y };
+        // A label the mouse passes through (pointer-events: none, as the canvas labels are) is clicked by way of what is
+        // under it, the canvas, which finds the label itself; only a target that takes the click can be covered.
+        if (getComputedStyle(element).pointerEvents === 'none') return { x, y };
         const describe = (node) => node ? node.tagName.toLowerCase() + (node.id ? '#' + node.id : '') + [...node.classList].map((name) => '.' + name).join('') : 'nothing';
         const cover = hit?.closest('[id]');
         return \`at (\${x}, \${y}) it is covered by \${describe(hit)}\${cover && cover !== hit ? ' inside ' + describe(cover) : ''} (the window is \${innerWidth}x\${innerHeight})\`;

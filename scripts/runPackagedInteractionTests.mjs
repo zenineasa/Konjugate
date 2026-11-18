@@ -26,6 +26,9 @@ import { combineOutcomes } from './interactionRetry.mjs';
 import { packagedAppExecutable } from './packagedPaths.mjs';
 
 const executable = packagedAppExecutable(rootDirectory);
+// A pass takes 10 to 25 minutes; one still going after this is stuck (a dialog nothing answers, a run that never
+// ends), and is stopped rather than left to use up the CI job's six hours. KONJUGATE_INTERACTION_PASS_MINUTES changes it.
+const passMinutes = Number(process.env.KONJUGATE_INTERACTION_PASS_MINUTES) || 60;
 if (!existsSync(executable)) {
     throw new Error(`No packaged app binary found at ${executable}. Run "make verifyPackagedInteraction", which packages the app with the test runner and runs this.`);
 }
@@ -50,6 +53,10 @@ async function runPass(only) {
             env: environment,
             stdio: 'inherit'
         });
+        const timer = setTimeout(() => {
+            console.error(`\nThe packaged app was still running after ${passMinutes} minutes, so it was stopped. The last scenario above is where it stuck.`);
+            child.kill('SIGKILL');
+        }, passMinutes * 60_000);
         await new Promise((resolve) => {
             child.once('error', (error) => {
                 console.error(error);
@@ -57,6 +64,7 @@ async function runPass(only) {
             });
             child.once('exit', resolve);
         });
+        clearTimeout(timer);
         try {
             return JSON.parse(await readFile(resultsFile, 'utf8')).outcomes;
         } catch {

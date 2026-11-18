@@ -313,6 +313,7 @@ export async function runInteractionTests(driver) {
     // for a script that retries the failures (scripts/runPackagedInteractionTests.mjs).
     const outcomes = [];
     let startedAt = 0;
+    const scenarioMinutes = Number(process.env.KONJUGATE_INTERACTION_SCENARIO_MINUTES) || 15;
     const run = async (name, task, { skip } = {}) => {
         if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
         const took = () => {
@@ -335,7 +336,17 @@ export async function runInteractionTests(driver) {
                 await waitFor(window, `!document.hidden`, 'The project window stayed hidden.');
             }
             startedAt = performance.now();
-            await task();
+            // A scenario stuck for good (an evaluate whose promise never settles: every wait has its own limit) fails
+            // here with its name, rather than holding the run until a CI job's own limit ends it with nothing said. The
+            // slowest, skipping through every tutorial, takes about 6.5 minutes on a slow runner.
+            let timer;
+            try {
+                await Promise.race([task(), new Promise((resolve, reject) => {
+                    timer = setTimeout(() => reject(new Error(`still running after ${scenarioMinutes} minutes, so it was given up`)), scenarioMinutes * 60_000);
+                })]);
+            } finally {
+                clearTimeout(timer);
+            }
             passedCount += 1;
             outcomes.push({ name, status: 'passed' });
             console.log(`✓ ${name} · ${took()}`);

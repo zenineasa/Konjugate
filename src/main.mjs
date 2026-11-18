@@ -319,10 +319,20 @@ function installCustomWindowState(window) {
 
 // pendingFileOpen, when given, is a Promise resolving to the payload the new window's
 // renderer will pull via projectPendingOpen once it's ready to load a project.
+// The interaction tests' project windows are this size whatever the screen, rather than maximized: on a CI runner's
+// 1024x768 screen an open editor card leaves the canvas too narrow for the scenarios' nodes, so the same suite passed
+// on a large display and failed there. Larger than the screen is allowed (macOS needs enableLargerThanScreen for it);
+// the part off the screen is still drawn, and the tests send their input to the window, not to the screen.
+// KONJUGATE_INTERACTION_WINDOW_SIZE=1024x674 runs them at another size, as when a failure on a runner is reproduced.
+const interactionTestWindowSize = process.argv.includes('--interaction-test')
+    ? (([width, height]) => ({ width, height }))((process.env.KONJUGATE_INTERACTION_WINDOW_SIZE ?? '1920x1050').split('x').map(Number))
+    : null;
+
 function createProjectWindow(pendingFileOpen) {
     const window = new BrowserWindow({
         width: 1200,
         height: 760,
+        ...(interactionTestWindowSize ? { ...interactionTestWindowSize, x: 0, y: 0, enableLargerThanScreen: true } : {}),
         minWidth: 720,
         minHeight: 480,
         frame: false,
@@ -337,7 +347,8 @@ function createProjectWindow(pendingFileOpen) {
             backgroundThrottling: false
         }
     });
-    window.maximize();
+    if (interactionTestWindowSize) window.setSize(interactionTestWindowSize.width, interactionTestWindowSize.height);
+    else window.maximize();
     projectWindows.add(window);
     projectWindowState.set(window, createProjectWindowState());
     if (pendingFileOpen) pendingWindowOpens.set(window, pendingFileOpen);

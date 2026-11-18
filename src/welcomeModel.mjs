@@ -4,48 +4,66 @@
 // Imports only the Node-free version comparison, because the Welcome window is a web page.
 import { isNewerVersion } from './versionCompare.mjs';
 
-export const onRampVisibleLimit = 8;
+// How many videos the Watch section shows before a "Show all", and how many tutorials Learn by doing suggests.
+export const watchVisibleLimit = 9;
+export const suggestedTutorialCount = 3;
 
 export const welcomeLinks = Object.freeze({
     discord: 'https://discord.gg/WPUzNyC3S',
     whatsapp: 'https://whatsapp.com/channel/0029Vb8dF8EKgsNs7dydEG1x',
     documentation: 'https://github.com/zenineasa/Konjugate/tree/master/docs',
     reportProblem: 'https://github.com/zenineasa/Konjugate/issues/new',
-    allReleases: 'https://github.com/zenineasa/Konjugate/releases'
+    allReleases: 'https://github.com/zenineasa/Konjugate/releases',
+    youtubeChannel: 'https://www.youtube.com/@Konjugate'
 });
 
 export const releaseNotesUrl = (version) => `https://github.com/zenineasa/Konjugate/releases/tag/v${version}`;
 
-// The sections of the page, top to bottom. The heading, the status line, the tour card, the On-Ramp, Community & help
-// and the footer are always there; the rest appear only when they have something to show. The On-Ramp
-// is never conditional and never reordered relative to the sections around it: it is the tutorial.
-export function welcomeSectionOrder({ hasRecommended = false, hasWhatsNew = false, hasFeatured = false, hasMoreToWatch = false, hasPosts = false } = {}) {
+// The sections of the page, top to bottom. The heading, the status line, Learn by doing, Community & help and the
+// footer are always there; the rest appear only when they have something to show. Learn by doing comes before the
+// videos: a tutorial ends with a model the person built, a video with one they watched being built.
+export function welcomeSectionOrder({ hasRecommended = false, hasWhatsNew = false, hasHighlight = false, hasVideos = false, hasPosts = false } = {}) {
     return [
         'heading',
         'status',
-        'tour',
         hasRecommended && 'recommended',
         hasWhatsNew && 'whatsNew',
-        hasFeatured && 'featured',
-        'onRamp',
-        hasMoreToWatch && 'moreToWatch',
+        hasHighlight && 'highlight',
+        'learn',
+        hasVideos && 'watch',
         hasPosts && 'blog',
         'community',
         'footer'
     ].filter(Boolean);
 }
 
-// The first `limit` episodes, in their given order, and how many are left behind a "Show all". Past
-// the limit the rest are only hidden, never dropped or reordered.
-export function visibleEpisodes(episodes, expanded = false, limit = onRampVisibleLimit) {
-    if (expanded || episodes.length <= limit) return { shown: episodes, hidden: 0 };
-    return { shown: episodes.slice(0, limit), hidden: episodes.length - limit };
+// Learn by doing: the next tutorials not yet completed, in the order the Tutorials list gives them (Start here
+// first, then each area in turn), so a new person is offered the first-model tour and someone further along
+// the next thing they have not done. `groups` is groupTutorials()'s shape.
+export function suggestedTutorials(groups, completed = [], count = suggestedTutorialCount) {
+    const done = new Set(completed);
+    const all = groups.flatMap((group) => group.tutorials.map((tutorial) => ({ ...tutorial, areaTitle: group.title })));
+    return { suggested: all.filter((tutorial) => !done.has(tutorial.id)).slice(0, count), total: all.length, completed: all.filter((tutorial) => done.has(tutorial.id)).length };
 }
 
-// The small label on a Featured item. Anything paid must say so.
+// The Watch section: the feed's videos, newest first as the feed lists them, without the one the highlight above
+// is showing, and the On-Ramp video series as one card for its playlist at the end. `limit` are shown, the rest
+// behind a "Show all".
+export function watchLibrary({ moreToWatch = [], onRamp = null, highlightedVideoId = null }, { expanded = false, limit = watchVisibleLimit } = {}) {
+    const videos = moreToWatch.filter((video) => video.videoId !== highlightedVideoId)
+        .map((video) => ({ title: video.title, videoId: video.videoId, url: `https://www.youtube.com/watch?v=${video.videoId}`, thumbnailUrl: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg` }));
+    const first = onRamp?.episodes?.[0];
+    if (onRamp?.playlistUrl && first) {
+        videos.push({ title: `Konjugate On-Ramp: the ${onRamp.episodes.length}-episode video series`, url: onRamp.playlistUrl, thumbnailUrl: first.thumbnailUrl ?? `https://img.youtube.com/vi/${first.videoId}/hqdefault.jpg`, playlist: true });
+    }
+    if (expanded || videos.length <= limit) return { shown: videos, hidden: 0 };
+    return { shown: videos.slice(0, limit), hidden: videos.length - limit };
+}
+
+// The small label on the highlight. Anything paid must say so.
 export function featuredLabel(kind, { playlist = false } = {}) {
     if (kind === 'sponsored') return 'Sponsored';
-    if (kind === 'video') return playlist ? 'New playlist' : 'New video';
+    if (kind === 'video') return playlist ? 'New playlist on the channel' : 'New on the channel';
     return 'Announcement';
 }
 

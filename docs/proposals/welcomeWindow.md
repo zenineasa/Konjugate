@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: The Welcome window as Konjugate's standing space
-description: Design for the Welcome window as a surface people see at every launch — the permanent On-Ramp tutorials, a time-limited Featured slot for announcements and promotions, and the rules that keep both trustworthy and fast.
+description: Design for the Welcome window as a surface people see at every launch — Learn by doing (the next in-app tutorials), a highlight for the newest video or an announcement that ages out on its own, one Watch library of every video, and the rules that keep it trustworthy and fast.
 tags: [proposals, welcome, onboarding, content]
 status: stable
 implementation: complete
@@ -11,7 +11,7 @@ implementation: complete
 
 # The Welcome window as Konjugate's standing space
 
-**Status: built, all four steps.** Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
+**Status: built, all five steps.** Step 5 replaced the On-Ramp section and the dismissable Featured slot once the tutorials ran inside the app (see below). Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
 
 ## The decision this rests on
 
@@ -28,29 +28,29 @@ From top to bottom, with conditional parts only when they apply:
 1. **The heading and a compact status line:** "Konjugate 1.1.8 · up to date · Check for updates · All releases". It expands into the full Updates card only when there is an update, an error, or the Store message ([updates.md](../updates.md)). Today a full card sits here in the most common state, which is nothing to do.
 2. **Recommended for you** — the existing one-time starter-pack offer; it is the only thing on the page that asks for an action, so it moves up.
 3. **What's new in this version** — shown once per version, on the first launch after an update: two or three lines and a link to the release notes.
-4. **Featured** — one time-limited item (below).
-5. **Learn Konjugate: the On-Ramp** — the six tutorial episodes (below). Permanent.
-6. **More to watch** — other videos, newest first (below).
+4. **New on the channel** — the highlight: one item, usually the newest video, that ages out on its own (below).
+5. **Learn by doing** — the next three in-app tutorials this person has not done, and the whole list one click away (below). Always there.
+6. **Watch** — every video, newest first, with the On-Ramp series as one card for its playlist (below).
 7. **Recent from the blog.**
 8. **Community & help:** Discord, Documentation, and **Help & feedback**, which closes the Welcome window and opens the Help & feedback dialog in the project window (the same one the button at the bottom of the left rail opens). The dialog offers two ways to report a problem, both with the report's sections and the system details (Konjugate version, operating system, install source, Electron and Chromium versions) already filled in so a report does not start with "which version?": by email, where it shows info@konjugate.com and the message in a text box with buttons to copy the address and to copy everything (no mailto: link, since most people have no mail program set up for one), and on GitHub, which opens the new-issue page with the details in its URL parameters.
 9. **A footer:** one line about Konjugate, then "Mozilla Public License 2.0 · © 2026 Zenin Easa Panthakkalakath". The three "About" paragraphs shrink to that one line; the full text stays in the ReadMe.
 
-## The On-Ramp series is permanent
+## Learn by doing
 
-The six On-Ramp episodes are the tutorial, and people come back to refer to it. So this section never rotates, collapses, hides itself or gets replaced, however many launches have passed. Its list stays in the bundled `assets/welcome/videos.json`, whose order is the display order, and it renders from that file even if every network feed fails. Nothing except adding an episode there changes it. Its position stays predictable too: the only things above it are the compact status line and the optional Featured and What's new items.
+The tutorials run inside Konjugate ([tutorials.md](tutorials.md)): the person builds the model themselves, step by step, and can skip any step. A tutorial ends with a model they built; a video ends with one they watched being built. So the page leads with tutorials, and the six On-Ramp episodes, which taught the same things as video (getting started, organising, live parameters, tuning, structure from data, the assistant), are no longer a section of their own.
 
-- **A quiet "opened" tick** on an episode the person has clicked, kept on this computer and sent nowhere. It helps people working through the series. It only knows about clicks, not watching, so the wording is "opened", not "watched".
-- **A "Watch the full playlist" link,** since the series already has one.
-- **"Show all" after eight episodes.** If the series grows past eight, the first row is shown with a link to the rest, in the same order; it is never reordered.
+- **The next three not yet done,** in the Tutorials list's order: Start here first, then each area in turn. A new person is offered the first-model tour, which replaced the page's separate tour card; someone further along is offered what comes after what they have done. Which tutorials are done is the `tutorialsCompleted` list the tutorials already keep.
+- **Start** closes the Welcome window and starts that tutorial in the project window it belongs to, as an example guide's "Take the tutorial" does.
+- **"See all N tutorials"** closes the Welcome window and opens the Tutorials list in the project window, with "k of N done" beside it once any are.
+- **Always present.** When every tutorial is done the section says so, and the list is still a click away.
 
-## Other videos, announcements and promotions go elsewhere
+## The highlight and the Watch library
 
-- **Featured** is a single slot under What's new. An item has an `id`, a `kind` (`announcement`, `video` or `sponsored`), a title, text, an optional image, a link, optional start and end dates, and optional "show at most N launches". One eligible item is shown at a time, highest priority first.
-- **A video item brings its own picture.** A `video` item takes a plain YouTube watch link, and its card shows that video's thumbnail from YouTube's public thumbnail CDN (the same one the On-Ramp cards use), so nothing needs to be added to `welcome/images/`; an explicit `image` still wins. To feature a whole playlist, give its `https://www.youtube.com/playlist?list=...` link and a `thumbnailVideoId`, the 11-character id of one of its videos (usually the first); the card is then labelled "New playlist" with a "Watch playlist" button. The picture and the title open the item, like the button.
-- **More to watch** is a short row of non-tutorial videos, newest first. A video that leaves the Featured slot lands here, and never in the On-Ramp section.
-- **Contextual placement** keeps most videos out of the Welcome window altogether: a causal-inference video on that feature's help page, a video per add-on in the Explorer (registry entries already support YouTube links), an example's video in its guide, a release demo in What's new.
-
-A promotion that outlives its usefulness turns invisible, so the slot has rules: every item can have an end date, an item can be capped at N launches, and **dismissing an item is remembered** and not shown again.
+- **New on the channel** (the highlight) is one item under What's new. An item has an `id`, a `kind` (`announcement`, `video` or `sponsored`), a title, text, an optional image, a link, optional start and end dates, and optional "show at most N launches". One eligible item is shown at a time, highest priority first.
+- **Nothing is dismissed.** A highlight ages out instead: by its end date (a new video is given one about a month after it was published), by its launch cap, or, for a single video, as soon as the person has opened it. The same video stays under Watch for good, so nothing is ever lost by being shown.
+- **A video item brings its own picture.** A `video` item takes a plain YouTube watch link, and its card shows that video's thumbnail from YouTube's public thumbnail CDN, so nothing needs to be added to `welcome/images/`; an explicit `image` still wins. To highlight a whole playlist, give its `https://www.youtube.com/playlist?list=...` link and a `thumbnailVideoId`, the 11-character id of one of its videos (usually the first); the card is then labelled "New playlist on the channel" with a "Watch playlist" button. The picture and the title open the item, like the button.
+- **Watch** is every video, newest first as `moreToWatch` lists them (up to 24), shorts mixed in, without the one the highlight is showing; then the On-Ramp series as one card for its playlist, from the bundled `assets/welcome/videos.json`. Nine are shown, the rest behind "Show all", then "More on YouTube" for the channel. A video the person has opened gets a quiet "Opened" mark, kept on this computer and sent nowhere; it only knows about clicks, so the wording is "opened", not "watched". A new upload is added to the top of `moreToWatch`, and given a highlight with an end date if it should be announced.
+- **Contextual placement** keeps most videos where they belong as well: a causal-inference video on that feature's help page, a video per add-on in the Explorer (registry entries already support YouTube links), an example's video in its guide, a release demo in What's new.
 
 ## Trust rules for anything promotional
 
@@ -62,13 +62,13 @@ A promotion that outlives its usefulness turns invisible, so the slot has rules:
 
 ## Opening fast and closing easily
 
-The window opens **immediately** with the bundled content (the On-Ramp, the layout, the footer) and fills in the blog posts, the add-on offer and the Featured item as they arrive; a slow or absent network can no longer delay it. **Esc closes it.** (The window keeps its existing focus behaviour; Esc applies when it has focus.) If the Featured feed fails, the last good copy is used, then the bundled default (empty), so it never shows an error to someone who only wanted to start working.
+The window opens **immediately** with the bundled content (Learn by doing, the On-Ramp card, the layout, the footer) and fills in the blog posts, the add-on offer, the highlight and the Watch videos as they arrive; a slow or absent network can no longer delay it. **Esc closes it.** (The window keeps its existing focus behaviour; Esc applies when it has focus.) If the feed fails, the last good copy is used, then the bundled default (empty), so it never shows an error to someone who only wanted to start working.
 
 There is no "Show at startup" opt-out in this design. If it turns out people resent the window, that is the first thing to add.
 
 ## What is stored
 
-One small file in the user data folder, `welcomeState.json`, written atomically like the update skip store: the Featured ids that were dismissed, how many launches each shown item has had, the episode ids that were opened, and the last version whose What's new was shown. Nothing identifies the person and nothing is sent anywhere.
+One small file in the user data folder, `welcomeState.json`, written atomically like the update skip store: how many launches each highlighted item has had, the video ids that were opened (kept as `openedEpisodes`, its name from when only On-Ramp episodes could be), the tutorials completed, and the last version whose What's new was shown. Its `dismissedFeatured` list, from before step 5, is still read so an old file loads, but nothing uses it. Nothing identifies the person and nothing is sent anywhere.
 
 ## Order of work
 
@@ -76,11 +76,12 @@ One small file in the user data folder, `welcomeState.json`, written atomically 
 2. **On-Ramp polish:** the section heading, the playlist link, the "opened" tick, "Show all" past eight.
 3. **What's new:** the last-seen version, shown once per release.
 4. **Featured and More to watch:** the feed format and where it is hosted, the repository-hosted images, caching and the bundled fallback, dismiss and launch caps, the Sponsored label.
+5. **Tutorials first, nothing to dismiss:** Learn by doing in place of the On-Ramp section and the tour card; the highlight ages out by date, launch cap or being opened, and cannot be dismissed; one Watch library with the On-Ramp as a playlist card.
 
 Each step leaves the window working. The state file arrives with step 2 (opened episodes) and grows from there.
 
 ## Decisions on the open questions
 
-- **Where the Featured feed is hosted:** the repository, `welcome/featured.json` and `welcome/images/`, fetched from `raw.githubusercontent.com` (override with `KONJUGATE_WELCOME_FEED_URL`). It is never bundled in the app; the last good copy is cached in the user data folder.
+- **Where the feed is hosted:** the repository, `welcome/featured.json` and `welcome/images/`, fetched from `raw.githubusercontent.com` (override with `KONJUGATE_WELCOME_FEED_URL`). It is never bundled in the app; the last good copy is cached in the user data folder.
 - **What counts as a launch:** only automatic opens (app start and macOS dock reactivation). Clicking the Konjugate button does not use up a launch cap.
-- **Sponsored items:** dismissible like any other, and the dismissal is remembered per item id.
+- **Sponsored items:** like any other item, they cannot be dismissed (since step 5), so a sponsored item should always carry an end date or a launch cap.

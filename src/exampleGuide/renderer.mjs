@@ -3,7 +3,7 @@
 import { convertLatexToMarkup } from '../../node_modules/mathlive/mathlive.min.mjs';
 import { guideKindSuffix } from './guideKind.mjs';
 import { describeCheckedAt, describeUpdateStatus } from '../updatePanel.mjs';
-import { featuredLabel, visibleEpisodes, welcomeLinks, welcomeSectionOrder } from '../welcomeModel.mjs';
+import { featuredLabel, watchLibrary, welcomeLinks, welcomeSectionOrder } from '../welcomeModel.mjs';
 import { prepareGuideMarkdown } from './markdown.mjs';
 
 const escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
@@ -59,7 +59,6 @@ function renderCard(card, { opened = false } = {}) {
     </a>`;
 }
 
-const youtubeCard = (video) => ({ title: video.title, videoId: video.videoId, url: `https://www.youtube.com/watch?v=${video.videoId}`, thumbnailUrl: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg` });
 
 // ---- The Welcome window (docs/proposals/welcomeWindow.md)
 //
@@ -116,22 +115,38 @@ function renderFeatured(item) {
             ${item.text ? `<p>${escapeHtml(item.text)}</p>` : ''}
             <button type="button" class="featuredAction" ${open}>${escapeHtml(action)}</button>
         </div>
-        <button type="button" class="featuredDismiss" data-featured-dismiss="${escapeHtml(item.id)}" aria-label="Dismiss this">×</button>
     </section>`;
 }
 
-function renderOnRamp() {
-    const { shown, hidden } = visibleEpisodes(welcome.onRamp.episodes, welcome.onRampExpanded);
+// Learn by doing: the tutorials this person has not done yet, next first, each started in the project window this
+// page belongs to; and the whole list one click away. Every tutorial ends with a model they built themselves.
+function renderLearn() {
+    const { suggested, total, completed } = welcome.learn;
+    const cards = suggested.map((tutorial) => `<div class="tutorialCard">
+            <div class="tutorialCardArea">${escapeHtml(tutorial.areaTitle)} · ${escapeHtml(String(tutorial.minutes))} min</div>
+            <strong>${escapeHtml(tutorial.title)}</strong>
+            <p>${escapeHtml(tutorial.summary)}</p>
+            <button type="button" data-start-tutorial="${escapeHtml(tutorial.id)}">Start</button>
+        </div>`).join('');
+    const progress = completed ? `${completed} of ${total} done · ` : '';
+    return `<h2>Learn by doing</h2>
+        <p class="sectionIntro">Short tutorials that run inside Konjugate: you build the model yourself, step by step, and can skip any step.</p>
+        ${cards ? `<div class="tutorialCards">${cards}</div>` : '<p class="sectionIntro">You have done every tutorial. They are all still there to take again.</p>'}
+        <p class="onRampMore">${progress}<button type="button" class="linkButton" data-open-tutorials>See all ${escapeHtml(String(total))} tutorials</button></p>`;
+}
+
+// Watch: every video, newest first, the highlighted one aside; the On-Ramp series is one card for its playlist.
+function renderWatch() {
+    const { shown, hidden } = watchLibrary({ moreToWatch: welcome.moreToWatch, onRamp: welcome.onRamp, highlightedVideoId: welcome.featured?.videoId ?? null }, { expanded: welcome.watchExpanded });
     const opened = new Set(welcome.openedEpisodes);
-    const cards = shown.map((episode) => renderCard(episode, { opened: opened.has(episode.videoId) })).join('');
+    const cards = shown.map((video) => (video.playlist ? renderCard({ ...video, videoId: undefined }) : renderCard(video, { opened: opened.has(video.videoId) }))).join('');
     const extras = [
         hidden ? `<button type="button" class="linkButton" data-show-all>Show all (${hidden} more)</button>` : '',
-        welcome.onRamp.playlistUrl ? `<a href="${escapeHtml(welcome.onRamp.playlistUrl)}" data-external-link>Watch the full playlist</a>` : ''
+        `<a href="${escapeHtml(welcomeLinks.youtubeChannel)}" data-external-link>More on YouTube</a>`
     ].filter(Boolean).join(' · ');
-    return `<h2>Learn Konjugate: the On-Ramp</h2>
-        <p class="sectionIntro">The tutorial series, in order. Come back to it any time.</p>
+    return `<h2>Watch</h2>
         <div class="cardGrid">${cards}</div>
-        ${extras ? `<p class="onRampMore">${extras}</p>` : ''}`;
+        <p class="onRampMore">${extras}</p>`;
 }
 
 function renderCommunity() {
@@ -148,12 +163,11 @@ function renderCommunity() {
 const sectionRenderers = {
     heading: () => `<h1>Welcome to Konjugate v${escapeHtml(welcome.version)}</h1>`,
     status: () => '<section id="updatesSection" class="updatesSection" aria-live="polite" hidden></section>',
-    tour: () => `<section class="tourCard"><div><strong>Take the 3-minute tour</strong><p>Build and run your first model, step by step, right in the app. You can skip it at any point.</p></div><button type="button" data-start-tour>Start the tour</button></section>`,
     recommended: () => renderRecommendedAddons(welcome.recommendedAddons, welcome.recommendedStatus),
     whatsNew: () => renderWhatsNew(welcome.whatsNew),
-    featured: () => renderFeatured(welcome.featured),
-    onRamp: renderOnRamp,
-    moreToWatch: () => `<h2>More to watch</h2><div class="cardGrid">${welcome.moreToWatch.map((video) => renderCard(youtubeCard(video))).join('')}</div>`,
+    highlight: () => renderFeatured(welcome.featured),
+    learn: renderLearn,
+    watch: renderWatch,
     blog: () => `<h2>Recent from the blog</h2><div class="cardGrid">${welcome.posts.map((post) => renderCard(post)).join('')}</div>`,
     community: renderCommunity,
     footer: () => `<footer class="welcomeFooter">${renderMarkdown(welcome.markdown)}</footer>`
@@ -163,8 +177,8 @@ function renderWelcome({ resetScroll = false } = {}) {
     const content = document.querySelector('#content');
     const scroll = content.scrollTop;
     const order = welcomeSectionOrder({
-        hasRecommended: welcome.recommendedAddons.length > 0, hasWhatsNew: Boolean(welcome.whatsNew), hasFeatured: Boolean(welcome.featured),
-        hasMoreToWatch: welcome.moreToWatch.length > 0, hasPosts: welcome.posts.length > 0
+        hasRecommended: welcome.recommendedAddons.length > 0, hasWhatsNew: Boolean(welcome.whatsNew), hasHighlight: Boolean(welcome.featured),
+        hasVideos: welcome.moreToWatch.length > 0 || Boolean(welcome.onRamp?.playlistUrl), hasPosts: welcome.posts.length > 0
     });
     content.innerHTML = order.map((section) => sectionRenderers[section]()).join('');
     content.scrollTop = resetScroll ? 0 : scroll;
@@ -188,17 +202,12 @@ function wireWelcome() {
         }
     }));
     content.querySelector('[data-show-all]')?.addEventListener('click', () => {
-        welcome.onRampExpanded = true;
+        welcome.watchExpanded = true;
         renderWelcome();
     });
+    content.querySelectorAll('[data-start-tutorial]').forEach((button) => button.addEventListener('click', () => window.exampleGuide.startTutorial(button.dataset.startTutorial)));
+    content.querySelector('[data-open-tutorials]')?.addEventListener('click', () => window.exampleGuide.openTutorials());
     content.querySelectorAll('[data-featured-open]').forEach((target) => target.addEventListener('click', (event) => window.exampleGuide.openFeatured(event.currentTarget.dataset.featuredOpen)));
-    content.querySelector('[data-featured-dismiss]')?.addEventListener('click', async (event) => {
-        if (await window.exampleGuide.dismissFeatured(event.currentTarget.dataset.featuredDismiss)) {
-            welcome.featured = null;
-            renderWelcome();
-        }
-    });
-    content.querySelector('[data-start-tour]')?.addEventListener('click', () => window.exampleGuide.startTour());
     content.querySelector('[data-help-feedback]')?.addEventListener('click', () => window.exampleGuide.openHelpFeedback());
     content.querySelector('#restartKonjugate')?.addEventListener('click', () => window.exampleGuide.restart());
     content.querySelector('#installRecommendedAddons')?.addEventListener('click', async () => {
@@ -302,7 +311,8 @@ window.exampleGuide.onContent((payload) => {
     if (kind === 'welcome') {
         welcome = {
             generation: payload.generation, version: payload.version, markdown,
-            onRamp: payload.onRamp, openedEpisodes: payload.openedEpisodes ?? [], onRampExpanded: false,
+            onRamp: payload.onRamp, openedEpisodes: payload.openedEpisodes ?? [], watchExpanded: false,
+            learn: payload.learn ?? { suggested: [], total: 0, completed: 0 },
             whatsNew: payload.whatsNew ?? null, featured: payload.featured ?? null, moreToWatch: payload.moreToWatch ?? [], posts: payload.posts ?? [],
             recommendedAddons: payload.recommendedAddons ?? [], recommendedStatus: { phase: 'idle', text: '' }
         };

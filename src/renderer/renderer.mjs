@@ -15384,6 +15384,7 @@ async function openTutorialsDialog() {
     $('#tutorialsSearch').focus();
 }
 $('#tutorialsButton').addEventListener('click', openTutorialsDialog);
+window.tutorials?.onOpenList?.(() => openTutorialsDialog());
 $('#tutorialsClose').addEventListener('click', () => $('#tutorialsDialog').close());
 $('#tutorialsSearch').addEventListener('input', renderTutorialsList);
 // Enter in the search field would submit the dialog's form, which closes it.

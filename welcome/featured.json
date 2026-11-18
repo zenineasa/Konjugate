@@ -3,19 +3,50 @@
     "formatVersion": 1,
     "featured": [
         {
-            "id": "break-it-before-the-world-does-ep-2",
+            "id": "digital-twin-in-4-minutes",
             "kind": "video",
-            "title": "Could Your City Run Out of Bread? | Break It Before the World Does Ep. 2",
-            "text": "What happens to your shelves if the border closes for two weeks?",
-            "url": "https://www.youtube.com/watch?v=Ur_3iGknlnQ"
-        },
-        {
-            "id": "break-it-before-the-world-does-ep-1",
-            "kind": "video",
-            "title": "Hormuz Closed: What About Your Shelves? | Break It Before the World Does Ep. 1",
-            "text": "Start with the first episode of the playlist.",
-            "url": "https://youtu.be/X8D1G_xipbI"
+            "title": "Digital Twin in 4 Minutes: Model, MQTT Data, Drift Detection",
+            "text": "A model running beside the real system, kept in step with its readings over MQTT, and saying when the two part ways.",
+            "url": "https://www.youtube.com/watch?v=sWJJNsbxi6o",
+            "endsAt": "2026-12-18"
         }
     ],
-    "moreToWatch": []
+    "moreToWatch": [
+        {
+            "videoId": "sWJJNsbxi6o",
+            "title": "Digital Twin in 4 Minutes: Model, MQTT Data, Drift Detection"
+        },
+        {
+            "videoId": "1H-26sCmftU",
+            "title": "Find the structure hiding in your time series data"
+        },
+        {
+            "videoId": "-srG_CWzQ4g",
+            "title": "Multiverse of Models: rewind, change one thing, fork"
+        },
+        {
+            "videoId": "GM1lWLaIMDs",
+            "title": "I had the model and the data, but not the parameters"
+        },
+        {
+            "videoId": "wJAx5wVzGss",
+            "title": "I changed my simulation while it was still running"
+        },
+        {
+            "videoId": "DQwQRCGPwWM",
+            "title": "I changed one number and my simulation tore itself apart"
+        },
+        {
+            "videoId": "Ur_3iGknlnQ",
+            "title": "Could Your City Run Out of Bread? | Break It Before the World Does Ep. 2"
+        },
+        {
+            "videoId": "X8D1G_xipbI",
+            "title": "Hormuz Closed: What About Your Shelves? | Break It Before the World Does Ep. 1"
+        },
+        {
+            "videoId": "l-rHUY-JdoY",
+            "title": "Konjugate Fintech: A Transparent Model for Bank Runs, Market and DeFi Risk Analysis"
+        }
+    ]
 }

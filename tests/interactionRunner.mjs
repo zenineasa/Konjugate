@@ -629,6 +629,65 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `1 + 1`), 2, 'The first window is no longer responsive after the second closed.');
     }, { skip: !driver.capabilities.multiWindow && 'multi-window and per-window Welcome-window scoping have no web-edition equivalent' });
 
+    await run('the Welcome page suggests tutorials not yet done and starts one, opens the whole list, and has nothing to dismiss', async () => {
+        // An empty, saved project, so starting a tutorial asks nothing (as tutorialHelpers().clean() does further on).
+        const clean = async () => {
+            await putAwayLeftovers();
+            if (await evaluate(window, `window.__debugTour.active()`)) await evaluate(window, `window.__debugTour.stop()`);
+            const emptyDocument = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(emptyDocument)}, 'welcome.kjt')`);
+            await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('0 nodes') && !window.__debugTour.blockers().dirty`, 'The empty project did not load.');
+        };
+        await clean();
+        const openWelcome = async () => {
+            const before = driver.allHandles();
+            await evaluate(window, `window.applicationInfo.openWelcome()`);
+            const welcomeWindow = await driver.waitForNewHandle(before, { titleIncludes: 'Welcome' });
+            await waitFor(welcomeWindow, `Boolean(document.querySelector('[data-open-tutorials]'))`, 'The Welcome page did not show Learn by doing.');
+            return welcomeWindow;
+        };
+        let welcomeWindow = await openWelcome();
+        const page = await evaluate(welcomeWindow, `({
+            headings: [...document.querySelectorAll('#content h2')].map((heading) => heading.textContent),
+            suggested: [...document.querySelectorAll('[data-start-tutorial]')].map((button) => button.dataset.startTutorial),
+            dismiss: document.querySelectorAll('[data-featured-dismiss], .featuredDismiss').length,
+            tour: document.querySelectorAll('[data-start-tour]').length,
+            onRampCard: [...document.querySelectorAll('.cardTitle')].some((title) => /^Konjugate On-Ramp: the \\d+-episode video series$/.test(title.textContent))
+        })`);
+        assert.ok(page.headings.includes('Learn by doing') && page.headings.includes('Watch'), `The sections are there: ${page.headings.join(', ')}.`);
+        assert.ok(!page.headings.some((heading) => /On-Ramp/.test(heading)), 'The On-Ramp is no longer a section of its own.');
+        assert.equal(page.onRampCard, true, 'The On-Ramp is one card under Watch.');
+        assert.equal(page.dismiss, 0, 'Nothing on the page can be dismissed.');
+        assert.equal(page.tour, 0, 'The tour is the first tutorial, not a card of its own.');
+        const completed = await evaluate(window, `window.tutorials.completed()`);
+        assert.ok(page.suggested.length <= 3, `At most three tutorials are suggested: ${page.suggested.join(', ')}.`);
+        assert.ok(page.suggested.every((id) => !completed.includes(id)), `Only tutorials not yet done are suggested (done: ${completed.join(', ')}).`);
+        // Run alone, or early in the suite, nothing is done yet; after the tutorial scenarios, everything may be.
+        if (!page.suggested.length) assert.match(await evaluate(welcomeWindow, `document.querySelector('#content').textContent`), /You have done every tutorial/, 'With nothing left, the page says so.');
+
+        // A video on the page can be remembered as opened; anything else is refused.
+        assert.equal(await evaluate(welcomeWindow, `window.exampleGuide.markEpisodeOpened('eDHksSqKhFs')`), true);
+        assert.equal(await evaluate(welcomeWindow, `window.exampleGuide.markEpisodeOpened('notAVideoId')`), false);
+
+        // Start: the Welcome window gives way to the tutorial, in the project window.
+        if (page.suggested.length) {
+            await evaluate(welcomeWindow, `setTimeout(() => document.querySelector('[data-start-tutorial]').click(), 0)`);
+            await waitFor(window, `window.__debugTour.tutorial() === ${JSON.stringify(page.suggested[0])}`, 'Start did not start the suggested tutorial.');
+            assert.equal(await welcomeWindow.isDestroyed(), true, 'The Welcome window closed for the tutorial.');
+            await evaluate(window, `window.__debugTour.stop()`);
+            await clean();
+            welcomeWindow = await openWelcome();
+        }
+
+        // See all: the whole Tutorials list, in the project window.
+        await evaluate(welcomeWindow, `setTimeout(() => document.querySelector('[data-open-tutorials]').click(), 0)`);
+        await waitFor(window, `document.querySelector('#tutorialsDialog').open`, 'See all tutorials did not open the Tutorials list.');
+        assert.equal(await welcomeWindow.isDestroyed(), true, 'The Welcome window closed for the list.');
+        await evaluate(window, `document.querySelector('#tutorialsClose').click()`);
+        // Left as the scenarios around it expect it: the example the first scenario loaded.
+        await freshExample();
+    }, { skip: !driver.capabilities.multiWindow && 'the Welcome page is a window of its own on the desktop only' });
+
     await run('an OS-initiated file open reuses an already-open window on the same file, otherwise opens a new one', async () => {
         // Simulates exactly what a real double-click (or a relaunch's second-instance argv, on
         // Windows/Linux) drives main.mjs's own app.on('open-file', ...) listener to do -- no OS

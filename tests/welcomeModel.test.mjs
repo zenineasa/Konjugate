@@ -3,51 +3,77 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { featuredLabel, onRampVisibleLimit, releaseNotesUrl, visibleEpisodes, welcomeLinks, welcomeSectionOrder, whatsNewFor } from '../src/welcomeModel.mjs';
+import { featuredLabel, releaseNotesUrl, suggestedTutorialCount, suggestedTutorials, watchLibrary, watchVisibleLimit, welcomeLinks, welcomeSectionOrder, whatsNewFor } from '../src/welcomeModel.mjs';
 
 test('the page always has its core sections, in order, and nothing conditional until it has content', () => {
-    assert.deepEqual(welcomeSectionOrder(), ['heading', 'status', 'tour', 'onRamp', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder(), ['heading', 'status', 'learn', 'community', 'footer']);
 });
 
-test('conditional sections slot into their place, with the On-Ramp between Featured and More to watch', () => {
-    assert.deepEqual(welcomeSectionOrder({ hasRecommended: true, hasWhatsNew: true, hasFeatured: true, hasMoreToWatch: true, hasPosts: true }),
-        ['heading', 'status', 'tour', 'recommended', 'whatsNew', 'featured', 'onRamp', 'moreToWatch', 'blog', 'community', 'footer']);
-    assert.deepEqual(welcomeSectionOrder({ hasFeatured: true }), ['heading', 'status', 'tour', 'featured', 'onRamp', 'community', 'footer']);
-    assert.deepEqual(welcomeSectionOrder({ hasPosts: true }), ['heading', 'status', 'tour', 'onRamp', 'blog', 'community', 'footer']);
+test('conditional sections slot into their place, with Learn by doing between the highlight and the videos', () => {
+    assert.deepEqual(welcomeSectionOrder({ hasRecommended: true, hasWhatsNew: true, hasHighlight: true, hasVideos: true, hasPosts: true }),
+        ['heading', 'status', 'recommended', 'whatsNew', 'highlight', 'learn', 'watch', 'blog', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder({ hasHighlight: true }), ['heading', 'status', 'highlight', 'learn', 'community', 'footer']);
+    assert.deepEqual(welcomeSectionOrder({ hasPosts: true }), ['heading', 'status', 'learn', 'blog', 'community', 'footer']);
 });
 
-test('whatever else appears, the On-Ramp is always present and always after Featured, never conditional', () => {
+test('whatever else appears, Learn by doing is always there, after the highlight and before the videos', () => {
     for (let bits = 0; bits < 32; bits += 1) {
         const order = welcomeSectionOrder({
-            hasRecommended: Boolean(bits & 1), hasWhatsNew: Boolean(bits & 2), hasFeatured: Boolean(bits & 4), hasMoreToWatch: Boolean(bits & 8), hasPosts: Boolean(bits & 16)
+            hasRecommended: Boolean(bits & 1), hasWhatsNew: Boolean(bits & 2), hasHighlight: Boolean(bits & 4), hasVideos: Boolean(bits & 8), hasPosts: Boolean(bits & 16)
         });
-        assert.ok(order.includes('onRamp'), `bits ${bits}`);
-        assert.ok(order.indexOf('onRamp') > order.indexOf('status'));
-        if (order.includes('featured')) assert.ok(order.indexOf('featured') < order.indexOf('onRamp'));
-        if (order.includes('moreToWatch')) assert.ok(order.indexOf('moreToWatch') > order.indexOf('onRamp'));
+        assert.ok(order.includes('learn'), `bits ${bits}`);
+        if (order.includes('highlight')) assert.ok(order.indexOf('highlight') < order.indexOf('learn'));
+        if (order.includes('watch')) assert.ok(order.indexOf('watch') > order.indexOf('learn'));
         assert.equal(order[0], 'heading');
         assert.equal(order.at(-1), 'footer');
         assert.equal(order.at(-2), 'community');
     }
 });
 
-test('episodes are shown whole up to the limit, and a longer series hides only the tail, in order', () => {
-    const episodes = Array.from({ length: 6 }, (_, index) => ({ videoId: `ep${index + 1}` }));
-    assert.deepEqual(visibleEpisodes(episodes), { shown: episodes, hidden: 0 });
-    const long = Array.from({ length: 11 }, (_, index) => ({ videoId: `ep${index + 1}` }));
-    const collapsed = visibleEpisodes(long);
-    assert.equal(onRampVisibleLimit, 8);
-    assert.deepEqual(collapsed.shown.map((entry) => entry.videoId), ['ep1', 'ep2', 'ep3', 'ep4', 'ep5', 'ep6', 'ep7', 'ep8']);
+const groups = [
+    { id: 'start', title: 'Start here', tutorials: [{ id: 'firstModel', title: 'First' }] },
+    { id: 'modelling', title: 'Modelling', tutorials: [{ id: 'm1', title: 'M1' }, { id: 'm2', title: 'M2' }] },
+    { id: 'data', title: 'Data and twins', tutorials: [{ id: 'd1', title: 'D1' }] }
+];
+
+test('Learn by doing suggests the next tutorials not done, in the list\'s order, first-model tour first', () => {
+    const fresh = suggestedTutorials(groups);
+    assert.equal(suggestedTutorialCount, 3);
+    assert.deepEqual(fresh.suggested.map((tutorial) => tutorial.id), ['firstModel', 'm1', 'm2']);
+    assert.equal(fresh.suggested[1].areaTitle, 'Modelling');
+    assert.deepEqual([fresh.total, fresh.completed], [4, 0]);
+    const along = suggestedTutorials(groups, ['firstModel', 'm2', 'not a tutorial']);
+    assert.deepEqual(along.suggested.map((tutorial) => tutorial.id), ['m1', 'd1'], 'done ones drop out, and fewer than three is fine');
+    assert.equal(along.completed, 2, 'an id no longer in the list is not counted');
+    assert.deepEqual(suggestedTutorials(groups, ['firstModel', 'm1', 'm2', 'd1']).suggested, [], 'all done');
+});
+
+const onRamp = { playlistUrl: 'https://www.youtube.com/watch?v=aaaaaaaaaaa&list=PLx', episodes: [{ videoId: 'aaaaaaaaaaa' }, { videoId: 'bbbbbbbbbbb' }] };
+const videos = (count) => Array.from({ length: count }, (_, index) => ({ videoId: `video${String(index).padStart(6, '0')}`, title: `Video ${index}` }));
+
+test('Watch lists the videos in the feed\'s order without the highlighted one, then the On-Ramp as one playlist card', () => {
+    const { shown, hidden } = watchLibrary({ moreToWatch: videos(3), onRamp, highlightedVideoId: 'video000000' });
+    assert.deepEqual(shown.map((card) => card.title), ['Video 1', 'Video 2', 'Konjugate On-Ramp: the 2-episode video series']);
+    assert.equal(hidden, 0);
+    assert.equal(shown[0].url, 'https://www.youtube.com/watch?v=video000001');
+    assert.equal(shown.at(-1).playlist, true);
+    assert.equal(shown.at(-1).url, onRamp.playlistUrl);
+    assert.deepEqual(watchLibrary({ moreToWatch: [], onRamp: null }).shown, [], 'nothing to watch');
+});
+
+test('Watch shows a handful, with the rest behind Show all, in order', () => {
+    assert.equal(watchVisibleLimit, 9);
+    const collapsed = watchLibrary({ moreToWatch: videos(11), onRamp });
+    assert.equal(collapsed.shown.length, 9);
     assert.equal(collapsed.hidden, 3);
-    assert.deepEqual(visibleEpisodes(long, true), { shown: long, hidden: 0 });
-    assert.deepEqual(visibleEpisodes(long.slice(0, 8)), { shown: long.slice(0, 8), hidden: 0 }, 'exactly the limit needs no "Show all"');
-    assert.equal(visibleEpisodes(long.slice(0, 9)).hidden, 1);
+    assert.equal(watchLibrary({ moreToWatch: videos(11), onRamp }, { expanded: true }).shown.length, 12);
+    assert.equal(watchLibrary({ moreToWatch: videos(8), onRamp }).hidden, 0, 'exactly the limit needs no Show all');
 });
 
 test('paid items are labelled as such, and the other kinds get plain labels', () => {
     assert.equal(featuredLabel('sponsored'), 'Sponsored');
-    assert.equal(featuredLabel('video'), 'New video');
-    assert.equal(featuredLabel('video', { playlist: true }), 'New playlist');
+    assert.equal(featuredLabel('video'), 'New on the channel');
+    assert.equal(featuredLabel('video', { playlist: true }), 'New playlist on the channel');
     assert.equal(featuredLabel('announcement', { playlist: true }), 'Announcement');
     assert.equal(featuredLabel('announcement'), 'Announcement');
     assert.equal(featuredLabel('anything else'), 'Announcement');
@@ -69,6 +95,7 @@ test('the fixed links point at Konjugate\'s own places', () => {
     }
     assert.ok(welcomeLinks.discord.startsWith('https://discord.gg/'));
     assert.ok(welcomeLinks.whatsapp.startsWith('https://whatsapp.com/channel/'));
+    assert.equal(welcomeLinks.youtubeChannel, 'https://www.youtube.com/@Konjugate');
 });
 
 test('the page model imports nothing but the Node-free version comparison', async () => {

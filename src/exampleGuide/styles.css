@@ -80,6 +80,15 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .tourCard p { margin: 4px 0 0; color: #a9bcc5; font-size: 13px; }
 .tourCard button { flex: none; height: 32px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .tourCard button:hover, .tourCard button:focus-visible { background: #74ddd3; border-color: #74ddd3; }
+/* Learn by doing: a tutorial card each, in the tour card's colours, its Start button at the bottom however long the summary. */
+/* Always the three suggestions side by side, never two and one left over; one under another only in a narrow window. */
+.tutorialCards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 10px; }
+@media (max-width: 640px) { .tutorialCards { grid-template-columns: 1fr; } }
+.tutorialCard { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; background: rgb(66 201 188 / 8%); border: 1px solid #2f6f6a; border-radius: 7px; }
+.tutorialCard .tutorialCardArea { color: #74ddd3; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+.tutorialCard p { flex: 1; margin: 0; color: #a9bcc5; font-size: 13px; }
+.tutorialCard button { align-self: flex-start; height: 30px; margin-top: 4px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+.tutorialCard button:hover, .tutorialCard button:focus-visible { background: #74ddd3; border-color: #74ddd3; }
 .whatsNew h2 { margin: 0 0 6px; padding-top: 0; border-top: 0; }
 .whatsNew ul { margin: 6px 0; }
 .featured { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; padding-right: 44px; }
@@ -94,8 +103,6 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .featuredBody > .featuredTitle + button { margin-top: 12px; }
 .featured button.featuredAction, .whatsNew button { height: 30px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; transition: background .15s ease, border-color .15s ease, transform .15s ease; }
 .featured button.featuredAction:hover, .featured button.featuredAction:focus-visible, .whatsNew button:hover { background: #74ddd3; border-color: #74ddd3; transform: translateY(-2px); }
-.featured button.featuredDismiss { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0; color: #8499a3; background: transparent; border: 0; font-size: 16px; font-weight: 400; transform: none; }
-.featured button.featuredDismiss:hover { color: #e6f0f2; background: #182730; transform: none; }
 .whatsNewFrom { margin: 0 0 6px; color: #778d98; }
 .whatsNewCompact { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 14px; padding-top: 10px; padding-bottom: 10px; color: #b8ced2; font-size: 11.5px; }
 .whatsNewCompact strong { color: #e6f0f2; }

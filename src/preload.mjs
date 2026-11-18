@@ -63,7 +63,9 @@ contextBridge.exposeInMainWorld('tutorials', {
     recordCompleted: (id) => ipcRenderer.invoke('tutorialRecordCompleted', id),
     downloadData: (fileName) => ipcRenderer.invoke('projectDownloadTutorialData', fileName),
     loadData: (fileName) => ipcRenderer.invoke('projectLoadTutorialData', fileName),
-    onStart: (callback) => ipcRenderer.on('tutorialStart', (_event, id) => callback(id))
+    onStart: (callback) => ipcRenderer.on('tutorialStart', (_event, id) => callback(id)),
+    // The Welcome window's "See all tutorials": main asks this window to show its Tutorials list.
+    onOpenList: (callback) => ipcRenderer.on('tutorialsOpenList', () => callback())
 });
 
 // "Help & feedback": the text of the email a person can send us (see bugReport.mjs), GitHub's pre-filled report, and main telling this

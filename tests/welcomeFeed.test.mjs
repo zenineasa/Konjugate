@@ -124,9 +124,15 @@ test('an item is shown only inside its window, and a window with no dates is alw
     assert.equal(selectFeatured({ items: parsed(item()), now: 1 })?.id, 'launch');
 });
 
-test('a dismissed item is never shown, and a capped item stops at its cap', () => {
+test('a watched video leaves the highlight, nothing else is removed by being opened, and a capped item stops at its cap', () => {
+    const video = parsed(item({ id: 'clip', kind: 'video', url: 'https://www.youtube.com/watch?v=abcdefghijk' }), item({ id: 'next', kind: 'video', url: 'https://youtu.be/bcdefghijkl' }));
+    assert.equal(selectFeatured({ items: video, now: 1 }).id, 'clip');
+    assert.equal(selectFeatured({ items: video, now: 1, opened: ['abcdefghijk'] }).id, 'next', 'once watched, the next one is highlighted');
+    assert.equal(selectFeatured({ items: video, now: 1, opened: ['abcdefghijk', 'bcdefghijkl'] }), null);
+    const playlist = parsed(item({ id: 'series', kind: 'video', url: 'https://www.youtube.com/playlist?list=PLabcdefghij', thumbnailVideoId: 'abcdefghijk' }));
+    assert.equal(selectFeatured({ items: playlist, now: 1, opened: ['abcdefghijk'] }).id, 'series', 'one video watched is not the whole playlist');
+    assert.equal(selectFeatured({ items: parsed(item()), now: 1, opened: ['abcdefghijk'] }).id, 'launch', 'an announcement has no video to watch');
     const items = parsed(item({ maxLaunches: 3 }));
-    assert.equal(selectFeatured({ items, now: 1, dismissed: ['launch'] }), null);
     assert.equal(selectFeatured({ items, now: 1, shown: { launch: 2 } })?.id, 'launch');
     assert.equal(selectFeatured({ items, now: 1, shown: { launch: 3 } }), null);
     assert.equal(selectFeatured({ items, now: 1, shown: { other: 99 } })?.id, 'launch');
@@ -135,9 +141,9 @@ test('a dismissed item is never shown, and a capped item stops at its cap', () =
 test('the highest priority wins, and ties go to the item listed first', () => {
     const items = parsed(item({ id: 'a' }), item({ id: 'b', priority: 5 }), item({ id: 'c', priority: 5 }), item({ id: 'd', priority: -1 }));
     assert.equal(selectFeatured({ items, now: 1 }).id, 'b');
-    assert.equal(selectFeatured({ items, now: 1, dismissed: ['b'] }).id, 'c');
-    assert.equal(selectFeatured({ items, now: 1, dismissed: ['b', 'c'] }).id, 'a');
-    assert.equal(selectFeatured({ items, now: 1, dismissed: ['a', 'b', 'c'] }).id, 'd');
+    const capped = parsed(item({ id: 'a' }), item({ id: 'b', priority: 5, maxLaunches: 1 }), item({ id: 'c', priority: 5 }), item({ id: 'd', priority: -1 }));
+    assert.equal(selectFeatured({ items: capped, now: 1, shown: { b: 1 } }).id, 'c');
+    assert.equal(selectFeatured({ items: parsed(item({ id: 'a' }), item({ id: 'd', priority: -1 })), now: 1 }).id, 'a');
 });
 
 // ---- Where things come from
@@ -178,6 +184,8 @@ test('the repository welcome/featured.json parses cleanly with no problems', asy
     const raw = JSON.parse(await readFile(new URL('../welcome/featured.json', import.meta.url), 'utf8'));
     const result = parseWelcomeFeed(raw);
     assert.deepEqual(result.problems, []);
-    assert.equal(result.featured[0].id, 'break-it-before-the-world-does-ep-2');
-    assert.equal(result.featured[0].thumbnailVideoId, 'Ur_3iGknlnQ');
+    assert.equal(result.featured[0].id, 'digital-twin-in-4-minutes');
+    assert.equal(result.featured[0].thumbnailVideoId, 'sWJJNsbxi6o');
+    assert.ok(result.featured[0].endsAt !== null, 'a highlighted video is given an end date, so it ages out');
+    assert.equal(result.moreToWatch[0].videoId, result.featured[0].thumbnailVideoId, 'and it stays under Watch, newest first, once it has');
 });

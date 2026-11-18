@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The Welcome window's Featured slot and "More to watch" row come from a small JSON file kept in this
+// The Welcome window's highlight ("New on the channel") and its Watch section come from a small JSON file kept in this
 // repository (welcome/featured.json), reviewed in git like the add-on registry: nothing promotional can
 // appear or change without a commit, and an empty file switches it all off. This module validates that
 // file strictly, picks what to show, and builds the URLs; the main process does the fetching, caching
@@ -10,7 +10,7 @@
 
 export const feedFormat = 'konjugate-welcome-feed';
 export const maxFeaturedItems = 10;
-export const maxMoreToWatch = 12;
+export const maxMoreToWatch = 24;
 const maxFeedBytes = 64 * 1024;
 
 const kinds = ['announcement', 'video', 'sponsored'];
@@ -107,16 +107,18 @@ export function parseWelcomeFeed(raw) {
     return { featured, moreToWatch, problems };
 }
 
-// The one item to show now, or null. Eligible means: inside its start/end window, not dismissed, and
-// shown on fewer launches than its cap. Highest priority wins; among equals, the one listed first.
-// `shown` maps an item id to how many launches it has already been shown on.
-export function selectFeatured({ items, now, dismissed = [], shown = {} }) {
+// The one item to highlight now, or null. Eligible means: inside its start/end window, shown on fewer launches
+// than its cap, and, for a video, not yet opened. Highest priority wins; among equals, the one listed first.
+// Nothing is dismissed: a highlight ages out by its end date (a new video is given one about a month on), or as
+// soon as the person has watched it, and the same video stays in More to watch for good.
+// `shown` maps an item id to how many launches it has already been shown on; `opened` lists the video ids opened.
+export function selectFeatured({ items, now, shown = {}, opened = [] }) {
     let best = null;
     for (const item of items) {
         if (item.startsAt !== null && now < item.startsAt) continue;
         if (item.endsAt !== null && now >= item.endsAt) continue;
-        if (dismissed.includes(item.id)) continue;
         if (item.maxLaunches !== null && (shown[item.id] ?? 0) >= item.maxLaunches) continue;
+        if (item.thumbnailVideoId && item.kind === 'video' && !item.playlist && opened.includes(item.thumbnailVideoId)) continue;
         if (best === null || item.priority > best.priority) best = item;
     }
     return best;

@@ -39,9 +39,9 @@ import { createUpdateSkipStore } from './updateSkipStore.mjs';
 import { bugReportUrl, formatBugReportEmail } from './bugReport.mjs';
 import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
 import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
-import { welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
-import { createWelcomeStateStore, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
-import { tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
+import { suggestedTutorials, welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
+import { createWelcomeStateStore, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
+import { groupTutorials, tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
@@ -620,6 +620,8 @@ async function fetchWelcomeImage(url) {
 // the page the way the On-Ramp cards' are (see the CSP in exampleGuide/index.html), so it needs nothing in the repository.
 const featuredPayload = (item, imageUrl = null) => (item ? {
     id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl, playlist: item.playlist,
+    // The video it shows, so the Watch section below does not show it twice.
+    videoId: item.kind === 'video' && !item.playlist ? item.thumbnailVideoId : null,
     thumbnailUrl: item.thumbnailVideoId ? `https://img.youtube.com/vi/${item.thumbnailVideoId}/hqdefault.jpg` : null
 } : null);
 
@@ -629,6 +631,12 @@ async function resolveFeaturedImage(item) {
     const url = item?.image ? welcomeImageUrl(item.image, welcomeFeedUrl()) : null;
     if (!url) return null;
     return cachedRegistryImage(`welcome-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`, () => fetchWelcomeImage(url), `Featured image for ${item.id}`);
+}
+
+// Learn by doing: the next tutorials this person has not completed, with what each needs to be shown and started.
+function welcomeLearn(completed) {
+    const { suggested, total, completed: done } = suggestedTutorials(groupTutorials(), completed);
+    return { total, completed: done, suggested: suggested.map(({ id, title, summary, minutes, areaTitle }) => ({ id, title, summary, minutes, areaTitle })) };
 }
 
 let welcomeGeneration = 0;
@@ -657,7 +665,7 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
     let countedFeaturedId = null;
     const chooseFeatured = async (feed) => {
         const current = await welcomeState().get();
-        const item = selectFeatured({ items: feed.featured, now: Date.now(), dismissed: current.dismissedFeatured, shown: current.featuredShown });
+        const item = selectFeatured({ items: feed.featured, now: Date.now(), shown: current.featuredShown, opened: current.openedEpisodes });
         if (item && automatic && countedFeaturedId !== item.id) {
             countedFeaturedId = item.id;
             await welcomeState().update((latest) => withFeaturedShown(latest, item.id));
@@ -674,6 +682,7 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
         generation,
         onRamp,
         openedEpisodes: state.openedEpisodes,
+        learn: welcomeLearn(state.tutorialsCompleted),
         whatsNew: whatsNewForThisRun,
         featured: featuredPayload(initialFeatured),
         moreToWatch: cachedFeed.moreToWatch,
@@ -714,12 +723,18 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
 
 // What the Welcome window can ask of the main process. Each takes only an id or nothing: the page never
 // supplies a URL or text, so it cannot make this process open or copy anything of its own choosing.
-ipcMain.handle('welcomeEpisodeOpened', async (_event, videoId) => {
+// A video on the page was opened: an On-Ramp episode, one under Watch, or the highlight's. Remembered (in the state's
+// openedEpisodes, which has always held video ids) for the "Opened" mark, and so a highlighted video retires once watched.
+async function rememberVideoOpened(videoId) {
     const { episodes } = await welcomeOnRamp();
-    if (typeof videoId !== 'string' || !episodes.some((episode) => episode.videoId === videoId)) return false;
+    const known = episodes.some((episode) => episode.videoId === videoId)
+        || currentWelcomeFeed.moreToWatch.some((video) => video.videoId === videoId)
+        || currentWelcomeFeed.featured.some((item) => item.thumbnailVideoId === videoId);
+    if (typeof videoId !== 'string' || !known) return false;
     await welcomeState().update((current) => withEpisodeOpened(current, videoId));
     return true;
-});
+}
+ipcMain.handle('welcomeEpisodeOpened', (_event, videoId) => rememberVideoOpened(videoId));
 // The first-model tour (docs/proposals/guidedTour.md). The first launch starts it in place of the Welcome window; the Welcome window's
 // card starts it again, in the window it was opened from, and closes itself so the tour has the screen.
 function startTourIn(projectWindow) {
@@ -761,15 +776,21 @@ ipcMain.handle('exampleGuideStartTutorial', (event, id) => {
     projectWindow.focus();
     return true;
 });
-ipcMain.handle('welcomeDismissFeatured', async (_event, id) => {
-    if (typeof id !== 'string' || !currentWelcomeFeed.featured.some((item) => item.id === id)) return false;
-    await welcomeState().update((current) => withDismissed(current, id));
-    return true;
-});
-ipcMain.handle('welcomeOpenFeatured', (_event, id) => {
+ipcMain.handle('welcomeOpenFeatured', async (_event, id) => {
     const item = currentWelcomeFeed.featured.find((candidate) => candidate.id === id);
     if (!item) return false;
     shell.openExternal(item.url);
+    if (item.kind === 'video' && !item.playlist && item.thumbnailVideoId) await rememberVideoOpened(item.thumbnailVideoId);
+    return true;
+});
+// Learn by doing's "See all tutorials": the Tutorials list, in the project window the Welcome window belongs to.
+ipcMain.handle('welcomeOpenTutorials', (event) => {
+    const guideWindow = BrowserWindow.fromWebContents(event.sender);
+    const projectWindow = [...projectWindows].find((window) => projectWindowState.get(window)?.exampleGuideWindow === guideWindow);
+    if (!projectWindow || projectWindow.isDestroyed()) return false;
+    guideWindow.close();
+    projectWindow.webContents.send('tutorialsOpenList');
+    projectWindow.focus();
     return true;
 });
 const bugReportDetails = () => ({

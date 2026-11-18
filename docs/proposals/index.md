@@ -12,8 +12,8 @@
 * [Subsystem Components](subsystemComponents.md) - Subsystems as reusable components: one definition with named ports and exposed parameters, placed as instances, saved to and linked from their own .kjt file, and expanded into the flat graph the engine already runs
 * [OpenStreetMap Traffic Simulation](openStreetMapTrafficSimulation.md) - Geographic network import and traffic twin simulation
 * [In-App Auto-Updates](autoUpdates.md) - Background update checking and differential updates
-* [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: the permanent On-Ramp tutorials, a time-limited Featured slot, and the trust rules for promotions
-* [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window
+* [Welcome Window](welcomeWindow.md) - The Welcome window as a standing space: Learn by doing (the next in-app tutorials), a highlight that ages out on its own, one Watch library, and the trust rules for promotions
+* [Guided Tour](guidedTour.md) - An optional, skippable first-model tour for the desktop and web editions, offered on first launch and from the Welcome window's Learn by doing
 * [Tutorials](tutorials.md) - Built: a searchable list of twenty-three short, checked in-app tutorials covering every feature, opened from a Tutorials button above Help & feedback, most starting from a shipped example, built by turning the guided tour into one tutorial among many
 * [Parameter Tuning Objectives](parameterTuningObjectives.md) - Tuning against a user-written objective (minimise or maximise) as well as measured data, and progress, estimates and stop-and-keep-best while a tuning runs
 * [Tuning Editors and Programs](tuningEditorsAndPrograms.md) - The tuning objective in the shared equation editor, objectives written as C++ or Python programs, and the shared classes behind both

@@ -11937,17 +11937,27 @@ window.addEventListener('pointerup', (event) => {
 // their own pointerdown.
 let rightPointerDown = null;
 let stagedContextMenuAction = null;
+// On Windows the `contextmenu` event comes after the button is let go, not when it is pressed as on macOS and Linux, so
+// the release finds nothing staged yet. A release that was a click (not a drag) leaves this set, and the menu the
+// `contextmenu` right after it stages opens at once.
+let rightClickReleased = false;
 window.addEventListener('pointerdown', (event) => {
-    if (event.button === 2) { rightPointerDown = { x: event.clientX, y: event.clientY }; stagedContextMenuAction = null; }
+    if (event.button === 2) { rightPointerDown = { x: event.clientX, y: event.clientY }; stagedContextMenuAction = null; rightClickReleased = false; }
 }, { capture: true });
 window.addEventListener('pointerup', (event) => {
     if (event.button !== 2 || !rightPointerDown) return;
     const dragged = Math.hypot(event.clientX - rightPointerDown.x, event.clientY - rightPointerDown.y) > 4;
     rightPointerDown = null;
-    if (!dragged) stagedContextMenuAction?.();
+    if (!dragged && stagedContextMenuAction) stagedContextMenuAction();
+    else rightClickReleased = !dragged;
     stagedContextMenuAction = null;
 }, { capture: true });
 function stageContextMenuAction(action) {
+    if (rightClickReleased) {
+        rightClickReleased = false;
+        action();
+        return;
+    }
     stagedContextMenuAction = action;
 }
 
@@ -11998,6 +12008,7 @@ function fireLongPress() {
     const target = document.elementFromPoint(x, y);
     if (!target) return;
     stagedContextMenuAction = null;
+    rightClickReleased = false;
     nodePointerDown = null;
     if (relationshipPointerDown) clearTimeout(relationshipPointerDown.timer);
     relationshipPointerDown = null;

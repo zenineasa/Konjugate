@@ -224,6 +224,7 @@ export function createPackageStore({ storage, appVersion, onAddonRemoved = null 
 
     // The shape the Extensions window already reads (see packageList in src/main.mjs), plus `enabled` and, for one this Konjugate
     // cannot run, `incompatible`.
+    const skippedPackageWarnings = new Set();
     async function list() {
         const disabled = await disabledKeys();
         const entries = [];
@@ -247,7 +248,12 @@ export function createPackageStore({ storage, appVersion, onAddonRemoved = null 
                             ...(verdict.compatible ? {} : { incompatible: { required: verdict.required, running: verdict.running } })
                         });
                     } catch (error) {
-                        console.warn(`Skipping installed package ${idEntry.name}/${versionEntry.name}: ${error.message}`);
+                        // Listed again and again, so each unreadable folder is warned about once, not on every listing.
+                        const warning = `Skipping installed package ${idEntry.name}/${versionEntry.name}: ${error.message}`;
+                        if (!skippedPackageWarnings.has(warning)) {
+                            skippedPackageWarnings.add(warning);
+                            console.warn(warning);
+                        }
                     }
                 }
             }

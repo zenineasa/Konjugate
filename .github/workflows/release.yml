@@ -259,6 +259,11 @@ jobs:
             - name: Install Linux interaction test prerequisites
               if: runner.os == 'Linux'
               run: sudo apt-get install -y xvfb libgtk-3-0 libnss3 libasound2 libgbm1
+            - name: Turn off App Nap for the interaction tests
+              # Nobody looks at a runner's window, so macOS can nap the app, which throttles the timers of it and of the
+              # engine it starts: real-time runs then fall far behind the clock and never finish in time.
+              if: runner.os == 'macOS'
+              run: defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
             - name: Interaction tests on the packaged app
               # Each pass stops itself after an hour (scripts/runPackagedInteractionTests.mjs); this is the backstop.
               timeout-minutes: 150

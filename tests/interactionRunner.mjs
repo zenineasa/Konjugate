@@ -72,7 +72,10 @@ async function waitFor(window, expression, message, timeout = 5000) {
     }
     const visibleError = await evaluate(window, `document.querySelector('#assistantError:not([hidden])')?.textContent ?? ''`);
     const assistantStatus = await evaluate(window, `document.querySelector('#assistantProposalStatus')?.textContent ?? ''`);
-    throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}`);
+    // Where a run had got to, when one is showing: one far short of its end was slowed (a runner throttling the app's
+    // timers), one stuck at a value had stopped.
+    const run = await evaluate(window, `(() => { const mode = document.querySelector('.resultMode small')?.textContent; const progress = document.querySelector('#simulationProgress'); return mode && !document.querySelector('#resultTransport')?.hidden ? \`\${mode}\${progress && getComputedStyle(progress).display !== 'none' ? ', at ' + progress.value : ''}; window \${document.hidden ? 'hidden' : 'visible'}, \${document.hasFocus() ? 'focused' : 'not focused'}\` : ''; })()`).catch(() => '');
+    throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}${run ? ` Run: ${run}` : ''}`);
 }
 
 // Run opens the Run dialog, and is disabled while the model is being (re)validated, as it is after any edit.
@@ -9698,7 +9701,8 @@ export async function runInteractionTests(driver) {
         const guideWindow = await driver.waitForNewHandle(before, { titleIncludes: 'Example Guide' });
         await waitFor(guideWindow, `Boolean(document.querySelector('[data-start-tutorial]'))`, 'The guide did not offer its tutorial.');
         assert.deepEqual(await evaluate(guideWindow, `[...document.querySelectorAll('.tourCard strong')].map((title) => title.textContent)`), ['Calibrate a model against measured data', 'Optimise towards a goal'], 'The guide offers every tutorial on its example.');
-        await evaluate(guideWindow, `document.querySelector('[data-start-tutorial]').click()`);
+        // Pressed after the script has answered: the button closes the guide window, which would otherwise race the answer.
+        await evaluate(guideWindow, `setTimeout(() => document.querySelector('[data-start-tutorial]').click(), 0)`);
         await waitFor(window, `window.__debugTour.tutorial() === 'calibrateTank'`, 'The guide did not start its tutorial.');
         await waitForStep('welcome');
         await evaluate(window, `window.__debugTour.stop()`);

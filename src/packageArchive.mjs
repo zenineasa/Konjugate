@@ -67,6 +67,15 @@ export async function installPackageArchive(archive, { extension, directory, ove
     return { ...inspected, installPath: target };
 }
 
+// The installed packages are listed again and again (Extensions, updates, the node library), so a folder that cannot
+// be read as one would otherwise be warned about on every listing: each is said once, with why.
+const skippedPackageWarnings = new Set();
+function warnSkippedPackage(installPath, message) {
+    if (skippedPackageWarnings.has(`${installPath}\n${message}`)) return;
+    skippedPackageWarnings.add(`${installPath}\n${message}`);
+    console.warn(message);
+}
+
 export async function listInstalledPackages(directory) {
     const results = [];
     for (const packageType of ['addon', 'plugin']) {
@@ -93,7 +102,7 @@ export async function listInstalledPackages(directory) {
                         manifest: contributionManifest, installPath
                     });
                 } catch (error) {
-                    console.warn(`Skipping installed package ${idEntry.name}/${versionEntry.name}: ${error.message}`);
+                    warnSkippedPackage(installPath, `Skipping installed package ${idEntry.name}/${versionEntry.name}: ${error.message}`);
                 }
             }
         }

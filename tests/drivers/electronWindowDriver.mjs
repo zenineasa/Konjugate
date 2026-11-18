@@ -24,8 +24,23 @@ function wrapWindow(win) {
     let handle = handlesByWindow.get(win);
     if (handle) return handle;
     handle = {
+        // A script that closes its own window (a guide's "Take the tutorial" button, which the main process answers by
+        // closing the guide) can take the reply with it, and executeJavaScript's promise then never settles. The window
+        // going away ends the wait instead: with the script's answer if it came first, else with an error naming why.
         async evaluate(expression) {
-            return win.webContents.executeJavaScript(expression, true);
+            const contents = win.webContents;
+            if (contents.isDestroyed()) throw new Error('The window was closed before the script could run.');
+            let onGone;
+            const gone = new Promise((resolve, reject) => {
+                onGone = () => reject(new Error('The window closed before the script answered.'));
+                contents.once('destroyed', onGone);
+            });
+            gone.catch(() => {}); // the script answered first; the window closing later is nothing to report
+            try {
+                return await Promise.race([contents.executeJavaScript(expression, true), gone]);
+            } finally {
+                if (!contents.isDestroyed()) contents.removeListener('destroyed', onGone);
+            }
         },
         async mouseMove(point, { modifiers = [] } = {}) {
             win.webContents.sendInputEvent({ type: 'mouseMove', ...point, modifiers });

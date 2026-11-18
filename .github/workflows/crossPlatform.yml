@@ -62,6 +62,11 @@ jobs:
             - run: cmake -E copy_directory thirdPartyLicenses out/packageResources/thirdPartyLicenses
             - name: Verify installed METIS runtime and notices
               run: node scripts/verifyPackagingNotices.mjs out/packageResources
+            - name: Turn off App Nap for the interaction tests
+              # Nobody looks at a runner's window, so macOS can nap the app, which throttles the timers of it and of the
+              # engine it starts: real-time runs then fall far behind the clock and never finish in time.
+              if: runner.os == 'macOS'
+              run: defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
             - name: Run Electron interaction tests
               if: runner.os != 'Linux'
               run: npm run test:interaction

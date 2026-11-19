@@ -3761,6 +3761,23 @@ export async function runInteractionTests(driver) {
         });
         assert.deepEqual(consoleMessages.filter((message) => /error|uncaught|exception/i.test(message)), []);
 
+        // Extended with the add-on open, the run going on is followed live in it, to its new end, as the run was.
+        await evaluate(window, `document.querySelector('#continueRun').click()`);
+        await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'Extend simulation did not open the Run dialog.');
+        await evaluate(window, `(() => {
+            const online = document.querySelector('#runOnlineMode');
+            if (!online.checked) { online.checked = true; online.dispatchEvent(new Event('change', { bubbles: true })); }
+            const pacing = document.querySelector('#runPacingMode');
+            pacing.value = 'realTime';
+            pacing.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#runTargetTime').value = '3';
+            document.querySelector('#startRun').click();
+        })()`);
+        await waitFor(poseWindow, `/^Live/.test(document.querySelector('#runLifecycle').textContent)`, 'The add-on did not follow the extended run live.', 15000);
+        assert.equal(await evaluate(poseWindow, `document.querySelector('#timeline').max`), '3', 'The add-on did not take the extended run\'s new end.');
+        await waitFor(poseWindow, `document.querySelector('#runLifecycle').textContent === 'Completed'`, 'The add-on did not see the extended run complete.', 15000);
+        await evaluate(window, `(() => { const online = document.querySelector('#runOnlineMode'); online.checked = false; online.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+
         await closeWhenValidated(poseWindow);
         for (let attempt = 0; attempt < 100 && !(await poseWindow.isDestroyed()); attempt += 1) {
             await new Promise((resolve) => setTimeout(resolve, 25));

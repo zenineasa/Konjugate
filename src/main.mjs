@@ -1332,6 +1332,20 @@ ipcMain.on('visualizerHostSelectionChange', (event, nodeId) => {
     }
 });
 
+// A run that continues the one a visualizer is open on (Extend, or a restart from a checkpoint) is that run going on, under a new job:
+// the visualizer's session moves to it, running again, to its new end, and the add-on is told to read its session again, so it follows
+// the run live as it did before. Its result holds the earlier part too.
+function continueVisualizerSession(projectWindow, continuesJobId, jobId, targetTime) {
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    const session = state?.visualizerSession;
+    if (!session || !continuesJobId || session.engineJobId !== continuesJobId) return;
+    session.engineJobId = jobId;
+    session.run = { ...session.run, lifecycle: 'running', ...(Number.isFinite(Number(targetTime)) ? { targetTime: Number(targetTime) } : {}) };
+    if (!state.analysisWindow || state.analysisWindow.isDestroyed()) return;
+    state.analysisWindow.webContents.send('visualizerSessionChange');
+    if (visualizerCan(state.visualizerManifest, 'simulation.status.read')) state.analysisWindow.webContents.send('visualizerRunStatusChange', structuredClone(session.run));
+}
+
 function updateVisualizerResult(projectWindow, jobId, result) {
     const state = projectWindow && projectWindowState.get(projectWindow);
     if (!state || !state.visualizerSession || state.visualizerSession.engineJobId !== jobId) return;
@@ -3579,6 +3593,7 @@ ipcMain.handle('engineStart', async (event, content, configuration) => {
     });
     if (!execution.available) return { available: false };
     activeEngineJobs.set(execution.jobId, { owner, latestResult: null, ...execution });
+    continueVisualizerSession(projectWindow, continuesJobId, execution.jobId, runConfiguration.targetTime);
     execution.completion.then(async (result) => {
         if (updateTimer) clearTimeout(updateTimer);
         updateTimer = null;

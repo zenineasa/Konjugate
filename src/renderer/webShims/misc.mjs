@@ -172,7 +172,12 @@ export const inputBindings = {
             if (event.key !== inputBindingsKey) return;
             try { callback(normalizeInputBindings(JSON.parse(event.newValue ?? 'null'))); } catch { /* not what was written */ }
         });
-    }
+    },
+    // A page cannot list what the computer has connected without asking the person to choose a device, nor open its settings: the
+    // Controllers page says how to connect one instead.
+    connectedControllers: async () => null,
+    canOpenBluetoothSettings: async () => false,
+    openBluetoothSettings: async () => false
 };
 
 // Help & feedback (src/bugReport.mjs). The web edition reports its browser, not an installer or Electron, and opens GitHub in a new tab.

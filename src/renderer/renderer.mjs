@@ -29,6 +29,8 @@ import { stepText } from '../tutorials/steps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
 import { controlLabel, keyName, liveRange } from '../inputBindings.mjs';
+import { controllersNotSeen } from '../connectedControllers.mjs';
+import { controllerOutline, controlsNotDrawn, moveControllerOutlines } from './controllerOutline.mjs';
 import { recordAsCommands } from '../interventionSchedules.mjs';
 import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
@@ -665,6 +667,8 @@ let heldCommandsAvailable = false;
 // For the interaction tests: the bindings, simulated devices, and the result on screen with its record.
 window.__debugSteering = {
     steering, devices: humanInput.simulated,
+    // What the computer has connected, in place of what the main process lists (null: as on the web, not known); undefined goes back.
+    setConnectedControllers: (list) => { connectedControllersOverride = list; return refreshConnectedControllers(); },
     result: () => (activeResult ? structuredClone({ jobId: activeEngineJobId, running: simulationRunning, lifecycle: activeResult.lifecycle, interventions: activeResult.interventions ?? [], samples: activeResult.samples }) : null)
 };
 steering.load();
@@ -7927,49 +7931,99 @@ function controllerDot(title, data) {
     Object.assign(dot.dataset, data);
     return dot;
 }
+// What the computer has connected (src/connectedControllers.mjs): listed by the desktop app's main process while the page is open, so the
+// page can name a controller that is connected but not shown to it yet, or say nothing is connected at all; null where that is not known
+// (the web edition). The tests set it in place of the list.
+let connectedControllers = null;
+let connectedControllersOverride;
+let connectedControllersTimer = null;
+const gamepadLabel = (control) => controlLabel({ kind: 'gamepad' }, control).replace('🎮 ', '');
+async function refreshConnectedControllers() {
+    let listed = null;
+    try {
+        listed = connectedControllersOverride !== undefined ? connectedControllersOverride : await window.inputBindings.connectedControllers?.() ?? null;
+    } catch (error) {
+        console.error('Could not list the connected controllers.', error);
+    }
+    if (JSON.stringify(listed) === JSON.stringify(connectedControllers)) return;
+    connectedControllers = listed;
+    if (settings.page === 'controllers') renderControllerSettings();
+}
+// Lists them again every two and a half seconds while the page is open, so pairing one shows here without closing Settings.
+function watchConnectedControllers() {
+    if (connectedControllersTimer !== null) return;
+    const tick = async () => {
+        if (settings.page !== 'controllers' || !$('#settingsDialog').open) { connectedControllersTimer = null; return; }
+        await refreshConnectedControllers();
+        connectedControllersTimer = setTimeout(tick, 2500);
+    };
+    connectedControllersTimer = setTimeout(tick, 0);
+}
+const notSeenControllers = () => (connectedControllers ? controllersNotSeen(connectedControllers, humanInput.readings().map((pad) => pad.id)) : []);
+function controllerDeviceRow(status, label, hint) {
+    const row = controllerElement('div', 'settingsItem controllerDevice');
+    const text = controllerElement('div', 'settingsItemText');
+    text.append(controllerElement('span', 'settingsItemLabel', label), controllerElement('small', 'settingsItemHint', hint));
+    row.append(controllerElement('span', `controllerStatusDot ${status}`), text);
+    return row;
+}
 function renderControllerDevices() {
     const container = $('#controllerDevices');
     const pads = humanInput.readings();
     const rows = pads.map((pad) => {
-        const row = controllerElement('div', 'settingsItem controllerDevice');
+        const counts = `${pad.axes.length} ${pad.axes.length === 1 ? 'axis' : 'axes'} · ${pad.buttons.length} ${pad.buttons.length === 1 ? 'button' : 'buttons'}`;
+        const row = controllerDeviceRow('connected', pad.name, `${counts} · move a stick or press a button and the drawing follows`);
+        row.classList.add('drawn');
         row.dataset.deviceId = pad.id;
-        const text = controllerElement('div', 'settingsItemText');
-        text.append(controllerElement('span', 'settingsItemLabel', pad.name),
-            controllerElement('small', 'settingsItemHint', `${pad.axes.length} ${pad.axes.length === 1 ? 'axis' : 'axes'} · ${pad.buttons.length} ${pad.buttons.length === 1 ? 'button' : 'buttons'} · move a stick or press a button to see it here`));
-        const readings = controllerElement('div', 'controllerReadings');
-        const axes = controllerElement('div', 'controllerAxes');
-        pad.axes.forEach((_value, index) => axes.append(controllerAxisMeter(controlLabel({ kind: 'gamepad' }, { type: 'axis', index }).replace('🎮 ', ''), { pad: pad.id, axis: String(index) })));
-        const buttons = controllerElement('div', 'controllerButtons');
-        pad.buttons.forEach((_button, index) => buttons.append(controllerDot(controlLabel({ kind: 'gamepad' }, { type: 'button', index }).replace('🎮 ', ''), { pad: pad.id, button: String(index) })));
-        readings.append(axes, buttons);
-        row.append(controllerElement('span', 'controllerStatusDot connected'), text, readings);
+        // The controller drawn, its sticks and buttons moving as they are moved; any control the drawing has no place for beside it.
+        const visual = controllerElement('div', 'controllerVisual');
+        visual.append(controllerOutline(pad, gamepadLabel));
+        const extra = controlsNotDrawn(pad);
+        if (extra.axes.length || extra.buttons.length) {
+            const readings = controllerElement('div', 'controllerReadings');
+            const axes = controllerElement('div', 'controllerAxes');
+            extra.axes.forEach((index) => axes.append(controllerAxisMeter(gamepadLabel({ type: 'axis', index }), { pad: pad.id, axis: String(index) })));
+            const buttons = controllerElement('div', 'controllerButtons');
+            extra.buttons.forEach((index) => buttons.append(controllerDot(gamepadLabel({ type: 'button', index }), { pad: pad.id, button: String(index) })));
+            readings.append(axes, buttons);
+            visual.append(readings);
+        }
+        row.append(visual);
         return row;
     });
-    if (!pads.length) {
-        const empty = controllerElement('div', 'settingsItem controllerDevice controllerNoDevice');
-        const text = controllerElement('div', 'settingsItemText');
-        text.append(controllerElement('span', 'settingsItemLabel', 'No gamepad or joystick seen yet'),
-            controllerElement('small', 'settingsItemHint', 'Plug one in and press any of its buttons: a browser shows a controller only once it has been used. It appears here as soon as it is seen.'));
-        empty.append(controllerElement('span', 'controllerStatusDot waiting'), text);
-        rows.push(empty);
-    }
-    const keyboard = controllerElement('div', 'settingsItem controllerDevice');
-    const keyboardText = controllerElement('div', 'settingsItemText');
-    keyboardText.append(controllerElement('span', 'settingsItemLabel', 'Keyboard'),
-        controllerElement('small', 'settingsItemHint', 'Always there. A key bound to a parameter steers it while this window is in front and no field is being typed in.'));
-    const held = controllerElement('div', 'controllerReadings controllerHeldKeys');
-    held.dataset.heldKeys = '';
-    keyboard.append(controllerElement('span', 'controllerStatusDot connected'), keyboardText, held);
-    rows.push(keyboard);
-    for (const device of humanInput.devices().filter((candidate) => candidate.kind === 'midi')) {
-        const row = controllerElement('div', 'settingsItem controllerDevice');
-        const text = controllerElement('div', 'settingsItemText');
-        text.append(controllerElement('span', 'settingsItemLabel', device.name), controllerElement('small', 'settingsItemHint', 'MIDI controller'));
-        row.append(controllerElement('span', 'controllerStatusDot connected'), text);
+    // Connected to the computer but not shown to Konjugate yet: a browser shows a controller only once it has been used in the window.
+    for (const controller of notSeenControllers()) {
+        const row = controllerDeviceRow('waiting', controller.name, 'Connected to this computer. Press one of its buttons while this window is in front, and it appears here with its sticks and buttons.');
+        row.classList.add('controllerNotSeen');
         rows.push(row);
     }
+    if (!rows.length) {
+        const empty = connectedControllers
+            ? controllerDeviceRow('waiting', 'No controller connected to this computer', 'Connect one over Bluetooth or with a cable. It appears here once it is connected; "Not seeing your controller?" below has the steps.')
+            : controllerDeviceRow('waiting', 'No gamepad or joystick seen yet', 'Connect one, then press any of its buttons while this window is in front: a controller is shown here only once it has been used in this window.');
+        empty.classList.add('controllerNoDevice');
+        rows.push(empty);
+    }
+    const keyboard = controllerDeviceRow('connected', 'Keyboard', 'Always there. A key bound to a parameter steers it while this window is in front and no field is being typed in.');
+    const held = controllerElement('div', 'controllerReadings controllerHeldKeys');
+    held.dataset.heldKeys = '';
+    keyboard.append(held);
+    rows.push(keyboard);
+    for (const device of humanInput.devices().filter((candidate) => candidate.kind === 'midi')) rows.push(controllerDeviceRow('connected', device.name, 'MIDI controller'));
     container.replaceChildren(...rows);
+    // The steps for connecting one open by themselves while nothing is seen, until the person opens or closes them.
+    const help = $('#controllerHelp');
+    if (!help.dataset.touched) help.open = !pads.length;
 }
+$('#controllerHelp > summary').addEventListener('click', () => { $('#controllerHelp').dataset.touched = 'true'; });
+$('#controllerOpenBluetooth').addEventListener('click', async () => {
+    try {
+        await window.inputBindings.openBluetoothSettings();
+    } catch (error) {
+        console.error('Could not open the Bluetooth settings.', error);
+    }
+});
+Promise.resolve(window.inputBindings.canOpenBluetoothSettings?.()).then((can) => { $('#controllerOpenBluetooth').hidden = !can; }, () => {});
 
 // The bindings shown last, so one just made can be marked as such.
 let controllerBindingIdsShown = null;
@@ -7977,6 +8031,7 @@ function renderControllerSettings() {
     if (settings.page !== 'controllers') return;
     // Devices are read while this page is open, bound or not, so a controller plugged in is seen at once.
     humanInput.start();
+    watchConnectedControllers();
     const kept = steering.document;
     const modelName = filenameStem(currentProjectFilename);
     const live = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
@@ -8064,7 +8119,9 @@ function animateControllerReadings() {
             fill.style.width = `${Math.abs(value) * 50}%`;
             meter.classList.toggle('active', value !== 0);
         }
-        for (const dot of document.querySelectorAll('[data-settings-page="controllers"] .controllerButtonDot')) {
+        const page = document.querySelector('[data-settings-page="controllers"]');
+        moveControllerOutlines(page, pads);
+        for (const dot of page.querySelectorAll('.controllerButtonDot, .controllerPart[data-button]')) {
             const on = dot.dataset.key ? held.has(dot.dataset.key) : Boolean(pads.get(dot.dataset.pad)?.buttons[Number(dot.dataset.button)]?.pressed);
             dot.classList.toggle('active', on);
         }
@@ -13253,6 +13310,7 @@ const tour = createTour({
                 gamepads: humanInput.devices().filter((device) => device.kind === 'gamepad').length,
                 gamepadNames: humanInput.devices().filter((device) => device.kind === 'gamepad').map((device) => device.name),
                 gamepadAxes: humanInput.readings().reduce((sum, pad) => sum + pad.axes.length, 0),
+                controllersNotSeen: notSeenControllers().map((controller) => controller.name),
                 // A state's values over the run on screen, by its node's name and its symbol. A live run keeps only its latest sample
                 // here, so what each look finds is kept as well (by the run), and the longer of the two is given.
                 resultSeries: (nodeName, symbol) => {
@@ -13622,6 +13680,15 @@ const tour = createTour({
             await waitUntil(() => liveControlsOffered(), 15000);
         },
         // No joystick at hand: each command bound to a pair of keys instead, as Settings › Controllers binds a key and adds one for down.
+        // "Not seeing your controller?" on a card: Settings › Controllers, with the steps for connecting one open.
+        showControllerHelp: async () => {
+            if (!$('#settingsDialog').open || settings.page !== 'controllers') openSettings('controllers');
+            const help = $('#controllerHelp');
+            help.dataset.touched = 'true';
+            help.open = true;
+            help.scrollIntoView({ block: 'nearest' });
+            return '';
+        },
         bindKeyboardFallback: async (step) => {
             const document = steering.document;
             const symbols = new Set(step.commands.map((command) => command.symbol));

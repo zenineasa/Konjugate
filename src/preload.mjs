@@ -195,7 +195,12 @@ contextBridge.exposeInMainWorld('ownershipDefaults', {
 contextBridge.exposeInMainWorld('inputBindings', {
     get: () => ipcRenderer.invoke('inputBindingsGet'),
     set: (document) => ipcRenderer.invoke('inputBindingsSet', document),
-    onChanged: (callback) => ipcRenderer.on('inputBindingsChanged', (_event, document) => callback(document))
+    onChanged: (callback) => ipcRenderer.on('inputBindingsChanged', (_event, document) => callback(document)),
+    // The gamepads and joysticks the computer has connected, used here or not ([{ name, vendorId, productId }], or null), and the
+    // system's Bluetooth settings, for pairing one.
+    connectedControllers: () => ipcRenderer.invoke('inputBindingsConnectedControllers'),
+    canOpenBluetoothSettings: () => ipcRenderer.invoke('inputBindingsCanOpenBluetoothSettings'),
+    openBluetoothSettings: () => ipcRenderer.invoke('inputBindingsOpenBluetoothSettings')
 });
 
 contextBridge.exposeInMainWorld('providerToolchains', {

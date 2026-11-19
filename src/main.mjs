@@ -68,6 +68,7 @@ import { addonCacheDirectory } from './addonCache.mjs';
 import { createAddonSettingsStore } from './addonSettingsStore.mjs';
 import { createOwnershipDefaultsStore } from './ownershipDefaultsStore.mjs';
 import { createInputBindingsStore } from './inputBindingsStore.mjs';
+import { bluetoothSettingsUrl, controllersFromHid, gamepadHidFilters } from './connectedControllers.mjs';
 import { publicNoticeOf, stampProjectContent } from './ownership.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
@@ -2831,6 +2832,47 @@ ipcMain.handle('inputBindingsSet', async (event, document) => {
     return kept;
 });
 
+// The gamepads and joysticks the computer has connected (src/connectedControllers.mjs), for Settings › Controllers to tell "nothing is
+// connected" from "connected, but not used in this window yet". Chromium lists HID devices only to a page asking to choose one, so the
+// window asks, in a world of its own apart from its page, and the list it would offer is read here and the choice cancelled: no chooser
+// is shown and nothing is granted. One listing at a time; null when it could not be read. The interaction tests see no real device.
+let hidListing = null;
+let hidListingQueue = Promise.resolve();
+function installControllerListing() {
+    session.defaultSession.on('select-hid-device', (event, details, callback) => {
+        event.preventDefault();
+        if (hidListing) { hidListing(details.deviceList ?? []); hidListing = null; }
+        callback();
+    });
+}
+function listConnectedControllers(contents) {
+    const listing = hidListingQueue.then(() => new Promise((resolve) => {
+        const timer = setTimeout(() => { hidListing = null; resolve(null); }, 2000);
+        hidListing = (deviceList) => { clearTimeout(timer); resolve(controllersFromHid(deviceList)); };
+        contents.executeJavaScriptInIsolatedWorld(1013, [{ code: `navigator.hid ? navigator.hid.requestDevice({ filters: ${JSON.stringify(gamepadHidFilters)} }).then(() => true, () => false) : false` }], true)
+            .then((asked) => { if (!asked && hidListing) { clearTimeout(timer); hidListing = null; resolve(null); } }, () => { clearTimeout(timer); hidListing = null; resolve(null); });
+    }));
+    hidListingQueue = listing.catch(() => null);
+    return listing;
+}
+ipcMain.handle('inputBindingsConnectedControllers', async (event) => {
+    requireSteeringWindow(event);
+    if (process.argv.includes('--interaction-test')) return [];
+    return listConnectedControllers(event.sender);
+});
+ipcMain.handle('inputBindingsCanOpenBluetoothSettings', (event) => {
+    requireSteeringWindow(event);
+    return Boolean(bluetoothSettingsUrl(process.platform));
+});
+ipcMain.handle('inputBindingsOpenBluetoothSettings', async (event) => {
+    requireSteeringWindow(event);
+    const url = bluetoothSettingsUrl(process.platform);
+    if (!url) return false;
+    if (process.argv.includes('--interaction-test')) return true;
+    await shell.openExternal(url);
+    return true;
+});
+
 // MIDI controllers are read through Web MIDI, which asks for permission: granted to the app's own project and twin windows (their own
 // page, not a frame inside them such as an add-on's), refused to everything else, and never with system-exclusive messages. Every
 // other permission is left as Electron decides it without a handler, which is to grant it.
@@ -3630,6 +3672,7 @@ app.whenReady().then(async () => {
     });
     extensionStateStore = createExtensionStateStore({ directory: join(app.getPath('userData'), 'packages') });
     installMidiPermission();
+    installControllerListing();
 
     // A file passed on the initial launch (Windows/Linux double-click, or a path Electron
     // handed us via process.argv) opens directly into the first window rather than opening

@@ -1330,6 +1330,18 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#controllerBindParameter option')].map((option) => option.textContent)`), ['Drive (k)']);
         assert.equal(await evaluate(window, `document.querySelector('#controllerThreshold').value`), '1', 'The threshold is 1% of the live range unless changed.');
 
+        // A gamepad laid out as the standard one is drawn as a gamepad, its buttons, triggers and sticks following it.
+        const gamepad = 'Test gamepad (simulated)';
+        const pad = (code) => evaluate(window, `(() => { const devices = window.__debugSteering.devices; ${code}; devices.poll(); })()`);
+        await pad(`devices.connectGamepad(${JSON.stringify(gamepad)})`);
+        await waitFor(window, `Boolean(document.querySelector('#controllerDevices [data-device-id="Test gamepad (simulated)"] .controllerOutline.gamepad'))`, 'The gamepad was not drawn.');
+        assert.equal(await evaluate(window, `document.querySelector('#controllerHelp').open`), false, 'The steps for connecting a controller stayed open with one seen.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#controllerDevices .controllerOutline.gamepad .controllerKnob').length`), 2);
+        await pad(`devices.setButton(${JSON.stringify(gamepad)}, 0, 1); devices.setButton(${JSON.stringify(gamepad)}, 7, 0.5); devices.moveAxis(${JSON.stringify(gamepad)}, 2, -1)`);
+        await waitFor(window, `document.querySelector('.controllerOutline.gamepad [data-button="0"]').classList.contains('active') && Number(document.querySelector('.controllerOutline.gamepad [data-trigger="7"]').getAttribute('width')) > 10 && document.querySelector('.controllerOutline.gamepad [data-stick="2,3"]').classList.contains('moved')`, 'The drawn gamepad did not follow its button, trigger and stick.');
+        await pad(`devices.disconnectGamepad(${JSON.stringify(gamepad)})`);
+        await waitFor(window, `!document.querySelector('#controllerDevices .controllerOutline')`, 'The gamepad was still drawn once disconnected.');
+
         // Bound before any run: the next key pressed drives Drive, and the key does nothing else meanwhile.
         await evaluate(window, `document.querySelector('#controllerBindButton').click()`);
         await waitFor(window, `document.querySelector('#controllerBindRow').classList.contains('listening')`, 'Bind a control did not wait for a control.');
@@ -9821,16 +9833,36 @@ export async function runInteractionTests(driver) {
             await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
             await press('[data-settings-target="controllers"]');
             await waitFor(window, `Boolean(document.querySelector('#controllerDevices .controllerNoDevice'))`, 'Settings did not say no controller is seen.');
+            // With nothing seen, the steps for connecting one are open; the card's link opens them too.
+            assert.equal(await evaluate(window, `document.querySelector('#controllerHelp').open`), true, 'The steps for connecting a controller were not open.');
+            assert.match(await evaluate(window, `document.querySelector('#controllerHelp').textContent`), /PlayStation 4 controller: hold PS and Share/);
+            await evaluate(window, `document.querySelector('#controllerHelp > summary').click()`);
+            assert.equal(await evaluate(window, `document.querySelector('#controllerHelp').open`), false);
+            await press('.tourFloating .tourContentLink');
+            await waitFor(window, `document.querySelector('#controllerHelp').open`, 'The card\'s link did not open the steps for connecting a controller.');
+            // The computer has nothing connected: the row says so. Then the left joystick is connected but not used in the window yet:
+            // the row names it and says to press a button, and so does the card.
+            await evaluate(window, `window.__debugSteering.setConnectedControllers([])`);
+            await waitFor(window, `/No controller connected to this computer/.test(document.querySelector('#controllerDevices .controllerNoDevice').textContent)`, 'Settings did not say nothing is connected to the computer.');
+            await evaluate(window, `window.__debugSteering.setConnectedControllers([{ name: ${JSON.stringify(left)}, vendorId: 0, productId: 0 }])`);
+            await waitFor(window, `/Press one of its buttons while this window is in front/.test(document.querySelector('#controllerDevices .controllerNotSeen')?.textContent ?? '')`, 'Settings did not name the controller that is connected but not seen.');
+            await waitFor(window, `/This computer has Left joystick \\(simulated\\) connected: press one of its buttons/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say to press a button on the connected joystick.');
             await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(left)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
+            await waitFor(window, `!document.querySelector('#controllerDevices .controllerNotSeen')`, 'The joystick, once seen, was still listed as not seen.');
             await waitFor(window, `/one controller .*2 axes in all: four are needed/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say one joystick is not enough.');
             assert.equal(await evaluate(window, `window.__debugTour.step()`), 'connect', 'One joystick of two axes is not four.');
             await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(right)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
             await waitForStep('bindLeft');
             // Settings › Controllers lists both, each with its two axes and four buttons, moving as they are moved.
             await waitFor(window, `document.querySelectorAll('#controllerDevices .controllerDevice[data-device-id]').length === 2`, 'Settings did not list the two joysticks.');
-            assert.equal(await evaluate(window, `document.querySelectorAll('#controllerDevices [data-device-id="Left joystick (simulated)"] .controllerAxisMeter').length`), 2);
+            // Each drawn as a stick in its gate (not a standard gamepad), with its four buttons beneath.
+            assert.equal(await evaluate(window, `document.querySelectorAll('#controllerDevices [data-device-id="Left joystick (simulated)"] .controllerOutline.joystick .controllerKnob[data-stick="0,1"]').length`), 1);
+            assert.equal(await evaluate(window, `document.querySelectorAll('#controllerDevices [data-device-id="Left joystick (simulated)"] .controllerOutline [data-button]').length`), 4);
             await axis(left, 0, 0.8);
-            await waitFor(window, `document.querySelector('#controllerDevices .controllerAxisMeter[data-pad="Left joystick (simulated)"][data-axis="0"]').classList.contains('active')`, 'The axis bar did not follow the joystick.');
+            await waitFor(window, `document.querySelector('#controllerDevices .controllerKnob[data-pad="Left joystick (simulated)"]').classList.contains('moved')`, 'The drawn stick did not follow the joystick.');
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.setButton(${JSON.stringify(left)}, 2, 1); devices.poll(); })()`);
+            await waitFor(window, `document.querySelector('#controllerDevices .controllerOutline [data-pad="Left joystick (simulated)"][data-button="2"]').classList.contains('active')`, 'The drawn button did not light up.');
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.setButton(${JSON.stringify(left)}, 2, 0); devices.poll(); })()`);
             await axis(left, 0, 0);
             // The left joystick bound by hand: each command chosen, Bind, and the axis moved.
             for (const [name, index] of [['Swing command', 0], ['Stick command', 1]]) {
@@ -9873,7 +9905,7 @@ export async function runInteractionTests(driver) {
             // The real-time run is stopped rather than left to play out its minute, for the scenarios after.
             await evaluate(window, `document.querySelector('#simulationStop')?.click()`);
             await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The run did not stop.', 15000).catch(() => {});
-            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.disconnectGamepad(${JSON.stringify(left)}); devices.disconnectGamepad(${JSON.stringify(right)}); devices.poll(); return window.__debugSteering.steering.save({ bindings: [] }); })()`);
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.disconnectGamepad(${JSON.stringify(left)}); devices.disconnectGamepad(${JSON.stringify(right)}); devices.poll(); window.__debugSteering.setConnectedControllers(undefined); return window.__debugSteering.steering.save({ bindings: [] }); })()`);
         }
     }, { skip: !driver.capabilities.multiWindow && 'the joystick tutorial is for the desktop app' });
 

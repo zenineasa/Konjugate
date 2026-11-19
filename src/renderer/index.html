@@ -548,6 +548,25 @@
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Connected controllers</h3>
                             <div id="controllerDevices" class="settingsCard controllerDevices" aria-label="Connected controllers" aria-live="polite"></div>
+                            <!-- How to get a controller onto the computer and then into Konjugate, for when the list above stays empty. -->
+                            <details id="controllerHelp" class="settingsDisclosure controllerHelp">
+                                <summary>Not seeing your controller?</summary>
+                                <div class="settingsDisclosureBody">
+                                    <ol class="controllerHelpSteps">
+                                        <li><strong>Connect it to this computer.</strong> Over Bluetooth, put the controller in pairing mode, then choose it in the computer's Bluetooth settings:
+                                            <ul>
+                                                <li>PlayStation 4 controller: hold PS and Share until the light bar flashes in quick double blinks.</li>
+                                                <li>PlayStation 5 controller: hold PS and Create until the light around the touchpad flashes.</li>
+                                                <li>Xbox Wireless Controller: turn it on with the Xbox button, then hold the pair button on its top edge until the Xbox button flashes quickly.</li>
+                                                <li>Nintendo Switch Pro Controller: hold the sync button on its top edge until the player lights run back and forth.</li>
+                                            </ul>
+                                            By cable, many cables only charge: if the computer does not see the controller, try a cable that carries data. A controller paired with a console goes back to it whenever the console is on nearby: turn the console off, or pair the controller again.</li>
+                                        <li><strong>Show it to Konjugate.</strong> Press any of its buttons while this window is in front. Like a browser, Konjugate is shown a controller only once it has been used in its window, so one connected while Konjugate was behind another window waits for a press.</li>
+                                        <li><strong>Still nothing?</strong> Turn the controller off and on again, or disconnect it and connect it again. An app that takes over controllers (Steam, or a remapping tool) can keep one from Konjugate: quit it and try again.</li>
+                                    </ol>
+                                    <div class="settingsItemControl"><button id="controllerOpenBluetooth" class="settingsButton" type="button" hidden>Open Bluetooth settings</button></div>
+                                </div>
+                            </details>
                         </section>
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Bindings</h3>

@@ -2173,6 +2173,26 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .controllerButtonDot { width: 8px; height: 8px; border: 1px solid #2c4048; border-radius: 50%; background: #0e1d25; }
 .controllerButtonDot.active { background: #42c9bc; border-color: #42c9bc; }
 .controllerHeldKeys:empty { display: none; }
+.controllerDevice.drawn { flex-wrap: wrap; }
+.controllerDevice.drawn > .settingsItemText { flex: 1 1 160px; }
+.controllerVisual { display: flex; flex: 0 1 auto; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; margin-left: auto; }
+.controllerOutline { display: block; flex: 0 0 auto; height: 86px; width: auto; aspect-ratio: 240 / 150; overflow: visible; }
+.controllerOutline.joystick { aspect-ratio: var(--outline-aspect, 120 / 136); }
+.controllerOutline .controllerBody { fill: #0e1d25; stroke: #2c4048; stroke-width: 1.5; }
+.controllerOutline .controllerPart { fill: #13232b; stroke: #3a4f59; stroke-width: 1.2; transition: fill 60ms linear, stroke 60ms linear; }
+.controllerOutline .controllerPart.active { fill: #42c9bc; stroke: #42c9bc; }
+.controllerOutline .controllerStickWell { fill: #091319; stroke: #22343e; stroke-width: 1.2; }
+.controllerOutline .controllerKnob { fill: #1a2d36; }
+.controllerOutline .controllerKnob.moved { stroke: #42c9bc; stroke-width: 2; }
+.controllerOutline .controllerKnob.moved.active, .controllerOutline .controllerKnob.active { fill: #42c9bc; }
+.controllerOutline .controllerGate { fill: none; stroke: #22343e; stroke-width: 1.2; stroke-dasharray: 3 3; }
+.controllerOutline .controllerTriggerFill { fill: #42c9bc; stroke: none; pointer-events: none; }
+.controllerHelp { margin-top: 8px; }
+.controllerHelpSteps { display: grid; gap: 8px; margin: 0; padding-left: 16px; color: #aebfc5; font-size: 9px; line-height: 1.5; }
+.controllerHelpSteps strong { color: #d2e6e8; font-weight: 600; }
+.controllerHelpSteps ul { margin: 4px 0; padding-left: 14px; }
+.controllerHelp .settingsItemControl { justify-content: flex-start; }
+@media (prefers-reduced-motion: reduce) { .controllerOutline .controllerPart { transition: none; } }
 .controllerBindingHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
 .passwordDialog.settingsSheet .controllerChip { padding: 1px 6px; color: #d2e6e8; background: #13232b; border: 1px solid #2c4048; border-radius: 4px; font-size: 8.5px; font-weight: 600; }
 .controllerBindingTarget { color: #b8c9cf; font-size: 9px; }

@@ -42,11 +42,14 @@ const steps = Object.freeze([
     {
         id: 'connect',
         title: 'Connect the joysticks',
-        text: 'Plug in two joysticks, or one gamepad (its two sticks do as well), and press a button on each so Konjugate sees it: a browser shows a controller only once it has been used. Settings › Controllers lists every one it sees, with its sticks and buttons moving as you move them. No joystick at hand? Skip this step, and the four functions are bound to keys instead: A and D swing, W and S the stick, I and K the boom, J and L the bucket.',
+        text: 'Plug in two joysticks, or one gamepad (its two sticks do as well), and press a button on each so Konjugate sees it: a browser shows a controller only once it has been used. Settings › Controllers draws every one it sees, its sticks and buttons moving as you move them, and "Not seeing your controller?" says how to connect one. No joystick at hand? Skip this step, and the four functions are bound to keys instead: A and D swing, W and S the stick, I and K the boom, J and L the bucket.',
         target: (ui) => (ui.controllersShown ? '#controllerDevices' : ui.settingsOpen ? '[data-settings-target="controllers"]' : '#settingsButton'),
         status: (ui) => (ui.gamepadNames.length
-            ? `Konjugate sees ${ui.gamepadNames.length === 1 ? 'one controller' : `${ui.gamepadNames.length} controllers`} (${ui.gamepadNames.join(', ')}), with ${ui.gamepadAxes} ${ui.gamepadAxes === 1 ? 'axis' : 'axes'} in all${ui.gamepadAxes < 4 ? ': four are needed, so connect the second joystick.' : '.'}`
-            : 'Konjugate sees no joystick or gamepad yet.'),
+            ? `Konjugate sees ${ui.gamepadNames.length === 1 ? 'one controller' : `${ui.gamepadNames.length} controllers`} (${ui.gamepadNames.join(', ')}), with ${ui.gamepadAxes} ${ui.gamepadAxes === 1 ? 'axis' : 'axes'} in all${ui.gamepadAxes >= 4 ? '.' : ui.controllersNotSeen?.length ? `: four are needed, and ${ui.controllersNotSeen.join(' and ')} is connected too, so press one of its buttons.` : ': four are needed, so connect the second joystick.'}`
+            : ui.controllersNotSeen?.length
+                ? `This computer has ${ui.controllersNotSeen.join(' and ')} connected: press one of its buttons while Konjugate is in front.`
+                : 'Konjugate sees no joystick or gamepad yet.'),
+        link: { label: 'Not seeing your controller?', action: 'showControllerHelp' },
         skip: 'bindKeyboardFallback', commands: values.commands,
         // Four axes in all: two joysticks, or one gamepad with two sticks.
         done: ({ ui }) => ui.gamepadAxes >= 4 || allBound(ui)

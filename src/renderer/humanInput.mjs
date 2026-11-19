@@ -24,7 +24,14 @@ function typingInto(target) {
     return tag === 'INPUT' && textEntryTypes.has((target.getAttribute('type') ?? '').toLowerCase());
 }
 
-const gamepadName = (id) => String(id).replace(/\s*\(.*\)\s*$/, '').trim() || String(id);
+// Two controllers of the same model report the same id ("DUALSHOCK 4 Wireless Controller (STANDARD GAMEPAD)"), so the second of a kind
+// connected is told apart as "<id> #2" (the third "#3", by the browser's index for it), and named "DUALSHOCK 4 Wireless Controller 2". The
+// first keeps the id as it is, so a binding made with one controller of a kind still finds it.
+export const gamepadName = (id) => {
+    const [, base, copy] = /^(.*?)(?: #(\d+))?$/s.exec(String(id));
+    const name = base.replace(/\s*\(.*\)\s*$/, '').trim() || base;
+    return copy ? `${name} ${copy}` : name;
+};
 
 export function createHumanInput({ host = globalThis } = {}) {
     const readingListeners = new Set();
@@ -55,21 +62,28 @@ export function createHumanInput({ host = globalThis } = {}) {
 
     // ---- Gamepads -----------------------------------------------------------------------------------------------------------------
     function pads() {
-        const real = [...(host.navigator?.getGamepads?.() ?? [])].filter((pad) => pad && pad.connected !== false);
-        return [...real.map((pad) => ({ pad, simulated: false })), ...[...simulatedPads.values()].map((pad) => ({ pad, simulated: true }))];
+        const real = [...(host.navigator?.getGamepads?.() ?? [])].filter((pad) => pad && pad.connected !== false)
+            .sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+        const ofKind = new Map();
+        const keyed = real.map((pad) => {
+            const count = (ofKind.get(pad.id) ?? 0) + 1;
+            ofKind.set(pad.id, count);
+            return { pad, key: count === 1 ? pad.id : `${pad.id} #${count}`, simulated: false };
+        });
+        return [...keyed, ...[...simulatedPads.values()].map((pad) => ({ pad, key: pad.id, simulated: true }))];
     }
 
     function pollGamepads() {
         const seen = new Set();
-        for (const { pad, simulated } of pads()) {
-            if (seen.has(pad.id)) continue;
-            seen.add(pad.id);
-            const device = { kind: 'gamepad', id: pad.id, name: gamepadName(pad.id) };
+        for (const { pad, key, simulated } of pads()) {
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const device = { kind: 'gamepad', id: key, name: gamepadName(key) };
             const axes = [...pad.axes].map((value) => Math.round(withoutDeadZone(Number(value) || 0, defaultDeadZone) * 1000) / 1000);
             const buttons = [...pad.buttons].map((button) => ({ value: Number(button?.value) || 0, pressed: Boolean(button?.pressed) }));
-            const previous = padState.get(pad.id);
+            const previous = padState.get(key);
             if (!previous) {
-                padState.set(pad.id, { axes, buttons, analogue: new Set() });
+                padState.set(key, { axes, buttons, analogue: new Set(), mapping: pad.mapping === 'standard' ? 'standard' : '' });
                 devicesChanged();
                 continue;
             }
@@ -286,10 +300,11 @@ export function createHumanInput({ host = globalThis } = {}) {
         devices() {
             return [keyboardDevice, ...[...padState.keys()].map((id) => ({ kind: 'gamepad', id, name: gamepadName(id) })), ...midiDevices.values()];
         },
-        // What each connected gamepad reads now, for showing it: [{ id, name, axes: [-1…1], buttons: [{ value, pressed }] }], and the
+        // What each connected gamepad reads now, for showing it: [{ id, name, mapping, axes: [-1…1], buttons: [{ value, pressed }] }] (a
+        // 'standard' mapping lays its controls out as the browser's standard gamepad does, '' anything else), and the
         // keys held (only those a binding uses, or any while one is being bound, are seen).
         readings() {
-            return [...padState.entries()].map(([id, state]) => ({ id, name: gamepadName(id), axes: [...state.axes], buttons: state.buttons.map((button) => ({ ...button })) }));
+            return [...padState.entries()].map(([id, state]) => ({ id, name: gamepadName(id), mapping: state.mapping, axes: [...state.axes], buttons: state.buttons.map((button) => ({ ...button })) }));
         },
         heldKeys() { return [...heldKeys]; },
         isConnected(device) {
@@ -299,8 +314,8 @@ export function createHumanInput({ host = globalThis } = {}) {
         },
         // Stand-ins for real devices, for tests.
         simulated: Object.freeze({
-            connectGamepad(id, { axes = 4, buttons = 17 } = {}) {
-                simulatedPads.set(id, { id, axes: Array(axes).fill(0), buttons: Array.from({ length: buttons }, () => ({ value: 0, pressed: false })) });
+            connectGamepad(id, { axes = 4, buttons = 17, mapping = axes >= 4 && buttons >= 16 ? 'standard' : '' } = {}) {
+                simulatedPads.set(id, { id, mapping, axes: Array(axes).fill(0), buttons: Array.from({ length: buttons }, () => ({ value: 0, pressed: false })) });
             },
             disconnectGamepad(id) { simulatedPads.delete(id); },
             moveAxis(id, index, value) { simulatedPads.get(id).axes[index] = value; },

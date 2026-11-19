@@ -9928,6 +9928,29 @@ export async function runInteractionTests(driver) {
             assert.equal(await evaluate(window, `Boolean(document.querySelector('.controllerParameter.listening'))`), false, 'Skipping left the page waiting for a control.');
             await press('#settingsClose');
             await press('.tourFloating .tourSkipStep');
+            // The machine in 3D: the Pose Visualizer opened on the run as it goes, from the card, drawing the cab, boom, stick and bucket at
+            // their true size and moving them as the joysticks move the machine. Without the add-on the card says so and Next carries on.
+            await waitForStep('watch3d', 20000);
+            if (driver.capabilities.addons && installedAddons.has('konjugate.poseVisualizer')) {
+                await waitFor(window, `/Press Pose/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say to press Pose.');
+                const before = driver.allHandles();
+                await evaluate(window, `[...document.querySelectorAll('.tourFloating button')].find((button) => button.textContent === 'Open it for me').click()`);
+                const poseWindow = await driver.waitForNewHandle(before);
+                const bodies = () => evaluate(poseWindow, `window.__debugPoseVisualizer?.bodies() ?? []`);
+                await waitFor(poseWindow, `(window.__debugPoseVisualizer?.bodies() ?? []).filter((body) => body.part).length === 4`, 'The 3D view did not draw the four parts at their true size.');
+                assert.deepEqual((await bodies()).map((body) => body.name).sort(), ['Machine pose · boom', 'Machine pose · bucket', 'Machine pose · cab', 'Machine pose · stick']);
+                await waitFor(window, `/^Open\\./.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not see the 3D view open.');
+                const stickAt = async () => (await bodies()).find((body) => body.name.endsWith('stick')).position;
+                const startedAt = await stickAt();
+                // The right joystick forward lowers the boom, and the stick's end of it comes down in the 3D view as the run goes.
+                await axis(right, 1, -1);
+                await waitFor(poseWindow, `(window.__debugPoseVisualizer.bodies().find((body) => body.name.endsWith('stick'))?.position[2] ?? Infinity) < ${startedAt[2]} - 0.2`, 'The 3D view did not follow the boom coming down.', 15000);
+                await axis(right, 1, 0);
+                await closeWhenValidated(poseWindow);
+            } else {
+                assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourStatus').textContent`), /not installed|installed/);
+            }
+            await press('.tourFloating .tourPrimary');
             await waitForStep('dig', 20000);
             // The Bucket tip's plot, open while the run goes, draws the run so far and keeps up with it (a live run's window holds only its
             // latest sample, so the plot keeps its own).

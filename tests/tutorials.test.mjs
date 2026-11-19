@@ -27,7 +27,7 @@ import { refitTwinValues } from '../src/tutorials/refitTwin.mjs';
 import { scheduleChangesValues } from '../src/tutorials/scheduleChanges.mjs';
 import { organiseModelValues } from '../src/tutorials/organiseModel.mjs';
 import { driveWithJoysticksValues } from '../src/tutorials/driveWithJoysticks.mjs';
-import { excavatorProject, startingTip } from '../scripts/generateExcavatorExample.mjs';
+import { excavator, excavatorParts, excavatorProject, startingPoses, startingTip } from '../scripts/generateExcavatorExample.mjs';
 import { objectiveVocabulary } from '../src/renderer/tuningObjective.mjs';
 
 // The first-model tour's tests below were written against its own step list; these bind the shared functions to it.
@@ -408,6 +408,24 @@ test('the excavator the joystick tutorial drives is the one its generator writes
     const tip = startingTip();
     assert.ok(tip.height > driveWithJoysticksValues.ground && tip.height < driveWithJoysticksValues.lift);
     assert.ok(shipped.nodes.some((node) => node.name === driveWithJoysticksValues.tip));
+    // The Pose Visualizer finds four bodies on Machine pose, each by its prefix to its own six names, and draws each with its part.
+    const poseNode = shipped.nodes.find((node) => node.name === 'Machine pose');
+    const symbols = poseNode.states.map((entry) => entry.symbol);
+    for (const { prefix } of excavatorParts) {
+        for (const role of ['X', 'Y', 'Z', 'Roll', 'Pitch', 'Yaw']) assert.ok(symbols.includes(`${prefix}${role}`), `Machine pose has no ${prefix}${role}.`);
+        const part = poseNode.appearance.parts.find((candidate) => candidate.prefix === prefix);
+        assert.ok(part && part.mesh.position.length === 72 && part.mesh.index.length === 36, `The ${prefix}'s part is not a box.`);
+    }
+    // Each part held at the end of the one before: the bucket's far end is the tip, where the model's own reckoning puts it.
+    const poses = startingPoses();
+    const end = poses.bucket;
+    const length = excavator.lengths.bucket;
+    assert.ok(Math.abs(end.z - length * Math.sin(end.pitch) - tip.height) < 1e-9, 'The bucket\'s far end is not at the tip\'s height.');
+    assert.ok(Math.abs(Math.hypot(end.x + length * Math.cos(end.pitch) * Math.cos(end.yaw), end.y + length * Math.cos(end.pitch) * Math.sin(end.yaw)) - tip.reach) < 1e-9, 'The bucket\'s far end is not at the tip\'s reach.');
+    for (const { prefix } of excavatorParts) for (const role of ['x', 'y', 'z', 'pitch', 'yaw']) {
+        assert.ok(Math.abs(poseNode.states.find((entry) => entry.symbol === `${prefix}${role[0].toUpperCase()}${role.slice(1)}`).initialValue - poses[prefix][role]) < 1e-6);
+    }
+    assert.match(driveWithJoysticksValues.poseVisualizer.since, /^1\.0\.7$/);
 });
 
 test('a step asking for an online run points at what is left to set, one thing after another, and at Start last', () => {

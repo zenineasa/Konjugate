@@ -13275,6 +13275,8 @@ const tutorialExportedKinds = new Set();
 // Extensions while a tutorial ran: the installed packages (read every few seconds, since the list is asked for), Discover seen, and the
 // add-ons opened from the rail.
 let tutorialInstalledPackages = [];
+// Their versions, by id, for a tutorial that needs one recent enough (the excavator's 3D view needs Pose Visualizer 1.0.7).
+let tutorialInstalledVersions = new Map();
 let tutorialInstalledReadAt = 0;
 let tutorialDiscoverSeen = false;
 // Whether an assistant proposal has been applied while a tutorial ran.
@@ -13284,7 +13286,11 @@ const tutorialAddonsOpened = new Set();
 function refreshTutorialInstalledPackages(force = false) {
     if (!window.extensions?.list || (!force && Date.now() - tutorialInstalledReadAt < 3000)) return Promise.resolve();
     tutorialInstalledReadAt = Date.now();
-    return window.extensions.list().then((packages) => { tutorialInstalledPackages = packages.filter((entry) => entry.enabled !== false).map((entry) => entry.packageId); }).catch(() => {});
+    return window.extensions.list().then((packages) => {
+        const enabled = packages.filter((entry) => entry.enabled !== false);
+        tutorialInstalledPackages = enabled.map((entry) => entry.packageId);
+        tutorialInstalledVersions = new Map(enabled.map((entry) => [entry.packageId, String(entry.version ?? '')]));
+    }).catch(() => {});
 }
 $('#addonRailButtons').addEventListener('click', (event) => {
     const button = event.target.closest('.addonTool');
@@ -13518,6 +13524,7 @@ const tour = createTour({
                     refreshTutorialInstalledPackages();
                     return tutorialInstalledPackages;
                 })(),
+                installedVersion: (id) => tutorialInstalledVersions.get(id) ?? null,
                 addonActive: (id) => Boolean(document.querySelector(`#addonRailButtons .addonTool[data-addon-id="${id}"]`)),
                 addonButtonOf: (id) => document.querySelector(`#addonRailButtons .addonTool[data-addon-id="${id}"]`),
                 addonsOpened: [...tutorialAddonsOpened],
@@ -14153,6 +14160,21 @@ const tour = createTour({
             if (document.querySelector('#addonRailButtons .addonTool')) return;
             keepTutorialForRestart();
             await window.applicationInfo.restart();
+        },
+        // The 3D view: the add-on's window opened on the run going now, when it is installed and started; otherwise its entry in
+        // Discover, to install it from (after the tutorial: installing one asks for a restart, which would end the run).
+        openPoseVisualizer: async (step) => {
+            const button = document.querySelector(`#addonRailButtons .addonTool[data-addon-id="${step.prefix}"]`);
+            if (button) {
+                await waitUntil(() => Boolean(activeResult) && !button.hidden, 15000);
+                if (!button.hidden) button.click();
+                return;
+            }
+            if (!$('#extensionsDialog').open) await openExtensionsDialog();
+            document.querySelector('.extensionsTab[data-extensions-mode="discover"]')?.click();
+            const item = () => document.querySelector(`#extensionsResults .discoverItem[data-discover-prefix="${step.prefix}"]`);
+            await waitUntil(() => Boolean(item()), 20000);
+            item()?.click();
         },
         openAddon: async (step) => {
             await waitUntil(() => activeResult && !simulationRunning, 60000);

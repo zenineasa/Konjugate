@@ -286,6 +286,12 @@ export function createHumanInput({ host = globalThis } = {}) {
         devices() {
             return [keyboardDevice, ...[...padState.keys()].map((id) => ({ kind: 'gamepad', id, name: gamepadName(id) })), ...midiDevices.values()];
         },
+        // What each connected gamepad reads now, for showing it: [{ id, name, axes: [-1…1], buttons: [{ value, pressed }] }], and the
+        // keys held (only those a binding uses, or any while one is being bound, are seen).
+        readings() {
+            return [...padState.entries()].map(([id, state]) => ({ id, name: gamepadName(id), axes: [...state.axes], buttons: state.buttons.map((button) => ({ ...button })) }));
+        },
+        heldKeys() { return [...heldKeys]; },
         isConnected(device) {
             if (device.kind === 'keyboard') return true;
             if (device.kind === 'gamepad') return padState.has(device.id);

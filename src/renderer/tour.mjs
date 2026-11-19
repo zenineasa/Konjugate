@@ -52,6 +52,9 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     const link = element('button', 'tourContentLink', '');
     link.type = 'button';
     const linkNote = element('p', 'tourLinkNote');
+    // A step's live status, worked out from the facts at every look (what a step waits for, as it stands).
+    const status = element('p', 'tourStatus');
+    status.setAttribute('role', 'status');
     linkNote.setAttribute('role', 'status');
     const notice = element('p', 'tourNotice');
     const back = element('button', 'tourLink', '');
@@ -66,7 +69,7 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     skipStep.type = 'button';
     const actions = element('div', 'tourActions');
     actions.append(skip, skipStep, fillButton, next);
-    card.append(progress, title, text, link, linkNote, notice, back, actions);
+    card.append(progress, title, text, status, link, linkNote, notice, back, actions);
     document.body.append(ring, card);
 
     const targetOf = (step, facts) => (typeof step.target === 'function' ? step.target(facts.ui) : step.target);
@@ -152,6 +155,9 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         progress.textContent = stepLabel(reached, steps);
         title.textContent = step.title;
         text.textContent = stepText(step, edition);
+        const said = step.status ? step.status(facts.ui) : '';
+        if (status.textContent !== said) status.textContent = said;
+        status.hidden = !said;
         if (link.dataset.step !== step.id) { linkNote.textContent = ''; link.dataset.step = step.id; }
         link.hidden = !step.link || !pageActions[step.link.action];
         link.textContent = step.link?.label ?? '';

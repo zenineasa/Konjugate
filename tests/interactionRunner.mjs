@@ -1332,11 +1332,15 @@ export async function runInteractionTests(driver) {
 
         // Bound before any run: the next key pressed drives Drive, and the key does nothing else meanwhile.
         await evaluate(window, `document.querySelector('#controllerBindButton').click()`);
-        await waitFor(window, `document.querySelector('#controllerBindButton').textContent.startsWith('Move a control')`, 'Bind a control did not wait for a control.');
+        await waitFor(window, `document.querySelector('#controllerBindRow').classList.contains('listening')`, 'Bind a control did not wait for a control.');
         await key('keydown', 'KeyW');
         await key('keyup', 'KeyW');
         await waitFor(window, `document.querySelectorAll('#controllerBindingList .controllerBindingRow').length === 1`, 'The key was not bound.');
-        assert.deepEqual(await rows(), ['⌨ WKeyboard · drives Drive (k) Change…Remove']);
+        assert.deepEqual(await rows(), ['⌨ W→ DriveKeyboard · kChange…Remove']);
+        // Saying what was bound, and the row marked as the one just made.
+        assert.match(await evaluate(window, `document.querySelector('#controllerBindStatus').textContent`), /^Bound ⌨ W to Drive\./);
+        assert.equal(await evaluate(window, `document.querySelector('#controllerBindingList .controllerBindingRow').classList.contains('justBound')`), true);
+        assert.match(await evaluate(window, `document.querySelector('#controllerBindParameter').selectedOptions[0].textContent`), /· bound$/, 'The parameter is marked as bound in the menu.');
         assert.equal(await evaluate(window, `document.querySelector('#settingsDialog').open`), true, 'Pressing a key to bind it closed Settings.');
 
         // Its settings: a second key makes the two one control, ramping the value up and down.
@@ -1356,7 +1360,7 @@ export async function runInteractionTests(driver) {
         // A binding for a parameter this model does not have waits, and says so; the threshold is kept as a fraction.
         await evaluate(window, `window.__debugSteering.steering.save({ ...window.__debugSteering.steering.document, bindings: [...window.__debugSteering.steering.document.bindings, { id: 'elsewhere', device: { kind: 'keyboard' }, control: { type: 'key', code: 'KeyH' }, parameter: { symbol: 'heaterPower', name: 'Heater power' } }] })`);
         await waitFor(window, `document.querySelectorAll('#controllerBindingList .controllerBindingRow').length === 2`, 'The second binding was not listed.');
-        assert.match((await rows())[1], /drives Heater power \(heaterPower\) · not in this model/);
+        assert.match((await rows())[1], /→ Heater power.*heaterPower · not in this model/);
         await evaluate(window, `(() => { const input = document.querySelector('#controllerThreshold'); input.value = '0.5'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitFor(window, `window.__debugSteering.steering.document.threshold === 0.005`, 'The threshold was not kept.');
 
@@ -9683,7 +9687,7 @@ export async function runInteractionTests(driver) {
             await waitForStep('bindKey');
             await evaluate(window, `(() => { const select = document.querySelector('#controllerBindParameter'); select.value = [...select.options].find((option) => option.textContent.includes('Setpoint angle')).value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
             await press('#controllerBindButton');
-            await waitFor(window, `document.querySelector('#controllerBindButton').textContent.startsWith('Move a control')`, 'Bind did not wait for a key.');
+            await waitFor(window, `document.querySelector('#controllerBindRow').classList.contains('listening')`, 'Bind did not wait for a key.');
             await key('keydown', 'KeyW');
             await key('keyup', 'KeyW');
             await waitForStep('addDownKey');
@@ -9811,17 +9815,29 @@ export async function runInteractionTests(driver) {
             await waitForStep('welcome');
             await press('.tourFloating .tourPrimary');
             await waitForStep('connect');
-            // Two joysticks plugged in, two axes each.
-            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(left)}, { axes: 2, buttons: 4 }); devices.connectGamepad(${JSON.stringify(right)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
-            await waitForStep('bindLeft');
-            // The left joystick bound by hand in Settings › Controllers: each command chosen, Bind, and the axis moved.
+            // The card says what Konjugate sees, as it changes: nothing, then one joystick (two axes, not yet four), then two.
+            await waitFor(window, `/sees no joystick/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say no joystick is seen.');
             await press('#settingsButton');
             await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
             await press('[data-settings-target="controllers"]');
+            await waitFor(window, `Boolean(document.querySelector('#controllerDevices .controllerNoDevice'))`, 'Settings did not say no controller is seen.');
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(left)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
+            await waitFor(window, `/one controller .*2 axes in all: four are needed/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say one joystick is not enough.');
+            assert.equal(await evaluate(window, `window.__debugTour.step()`), 'connect', 'One joystick of two axes is not four.');
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(right)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
+            await waitForStep('bindLeft');
+            // Settings › Controllers lists both, each with its two axes and four buttons, moving as they are moved.
+            await waitFor(window, `document.querySelectorAll('#controllerDevices .controllerDevice[data-device-id]').length === 2`, 'Settings did not list the two joysticks.');
+            assert.equal(await evaluate(window, `document.querySelectorAll('#controllerDevices [data-device-id="Left joystick (simulated)"] .controllerAxisMeter').length`), 2);
+            await axis(left, 0, 0.8);
+            await waitFor(window, `document.querySelector('#controllerDevices .controllerAxisMeter[data-pad="Left joystick (simulated)"][data-axis="0"]').classList.contains('active')`, 'The axis bar did not follow the joystick.');
+            await axis(left, 0, 0);
+            // The left joystick bound by hand: each command chosen, Bind, and the axis moved.
             for (const [name, index] of [['Swing command', 0], ['Stick command', 1]]) {
                 await evaluate(window, `(() => { const select = document.querySelector('#controllerBindParameter'); select.value = [...select.options].find((option) => option.textContent.startsWith(${JSON.stringify(name)})).value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
                 await press('#controllerBindButton');
-                await waitFor(window, `document.querySelector('#controllerBindButton').textContent.startsWith('Move a control')`, 'Bind did not wait for a control.');
+                await waitFor(window, `document.querySelector('#controllerBindRow').classList.contains('listening')`, 'Bind did not wait for a control.');
+                assert.match(await evaluate(window, `document.querySelector('#controllerBindHint').textContent`), new RegExp(`^Listening for ${name}`));
                 await axis(left, index, 0.9);
                 await new Promise((resolve) => setTimeout(resolve, 150));
                 await axis(left, index, 0);

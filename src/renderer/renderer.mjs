@@ -28,7 +28,7 @@ import { groupTutorials, searchTutorials, tutorialById, tutorialStartLabel } fro
 import { stepText } from '../tutorials/steps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
 import { changedParameterIds, describeIntervention, parameterChangeEntries } from '../parameterHistory.mjs';
-import { liveRange } from '../inputBindings.mjs';
+import { controlLabel, keyName, liveRange } from '../inputBindings.mjs';
 import { recordAsCommands } from '../interventionSchedules.mjs';
 import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
@@ -7902,11 +7902,81 @@ async function keepNewProjectDefaults() {
     }
 }
 
-// Settings › Controllers (docs/proposals/humanInputBinding.md): every binding the person keeps, with its device's state and whether the
-// open model has its parameter, to change or remove; a control bound to any live parameter of the open model, run or no run; and how
-// big a change of a moving control must be to be recorded. Kept as they are made.
+// Settings › Controllers (docs/proposals/humanInputBinding.md): what Konjugate sees now (each gamepad or joystick with its axes and buttons
+// moving live, the keyboard, MIDI), every binding the person keeps (its device's state, what it drives, its control moving live, whether
+// the open model has its parameter), a control bound to any live parameter of the open model, run or no run, and how big a change of a
+// moving control must be to be recorded. Kept as they are made.
+const controllerElement = (tag, className, text) => {
+    const created = document.createElement(tag);
+    if (className) created.className = className;
+    if (text !== undefined) created.textContent = text;
+    return created;
+};
+// A centred bar for an axis (−1 to 1), filled from the middle towards the side it is pushed; a dot for a button or a key.
+function controllerAxisMeter(title, data) {
+    const meter = controllerElement('span', 'controllerAxisMeter');
+    meter.title = title;
+    meter.setAttribute('aria-label', title);
+    Object.assign(meter.dataset, data);
+    meter.append(controllerElement('i'));
+    return meter;
+}
+function controllerDot(title, data) {
+    const dot = controllerElement('span', 'controllerButtonDot');
+    dot.title = title;
+    Object.assign(dot.dataset, data);
+    return dot;
+}
+function renderControllerDevices() {
+    const container = $('#controllerDevices');
+    const pads = humanInput.readings();
+    const rows = pads.map((pad) => {
+        const row = controllerElement('div', 'settingsItem controllerDevice');
+        row.dataset.deviceId = pad.id;
+        const text = controllerElement('div', 'settingsItemText');
+        text.append(controllerElement('span', 'settingsItemLabel', pad.name),
+            controllerElement('small', 'settingsItemHint', `${pad.axes.length} ${pad.axes.length === 1 ? 'axis' : 'axes'} · ${pad.buttons.length} ${pad.buttons.length === 1 ? 'button' : 'buttons'} · move a stick or press a button to see it here`));
+        const readings = controllerElement('div', 'controllerReadings');
+        const axes = controllerElement('div', 'controllerAxes');
+        pad.axes.forEach((_value, index) => axes.append(controllerAxisMeter(controlLabel({ kind: 'gamepad' }, { type: 'axis', index }).replace('🎮 ', ''), { pad: pad.id, axis: String(index) })));
+        const buttons = controllerElement('div', 'controllerButtons');
+        pad.buttons.forEach((_button, index) => buttons.append(controllerDot(controlLabel({ kind: 'gamepad' }, { type: 'button', index }).replace('🎮 ', ''), { pad: pad.id, button: String(index) })));
+        readings.append(axes, buttons);
+        row.append(controllerElement('span', 'controllerStatusDot connected'), text, readings);
+        return row;
+    });
+    if (!pads.length) {
+        const empty = controllerElement('div', 'settingsItem controllerDevice controllerNoDevice');
+        const text = controllerElement('div', 'settingsItemText');
+        text.append(controllerElement('span', 'settingsItemLabel', 'No gamepad or joystick seen yet'),
+            controllerElement('small', 'settingsItemHint', 'Plug one in and press any of its buttons: a browser shows a controller only once it has been used. It appears here as soon as it is seen.'));
+        empty.append(controllerElement('span', 'controllerStatusDot waiting'), text);
+        rows.push(empty);
+    }
+    const keyboard = controllerElement('div', 'settingsItem controllerDevice');
+    const keyboardText = controllerElement('div', 'settingsItemText');
+    keyboardText.append(controllerElement('span', 'settingsItemLabel', 'Keyboard'),
+        controllerElement('small', 'settingsItemHint', 'Always there. A key bound to a parameter steers it while this window is in front and no field is being typed in.'));
+    const held = controllerElement('div', 'controllerReadings controllerHeldKeys');
+    held.dataset.heldKeys = '';
+    keyboard.append(controllerElement('span', 'controllerStatusDot connected'), keyboardText, held);
+    rows.push(keyboard);
+    for (const device of humanInput.devices().filter((candidate) => candidate.kind === 'midi')) {
+        const row = controllerElement('div', 'settingsItem controllerDevice');
+        const text = controllerElement('div', 'settingsItemText');
+        text.append(controllerElement('span', 'settingsItemLabel', device.name), controllerElement('small', 'settingsItemHint', 'MIDI controller'));
+        row.append(controllerElement('span', 'controllerStatusDot connected'), text);
+        rows.push(row);
+    }
+    container.replaceChildren(...rows);
+}
+
+// The bindings shown last, so one just made can be marked as such.
+let controllerBindingIdsShown = null;
 function renderControllerSettings() {
     if (settings.page !== 'controllers') return;
+    // Devices are read while this page is open, bound or not, so a controller plugged in is seen at once.
+    humanInput.start();
     const kept = steering.document;
     const modelName = filenameStem(currentProjectFilename);
     const live = parameterOwnersInModel().filter(({ parameter }) => parameter.mode === 'live');
@@ -7916,44 +7986,111 @@ function renderControllerSettings() {
     $('#controllersMidiNote').textContent = midi === 'unsupported'
         ? 'This browser has no Web MIDI, so a MIDI controller cannot be used here; gamepads and the keyboard can.'
         : 'MIDI was not allowed for this page, so a MIDI controller cannot be used; gamepads and the keyboard can.';
+    renderControllerDevices();
     const list = $('#controllerBindingList');
+    const shownBefore = controllerBindingIdsShown;
+    const added = shownBefore ? kept.bindings.filter((entry) => !shownBefore.has(entry.id)) : [];
+    controllerBindingIdsShown = new Set(kept.bindings.map((entry) => entry.id));
     list.replaceChildren(...kept.bindings.map((entry) => {
         const described = steering.describe(entry);
         const here = (entry.model === null || entry.model === modelName) && symbols.has(entry.parameter.symbol);
-        const row = document.createElement('div');
-        row.className = 'settingsItem controllerBindingRow';
+        const row = controllerElement('div', 'settingsItem controllerBindingRow');
         row.dataset.bindingId = entry.id;
-        const notes = [
-            `${entry.device.name}${described.connected ? '' : ', not plugged in'}`,
-            `drives ${entry.parameter.name} (${entry.parameter.symbol})${entry.model ? ` only in “${entry.model}”` : ''}`,
-            ...(here ? [] : ['not in this model'])
-        ];
-        row.innerHTML = `<div class="settingsItemText"><strong class="settingsItemLabel">${escapeHtml(described.label)}</strong><small class="settingsItemHint">${escapeHtml(notes.join(' · '))}</small></div>
-            <div class="settingsItemControl"><button class="settingsButton" type="button" data-change>Change…</button><button class="settingsButton danger" type="button" data-remove>Remove</button></div>`;
-        $('[data-change]', row).addEventListener('click', () => steering.openSettings(entry.id));
-        $('[data-remove]', row).addEventListener('click', () => steering.save({ ...steering.document, bindings: steering.document.bindings.filter((other) => other.id !== entry.id) }));
+        row.classList.toggle('justBound', added.some((other) => other.id === entry.id));
+        row.classList.toggle('elsewhere', !here);
+        const text = controllerElement('div', 'settingsItemText');
+        const heading = controllerElement('div', 'controllerBindingHeading');
+        heading.append(controllerElement('strong', 'controllerChip', described.label), controllerElement('span', 'controllerBindingTarget', `→ ${entry.parameter.name}`));
+        const notes = [`${entry.device.name}${described.connected ? '' : ' · not plugged in'}`, entry.parameter.symbol, ...(entry.model ? [`only in “${entry.model}”`] : []), ...(here ? [] : ['not in this model'])];
+        text.append(heading, controllerElement('small', 'settingsItemHint', notes.join(' · ')));
+        // The bound control, moving as it is moved: an axis as a centred bar, a button or a key as a dot, a pair of keys as two.
+        const reading = controllerElement('div', 'controllerReadings');
+        if (entry.device.kind === 'gamepad' && entry.control.type === 'axis') reading.append(controllerAxisMeter(described.label, { pad: entry.device.id, axis: String(entry.control.index) }));
+        else if (entry.device.kind === 'gamepad') reading.append(controllerDot(described.label, { pad: entry.device.id, button: String(entry.control.index) }));
+        else if (entry.control.type === 'keys') reading.append(controllerDot(keyName(entry.control.down), { key: entry.control.down }), controllerDot(keyName(entry.control.up), { key: entry.control.up }));
+        else if (entry.control.type === 'key') reading.append(controllerDot(keyName(entry.control.code), { key: entry.control.code }));
+        const status = controllerElement('span', `controllerStatusDot ${described.connected ? 'connected' : 'missing'}`);
+        status.title = described.connected ? 'Connected' : 'Not plugged in';
+        const actions = controllerElement('div', 'settingsItemControl');
+        const change = controllerElement('button', 'settingsButton', 'Change…');
+        change.type = 'button';
+        change.dataset.change = '';
+        const remove = controllerElement('button', 'settingsButton danger', 'Remove');
+        remove.type = 'button';
+        remove.dataset.remove = '';
+        actions.append(change, remove);
+        row.append(status, text, reading, actions);
+        change.addEventListener('click', () => steering.openSettings(entry.id));
+        remove.addEventListener('click', () => steering.save({ ...steering.document, bindings: steering.document.bindings.filter((other) => other.id !== entry.id) }));
         return row;
     }));
-    if (!kept.bindings.length) list.replaceChildren(Object.assign(document.createElement('div'), { className: 'settingsItem settingsEmpty', textContent: 'No controls bound yet.' }));
+    if (!kept.bindings.length) list.replaceChildren(controllerElement('div', 'settingsItem settingsEmpty', 'No controls bound yet. Choose a live parameter below and press Bind.'));
+    if (added.length) {
+        const [first] = added;
+        $('#controllerBindStatus').textContent = `Bound ${steering.describe(first).label} to ${first.parameter.name}. Move it to see it on its row.`;
+        $('#controllerBindStatus').hidden = false;
+    }
     const choose = $('#controllerBindParameter');
     const chosen = choose.value;
-    choose.replaceChildren(...(live.length
-        ? [...new Map(live.map(({ parameter }) => [parameter.symbol, parameter])).values()].map((parameter) => new Option(`${parameter.name} (${parameter.symbol})`, parameter.symbol, false, parameter.symbol === chosen))
-        : [new Option('No live parameter in this model', '')]));
-    choose.disabled = !live.length;
-    $('#controllerBindButton').disabled = !live.length;
+    const boundSymbols = new Set(kept.bindings.map((entry) => entry.parameter.symbol));
+    const parameters = [...new Map(live.map(({ parameter }) => [parameter.symbol, parameter])).values()];
+    choose.replaceChildren(...parameters.map((parameter) => new Option(`${parameter.name} (${parameter.symbol})${boundSymbols.has(parameter.symbol) ? ' · bound' : ''}`, parameter.symbol, false, parameter.symbol === chosen)));
+    // With no live parameter, the row says how to make one instead of offering nothing.
+    choose.hidden = !parameters.length;
+    $('#controllerBindButton').hidden = !parameters.length;
+    if (!$('#controllerBindRow').classList.contains('listening')) {
+        $('#controllerBindHint').textContent = parameters.length
+            ? 'Choose a live parameter, press Bind, then move a stick, press a button or press a key'
+            : 'This model has no live parameter to steer. Set a parameter\'s Mode to Live in its relationship\'s or node\'s editor, with the range it may take, and it is offered here.';
+    }
     $('#controllerThreshold').value = String(Number((kept.threshold * 100).toPrecision(4)));
+    animateControllerReadings();
 }
 steering.onChanged(renderControllerSettings);
+humanInput.onDevicesChanged(() => { if (settings.page === 'controllers') renderControllerSettings(); });
+// While the page is open, every axis bar and button or key dot on it follows its control, frame by frame.
+let controllerReadingsFrame = null;
+function animateControllerReadings() {
+    if (controllerReadingsFrame !== null) return;
+    const step = () => {
+        controllerReadingsFrame = null;
+        if (settings.page !== 'controllers' || !$('#settingsDialog').open) return;
+        const pads = new Map(humanInput.readings().map((pad) => [pad.id, pad]));
+        const held = new Set(humanInput.heldKeys());
+        for (const meter of document.querySelectorAll('[data-settings-page="controllers"] .controllerAxisMeter')) {
+            const value = Math.max(-1, Math.min(1, pads.get(meter.dataset.pad)?.axes[Number(meter.dataset.axis)] ?? 0));
+            const fill = meter.firstElementChild;
+            fill.style.left = `${50 + Math.min(0, value) * 50}%`;
+            fill.style.width = `${Math.abs(value) * 50}%`;
+            meter.classList.toggle('active', value !== 0);
+        }
+        for (const dot of document.querySelectorAll('[data-settings-page="controllers"] .controllerButtonDot')) {
+            const on = dot.dataset.key ? held.has(dot.dataset.key) : Boolean(pads.get(dot.dataset.pad)?.buttons[Number(dot.dataset.button)]?.pressed);
+            dot.classList.toggle('active', on);
+        }
+        const heldKeys = document.querySelector('[data-held-keys]');
+        if (heldKeys) {
+            const text = [...held].map(keyName).join(' ');
+            if (heldKeys.textContent !== text) heldKeys.textContent = text;
+        }
+        controllerReadingsFrame = requestAnimationFrame(step);
+    };
+    controllerReadingsFrame = requestAnimationFrame(step);
+}
 $('#controllerBindButton').addEventListener('click', () => {
     const button = $('#controllerBindButton');
     if (button.dataset.waiting) { steering.stopBinding(); return; }
     const symbol = $('#controllerBindParameter').value;
     const parameter = parameterOwnersInModel().map((owner) => owner.parameter).find((candidate) => candidate.mode === 'live' && candidate.symbol === symbol);
     if (!parameter) return;
+    $('#controllerBindStatus').hidden = true;
     steering.bindParameter({ symbol: parameter.symbol, name: parameter.name }, {
         waiting: (waiting) => {
-            button.textContent = waiting ? 'Move a control… (Esc to stop)' : 'Bind';
+            button.textContent = waiting ? 'Stop listening' : 'Bind';
+            $('#controllerBindRow').classList.toggle('listening', waiting);
+            $('#controllerBindHint').textContent = waiting
+                ? `Listening for ${parameter.name}: move a stick, press a button or press a key. Esc stops.`
+                : 'Choose a live parameter, press Bind, then move a stick, press a button or press a key';
             if (waiting) button.dataset.waiting = 'true'; else delete button.dataset.waiting;
         }
     });
@@ -13114,6 +13251,8 @@ const tour = createTour({
                 // A live run's parameters can be steered once its first results are in.
                 steerable: liveControlsOffered(),
                 gamepads: humanInput.devices().filter((device) => device.kind === 'gamepad').length,
+                gamepadNames: humanInput.devices().filter((device) => device.kind === 'gamepad').map((device) => device.name),
+                gamepadAxes: humanInput.readings().reduce((sum, pad) => sum + pad.axes.length, 0),
                 // A state's values over the run on screen, by its node's name and its symbol. A live run keeps only its latest sample
                 // here, so what each look finds is kept as well (by the run), and the longer of the two is given.
                 resultSeries: (nodeName, symbol) => {

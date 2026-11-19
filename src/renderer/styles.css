@@ -1774,6 +1774,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .tourFloating .tourContentLink { display: block; height: auto; margin: -4px 0 12px; padding: 0; color: #74ddd3; background: none; border: 0; font-size: 13px; font-weight: 600; text-align: left; text-decoration: underline; text-underline-offset: 3px; }
 .tourFloating .tourLinkNote { margin: -6px 0 12px; font-size: 12px; line-height: 1.45; color: #8fb3bd; overflow-wrap: anywhere; }
 .tourFloating .tourLinkNote[hidden] { display: none; }
+.tourFloating .tourStatus { margin: -6px 0 12px; padding: 6px 9px; color: #b9ccd4; background: rgb(66 201 188 / 8%); border-left: 2px solid #42c9bc; border-radius: 3px; font-size: 12px; line-height: 1.45; }
+.tourFloating .tourStatus[hidden] { display: none; }
 .tourFloating button { height: 30px; padding: 0 14px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; }
 .tourFloating .tourPrimary { color: #061412; background: #42c9bc; border: 1px solid #42c9bc; }
 .tourFloating .tourSecondary { color: #dbe7ec; background: transparent; border: 1px solid #3b5460; }
@@ -2152,14 +2154,35 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .passwordDialog .inputBindingCheck { display: flex; align-items: center; gap: 7px; }
 .passwordDialog .inputBindingCheck input { width: 14px; height: 14px; padding: 0; accent-color: var(--accent); }
 .passwordDialog footer .inputBindingRemove { margin-right: auto; color: #d98b7f; border-color: #5a3530; }
-.controllerBindingList { display: grid; gap: 6px; }
+/* Settings › Controllers: what is connected, with its axes and buttons moving live, and the bindings, each with its control moving. */
+.controllerBindingList { display: grid; }
 .controllerBindingList .emptyEditorState { margin: 0; }
-.controllerBindingRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 7px 8px; background: #09141b; border: 1px solid #22343e; border-radius: 4px; }
-.controllerBindingRow > div { display: grid; gap: 2px; min-width: 0; }
-.controllerBindingRow strong { margin: 0; font-size: 9px; }
-.controllerBindingRow small { overflow-wrap: anywhere; color: #667b86; font-size: 7px; line-height: 1.4; }
-.controllerBindingRow button, .controllerBindRow button { height: 26px; padding: 0 9px; color: #8fa7b0; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
-.controllerBindRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; margin-top: 8px; }
+.passwordDialog.settingsSheet .controllerBindingList > .settingsItem + .settingsItem { border-top: 1px solid #1c2c35; }
+.passwordDialog.settingsSheet .controllerBindingList + .controllerBindRow { border-top: 1px solid #1c2c35; }
+.controllerStatusDot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #3a4c55; }
+.controllerStatusDot.connected { background: #42c9bc; box-shadow: 0 0 0 3px rgb(66 201 188 / 15%); }
+.controllerStatusDot.missing { background: #d6a35f; box-shadow: 0 0 0 3px rgb(214 163 95 / 15%); }
+.controllerStatusDot.waiting { background: #567080; animation: controllerWaiting 1.6s ease-in-out infinite; }
+@keyframes controllerWaiting { 50% { opacity: .35; } }
+.controllerReadings { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; color: #9fb5bd; font-size: 8px; font-variant-numeric: tabular-nums; }
+.controllerAxes, .controllerButtons { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.controllerButtons { max-width: 120px; }
+.controllerAxisMeter { position: relative; width: 46px; height: 8px; overflow: hidden; background: #0e1d25; border: 1px solid #22343e; border-radius: 4px; }
+.controllerAxisMeter::before { position: absolute; top: 1px; bottom: 1px; left: 50%; width: 1px; background: #2c4048; content: ''; }
+.controllerAxisMeter > i { position: absolute; top: 1px; bottom: 1px; left: 50%; width: 0; background: #42c9bc; border-radius: 2px; }
+.controllerButtonDot { width: 8px; height: 8px; border: 1px solid #2c4048; border-radius: 50%; background: #0e1d25; }
+.controllerButtonDot.active { background: #42c9bc; border-color: #42c9bc; }
+.controllerHeldKeys:empty { display: none; }
+.controllerBindingHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
+.passwordDialog.settingsSheet .controllerChip { padding: 1px 6px; color: #d2e6e8; background: #13232b; border: 1px solid #2c4048; border-radius: 4px; font-size: 8.5px; font-weight: 600; }
+.controllerBindingTarget { color: #b8c9cf; font-size: 9px; }
+.controllerBindingRow.elsewhere .controllerBindingTarget, .controllerBindingRow.elsewhere .controllerChip { opacity: .6; }
+.controllerBindingRow.justBound { animation: controllerJustBound 2.4s ease-out; }
+@keyframes controllerJustBound { from { background: rgb(66 201 188 / 16%); } }
+.controllerBindRow.listening { background: rgb(66 201 188 / 8%); }
+.controllerBindRow.listening .settingsItemHint { color: #74ddd3; }
+.passwordDialog.settingsSheet .controllerBindStatus { color: #74ddd3; }
+@media (prefers-reduced-motion: reduce) { .controllerStatusDot.waiting, .controllerBindingRow.justBound { animation: none; } }
 .passwordDialog .controllerThreshold { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .passwordDialog .controllerThreshold input { width: 70px; height: 26px; }
 .controlHistoryFooter { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid #1e313b; }

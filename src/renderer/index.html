@@ -544,12 +544,18 @@
                     <section class="settingsPage" data-settings-page="controllers" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
                         <p class="settingsLead">Gamepads, joysticks, MIDI controllers and keys that steer live parameters while a run goes. A binding follows a parameter's symbol, so it works in every model that has it.</p>
                         <p id="controllersMidiNote" class="settingsNote warning" hidden></p>
+                        <!-- What Konjugate sees now: each gamepad or joystick with its axes and buttons moving live, the keyboard, and MIDI. -->
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Connected controllers</h3>
+                            <div id="controllerDevices" class="settingsCard controllerDevices" aria-label="Connected controllers" aria-live="polite"></div>
+                        </section>
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Bindings</h3>
                             <div class="settingsCard">
                                 <div id="controllerBindingList" class="controllerBindingList" aria-label="Controller bindings"></div>
-                                <div class="settingsItem controllerBindRow"><div class="settingsItemText"><span class="settingsItemLabel">Bind a control</span><small class="settingsItemHint">Choose a live parameter, press Bind, then move a control or press a key</small></div><div class="settingsItemControl"><select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select><button id="controllerBindButton" class="settingsButton" type="button">Bind</button></div></div>
+                                <div id="controllerBindRow" class="settingsItem controllerBindRow"><div class="settingsItemText"><span class="settingsItemLabel">Bind a control</span><small id="controllerBindHint" class="settingsItemHint">Choose a live parameter, press Bind, then move a stick, press a button or press a key</small></div><div class="settingsItemControl"><select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select><button id="controllerBindButton" class="settingsButton primary" type="button">Bind</button></div></div>
                             </div>
+                            <p id="controllerBindStatus" class="settingsNote controllerBindStatus" role="status" hidden></p>
                         </section>
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Recording</h3>

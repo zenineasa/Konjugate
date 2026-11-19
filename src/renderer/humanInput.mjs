@@ -78,7 +78,7 @@ export function createHumanInput({ host = globalThis } = {}) {
         for (const { pad, key, simulated } of pads()) {
             if (seen.has(key)) continue;
             seen.add(key);
-            const device = { kind: 'gamepad', id: key, name: gamepadName(key) };
+            const device = { kind: 'gamepad', id: key, name: gamepadName(key), layout: pad.mapping === 'standard' ? 'standard' : 'other' };
             const axes = [...pad.axes].map((value) => Math.round(withoutDeadZone(Number(value) || 0, defaultDeadZone) * 1000) / 1000);
             const buttons = [...pad.buttons].map((button) => ({ value: Number(button?.value) || 0, pressed: Boolean(button?.pressed) }));
             const previous = padState.get(key);
@@ -252,6 +252,12 @@ export function createHumanInput({ host = globalThis } = {}) {
     function capture({ signal } = {}) {
         start();
         if (capturing) capturing.finish(null);
+        // A control already pushed or held when the wait begins (the stick just bound, still over) is not taken until it has come back
+        // to rest, so binding one control after another does not take the same one twice.
+        const held = new Set([...padState.entries()].flatMap(([id, state]) => [
+            ...state.axes.flatMap((value, index) => (Math.abs(value) >= 0.25 ? [`${id}|axis|${index}`] : [])),
+            ...state.buttons.flatMap((button, index) => (button.pressed || button.value >= 0.25 ? [`${id}|button|${index}`] : []))
+        ]));
         return new Promise((resolve) => {
             const turned = new Map();
             const session = {
@@ -265,6 +271,13 @@ export function createHumanInput({ host = globalThis } = {}) {
                         if (!reading.pressed) return true;
                         session.finish(control.code === 'Escape' ? null : { device, control, centred: false, analogue: false });
                         return true;
+                    }
+                    if (device.kind === 'gamepad') {
+                        const key = `${device.id}|${control.type}|${control.index}`;
+                        if (held.has(key)) {
+                            if (Math.abs(reading.value) < 0.25 && !reading.pressed) held.delete(key);
+                            return true;
+                        }
                     }
                     let decisive = false;
                     if (control.type === 'cc') {

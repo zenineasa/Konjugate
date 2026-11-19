@@ -8,7 +8,7 @@
 // the binding's settings. Shared by the project window and the twin's window, each with its own devices (src/renderer/humanInput.mjs).
 
 import {
-    bindingLabel, bindingTarget, controlLabel, createBinding, createBindingDriver, createChangeRecorder, defaultMapping, givesPosition,
+    bindingTarget, controlLabel, createBinding, createBindingDriver, createChangeRecorder, defaultMapping, givesPosition,
     keyName, normalizeInputBindings, readingMatches
 } from '../inputBindings.mjs';
 
@@ -34,6 +34,14 @@ export function createSteering({ humanInput, store, modelName = () => '', status
     let binding = null;
 
     const notify = () => { for (const listener of changeListeners) listener(); };
+    // A binding's chip text, with its gamepad's layout taken from the gamepad connected now when the binding does not say (one made
+    // before bindings kept it, or by a tutorial's skip), so a joystick's axes are not named as a gamepad's left stick.
+    const deviceWithLayout = (device) => {
+        if (device.kind !== 'gamepad' || device.layout) return device;
+        const pad = humanInput.readings?.().find((reading) => reading.id === device.id);
+        return pad ? { ...device, layout: pad.mapping === 'standard' ? 'standard' : 'other' } : device;
+    };
+    const labelOf = (entry) => entry.label || controlLabel(deviceWithLayout(entry.device), entry.control);
 
     function stateOf(entry) {
         const target = bindingTarget(entry, [...targets.values()], modelName());
@@ -155,7 +163,7 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         const notes = [];
         if (!humanInput.isConnected(entry.device)) notes.push(entry.device.kind === 'midi' && humanInput.midiState === 'unsupported' ? 'no MIDI in this browser' : 'not plugged in');
         else if (state?.overridden) notes.push('the slider took over until the control moves again');
-        return { label: bindingLabel(entry), note: notes.join(' · ') };
+        return { label: labelOf(entry), note: notes.join(' · ') };
     }
 
     // `fresh`: the slot was just made and may not be on the page yet; otherwise a slot no longer on the page is forgotten.
@@ -205,6 +213,34 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         return created;
     }
 
+    // Gives the binding `id` another control, the next one the person moves, keeping the rest of it: its name, the model it is narrowed
+    // to, and how it maps when the new control can map the same way (a stick for a stick); otherwise the new control's usual mapping.
+    // Answers the changed binding, or null when the person stopped.
+    async function rebind(id, { waiting = () => {} } = {}) {
+        const entry = bindings.bindings.find((candidate) => candidate.id === id);
+        if (!entry) return null;
+        binding?.abort();
+        const controller = new AbortController();
+        const current = { key: null, rebinding: id, abort: () => controller.abort() };
+        binding = current;
+        waiting(true);
+        status(`Move a control or press a key to drive ${entry.parameter.name} instead; Escape stops.`);
+        humanInput.requestMidi();
+        const moved = await humanInput.capture({ signal: controller.signal });
+        if (binding === current) binding = null;
+        waiting(false);
+        const still = bindings.bindings.find((candidate) => candidate.id === id);
+        if (!moved || !still) { status(''); return null; }
+        const fresh = createBinding({ id, device: moved.device, control: moved.control, centred: moved.centred, analogue: moved.analogue, parameter: still.parameter });
+        const mapping = fresh.mapping.kind === still.mapping.kind ? still.mapping : fresh.mapping;
+        const changed = { ...still, device: fresh.device, control: fresh.control, centred: fresh.centred, mapping };
+        const same = (other) => other.id !== id && other.device.kind === changed.device.kind && other.device.id === changed.device.id
+            && JSON.stringify(other.control) === JSON.stringify(changed.control) && other.parameter.symbol === changed.parameter.symbol;
+        await save({ ...bindings, bindings: bindings.bindings.filter((other) => !same(other)).map((other) => (other.id === id ? changed : other)) });
+        status(`${controlLabel(changed.device, changed.control)} now drives ${changed.parameter.name}.`);
+        return bindings.bindings.find((candidate) => candidate.id === id) ?? null;
+    }
+
     // Binds a control to the target `key`, from its Bind… button.
     function bindTo(key) {
         const target = targets.get(key);
@@ -247,6 +283,8 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         kind.addEventListener('change', showGroup);
         const secondKey = entry.control.type === 'key' ? element('button', { type: 'button', textContent: 'Add a key for down…', title: 'Make two keys one control: this one up, the next you press down' }) : null;
         const remove = element('button', { type: 'button', textContent: 'Remove', className: 'inputBindingRemove' });
+        const changeControl = element('button', { type: 'button', textContent: 'Change control…', title: 'Drive this with another control, keeping these settings: press this, then move the control or press the key' });
+        changeControl.dataset.rebind = 'true';
         const done = element('button', { type: 'submit', textContent: 'Done', className: 'doneButton' });
         const form = element('form', { method: 'dialog' },
             element('span', { className: 'contextKicker', textContent: 'Controller' }),
@@ -256,7 +294,7 @@ export function createSteering({ humanInput, store, modelName = () => '', status
             field('How it maps', kind),
             ...Object.values(groups),
             element('label', { className: 'inputBindingCheck' }, onlyHere, element('span', { textContent: `Only in “${model || 'this model'}”` })),
-            element('footer', {}, remove, secondKey, done));
+            element('footer', {}, remove, changeControl, secondKey, done));
         // Its own dialog: a reopened one (after a second key is added) must not be closed or removed by the one it replaced.
         const own = element('dialog', { className: 'passwordDialog inputBindingDialog' }, form);
         dialog = own;
@@ -284,6 +322,14 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         remove.addEventListener('click', () => {
             save({ ...bindings, bindings: bindings.bindings.filter((candidate) => candidate.id !== id) });
             own.close();
+        });
+        changeControl.addEventListener('click', async () => {
+            changeControl.textContent = 'Move a control… (Esc to stop)';
+            changeControl.disabled = true;
+            const changed = await rebind(id);
+            if (!own.isConnected) return;
+            own.close();
+            if (changed) openSettings(id);
         });
         secondKey?.addEventListener('click', async () => {
             secondKey.textContent = 'Press the key for down…';
@@ -340,6 +386,7 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         },
         bindTo,
         bindParameter,
+        rebind,
         // Stops waiting for a control to bind.
         stopBinding() { binding?.abort(); },
         openSettings,
@@ -350,7 +397,7 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         targets: () => [...targets.values()],
         // A binding as the settings list shows it: its target in the open model, if any, and whether its device is there.
         describe(entry) {
-            return { label: bindingLabel(entry), target: bindingTarget(entry, [...targets.values()], modelName()), connected: humanInput.isConnected(entry.device) };
+            return { label: labelOf(entry), target: bindingTarget(entry, [...targets.values()], modelName()), connected: humanInput.isConnected(entry.device) };
         },
         isBound: (key) => bindings.bindings.some((entry) => { const target = targets.get(key); return target && bindingTarget(entry, [target], modelName()); }),
         onChanged(listener) { changeListeners.add(listener); return () => changeListeners.delete(listener); },

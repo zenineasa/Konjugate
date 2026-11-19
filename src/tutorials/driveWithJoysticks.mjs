@@ -9,12 +9,13 @@
 
 export const driveWithJoysticksValues = Object.freeze({
     // Which joystick and axis drives which command: joystick 0 is the left one, 1 the right; axis 0 is left and right, 1 forward and back.
-    // One gamepad stands for both joysticks: its left stick is axes 0 and 1, its right stick 2 and 3.
+    // One gamepad stands for both joysticks: its left stick is axes 0 and 1, its right stick 2 and 3. In the model's order, which is the
+    // order Settings › Controllers lists them in and Bind goes through them in.
     commands: [
-        { symbol: 'swingCommand', name: 'Swing command', joystick: 0, axis: 0, keys: { up: 'KeyD', down: 'KeyA' } },
-        { symbol: 'stickCommand', name: 'Stick command', joystick: 0, axis: 1, keys: { up: 'KeyS', down: 'KeyW' } },
-        { symbol: 'boomCommand', name: 'Boom command', joystick: 1, axis: 1, keys: { up: 'KeyK', down: 'KeyI' } },
-        { symbol: 'bucketCommand', name: 'Bucket command', joystick: 1, axis: 0, keys: { up: 'KeyL', down: 'KeyJ' } }
+        { symbol: 'swingCommand', name: 'Swing command', joystick: 0, axis: 0, move: 'the left joystick left or right', keys: { up: 'KeyD', down: 'KeyA' } },
+        { symbol: 'boomCommand', name: 'Boom command', joystick: 1, axis: 1, move: 'the right joystick forward or back', keys: { up: 'KeyK', down: 'KeyI' } },
+        { symbol: 'stickCommand', name: 'Stick command', joystick: 0, axis: 1, move: 'the left joystick forward or back', keys: { up: 'KeyS', down: 'KeyW' } },
+        { symbol: 'bucketCommand', name: 'Bucket command', joystick: 1, axis: 0, move: 'the right joystick left or right', keys: { up: 'KeyL', down: 'KeyJ' } }
     ],
     tip: 'Bucket tip',
     ground: 0,
@@ -25,6 +26,7 @@ const values = driveWithJoysticksValues;
 
 const bound = (ui, symbols) => symbols.every((symbol) => ui.bindings.some((binding) => binding.symbol === symbol));
 const allBound = (ui) => bound(ui, values.commands.map((command) => command.symbol));
+const nextUnbound = (ui) => values.commands.find((command) => !bound(ui, [command.symbol])) ?? null;
 // The tip touched the ground, and after that was lifted above the lift height.
 const dug = (ui) => {
     const heights = ui.resultSeries(values.tip, 'height');
@@ -55,19 +57,25 @@ const steps = Object.freeze([
         done: ({ ui }) => ui.gamepadAxes >= 4 || allBound(ui)
     },
     {
-        id: 'bindLeft',
-        title: 'Bind the left joystick',
-        text: 'Open Settings › Controllers. Under "Bind a control", choose "Swing command", press Bind, and move the left joystick left or right. Then choose "Stick command", press Bind, and move it forward or back. A centred joystick sends 0, holding its joint still. With one gamepad, use its left stick.',
-        target: (ui) => (ui.controllersShown ? '#controllerBindButton' : ui.settingsOpen ? '[data-settings-target="controllers"]' : '#settingsButton'),
-        skip: 'bindJoystickAxes', commands: values.commands.filter((command) => command.joystick === 0),
-        done: ({ ui }) => bound(ui, ['swingCommand', 'stickCommand'])
-    },
-    {
-        id: 'bindRight',
-        title: 'Bind the right joystick',
-        text: 'The same for the right joystick: "Boom command" to its forward and back, "Bucket command" to its left and right. With one gamepad, use its right stick. If a function moves the wrong way, its binding\'s Change… inverts it.',
-        target: (ui) => (ui.controllersShown ? '#controllerBindButton' : '#settingsButton'),
-        skip: 'bindJoystickAxes', commands: values.commands.filter((command) => command.joystick === 1),
+        id: 'bind',
+        title: 'Bind the four commands',
+        text: 'In Settings › Controllers, press Bind beside "Swing command" and move the left joystick left or right. Konjugate then listens for the next command by itself: move the boom with the right joystick forward or back, the stick with the left joystick forward or back, and the bucket with the right joystick left or right. With one gamepad, its left stick is the left joystick and its right stick the right one. A centred joystick sends 0, holding its joint still. If a function moves the wrong way, press Invert on its row; Rebind gives it another control.',
+        target: (ui) => {
+            const next = nextUnbound(ui);
+            if (!ui.controllersShown) return ui.settingsOpen ? '[data-settings-target="controllers"]' : '#settingsButton';
+            if (!next) return '#controllerParameters';
+            return ui.controllerListeningFor === next.symbol ? `.controllerParameter[data-symbol="${next.symbol}"]` : `[data-bind-symbol="${next.symbol}"]`;
+        },
+        status: (ui) => {
+            const next = nextUnbound(ui);
+            if (!next) return '';
+            const done = values.commands.filter((command) => bound(ui, [command.symbol])).length;
+            const progress = done ? `${done} of ${values.commands.length} bound. ` : '';
+            return ui.controllerListeningFor === next.symbol
+                ? `${progress}Listening for ${next.name}: move ${next.move}.`
+                : `${progress}Next: ${next.name}, with ${next.move}. Press Bind beside it.`;
+        },
+        skip: 'bindJoystickAxes', commands: values.commands,
         done: ({ ui }) => allBound(ui)
     },
     {

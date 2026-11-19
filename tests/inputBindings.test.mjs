@@ -184,3 +184,17 @@ test('the bindings are kept in the user\'s data folder, and a damaged file reads
         await rm(userData, { recursive: true, force: true });
     }
 });
+
+test('a joystick\'s axes and buttons are named as what they are, a standard gamepad\'s as its own, and the layout is kept with the binding', () => {
+    assert.equal(controlLabel({ kind: 'gamepad' }, { type: 'axis', index: 1 }), '🎮 Left stick ↕', 'A gamepad of no known layout is named as the standard one.');
+    assert.equal(controlLabel({ kind: 'gamepad', layout: 'standard' }, { type: 'button', index: 0 }), '🎮 A');
+    assert.equal(controlLabel({ kind: 'gamepad', layout: 'other' }, { type: 'axis', index: 1 }), '🎮 Stick ↕');
+    assert.equal(controlLabel({ kind: 'gamepad', layout: 'other' }, { type: 'axis', index: 2 }), '🎮 Axis 3');
+    assert.equal(controlLabel({ kind: 'gamepad', layout: 'other' }, { type: 'button', index: 0 }), '🎮 Button 1');
+    const kept = normalizeInputBindings({ bindings: [
+        { id: 'a', device: { kind: 'gamepad', id: 'Joystick', name: 'Joystick', layout: 'other' }, control: { type: 'axis', index: 0 }, parameter: { symbol: 'k' } },
+        { id: 'b', device: { kind: 'gamepad', id: 'Pad', name: 'Pad', layout: 'sideways' }, control: { type: 'axis', index: 0 }, parameter: { symbol: 'k' } },
+        { id: 'c', device: { kind: 'keyboard', layout: 'other' }, control: { type: 'key', code: 'KeyW' }, parameter: { symbol: 'k' } }
+    ] }).bindings;
+    assert.deepEqual(kept.map((binding) => binding.device.layout), ['other', undefined, undefined]);
+});

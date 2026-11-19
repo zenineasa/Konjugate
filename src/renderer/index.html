@@ -543,11 +543,21 @@
                     </section>
                     <section class="settingsPage" data-settings-page="controllers" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
                         <p class="settingsLead">Gamepads, joysticks, MIDI controllers and keys that steer live parameters while a run goes. A binding follows a parameter's symbol, so it works in every model that has it.</p>
-                        <p id="controllersMidiNote" class="settingsNote warning" hidden></p>
+                        <!-- The open model's live parameters, each with the controls bound to it: Bind, then move a control; each binding changed in place. -->
+                        <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">Bindings</h3>
+                            <div id="controllerParameters" class="settingsCard controllerParameters" aria-label="Live parameters and the controls bound to them"></div>
+                            <p id="controllerBindStatus" class="settingsNote controllerBindStatus" role="status" hidden></p>
+                            <details id="controllerOtherBindings" class="settingsDisclosure controllerOtherBindings" hidden>
+                                <summary id="controllerOtherBindingsTitle">Bindings for other models</summary>
+                                <div id="controllerBindingList" class="controllerBindingList" aria-label="Bindings for parameters this model does not have"></div>
+                            </details>
+                        </section>
                         <!-- What Konjugate sees now: each gamepad or joystick with its axes and buttons moving live, the keyboard, and MIDI. -->
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Connected controllers</h3>
                             <div id="controllerDevices" class="settingsCard controllerDevices" aria-label="Connected controllers" aria-live="polite"></div>
+                            <p id="controllersMidiNote" class="settingsNote" hidden></p>
                             <!-- How to get a controller onto the computer and then into Konjugate, for when the list above stays empty. -->
                             <details id="controllerHelp" class="settingsDisclosure controllerHelp">
                                 <summary>Not seeing your controller?</summary>
@@ -561,20 +571,12 @@
                                                 <li>Nintendo Switch Pro Controller: hold the sync button on its top edge until the player lights run back and forth.</li>
                                             </ul>
                                             By cable, many cables only charge: if the computer does not see the controller, try a cable that carries data. A controller paired with a console goes back to it whenever the console is on nearby: turn the console off, or pair the controller again.</li>
-                                        <li><strong>Show it to Konjugate.</strong> Press any of its buttons while this window is in front. Like a browser, Konjugate is shown a controller only once it has been used in its window, so one connected while Konjugate was behind another window waits for a press.</li>
-                                        <li><strong>Still nothing?</strong> Turn the controller off and on again, or disconnect it and connect it again. An app that takes over controllers (Steam, or a remapping tool) can keep one from Konjugate: quit it and try again.</li>
+                                        <li><strong>Show it to Konjugate.</strong> Press any of its buttons while this window is in front. As in a browser, Konjugate is shown a controller only once it has been used in its window, so one connected while Konjugate was behind another window waits for a press.</li>
+                                        <li><strong>Still not there?</strong> Turn the controller off and on again, or disconnect it and connect it again. An app that takes over controllers (Steam, or a remapping tool) can keep one from Konjugate: quit it and try again.</li>
                                     </ol>
                                     <div class="settingsItemControl"><button id="controllerOpenBluetooth" class="settingsButton" type="button" hidden>Open Bluetooth settings</button></div>
                                 </div>
                             </details>
-                        </section>
-                        <section class="settingsSection">
-                            <h3 class="settingsSectionTitle">Bindings</h3>
-                            <div class="settingsCard">
-                                <div id="controllerBindingList" class="controllerBindingList" aria-label="Controller bindings"></div>
-                                <div id="controllerBindRow" class="settingsItem controllerBindRow"><div class="settingsItemText"><span class="settingsItemLabel">Bind a control</span><small id="controllerBindHint" class="settingsItemHint">Choose a live parameter, press Bind, then move a stick, press a button or press a key</small></div><div class="settingsItemControl"><select id="controllerBindParameter" aria-label="Live parameter to bind a control to"></select><button id="controllerBindButton" class="settingsButton primary" type="button">Bind</button></div></div>
-                            </div>
-                            <p id="controllerBindStatus" class="settingsNote controllerBindStatus" role="status" hidden></p>
                         </section>
                         <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Recording</h3>

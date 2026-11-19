@@ -95,10 +95,17 @@ export function keyName(code) {
     return code;
 }
 
-// What a control is called on its chip: "🎮 Left stick ↕", "🎛 Control 3", "⌨ W / S".
+// A joystick's own axes (one the browser does not lay out as its standard gamepad): a stick's two, then the rest by number.
+const joystickAxes = ['Stick ↔', 'Stick ↕'];
+
+// What a control is called on its chip: "🎮 Left stick ↕", "🎛 Control 3", "⌨ W / S". A gamepad's controls are named as the standard
+// gamepad's, unless its device says it is laid out otherwise (`layout: 'other'`, a joystick), whose are named by what they are.
 export function controlLabel(device, control) {
     if (device.kind === 'gamepad') {
-        const name = control.type === 'axis' ? (standardAxes[control.index] ?? `Axis ${control.index + 1}`) : (standardButtons[control.index] ?? `Button ${control.index + 1}`);
+        const other = device.layout === 'other';
+        const name = control.type === 'axis'
+            ? ((other ? joystickAxes : standardAxes)[control.index] ?? `Axis ${control.index + 1}`)
+            : ((other ? [] : standardButtons)[control.index] ?? `Button ${control.index + 1}`);
         return `🎮 ${name}`;
     }
     if (device.kind === 'midi') {
@@ -142,7 +149,7 @@ function normalizeMapping(raw, control) {
 }
 
 // ---- The bindings a person keeps ------------------------------------------------------------------------------------------------
-// { version: 1, threshold, bindings: [{ id, label, device: { kind, id, name }, control, centred, parameter: { symbol, name }, model,
+// { version: 1, threshold, bindings: [{ id, label, device: { kind, id, name, layout? }, control, centred, parameter: { symbol, name }, model,
 // mapping }] }. `model` (a model's name, or null) narrows a binding to one model; `centred` says the control reads −1 to 1.
 
 export function normalizeInputBindings(raw) {
@@ -161,7 +168,11 @@ export function normalizeInputBindings(raw) {
         seen.add(id);
         return [{
             id, label: text(entry.label, 80),
-            device: { kind, id: deviceId, name: kind === 'keyboard' ? 'Keyboard' : (text(entry.device.name, 200) || deviceId) },
+            device: {
+                kind, id: deviceId, name: kind === 'keyboard' ? 'Keyboard' : (text(entry.device.name, 200) || deviceId),
+                // How a gamepad's controls are laid out, when it was known: as the standard gamepad's, or otherwise (a joystick).
+                ...(kind === 'gamepad' && (entry.device.layout === 'standard' || entry.device.layout === 'other') ? { layout: entry.device.layout } : {})
+            },
             control, centred: control.type === 'axis' || control.type === 'pitch' ? entry.centred !== false : false,
             parameter: { symbol, name: text(entry.parameter.name, 200) || symbol },
             model: text(entry.model, 200) || null,

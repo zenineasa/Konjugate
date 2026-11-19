@@ -2173,10 +2173,28 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .controllerButtonDot { width: 8px; height: 8px; border: 1px solid #2c4048; border-radius: 50%; background: #0e1d25; }
 .controllerButtonDot.active { background: #42c9bc; border-color: #42c9bc; }
 .controllerHeldKeys:empty { display: none; }
+.controllerParameters { display: grid; }
+.controllerParameter { scroll-margin-top: 12px; }
+.controllerParameter [data-bind-symbol] { scroll-margin-top: 28px; }
+.passwordDialog.settingsSheet .controllerParameters > .controllerParameter + .controllerParameter { border-top: 1px solid #1c2c35; }
+.controllerParameter.listening { background: rgb(66 201 188 / 8%); }
+.controllerParameter.listening .controllerParameterHead .settingsItemHint { color: #74ddd3; }
+.controllerParameter.unbound .controllerParameterHead .settingsItemLabel { color: #d2e6e8; }
+.controllerParameterBindings { display: grid; gap: 2px; padding: 0 12px 9px 12px; }
+.controllerBindingRow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 30px; padding: 4px 8px; background: #0b171e; border: 1px solid #1c2c35; border-radius: 6px; }
+.controllerBindingRow > .settingsItemText { flex: 1 1 140px; min-width: 0; }
+.controllerBindingRow.listening { border-color: #42c9bc; background: rgb(66 201 188 / 8%); }
+.controllerBindingRow.listening .settingsItemHint { color: #74ddd3; }
+.controllerBindingActions { display: flex; flex-wrap: wrap; gap: 4px; }
+.passwordDialog.settingsSheet .controllerBindingActions .settingsButton { min-height: 22px; padding: 2px 8px; font-size: 8.5px; }
+.passwordDialog.settingsSheet .controllerToggle.on { color: #0b161c; background: #42c9bc; border-color: #42c9bc; }
+.controllerOtherBindings { margin-top: 8px; }
+.controllerOtherBindings .controllerBindingList { display: grid; gap: 2px; padding: 8px 10px 10px; }
+.controllerDevice { min-height: 0; }
 .controllerDevice.drawn { flex-wrap: wrap; }
 .controllerDevice.drawn > .settingsItemText { flex: 1 1 160px; }
 .controllerVisual { display: flex; flex: 0 1 auto; align-items: center; justify-content: flex-end; gap: 10px; min-width: 0; margin-left: auto; }
-.controllerOutline { display: block; flex: 0 0 auto; height: 86px; width: auto; aspect-ratio: 240 / 150; overflow: visible; }
+.controllerOutline { display: block; flex: 0 0 auto; height: 62px; width: auto; aspect-ratio: 240 / 150; overflow: visible; }
 .controllerOutline.joystick { aspect-ratio: var(--outline-aspect, 120 / 136); }
 .controllerOutline .controllerBody { fill: #0e1d25; stroke: #2c4048; stroke-width: 1.5; }
 .controllerOutline .controllerPart { fill: #13232b; stroke: #3a4f59; stroke-width: 1.2; transition: fill 60ms linear, stroke 60ms linear; }
@@ -2189,12 +2207,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .controllerOutline .controllerTriggerFill { fill: #42c9bc; stroke: none; pointer-events: none; }
 .controllerHelp { margin-top: 8px; }
 .controllerHelpSteps { display: grid; gap: 8px; margin: 0; padding-left: 16px; color: #aebfc5; font-size: 9px; line-height: 1.5; }
-.controllerHelpSteps strong { color: #d2e6e8; font-weight: 600; }
+.controllerHelpSteps li { font-size: 9px; line-height: 1.5; }
+.passwordDialog .controllerHelpSteps strong { display: inline; margin: 0; color: #d2e6e8; font-size: inherit; font-weight: 600; }
 .controllerHelpSteps ul { margin: 4px 0; padding-left: 14px; }
 .controllerHelp .settingsItemControl { justify-content: flex-start; }
 @media (prefers-reduced-motion: reduce) { .controllerOutline .controllerPart { transition: none; } }
 .controllerBindingHeading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; min-width: 0; }
-.passwordDialog.settingsSheet .controllerChip { padding: 1px 6px; color: #d2e6e8; background: #13232b; border: 1px solid #2c4048; border-radius: 4px; font-size: 8.5px; font-weight: 600; }
+.passwordDialog.settingsSheet .controllerChip { display: inline-block; margin: 0; padding: 1px 6px; color: #d2e6e8; background: #13232b; border: 1px solid #2c4048; border-radius: 4px; font-size: 8.5px; font-weight: 600; }
 .controllerBindingTarget { color: #b8c9cf; font-size: 9px; }
 .controllerBindingRow.elsewhere .controllerBindingTarget, .controllerBindingRow.elsewhere .controllerChip { opacity: .6; }
 .controllerBindingRow.justBound { animation: controllerJustBound 2.4s ease-out; }

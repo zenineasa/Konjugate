@@ -26,22 +26,23 @@ const steps = Object.freeze([
     {
         id: 'openControllers',
         title: 'Open Settings › Controllers',
-        text: 'Open Settings (the gear in the title bar) and choose Controllers. It lists every control bound to a parameter, here or in any model.',
+        text: 'Open Settings (the gear in the title bar) and choose Controllers. It lists this model\'s live parameters, each with the controls bound to it.',
         target: (ui) => (ui.settingsOpen ? '[data-settings-target="controllers"]' : '#settingsButton'), skip: 'openControllers',
         done: ({ ui }) => ui.controllersShown || binding(ui) !== null
     },
     {
         id: 'bindKey',
         title: 'Bind a key',
-        text: `Under "Bind a control", choose "${values.setpoint.name}", press Bind, then press W.`,
-        target: '#controllerBindButton', skip: 'bindKey', symbol: values.setpoint.symbol, parameterName: values.setpoint.name, key: values.keys.up,
+        text: `Settings › Controllers lists this model's live parameters. Press Bind beside "${values.setpoint.name}", then press W.`,
+        // Built when the page opens, one row for each live parameter.
+        target: () => `[data-bind-symbol="${values.setpoint.symbol}"]`, skip: 'bindKey', symbol: values.setpoint.symbol, parameterName: values.setpoint.name, key: values.keys.up,
         done: ({ ui }) => binding(ui) !== null
     },
     {
         id: 'addDownKey',
         title: 'Add a key for down',
-        text: 'One key can only push one way. Press Change… beside the new binding, then "Add a key for down…", press S, and save. W and S are now one control: held, they ramp the angle up and down.',
-        target: '#controllerBindingList', skip: 'bindKeyPair', symbol: values.setpoint.symbol, parameterName: values.setpoint.name, keys: values.keys,
+        text: 'One key can only push one way. Press Options… on the new binding, then "Add a key for down…", press S, and press Done. W and S are now one control: held, they ramp the angle up and down.',
+        target: () => `.controllerParameter[data-symbol="${values.setpoint.symbol}"] [data-change]`, skip: 'bindKeyPair', symbol: values.setpoint.symbol, parameterName: values.setpoint.name, keys: values.keys,
         done: ({ ui }) => binding(ui)?.type === 'keys'
     },
     {

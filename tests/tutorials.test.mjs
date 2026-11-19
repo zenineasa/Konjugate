@@ -397,7 +397,8 @@ test('the excavator the joystick tutorial drives is the one its generator writes
     const shipped = await exampleDocument('excavator.kjt');
     assert.deepEqual(shipped, JSON.parse(JSON.stringify(excavatorProject())), 'examples/excavator.kjt has drifted from scripts/generateExcavatorExample.mjs: run the script again.');
     const live = shipped.nodes.flatMap((node) => node.sourceTerms.flatMap((term) => term.parameters)).filter((parameter) => parameter.mode === 'live');
-    assert.deepEqual(live.map((parameter) => parameter.symbol).sort(), driveWithJoysticksValues.commands.map((command) => command.symbol).sort());
+    // In the model's order: Settings › Controllers lists them so, Bind goes on through them so, and the card names them so.
+    assert.deepEqual(live.map((parameter) => parameter.symbol), driveWithJoysticksValues.commands.map((command) => command.symbol));
     for (const parameter of live) assert.deepEqual([parameter.control.minimum, parameter.control.maximum, parameter.value], [-1, 1, 0], `${parameter.name} is centred, from −1 to 1.`);
     // Each joystick drives two commands, on two different axes; the keys stand in for all four, each pair distinct.
     for (const joystick of [0, 1]) assert.deepEqual(driveWithJoysticksValues.commands.filter((command) => command.joystick === joystick).map((command) => command.axis).sort(), [0, 1]);

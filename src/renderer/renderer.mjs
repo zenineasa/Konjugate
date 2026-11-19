@@ -654,7 +654,11 @@ let controlHistoryDrawnAt = 0;
 const liveParameterUpdateTimers = new Map();
 // Steering live parameters with a gamepad, a MIDI controller or keys (docs/proposals/humanInputBinding.md): the bindings are the
 // person's own, kept in the app's settings, and drive the live parameters of whichever model is open by their symbols.
-const humanInput = createHumanInput();
+// Handed the controllers by the main process while another of Konjugate's windows has focus (an add-on's 3D view), so they keep
+// steering this window's run (src/inputFocus.mjs).
+let controllersFollowFocus = false;
+window.inputBindings.onFollowFocus?.((follows) => { controllersFollowFocus = follows; });
+const humanInput = createHumanInput({ followsFocus: () => controllersFollowFocus });
 // On the interface clock (interfaceClock.mjs): when a moving control has come to rest is a matter of time, which a test can then set.
 const steering = createSteering({
     humanInput, store: window.inputBindings, modelName: () => filenameStem(currentProjectFilename),
@@ -667,6 +671,8 @@ let heldCommandsAvailable = false;
 // For the interaction tests: the bindings, simulated devices, and the result on screen with its record.
 window.__debugSteering = {
     steering, devices: humanInput.simulated,
+    // Whether the main process has handed this window the controllers while another of Konjugate's windows has focus.
+    followsFocus: () => controllersFollowFocus,
     // What the computer has connected, in place of what the main process lists (null: as on the web, not known); undefined goes back.
     setConnectedControllers: (list) => { connectedControllersOverride = list; return refreshConnectedControllers(); },
     result: () => (activeResult ? structuredClone({ jobId: activeEngineJobId, running: simulationRunning, lifecycle: activeResult.lifecycle, interventions: activeResult.interventions ?? [], samples: activeResult.samples }) : null)

@@ -43,3 +43,28 @@ test('a gamepad\'s name drops what the browser adds in brackets, and numbers a s
     assert.equal(gamepadName(`${ds4} #3`), 'DUALSHOCK 4 Wireless Controller 3');
     assert.equal(gamepadName('Left joystick (simulated)'), 'Left joystick');
 });
+
+test('a window without focus reads its gamepads only while it is handed them, and polls on a timer while hidden', () => {
+    const gamepads = [pad(0)];
+    const host = fakeHost(gamepads);
+    host.document.hasFocus = () => false;
+    host.document.visibilityState = 'hidden';
+    let timers = 0;
+    host.setTimeout = () => { timers += 1; return timers; };
+    host.clearTimeout = () => {};
+    let follows = false;
+    const input = createHumanInput({ host, followsFocus: () => follows });
+    input.start();
+    assert.ok(timers >= 1, 'A hidden window is polled on a timer.');
+    const moved = [];
+    input.onReading((reading) => moved.push(reading.value));
+    gamepads[0].axes[0] = 0.8;
+    input.simulated.poll();
+    assert.deepEqual(moved, [], 'Not handed the controllers, a window without focus does not read them.');
+    follows = true;
+    gamepads[0].axes[0] = -0.6;
+    input.simulated.poll();
+    assert.equal(moved.length, 1, 'Handed the controllers, it reads them.');
+    assert.ok(moved[0] < -0.5, 'The stick as it was moved (less its dead zone).');
+    input.stop();
+});

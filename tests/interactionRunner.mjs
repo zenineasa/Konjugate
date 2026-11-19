@@ -9940,6 +9940,8 @@ export async function runInteractionTests(driver) {
                 await waitFor(poseWindow, `(window.__debugPoseVisualizer?.bodies() ?? []).filter((body) => body.part).length === 4`, 'The 3D view did not draw the four parts at their true size.');
                 assert.deepEqual((await bodies()).map((body) => body.name).sort(), ['Machine pose · boom', 'Machine pose · bucket', 'Machine pose · cab', 'Machine pose · stick']);
                 await waitFor(window, `/^Open\\./.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not see the 3D view open.');
+                // With the 3D view in front, the project window keeps its controllers (a real gamepad is read then too; a simulated one always is).
+                await waitFor(window, `window.__debugSteering.followsFocus()`, 'The project window was not handed the controllers while the 3D view had focus.');
                 const stickAt = async () => (await bodies()).find((body) => body.name.endsWith('stick')).position;
                 const startedAt = await stickAt();
                 // The right joystick forward lowers the boom, and the stick's end of it comes down in the 3D view as the run goes.
@@ -9947,6 +9949,7 @@ export async function runInteractionTests(driver) {
                 await waitFor(poseWindow, `(window.__debugPoseVisualizer.bodies().find((body) => body.name.endsWith('stick'))?.position[2] ?? Infinity) < ${startedAt[2]} - 0.2`, 'The 3D view did not follow the boom coming down.', 15000);
                 await axis(right, 1, 0);
                 await closeWhenValidated(poseWindow);
+                await waitFor(window, `!window.__debugSteering.followsFocus()`, 'The controllers were still handed to the project window once the 3D view closed.');
             } else {
                 assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourStatus').textContent`), /not installed|installed/);
             }

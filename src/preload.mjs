@@ -200,7 +200,9 @@ contextBridge.exposeInMainWorld('inputBindings', {
     // system's Bluetooth settings, for pairing one.
     connectedControllers: () => ipcRenderer.invoke('inputBindingsConnectedControllers'),
     canOpenBluetoothSettings: () => ipcRenderer.invoke('inputBindingsCanOpenBluetoothSettings'),
-    openBluetoothSettings: () => ipcRenderer.invoke('inputBindingsOpenBluetoothSettings')
+    openBluetoothSettings: () => ipcRenderer.invoke('inputBindingsOpenBluetoothSettings'),
+    // Whether this window keeps reading its controllers while another of Konjugate's windows has focus.
+    onFollowFocus: (callback) => ipcRenderer.on('inputBindingsFollowFocus', (_event, follows) => callback(Boolean(follows)))
 });
 
 contextBridge.exposeInMainWorld('providerToolchains', {

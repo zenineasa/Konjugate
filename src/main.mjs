@@ -69,6 +69,7 @@ import { createAddonSettingsStore } from './addonSettingsStore.mjs';
 import { createOwnershipDefaultsStore } from './ownershipDefaultsStore.mjs';
 import { createInputBindingsStore } from './inputBindingsStore.mjs';
 import { bluetoothSettingsUrl, controllersFromHid, gamepadHidFilters } from './connectedControllers.mjs';
+import { controllerFocus } from './inputFocus.mjs';
 import { publicNoticeOf, stampProjectContent } from './ownership.mjs';
 import { keepAddonData, requestAddonData } from './projectAddonData.mjs';
 import { normalizeShapeLibraryEntry, uploadedShapeEntry, uploadedShapeFileName, uploadedShapeFormat } from './shapeLibraryCatalog.mjs';
@@ -2832,6 +2833,28 @@ ipcMain.handle('inputBindingsSet', async (event, document) => {
     return kept;
 });
 
+// While another of Konjugate's windows has focus (an add-on's 3D view, a guide), the project or twin window last used keeps reading its
+// controllers (src/inputFocus.mjs), so a person can drive while watching that window; each steering window is told whether it has them.
+// When another application has focus, none does. Looked at again after every focus change, once the change has settled.
+let controllerOwner = null;
+const controllerHandedTo = new WeakMap();
+function updateControllerFocus() {
+    const steering = steeringWindows();
+    const focused = BrowserWindow.getFocusedWindow();
+    const { owner, handedTo } = controllerFocus({ focused: focused && !focused.isDestroyed() ? focused : null, steering, owner: controllerOwner });
+    controllerOwner = owner;
+    for (const window of steering) {
+        const has = window === handedTo;
+        if ((controllerHandedTo.get(window) ?? false) === has) continue;
+        controllerHandedTo.set(window, has);
+        window.webContents.send('inputBindingsFollowFocus', has);
+    }
+}
+function installControllerFocus() {
+    app.on('browser-window-focus', () => setTimeout(updateControllerFocus, 0));
+    app.on('browser-window-blur', () => setTimeout(updateControllerFocus, 0));
+}
+
 // The gamepads and joysticks the computer has connected (src/connectedControllers.mjs), for Settings › Controllers to tell "nothing is
 // connected" from "connected, but not used in this window yet". Chromium lists HID devices only to a page asking to choose one, so the
 // window asks, in a world of its own apart from its page, and the list it would offer is read here and the choice cancelled: no chooser
@@ -3673,6 +3696,7 @@ app.whenReady().then(async () => {
     extensionStateStore = createExtensionStateStore({ directory: join(app.getPath('userData'), 'packages') });
     installMidiPermission();
     installControllerListing();
+    installControllerFocus();
 
     // A file passed on the initial launch (Windows/Linux double-click, or a path Electron
     // handed us via process.argv) opens directly into the first window rather than opening

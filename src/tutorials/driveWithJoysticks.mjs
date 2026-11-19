@@ -103,9 +103,10 @@ const steps = Object.freeze([
         text: `The ${pose.name} add-on draws the excavator in 3D as it moves: the cab, the boom, the stick and the bucket, each at its true size, from the "Machine pose" node. Press Pose (◈) on the left rail; it opens in a window of its own, so put it beside this one. Without the add-on, press Next and watch the numbers on the canvas instead.`,
         target: (ui) => (ui.addonActive(pose.prefix) ? ui.addonButtonOf(pose.prefix) : '#extensionsButton'),
         status: (ui) => {
-            if (ui.addonsOpened.includes(pose.prefix)) return 'Open. It follows the run as it goes: drag in its view to look around, or press Fit in its corner to frame the whole machine. Press Next to dig.';
+            // An older version opens, but finds no bodies on Machine pose: that is said first, opened or not.
             const version = ui.installedVersion(pose.prefix);
-            if (ui.addonActive(pose.prefix) && version && !atLeast(version, pose.since)) return `${pose.name} ${version} is installed; ${pose.since} or later draws the machine's parts. Update it from Extensions › Installed after this tutorial.`;
+            if (ui.addonActive(pose.prefix) && version && !atLeast(version, pose.since)) return `${pose.name} ${version} is installed, and only ${pose.since} or later draws the machine's parts: its window stays empty. Update it from Extensions › Installed after this tutorial.`;
+            if (ui.addonsOpened.includes(pose.prefix)) return 'Open. It follows the run as it goes, and the joysticks keep driving while its window is in front: drag in its view to look around, or press Fit in its corner to frame the whole machine. Press Next to dig.';
             if (ui.addonActive(pose.prefix)) return 'Press Pose (◈) on the left rail.';
             if (ui.installed.includes(pose.prefix)) return `${pose.name} is installed and starts when Konjugate restarts. Restart after this tutorial; a restart now would end the run.`;
             return `${pose.name} is not installed. It is free in Extensions › Discover (it needs the internet, and a restart, so install it after this tutorial). Press Next to carry on without it.`;

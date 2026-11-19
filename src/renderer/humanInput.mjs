@@ -33,11 +33,14 @@ export const gamepadName = (id) => {
     return copy ? `${name} ${copy}` : name;
 };
 
-export function createHumanInput({ host = globalThis } = {}) {
+// `followsFocus()`: whether this window keeps reading its controllers while it does not have focus itself (the desktop app's main
+// process says so for the project window last used while another of Konjugate's windows, such as an add-on's, has focus).
+export function createHumanInput({ host = globalThis, followsFocus = () => false } = {}) {
     const readingListeners = new Set();
     const deviceListeners = new Set();
     let started = false;
     let frame = null;
+    let frameKind = 'animation';
     let midiState = typeof host.navigator?.requestMIDIAccess === 'function' ? 'unasked' : 'unsupported';
     let midiAccess = null;
     let midiRequest = null;
@@ -53,7 +56,9 @@ export function createHumanInput({ host = globalThis } = {}) {
     let keyWanted = () => false;
     let capturing = null;
 
-    const inFront = () => host.document?.visibilityState !== 'hidden' && (host.document?.hasFocus?.() ?? true);
+    // Controllers are read while this window is the one in use: in front with focus, or handed the controllers while another of
+    // Konjugate's windows has focus (even covered or minimised then, so the 3D view of an add-on can be watched while driving).
+    const inFront = () => (host.document?.visibilityState !== 'hidden' && (host.document?.hasFocus?.() ?? true)) || Boolean(followsFocus());
     const emit = (reading) => {
         if (capturing && capturing.consider(reading)) return;
         for (const listener of readingListeners) listener(reading);
@@ -111,7 +116,10 @@ export function createHumanInput({ host = globalThis } = {}) {
         frame = null;
         if (!started) return;
         pollGamepads();
-        frame = host.requestAnimationFrame ? host.requestAnimationFrame(loop) : host.setTimeout(loop, 16);
+        // A hidden window gets no animation frames, so it is polled on a timer instead (a window handed the controllers may be covered).
+        const animating = host.requestAnimationFrame && host.document?.visibilityState !== 'hidden';
+        frameKind = animating ? 'animation' : 'timer';
+        frame = animating ? host.requestAnimationFrame(loop) : host.setTimeout(loop, 16);
     }
 
     // ---- The keyboard -------------------------------------------------------------------------------------------------------------
@@ -242,7 +250,7 @@ export function createHumanInput({ host = globalThis } = {}) {
         host.removeEventListener?.('blur', onBlur);
         host.removeEventListener?.('gamepadconnected', devicesChanged);
         host.removeEventListener?.('gamepaddisconnected', devicesChanged);
-        if (frame !== null) (host.cancelAnimationFrame ?? host.clearTimeout)?.(frame);
+        if (frame !== null) (frameKind === 'animation' ? host.cancelAnimationFrame : host.clearTimeout)?.(frame);
         frame = null;
         heldKeys.clear();
     }

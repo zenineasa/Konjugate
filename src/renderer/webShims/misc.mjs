@@ -177,7 +177,9 @@ export const inputBindings = {
     // Controllers page says how to connect one instead.
     connectedControllers: async () => null,
     canOpenBluetoothSettings: async () => false,
-    openBluetoothSettings: async () => false
+    openBluetoothSettings: async () => false,
+    // A tab reads its controllers while it is the one in use; nothing hands them to it.
+    onFollowFocus: () => {}
 };
 
 // Help & feedback (src/bugReport.mjs). The web edition reports its browser, not an installer or Electron, and opens GitHub in a new tab.

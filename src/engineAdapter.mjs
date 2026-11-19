@@ -561,10 +561,12 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             await sendCommand({ type: 'setPacing', pacing: normalized });
             return normalized;
         },
-        setExecutionState: async (executionState) => {
+        // `applyAt`: carried out when the run reaches that time, as a held parameter change is (a pause held until a time stops the
+        // run at exactly that step, however fast it goes).
+        setExecutionState: async (executionState, { applyAt } = {}) => {
             if (!['running', 'paused', 'stopped'].includes(executionState)) throw new Error('Unsupported execution state.');
-            await sendCommand({ type: 'setRunState', state: executionState });
-            if (executionState === 'stopped') await closeCommandStream();
+            await sendCommand({ type: 'setRunState', state: executionState, ...heldUntil(applyAt) });
+            if (executionState === 'stopped' && applyAt === undefined) await closeCommandStream();
             return executionState;
         },
         // `applyAt`: hold the change until the run reaches that time (a run's record sent back to repeat it); otherwise at once.

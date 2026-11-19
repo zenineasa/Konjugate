@@ -40,7 +40,7 @@ export default {
     run: async (content, configuration) => runWithWebEngine(engineModuleUrl, await resolvePluginReferences(content), configuration),
     start: async (content, configuration) => startWebEngineLiveRun(engineModuleUrl, await resolvePluginReferences(content), configuration),
     setPacing: (jobId, pacing) => setWebEngineLivePacing(jobId, pacing),
-    setExecutionState: (jobId, executionState) => setWebEngineLiveExecutionState(jobId, executionState),
+    setExecutionState: (jobId, executionState, options) => setWebEngineLiveExecutionState(jobId, executionState, options),
     setParameterValue: (jobId, parameterId, value, options) => setWebEngineLiveParameterValue(jobId, parameterId, value, options),
     scheduleParameterValue: (jobId, parameterId, schedule, options) => scheduleWebEngineLiveParameterValue(jobId, parameterId, schedule, options),
     readResultSeries: (jobId, signalIds, options) => readWebEngineResultSeries(jobId, signalIds, options),

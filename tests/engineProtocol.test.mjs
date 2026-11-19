@@ -90,6 +90,9 @@ test('encodes ordered framed engine commands without JSON conversion', () => {
     const parameter = Buffer.from(encodeEngineCommand(2, { type: 'setParameterValue', parameterId: 11, value: 2 }));
     assert.equal(parameter.readUInt32BE(0), parameter.length - 4);
     assert.equal(parameter.subarray(4).toString('hex'), '080110022a0b080b110000000000000040');
+    // A run state held until a time (a pause a test moves a run on to) carries apply_at, field 13, as a held parameter change does.
+    const heldPause = Buffer.from(encodeEngineCommand(3, { type: 'setRunState', state: 'paused', applyAt: 0.5 }));
+    assert.equal(heldPause.subarray(4).toString('hex'), '0801100322020802' + '69' + '000000000000e03f');
     assert.throws(() => encodeEngineCommand(0, { type: 'setRunState', state: 'running' }), /sequences/);
     assert.throws(() => encodeEngineCommand(1, { type: 'setParameterValue', parameterId: 0, value: 1 }), /identifier/);
 });

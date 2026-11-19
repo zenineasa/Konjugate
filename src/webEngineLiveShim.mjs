@@ -184,11 +184,11 @@ export async function setWebEngineLivePacing(jobId, pacing) {
     return normalized;
 }
 
-export async function setWebEngineLiveExecutionState(jobId, executionState) {
+export async function setWebEngineLiveExecutionState(jobId, executionState, { applyAt } = {}) {
     const job = liveJobs.get(jobId);
     if (!job) throw new Error("Pausing or stopping a run isn't available in the web edition's batch-run mode.");
     if (!['running', 'paused', 'stopped'].includes(executionState)) throw new Error('Unsupported execution state.');
-    sendLiveCommand(job, { type: 'setRunState', state: executionState });
+    sendLiveCommand(job, { type: 'setRunState', state: executionState, ...heldUntil(applyAt) });
     return executionState;
 }
 

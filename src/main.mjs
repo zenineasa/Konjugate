@@ -3541,10 +3541,10 @@ ipcMain.handle('engineSetPacing', async (event, jobId, pacing) => {
     return job.setPacing(pacing);
 });
 
-ipcMain.handle('engineSetExecutionState', async (event, jobId, executionState) => {
+ipcMain.handle('engineSetExecutionState', async (event, jobId, executionState, options) => {
     const job = activeEngineJobs.get(jobId);
     if (!job || job.owner !== event.sender) throw new Error('That simulation job is not active.');
-    return job.setExecutionState(executionState);
+    return job.setExecutionState(executionState, { applyAt: options?.applyAt });
 });
 
 ipcMain.handle('engineSetParameterValue', async (event, jobId, parameterId, value, options) => {

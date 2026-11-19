@@ -25,6 +25,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'pidTemplate
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'parameterWaveforms.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'thermalLinks.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'startPaused.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'heldPause.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'fitProgress.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'tankCalibrationExample.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'objectiveFit.mjs'), executable]);

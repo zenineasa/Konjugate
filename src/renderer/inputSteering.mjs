@@ -345,6 +345,8 @@ export function createSteering({ humanInput, store, modelName = () => '', status
         openSettings,
         save,
         get document() { return bindings; },
+        // Nothing held and no resting value still to send: what the controls last did has all been sent.
+        get settled() { return ticker === null; },
         targets: () => [...targets.values()],
         // A binding as the settings list shows it: its target in the open model, if any, and whether its device is there.
         describe(entry) {

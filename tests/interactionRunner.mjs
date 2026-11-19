@@ -84,14 +84,15 @@ async function waitFor(window, expression, message, timeout = 5000) {
 // Clicking a disabled button does nothing, so wait for it first, then for the dialog itself: a test that
 // goes on to fill and submit the dialog would otherwise be working on one that never opened.
 async function openRunDialog(window) {
+    await settle(window, 'validation', 'Validation before opening the Run dialog');
     await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available to open the Run dialog.', 15000);
     await evaluate(window, `document.querySelector('#runButton').click()`);
     await waitFor(window, `document.querySelector('#runLaunchDialog').open`, 'The Run dialog did not open.');
 }
 
 // Closing a window mid-validation cancels its engine process; let validation settle first.
-async function closeWhenValidated(window, timeout = 10000) {
-    await waitFor(window, `!document.querySelector('#validationSummary')?.classList.contains('pending')`, 'Model validation did not settle before closing the window.', timeout);
+async function closeWhenValidated(window) {
+    await settle(window, 'validation', 'Model validation before closing the window');
     await window.close();
 }
 
@@ -116,24 +117,38 @@ async function waitForStableRect(window, expression, message, timeout = 3000) {
             stableStreak = 0;
         }
         previous = current;
-                await new Promise((resolve) => setTimeout(resolve, 50));
+        await new Promise((resolve) => setTimeout(resolve, 50));
     }
     throw new Error(message);
 }
 
-// Two things move every node, relationship and label on the screen without the model changing: the canvas sliding
-// over when an editor card opens or closes (`.webglContainer` and `.css2dContainer` animate their `right` edge), and the
-// camera still easing after a view change or a drag (its snap animation, or OrbitControls' damping). A screen point read
-// during either is where the thing was, not where it will be when the click lands, so anything aiming at the canvas
-// waits for both to stop first. `getAnimations()` flushes style, so a slide a click just started is already counted;
-// the camera is at rest once the view cube's readout holds for a few frames: distance and target to two places (zoom
-// to the cursor's damping leaves a tail that takes several seconds to fall below a ten-thousandth of a unit, far under
-// a pixel) and the turn to four (its matrix keeps drifting in its 40th decimal as damping decays).
-async function waitForCanvasAtRest(window, timeout = 5000) {
-    await waitFor(window, `!document.getAnimations().some((animation) => ['webglContainer', 'css2dContainer'].includes(animation.effect?.target?.id) && animation.playState !== 'finished')`,
-        'The canvas did not stop sliding.', timeout);
-    await waitForStableRect(window, `(() => { const cube = document.querySelector('#viewCube'); const coarse = (text) => text.split(',').map((number) => (Math.round(Number(number) * 100) / 100 || 0)).join(','); return [coarse(cube.dataset.cameraDistance), coarse(cube.dataset.cameraTarget), document.querySelector('#viewCubeObject').style.transform.replace(/(?<![a-z])-?[\\d.]+(e[-+]?\\d+)?/g, (number) => String(Math.round(Number(number) * 1e4) / 1e4 || 0))].join('|'); })()`,
-        'The camera did not come to rest.', timeout);
+// Waits for the window to finish a piece of its own work, by awaiting the promise it hands out for it (window.__debugSettle in
+// renderer.mjs: validation, frame, camera, labels), rather than watching the page until a time limit runs out. A slow machine
+// then only takes longer; it does not fail. The limit left is a guard against a window that never settles at all, set far
+// beyond any machine's slowness, so reaching it means something is wrong, not that the machine was slow.
+const settleHangGuardMs = 120000;
+async function settle(window, kind, what = 'The window') {
+    let guard;
+    const hung = new Promise((_resolve, reject) => {
+        guard = setTimeout(() => reject(new Error(`${what} had still not settled (${kind}) after ${settleHangGuardMs / 1000} s.`)), settleHangGuardMs);
+    });
+    try {
+        // A window that is not a project window (a guide, the Welcome window, an add-on's) has none of this work to finish.
+        await Promise.race([evaluate(window, `window.__debugSettle ? window.__debugSettle.${kind}().then(() => true) : true`), hung]);
+    } finally {
+        clearTimeout(guard);
+    }
+}
+
+// The canvas moves under a fixed screen point in two ways: sliding over when an editor card opens or closes (`.webglContainer`
+// and `.css2dContainer` animate their `right` edge), and the camera easing after a view change or a drag (its snap animation, or
+// OrbitControls' damping). A screen point read during either is where the thing was, not where it will be when the click lands,
+// so anything aiming at the canvas waits for both to end: the slides' own `finished` promises (`getAnimations()` flushes style,
+// so a slide a click just started is counted), then the window's word that its camera is still and a frame drawn with it, which
+// is also the frame that places every label.
+async function waitForCanvasAtRest(window, what = 'The canvas') {
+    await evaluate(window, `Promise.all(document.getAnimations().filter((animation) => ['webglContainer', 'css2dContainer'].includes(animation.effect?.target?.id)).map((animation) => animation.finished.catch(() => {}))).then(() => true)`);
+    await settle(window, 'camera', what);
 }
 
 // A test hook's screen point (window.__relationshipScreenPoint and the like), read once the canvas is at rest.
@@ -173,12 +188,9 @@ async function clickablePoint(window, expression, timeout = 2000) {
 }
 
 async function clickElement(window, expression, modifiers = []) {
+    // At rest is also the frame drawn after the camera stopped, which places a label made a moment ago (an undo or redo
+    // rebuilds every label) where it will be when the click lands.
     await waitForCanvasAtRest(window);
-    // The canvas at rest is not enough for a label made a moment ago (an undo or redo rebuilds every label): it is placed on
-    // the next render, which is throttled and comes late on a busy machine, so until then its box is not where it will be.
-    // Its own box holding still over a few render ticks is.
-    await waitForStableRect(window, `(() => { const bounds = (${expression})?.getBoundingClientRect(); return bounds && bounds.width > 0 ? [bounds.left, bounds.top, bounds.width, bounds.height].map(Math.round).join(',') : null; })()`,
-        'The element to click did not settle on the screen.', 5000);
     const point = await clickablePoint(window, expression);
     await window.mouseMove(point, { modifiers });
     await window.mouseDown(point, { button: 'left', clickCount: 1, modifiers });
@@ -719,6 +731,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.osFileOpen && 'OS-initiated file open has no web-edition equivalent' });
 
     await run('validation summary reports and displays a valid model', async () => {
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'C++ validation report did not reach the UI.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false);
         await evaluate(window, `document.querySelector('#validationSummary').click()`);
@@ -1036,6 +1049,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editNodeSubsteps').value`), '2');
         assert.match(await evaluate(window, `document.querySelector('#nodeEffectiveTimeStep').textContent`), /0\.01/);
         await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Updated numerical settings were not validated.');
     });
 
@@ -1782,18 +1796,11 @@ export async function runInteractionTests(driver) {
             relationships: document.querySelectorAll('.modelStatus span')[1].textContent
         })`);
         await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`);
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await settle(window, 'frame');
         await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air'))`, ['shift']);
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Real Shift-click did not add the second node.');
-        // Give the CSS2DRenderer a frame to reposition the bundle label after the selection
-        // change before reading its bounding rect for the click below — under SwiftShader
-        // software rendering (used in headless/CI test runs) this can otherwise still be
-        // mid-transition, sending the click past the label onto the canvas underneath.
-        // SwiftShader frames have been observed stalling well past 250ms, so wait for it to
-        // actually settle rather than a single fixed delay.
-        await waitForStableRect(window,
-            `(() => { const rect = document.querySelector('.bundleLabel')?.getBoundingClientRect(); return rect && JSON.stringify(rect); })()`,
-            'The bundle label did not settle into a stable position.');
+        // clickElement waits for a frame drawn on a still camera, which places the bundle label after the selection change,
+        // however long a software-rendered frame takes.
         await clickElement(window, `document.querySelector('.bundleLabel')`, ['shift']);
         assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container.selected').length`), 2);
         const emptyPoint = await evaluate(window, `(() => { const bounds = document.querySelector('#webglContainer').getBoundingClientRect(); return { x: Math.round(bounds.left + 20), y: Math.round(bounds.top + 20) }; })()`);
@@ -1851,7 +1858,7 @@ export async function runInteractionTests(driver) {
         const labelRectsSelector = `[...document.querySelectorAll('.node-label-container')]
             .filter((label) => (label.textContent.includes('Battery module') || label.textContent.includes('Enclosed air')) && !label.textContent.includes('copy'))
             .map((label) => label.getBoundingClientRect())`;
-        await waitForStableRect(window, `JSON.stringify(${labelRectsSelector})`, 'The node labels did not settle into a stable position.');
+        await waitForCanvasAtRest(window, 'The node labels');
         const bounds = await evaluate(window, `(() => {
             // Excludes "... copy" labels: a soft-deleted "Battery module copy" from the preceding
             // paste-undo test can still be present (hidden) in the DOM, and getBoundingClientRect()
@@ -2145,6 +2152,7 @@ export async function runInteractionTests(driver) {
             field.setValue('randomCharacters');
             field.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationSummary').classList.contains('error')`, 'Unknown equation symbols were not rejected by the C++ validator.');
         assert.match(await evaluate(window, `document.querySelector('#validationIssues').textContent`), /randomCharacters/);
         await evaluate(window, `(() => {
@@ -2152,6 +2160,7 @@ export async function runInteractionTests(driver) {
             field.setValue(${JSON.stringify(originalEquation)});
             field.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`, 'Restoring the valid equation did not clear its validation error.');
     });
 
@@ -2168,6 +2177,7 @@ export async function runInteractionTests(driver) {
             field.setValue(${JSON.stringify('\\operatorname{Max}(1, 2)')});
             field.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Engine validation did not run.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('error')`), false, '\\operatorname{Max}(...) should be accepted the same as \\max(...).');
 
@@ -2178,6 +2188,7 @@ export async function runInteractionTests(driver) {
             field.setValue(${JSON.stringify('\\operatorname{Bogus}(1, 2)')});
             field.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationSummary').classList.contains('error')`, 'An unrecognized \\operatorname{} name was not rejected.');
         assert.match(await evaluate(window, `document.querySelector('#validationIssues').textContent`), /Bogus/);
 
@@ -2186,6 +2197,7 @@ export async function runInteractionTests(driver) {
             field.setValue(${JSON.stringify(originalEquation)});
             field.dispatchEvent(new Event('input', { bubbles: true }));
         })()`);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`, 'Restoring the valid equation did not clear its validation error.');
     });
 
@@ -2249,6 +2261,7 @@ export async function runInteractionTests(driver) {
         assert.match(regenerated, /ScalarPort\{"temperature", "temperature", ""\}/);
         assert.match(regenerated, /ScalarPort\{"heatRate", "heatRate", ""\}/);
 
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
             'The programmable source term did not reach native validation.');
         assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
@@ -2505,7 +2518,7 @@ export async function runInteractionTests(driver) {
         // opens the node editor, and this deep into the suite the editor panel can overlap
         // where the second label renders, making a real mouse click land on the panel instead.
         await clickElement(window, batteryModuleLabel, ['shift']);
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await settle(window, 'frame');
         await clickElement(window, enclosedAirLabel, ['shift']);
         await waitFor(window, `document.querySelectorAll('.node-label-container.selected').length === 2`, 'Shift-click did not build a two-node selection.');
 
@@ -2674,6 +2687,7 @@ export async function runInteractionTests(driver) {
             document.querySelector('#createNode').click();
         })()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
             'The new node with a programmable source term did not reach native validation.');
         assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
@@ -2820,6 +2834,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#createEdge').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The new provider relationship did not reach native validation.');
         // The edge builder leaves source/target stateId null for every new relationship
         // regardless of implementation kind, which the native validator separately flags
@@ -2958,11 +2973,22 @@ export async function runInteractionTests(driver) {
         }, `!document.querySelector('#edgeContextMenu').classList.contains('hidden') && !document.querySelector('#edgeContextAddWaypoint').hidden`);
     };
 
+    // Held on the window's own clock (window.__debugClock, interfaceClock.mjs), stopped for the gesture: the press, then the
+    // window's word that it took it (its hold timer waiting), then the clock moved past the hold, then the release. A machine
+    // that hands the window its input late cannot turn the hold into a quick click, as a release sent 600 ms of the test's
+    // own time after the press could. A press that missed the line arms no timer; it is released, and the caller tries again.
     const pressAndHold = async (point) => {
-        await window.mouseMove(point);
-        await window.mouseDown(point, { button: 'left', clickCount: 1 });
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        await window.mouseUp(point, { button: 'left', clickCount: 1 });
+        await evaluate(window, `window.__debugClock.stop()`);
+        try {
+            await window.mouseMove(point);
+            await window.mouseDown(point, { button: 'left', clickCount: 1 });
+            const startedAt = Date.now();
+            while (!await evaluate(window, `window.__debugClock.pending() > 0`) && Date.now() - startedAt < 10000) await new Promise((resolve) => setTimeout(resolve, 20));
+            await evaluate(window, `window.__debugClock.advance(1000)`);
+            await window.mouseUp(point, { button: 'left', clickCount: 1 });
+        } finally {
+            await evaluate(window, `window.__debugClock.resume()`);
+        }
     };
 
     const deleteWaypointTestEdge = async (name) => {
@@ -3015,10 +3041,9 @@ export async function runInteractionTests(driver) {
         assert.equal(initialWaypoints.length, 1, 'Right-clicking the edge line did not add a waypoint.');
         const initialWaypointJson = JSON.stringify(initialWaypoints[0]);
         // Adding the waypoint also hides this edge's bundle label (it would otherwise sit right
-        // on top of the new handle, re-anchored to the curve's new midpoint) -- give the
-        // renderer a moment to actually apply that display:none before synthesizing a drag,
-        // rather than risk racing a hit-test against a still-composited previous frame.
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // on top of the new handle, re-anchored to the curve's new midpoint) -- a frame drawn
+        // since applies that display:none before the drag is aimed.
+        await settle(window, 'frame');
 
         // Drag the handle and confirm the underlying model's waypoint position actually moved
         // (not just the handle mesh) -- this is the same live-mutate-during-gesture idiom node
@@ -3065,9 +3090,8 @@ export async function runInteractionTests(driver) {
         assert.ok(added, 'Right-clicking the edge line did not open its context menu offering to add a waypoint after 5 attempts.');
         await evaluate(window, `document.querySelector('#edgeContextAddWaypoint').click()`);
         await waitFor(window, `window.__relationshipWaypoints('Waypoint add-remove test edge').length === 1`, 'Right-clicking the edge line did not add a waypoint.');
-        // See the drag test above for why this delay matters: the label hiding that keeps a
-        // fresh handle clickable needs a moment to actually apply.
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        // See the drag test above: the label hiding that keeps a fresh handle clickable is applied by the next frame.
+        await settle(window, 'frame');
 
         const removed = await retryGesture(window, async () => {
             const handlePoint = await findCanvasPoint(window, await canvasPoint(window, `window.__waypointScreenPoint('Waypoint add-remove test edge', 0)`));
@@ -3103,7 +3127,7 @@ export async function runInteractionTests(driver) {
     await run('camera controls provide wheel-free zoom and model fitting', async () => {
         assert.equal(await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').ariaLabel`), 'Zoom camera in');
         // A camera move left animating by an earlier test would overwrite the zoom when it ends: the camera still, first.
-        await waitForStableRect(window, `document.querySelector('#viewCube').dataset.cameraDistance`, 'The camera did not come to rest before zooming.', 5000);
+        await waitForCanvasAtRest(window, 'The camera, before zooming,');
         const before = Number(await evaluate(window, `document.querySelector('#viewCube').dataset.cameraDistance`));
         await evaluate(window, `document.querySelector('[data-nav-action="zoomIn"]').click()`);
         await waitFor(window, `Number(document.querySelector('#viewCube').dataset.cameraDistance) < ${before}`, 'Camera zoom-in control did not reduce its target distance.');
@@ -3136,7 +3160,7 @@ export async function runInteractionTests(driver) {
         // began and its tail read as that drag moving the target. So each drag is followed until
         // the target, as the view cube gives it (to four places), holds still over several render
         // ticks; what is left of the momentum by then is far under the "close enough" below.
-        const targetAtRest = (message) => waitForStableRect(window, cameraTargetExpression, message, 15000);
+        const targetAtRest = (message) => waitForCanvasAtRest(window, message);
         const targetsClose = (a, b, epsilon = 0.02) => a.every((value, index) => Math.abs(value - b[index]) < epsilon);
 
         assert.equal(await evaluate(window, `document.querySelector('#lock2DButton').ariaPressed`), 'false');
@@ -4160,11 +4184,8 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#groupEquationDiagnostics').classList.contains('valid')`), true);
 
         await waitFor(window, `Boolean(${bundleLabel('Group test A')})`, 'A mesh edge bundle label was not available.');
-        // Whole pixels: the camera's damping can keep a freshly framed label creeping by fractions of
-        // a pixel for longer than the wait, which never matters for the click that follows.
-        await waitForStableRect(window,
-            `(() => { const el = ${bundleLabel('Group test A')}; const rect = el?.getBoundingClientRect(); return rect && JSON.stringify([rect.left, rect.top, rect.width, rect.height].map(Math.round)); })()`,
-            'The mesh edge bundle label did not settle into a stable position.', 6000);
+        // The camera framing the new group comes to rest before the label is read.
+        await waitForCanvasAtRest(window, 'The mesh edge bundle label');
         // The bundle label's naive center point can be occluded by one of its own endpoint
         // nodes' labels at this camera framing (confirmed: document.elementFromPoint() there
         // resolves to the node's objectLabel, not the bundle label) -- find a point within the
@@ -4410,7 +4431,8 @@ export async function runInteractionTests(driver) {
         assert.equal(await nodeCount(), nodesBefore);
         await waitFor(window, `Boolean(${nodeLabel('Import test A')})`, 'The label for "Import test A" did not re-render after undo.');
         await evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
-        await clickElement(window, nodeLabel('Import test A'));
+        // Its label clicked directly, as openNode does: this is about what inference made, not about aiming at the screen.
+        await evaluate(window, `${nodeLabel('Import test A')}.click()`);
         await waitFor(window, `document.querySelector('#editNodeName').value === 'Import test A'`, 'Clicking "Import test A" did not open its node editor.');
         // The key goes to the canvas, as a person presses it with no field in use: the editor may have put the focus in its name field by
         // now, where Delete edits the text instead (which, depending on when the focus moved, once made this fail now and then).
@@ -4490,11 +4512,8 @@ export async function runInteractionTests(driver) {
         // addNode operations), not the generic assistant/manual default of a box.
         const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
         await waitFor(window, `Boolean(${nodeLabel('columnP')})`, 'The label for the newly-created "columnP" node did not render.');
-        // The view eases to take in the new nodes: clicked once its label has stopped moving, not where it was a moment before.
-        await waitForStableRect(window,
-            `(() => { const rect = ${nodeLabel('columnP')}?.getBoundingClientRect(); return rect && JSON.stringify([rect.left, rect.top, rect.width, rect.height].map(Math.round)); })()`,
-            'The new columnP node\'s label did not settle.', 6000);
-        await clickElement(window, nodeLabel('columnP'));
+        // Its label clicked directly, as openNode does: this is about what inference made, not about aiming at the screen.
+        await evaluate(window, `${nodeLabel('columnP')}.click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'columnP'`, 'Clicking the new columnP node did not open its node editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), 'sphere',
             'A node created by causal inference should default to a sphere shape.');
@@ -5186,6 +5205,7 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
+        await settle(diagnosticWindow, 'validation');
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
         await openRunDialog(diagnosticWindow);
         await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
@@ -5196,6 +5216,7 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#runLaunchDialog').open`, 'Run dialog did not close.');
 
+        await settle(diagnosticWindow, 'validation');
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'Model validation did not settle.', 10000);
         await evaluate(diagnosticWindow, `document.querySelector('#validationSummary').click()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#validationPanel').hidden`, 'Validation panel did not open.');
@@ -5235,6 +5256,7 @@ export async function runInteractionTests(driver) {
         try {
             await waitFor(opened, `document.querySelector('.documentTitle')`, 'The new window did not finish loading.');
             await evaluate(opened, `window.__debugProject.load(${JSON.stringify(document_)}, 'issues.kjt')`);
+            await settle(opened, 'validation');
             await waitFor(opened, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelectorAll('#validationIssues .validationIssue').length === 3`, 'The three issues were not listed.', 15000);
             const issue = (kind) => `[...document.querySelectorAll('#validationIssues .validationIssue')].find((item) => item.querySelector('small').textContent.startsWith(${JSON.stringify(kind)}))`;
             const follow = async (kind) => {
@@ -5298,6 +5320,7 @@ export async function runInteractionTests(driver) {
         await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
+        await settle(diagnosticWindow, 'validation');
         await waitFor(diagnosticWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#runButton').disabled`, 'Model validation did not settle before the run settings could be opened.', 10000);
         await openRunDialog(diagnosticWindow);
         await waitFor(diagnosticWindow, `document.querySelector('#runLaunchDialog').open`, 'Run dialog did not open.');
@@ -5411,6 +5434,7 @@ export async function runInteractionTests(driver) {
         assert.match(await diagnostics(), /condition of a cases expression/, 'A bare comparison must be rejected.');
         await setEdgeEquation(String.raw`\begin{cases} 1 & t \ge 1.95 \\ 0 & \text{otherwise} \end{cases}`);
         assert.equal(await diagnostics(), 'Valid expression · MathJSON ready');
+        await settle(opened, 'validation');
         await waitFor(opened, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`,
             'The engine must accept a cases expression using t.');
 
@@ -7086,7 +7110,8 @@ export async function runInteractionTests(driver) {
         // Closing a result asks first, in the window: answered.
         const closeResultsIn = async (handle) => {
             await evaluate(handle, `document.querySelector('#closeResults').click()`);
-            await new Promise((resolve) => setTimeout(resolve, 250));
+            // Asked first when there is something to lose; else closed at once.
+            await waitFor(handle, `document.querySelector('#closeResultsDialog').open || document.querySelector('#resultTransport').hidden`, 'Closing the results neither asked nor closed them.');
             await evaluate(handle, `document.querySelector('#confirmCloseResults')?.click()`);
             await waitFor(handle, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
         };
@@ -7220,6 +7245,7 @@ export async function runInteractionTests(driver) {
         assert.match(rows.find((row) => row.includes('Cover target')), /2 uses/);
         assert.equal(rows.filter((row) => row.includes('Drain time') && /1 use/.test(row)).length, 2);
 
+        await settle(stockWindow, 'validation');
         await waitFor(stockWindow, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The placed stockpiles were not validated.', 10000);
         assert.equal(await evaluate(stockWindow, `document.querySelector('#validationSummary').classList.contains('error')`), false,
             'The engine should accept template source terms with parameters and an algebraic output.');
@@ -7365,15 +7391,18 @@ export async function runInteractionTests(driver) {
         const before = driver.allHandles();
         await driver.simulateOsFileOpen(crowdedPath);
         const crowdedWindow = await driver.waitForNewHandle(before);
-        // Loaded means all forty labels are accounted for: drawn, or left out. Not "forty label elements exist":
-        // a label is added to the page the first time it is drawn, so one left out before its first frame (the
-        // left-out pass runs on its own timer, and can come first in a new window) never gets an element at all.
-        await waitFor(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length
-            + Number(document.querySelector('#canvas').dataset.labelsLeftOut ?? 0) === 40`, 'The crowded project did not load.');
-        await waitFor(crowdedWindow, `Number(document.querySelector('#canvas').dataset.labelsLeftOut) > 0`, 'No label was left out of a crowded canvas.', 5000);
+        // Loaded: its forty nodes are in the window's model (a new window, opening a file, takes as long as the machine takes; the
+        // limit only ends a hang). Then the window's word that the pass leaving labels out has run on a still camera, and a frame
+        // been drawn after it: what is left out, and what is drawn, are final.
+        await waitFor(crowdedWindow, `window.__debugProject?.serialize().nodes.length === 40`, 'The crowded project did not load.', settleHangGuardMs);
+        await settle(crowdedWindow, 'labels', 'The crowded canvas');
+        // Every label accounted for: drawn, or left out. Not "forty label elements exist": a label is added to the page the first
+        // time it is drawn, so one left out before its first frame never gets an element at all.
+        assert.equal(await evaluate(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length
+            + Number(document.querySelector('#canvas').dataset.labelsLeftOut ?? 0)`), 40, 'Some labels are neither drawn nor counted as left out.');
         const leftOut = Number(await evaluate(crowdedWindow, `document.querySelector('#canvas').dataset.labelsLeftOut`));
         assert.ok(leftOut >= 10 && leftOut < 40, `${leftOut} of 40 labels left out`);
-        await waitFor(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length === ${40 - leftOut}`, 'The labels left out are still drawn.', 3000);
+        assert.equal(await evaluate(crowdedWindow, `[...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').length`), 40 - leftOut, 'The labels left out are still drawn.');
         // Those written do not lie over each other.
         const overlapping = await evaluate(crowdedWindow, `(() => {
             const boxes = [...document.querySelectorAll('.node-label-container')].filter((label) => label.style.display !== 'none').map((label) => label.querySelector('.objectLabel').getBoundingClientRect());
@@ -7417,22 +7446,12 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `${label}.click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === ${JSON.stringify(title)}`, `The ${title} node editor did not open.`);
     };
+    // Opened by its row on the label the canvas draws for it, clicked directly: the scenarios below are about the editor, not about
+    // where on screen the line runs, which "clicking a relationship after replacing a deleted one" checks with a real click.
     const openRelationship = async (title) => {
-        // A third of the way along, clear of the label the canvas draws at the middle, once the view has stopped moving
-        // (a model just loaded is still being fitted into view).
-        const locate = () => canvasPoint(window, `JSON.stringify(window.__relationshipScreenPoint(${JSON.stringify(title)}, 0.3))`);
-        let previous = null;
-        let located = await locate();
-        for (let attempt = 0; attempt < 40 && located !== previous; attempt += 1) {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            previous = located;
-            located = await locate();
-        }
-        const point = JSON.parse(located);
-        assert.ok(point, `Could not locate ${title} on screen.`);
-        await window.mouseMove(point);
-        await window.mouseDown(point, { button: 'left', clickCount: 1 });
-        await window.mouseUp(point, { button: 'left', clickCount: 1 });
+        const row = `(() => { const edge = window.__debugProject.serialize().edges.find((item) => item.name === ${JSON.stringify(title)}); return edge ? document.querySelector('.relationshipRow[data-relationship="' + edge.id + '"]') : null; })()`;
+        await waitFor(window, `Boolean(${row})`, `The ${title} relationship has no row on its label.`);
+        await evaluate(window, `${row}.click()`);
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === ${JSON.stringify(title)}`, `The ${title} edge editor did not open.`);
     };
     const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
@@ -8092,7 +8111,8 @@ export async function runInteractionTests(driver) {
             await rm(path, { force: true });
         }
         await evaluate(window, `document.querySelector('#closeResults').click()`);
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        // Asked first when there is something to lose; else closed at once.
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open || document.querySelector('#resultTransport').hidden`, 'Closing the results neither asked nor closed them.');
         await evaluate(window, `document.querySelector('#confirmCloseResults')?.click()`);
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
     });
@@ -8426,13 +8446,13 @@ export async function runInteractionTests(driver) {
         // The pad is seen once before it is moved: a pad that turns up reads as where it is, not as a move.
         await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(pad)}); devices.poll(); })()`);
 
+        // Started paused, and moved on by its own time (window.__debugRun.advanceTo) between the stick's moves: the run is going
+        // throughout, and each reading reaches it before the step it is meant for, however slowly this machine sends them. A run
+        // left to the clock was over before the sixty-three readings were in on a slow runner.
         await openRunDialog(window);
-        // Twenty seconds kept to the clock: long enough for every step below to happen while it is going. Each move of the stick is a
-        // round trip to the window, and on a slow runner the sixty-three of them took longer than an eight-second run lasted.
-        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '20'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
-        await waitFor(window, `!document.querySelector('#liveParameterButton').hidden`, 'The live controls were not offered during the run.', 10000);
-        await evaluate(window, `document.querySelector('#liveParameterButton').click()`);
-        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows [data-bind]'))`, 'The live control has no Bind… button.');
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '8'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRunPaused').click(); })()`);
+        // A run started paused opens its live controls by itself.
+        await waitFor(window, `!document.querySelector('#liveParameterPanel').hidden && Boolean(document.querySelector('#liveParameterRows [data-bind]'))`, 'The live control has no Bind… button.', 10000);
 
         // Bind…, then the stick pushed down: the stick now drives Drive, and says so on its chip.
         await evaluate(window, `document.querySelector('#liveParameterRows [data-bind]').click()`);
@@ -8443,10 +8463,21 @@ export async function runInteractionTests(driver) {
         assert.deepEqual([kept.device.kind, kept.control, kept.parameter, kept.model], ['gamepad', { type: 'axis', index: 1 }, { symbol: 'k', name: 'Drive' }, null]);
 
         // Steered: sixty-two readings as the stick goes from the centre to most of the way up. The slider follows every one.
+        // The readings come 16 ms apart on the window's own clock (window.__debugClock), stopped meanwhile, so which of them are
+        // sent, by the size of the change and once the stick has rested, does not depend on how long this machine takes per reading.
         const readings = 62;
-        for (let index = 0; index <= readings; index += 1) {
-            await stick(Number((index * 0.01).toFixed(2)));
-            await new Promise((resolve) => setTimeout(resolve, 16));
+        await evaluate(window, `window.__debugClock.stop()`);
+        try {
+            for (let index = 0; index <= readings; index += 1) {
+                await stick(Number((index * 0.01).toFixed(2)));
+                await evaluate(window, `window.__debugClock.advance(16)`);
+                await evaluate(window, `window.__debugRun.advanceTo(${((index + 1) * 0.1).toFixed(1)})`);
+            }
+            // Then at rest, long enough for where it came to rest to be sent.
+            await evaluate(window, `window.__debugClock.advance(2000)`);
+            await waitFor(window, `window.__debugSteering.steering.settled`, 'The stick at rest was not sent.');
+        } finally {
+            await evaluate(window, `window.__debugClock.resume()`);
         }
         await waitFor(window, `document.querySelector('#liveParameterRows input[type=range]').value === '5.9'`, 'The slider did not follow the stick.');
         // Moved by hand, the slider takes over until the stick moves again.
@@ -8454,13 +8485,20 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'The chip did not say the slider took over.');
         await stick(0.7);
         await waitFor(window, `!/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'Moving the stick again did not take the parameter back.');
-        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The steered run did not finish.', 40000);
+        // Let go to its end.
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The steered run did not finish.', 30000);
 
-        // Recorded by the size of each change (a fiftieth of the range, at least), and once where the stick came to rest.
+        // Recorded by the size of each change, and once where the stick came to rest.
         const steered = await evaluate(window, `window.__debugSteering.result()`);
         const values = steered.interventions.map((change) => change.value);
         assert.ok(steered.interventions.every((change) => change.kind === 'value' && change.parameterId === 4), 'Only values for Drive were recorded.');
-        assert.ok(values.length >= 4 && values.length < readings / 2, `${values.length} values were recorded for ${readings} readings.`);
+        // By the size of each change: as the stick went up, each value sent is at least a hundredth of the range (0.2) past the one
+        // before, so about every other reading, and then where it came to rest (5.9, a step past the last one sent).
+        const steeredValues = values.slice(0, values.indexOf(5.9) + 1);
+        const gaps = steeredValues.slice(1).map((value, index) => Math.round((value - steeredValues[index]) * 10) / 10);
+        assert.ok(steeredValues.length > 4 && steeredValues.length < readings / 2 + 2, `${steeredValues.length} values were recorded for ${readings} readings: ${values.join(', ')}.`);
+        assert.ok(gaps.slice(0, -1).every((gap) => gap >= 0.2), `A change smaller than a hundredth of the range was sent as the stick moved: ${values.join(', ')}.`);
         assert.equal(values.at(-1), 6.7, 'Where the stick came to rest is the last value recorded.');
         assert.ok(values.every((value) => Math.abs(value * 10 - Math.round(value * 10)) < 1e-9), `Values off the live steps: ${values.join(', ')}.`);
 
@@ -8515,11 +8553,12 @@ export async function runInteractionTests(driver) {
         const choose = (mode) => evaluate(window, `(() => { const select = document.querySelector('#liveParameterRows [data-schedule-mode]'); select.value = ${JSON.stringify(mode)}; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         const set = (name, value) => evaluate(window, `(() => { const input = ${field(name)}; input.value = ${JSON.stringify(String(value))}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
 
+        // Started paused: the controls below are used on a run that is going but held at its start, so none of them races the run
+        // to its end; it is moved on by its own time (window.__debugRun.advanceTo) once the waveform is started.
         await openRunDialog(window);
-        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '4'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
-        await waitFor(window, `!document.querySelector('#liveParameterButton').hidden`, 'The live controls were not offered during the run.', 10000);
-        await evaluate(window, `document.querySelector('#liveParameterButton').click()`);
-        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows [data-schedule-mode]'))`, 'The live parameter has no transition controls.');
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '4'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRunPaused').click(); })()`);
+        // A run started paused opens its live controls by itself.
+        await waitFor(window, `!document.querySelector('#liveParameterPanel').hidden && Boolean(document.querySelector('#liveParameterRows [data-schedule-mode]'))`, 'The live parameter has no transition controls.', 10000);
 
         // The menu offers the waveforms, each with the fields that shape it and no others.
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#liveParameterRows [data-schedule-mode] optgroup[label="Waveform"] option')].map((option) => option.value)`),
@@ -8583,12 +8622,16 @@ export async function runInteractionTests(driver) {
         await set('frequency', 5);
         await set('seed', 3);
         await evaluate(window, `document.querySelector('#liveParameterRows [data-schedule-start]').click()`);
-        // While it runs, a marker follows the simulation time along the preview, with the value it has right now.
-        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows .waveformNow')) && document.querySelector('#liveParameterRows .waveformDot').getBoundingClientRect().width > 0`, 'No marker followed the running waveform.', 10000);
+        // While it runs, a marker follows the simulation time along the preview, with the value it has right now: seen at one
+        // second, then again at two.
+        await evaluate(window, `window.__debugRun.advanceTo(1)`);
+        await waitFor(window, `Boolean(document.querySelector('#liveParameterRows .waveformNow')) && document.querySelector('#liveParameterRows .waveformDot').getBoundingClientRect().width > 0`, 'No marker followed the running waveform.');
         const markerAt = async () => evaluate(window, `Number(document.querySelector('#liveParameterRows .waveformDot').getAttribute('cx'))`);
         const firstMarker = await markerAt();
-        await waitFor(window, `Number(document.querySelector('#liveParameterRows .waveformDot').getAttribute('cx')) !== ${firstMarker}`, 'The marker did not move as the simulation advanced.', 5000);
+        await evaluate(window, `window.__debugRun.advanceTo(2)`);
+        await waitFor(window, `Number(document.querySelector('#liveParameterRows .waveformDot').getAttribute('cx')) !== ${firstMarker}`, 'The marker did not move as the simulation advanced.');
         assert.match(await plot('caption.querySelector(".waveformNow").textContent'), /^ · now -?\d/);
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
         await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The run did not complete.', 15000);
         const finalValue = Number((await evaluate(window, `document.querySelector('.node-label-container dd').textContent`)).replace(/[^0-9eE+.-]/g, ''));
         assert.ok(Number.isFinite(finalValue) && finalValue !== 0, `The noise did not move X: it ended at ${finalValue}.`);
@@ -8598,7 +8641,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing results did not request confirmation.');
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
-    }, { skip: !driver.capabilities.parameterWaveforms && 'needs a web engine built with waveform schedules; the engine in the web shell predates them (npm run build:web:threads, then build:webShell:threads)' });
+    }, { skip: !(driver.capabilities.parameterWaveforms && driver.capabilities.heldCommands) && 'needs a web engine built with waveform schedules and held commands; the engine in the web shell predates them (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('a thermal link joins two bodies with two directed edges sharing one conductance, and one-way conduction leaves a boundary alone', async () => {
         const box = { type: 'primitive', shape: 'box', color: '#888888' };
@@ -8749,10 +8792,12 @@ export async function runInteractionTests(driver) {
         // Closing the panel is respected: it does not open itself again when the run goes on and the controls are used again.
         await evaluate(window, `document.querySelector('#closeControlHistoryPanel').click()`);
         assert.equal(await visible('#controlHistoryPanel'), false);
-        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
-        await waitFor(window, `Number(document.querySelector('#resultCurrentTime').value.replace(' s', '')) > 0.5`, 'The run did not get going.', 10000);
+        // Moved on by its own time to one second (window.__debugRun.advanceTo), where it is held for the second change, so the change
+        // lands there however slowly it is sent; then let go to its end.
+        await evaluate(window, `window.__debugRun.advanceTo(1)`);
         await type(2);
         assert.equal(await visible('#controlHistoryPanel'), false, 'The panel opened itself again after it was closed.');
+        await evaluate(window, `document.querySelector('#simulationPauseResume').click()`);
         await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The run did not complete.', 20000);
         assert.equal(await evaluate(window, `document.querySelector('#controlHistoryCount').textContent`), '1', 'One parameter was changed.');
 
@@ -8790,7 +8835,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'Model editing did not re-enable after closing results.');
         assert.equal(await visible('#controlHistoryPanel'), false);
         assert.equal(await visible('#controlHistoryButton'), false);
-    }, { skip: !driver.capabilities.startPausedRuns && 'needs a web engine that records the changes it applies; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
+    }, { skip: !(driver.capabilities.startPausedRuns && driver.capabilities.heldCommands) && 'needs a web engine that records the changes it applies and holds commands; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
@@ -8816,6 +8861,7 @@ export async function runInteractionTests(driver) {
 
     // Waits for the engine's own verdict on the model as it now is.
     const engineVerdict = async (message) => {
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('pending')`, message, 15000);
         return evaluate(window, `!document.querySelector('#validationSummary').classList.contains('error')`);
     };
@@ -9452,6 +9498,7 @@ export async function runInteractionTests(driver) {
             await press('.tourFloating .tourSkipStep');
         }
         await waitForStep('seeWarning');
+        await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && document.querySelector('#validationIssues').textContent.includes('at least 11')`, 'The pre-run check did not warn about the stiff spring.', 15000);
         await press('#validationSummary');
         await waitForStep('followWarning');

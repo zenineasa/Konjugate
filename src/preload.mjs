@@ -315,7 +315,7 @@ contextBridge.exposeInMainWorld('engine', {
     run: (content, configuration) => ipcRenderer.invoke('engineRun', content, configuration),
     start: (content, configuration) => ipcRenderer.invoke('engineStart', content, configuration),
     setPacing: (jobId, pacing) => ipcRenderer.invoke('engineSetPacing', jobId, pacing),
-    setExecutionState: (jobId, executionState) => ipcRenderer.invoke('engineSetExecutionState', jobId, executionState),
+    setExecutionState: (jobId, executionState, options) => ipcRenderer.invoke('engineSetExecutionState', jobId, executionState, options),
     setParameterValue: (jobId, parameterId, value, options) => ipcRenderer.invoke('engineSetParameterValue', jobId, parameterId, value, options),
     scheduleParameterValue: (jobId, parameterId, schedule, options) => ipcRenderer.invoke('engineScheduleParameterValue', jobId, parameterId, schedule, options),
     readResultSeries: (jobId, signalIds, options) => ipcRenderer.invoke('engineReadResultSeries', jobId, signalIds, options),

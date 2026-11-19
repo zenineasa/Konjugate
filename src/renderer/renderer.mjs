@@ -110,6 +110,7 @@ import { formatDataLog } from '../dataLogFormat.mjs';
 import { fitPlanFromLog } from '../dataLogFit.mjs';
 import { draftScenario, modelFingerprint, normalizeScenarios, withScenario } from '../scenarios.mjs';
 import { objectiveTemplate, objectiveTemplateIds, programBindingsProblem } from '../objectiveTemplates.mjs';
+import { clearInterfaceTimer, interfaceNow, setInterfaceTimer } from './interfaceClock.mjs';
 import { compareReplay, defaultTolerance, guessReplayMapping, latestReadings, replayPlan, replaySentence, replayTargets, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import {
     CSS2DObject,
@@ -652,9 +653,11 @@ const liveParameterUpdateTimers = new Map();
 // Steering live parameters with a gamepad, a MIDI controller or keys (docs/proposals/humanInputBinding.md): the bindings are the
 // person's own, kept in the app's settings, and drive the live parameters of whichever model is open by their symbols.
 const humanInput = createHumanInput();
+// On the interface clock (interfaceClock.mjs): when a moving control has come to rest is a matter of time, which a test can then set.
 const steering = createSteering({
     humanInput, store: window.inputBindings, modelName: () => filenameStem(currentProjectFilename),
-    status: (text) => { $('#statusText').textContent = text; }
+    status: (text) => { $('#statusText').textContent = text; },
+    now: interfaceNow
 });
 let steeringSignature = '';
 // Whether the engine holds a command until a time (EngineCommand.apply_at), which repeating a run from its record needs.
@@ -7024,7 +7027,32 @@ function applyLiveResult(jobId, result) {
         updateLiveResultControls();
     }
     updateLiveWaveformCursors(result.samples.at(-1)?.time);
+    releaseRunWaiters();
 }
+
+// For the interaction tests: a run moved on by its own time rather than by the clock. Started paused, it is let go until exactly
+// `time` (a pause held until then, EngineCommand.apply_at, then resumed), and the promise resolves once the window shows it held
+// there, or the run is over. However slow the machine, the run stops at that step and waits, so a test can act on a running
+// model without racing it.
+let runWaiters = [];
+function releaseRunWaiters() {
+    const time = activeResult?.simulationTime ?? activeResult?.samples.at(-1)?.time ?? -Infinity;
+    runWaiters = runWaiters.filter((waiter) => {
+        const reached = !simulationRunning || (activeResult?.lifecycle === 'paused' && time >= waiter.time - 1e-9);
+        if (reached) waiter.resolve(time);
+        return !reached;
+    });
+}
+window.__debugRun = {
+    advanceTo: async (time) => {
+        if (!activeEngineJobId || !simulationRunning) throw new Error('There is no run going to move on.');
+        const reached = new Promise((resolve) => runWaiters.push({ time, resolve }));
+        await window.engine.setExecutionState(activeEngineJobId, 'paused', { applyAt: time });
+        await window.engine.setExecutionState(activeEngineJobId, 'running');
+        return reached;
+    },
+    time: () => activeResult?.simulationTime ?? activeResult?.samples.at(-1)?.time ?? null
+};
 
 async function discardResultPlayback({ markProjectChanged = false } = {}) {
     if (!activeResult) return;
@@ -7706,12 +7734,14 @@ window.engine.onComplete(({ jobId, result }) => {
     selectSuggestedPlaybackRate();
     updateLiveResultControls();
     $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
+    releaseRunWaiters();
 });
 window.engine.onError(({ jobId, message }) => {
     if (jobId !== activeEngineJobId) return;
     console.error(`[Simulation Error] Job ${jobId} failed:`, message);
     simulationRunning = false;
     updateLiveResultControls();
+    releaseRunWaiters();
     $('#statusText').textContent = 'Simulation failed';
     $('#runButton').title = message;
     if (!activeResult) {
@@ -11971,7 +12001,7 @@ const longPressTravelLimit = 10;
 let longPress = null;
 let swallowNextClick = false;
 function cancelLongPress() {
-    if (longPress) clearTimeout(longPress.timer);
+    if (longPress) clearInterfaceTimer(longPress.timer);
     longPress = null;
 }
 window.addEventListener('pointerdown', (event) => {
@@ -11979,7 +12009,7 @@ window.addEventListener('pointerdown', (event) => {
     swallowNextClick = false;
     if (event.pointerType !== 'touch' || !event.isPrimary) return;
     // What was selected before this press: with Multi-select on, the press itself toggles a node, which a hold must not do.
-    longPress = { x: event.clientX, y: event.clientY, selected: new Set(selectedNodeIds), timer: setTimeout(fireLongPress, longPressDelayMs) };
+    longPress = { x: event.clientX, y: event.clientY, selected: new Set(selectedNodeIds), timer: setInterfaceTimer(fireLongPress, longPressDelayMs) };
 }, { capture: true });
 window.addEventListener('pointermove', (event) => {
     if (longPress && Math.hypot(event.clientX - longPress.x, event.clientY - longPress.y) > longPressTravelLimit) cancelLongPress();
@@ -12010,7 +12040,7 @@ function fireLongPress() {
     stagedContextMenuAction = null;
     rightClickReleased = false;
     nodePointerDown = null;
-    if (relationshipPointerDown) clearTimeout(relationshipPointerDown.timer);
+    if (relationshipPointerDown) clearInterfaceTimer(relationshipPointerDown.timer);
     relationshipPointerDown = null;
     target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2, view: window }));
     const action = stagedContextMenuAction;
@@ -12098,7 +12128,7 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
             x: event.clientX,
             y: event.clientY,
             holdTriggered: false,
-            timer: setTimeout(() => {
+            timer: setInterfaceTimer(() => {
                 relationshipPointerDown.holdTriggered = true;
                 selectRelationship(definition);
                 transformControls.detach();
@@ -12116,7 +12146,7 @@ renderer.domElement.addEventListener('pointermove', (event) => {
     if (!relationshipPointerDown || relationshipPointerDown.holdTriggered) return;
     const travel = Math.hypot(event.clientX - relationshipPointerDown.x, event.clientY - relationshipPointerDown.y);
     if (travel > relationshipHoldTravelLimit) {
-        clearTimeout(relationshipPointerDown.timer);
+        clearInterfaceTimer(relationshipPointerDown.timer);
         relationshipPointerDown = null;
     }
 });
@@ -12135,7 +12165,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
         return;
     }
     if (relationshipPointerDown) {
-        clearTimeout(relationshipPointerDown.timer);
+        clearInterfaceTimer(relationshipPointerDown.timer);
         const { definition, x, y, holdTriggered } = relationshipPointerDown;
         relationshipPointerDown = null;
         if (holdTriggered || event.button !== 0) return;
@@ -18655,13 +18685,37 @@ updateModelStatus();
 initializeAddonRailContributions();
 checkPendingProjectOpen();
 
+// What the interaction tests wait on, instead of watching the page with a time limit: each resolves once this window has
+// finished a piece of its own work, however long that took on the machine running it. A camera is still once two frames
+// have been drawn without it moving (the fit animation over, and OrbitControls' damping eased off below its own threshold),
+// so the labels on the page are where that view puts them; the labels have settled once the pass leaving out those that
+// would overlap has also run on a still camera. A window not being drawn (hidden) settles nothing until it is shown again.
+const settleWaiters = { frame: [], camera: [], labels: [] };
+let cameraStillFrames = 0;
+function settleWaiter(kind) {
+    return new Promise((resolve) => settleWaiters[kind].push(resolve));
+}
+function releaseSettleWaiters(kind) {
+    const waiting = settleWaiters[kind];
+    settleWaiters[kind] = [];
+    waiting.forEach((resolve) => resolve());
+}
+window.__debugSettle = {
+    validation: () => validationSettled(),
+    frame: () => settleWaiter('frame'),
+    camera: () => settleWaiter('camera'),
+    labels: () => settleWaiter('labels')
+};
+
 let lastRenderTime = 0;
 let lastLabelRefresh = 0;
 function render(time) {
     requestAnimationFrame(render);
     if (document.hidden || time - lastRenderTime < 1000 / 30) return;
     lastRenderTime = time;
-    if (!updateCameraAnimation(time)) orbitControls.update();
+    const cameraMoved = updateCameraAnimation(time) || orbitControls.update();
+    cameraStillFrames = cameraMoved ? 0 : cameraStillFrames + 1;
+    let labelsRefreshed = false;
     updateViewCube();
     // A model seen from far back keeps its shapes: the fog thins with the distance, and the far plane keeps up.
     const viewDistance = camera.position.distanceTo(orbitControls.target);
@@ -18682,9 +18736,15 @@ function render(time) {
         lastLabelRefresh = time;
         refreshLabelDeclutter();
         if (labelModes.nodes === 'hidden' || labelModes.edges === 'hidden') refreshLabelObjectVisibility();
+        labelsRefreshed = true;
     }
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
+    releaseSettleWaiters('frame');
+    if (cameraStillFrames >= 2) {
+        releaseSettleWaiters('camera');
+        if (labelsRefreshed) releaseSettleWaiters('labels');
+    }
 }
 
 labelSystemReady = true;

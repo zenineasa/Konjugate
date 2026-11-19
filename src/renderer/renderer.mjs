@@ -3029,9 +3029,30 @@ function previewSourceTermProviderSource(source) {
     updateValidationStatus();
 }
 
+// A live run's window gets only its latest samples with each update, and its record cannot be read back until it ends, so the samples
+// are kept here as they come, by run, for the node's plot to draw the run so far. Thinned to every other sample past a limit, so a long
+// run stays light; once the run ends, its result holds the whole record again and this is no longer read.
+const liveSampleHistory = new Map();
+const liveSampleLimit = 8000;
+function recordLiveSamples(jobId, result) {
+    if (!jobId || result?.snapshotMode !== 'live') return;
+    let history = liveSampleHistory.get(jobId);
+    if (!history) {
+        // One live run at a time: what was kept for the runs before it is let go.
+        liveSampleHistory.clear();
+        history = [];
+        liveSampleHistory.set(jobId, history);
+    }
+    const last = history.at(-1)?.time ?? -Infinity;
+    for (const sample of result.samples ?? []) if (sample.time > last + 1e-12) history.push(sample);
+    if (history.length > liveSampleLimit) liveSampleHistory.set(jobId, history.filter((_sample, index) => index % 2 === 0 || index === history.length - 1));
+}
+
 // Shared by the active branch and every branch selected for comparison (comparisonBranchUuids) --
 // branchLabel is only actually attached to the returned series when the caller passes one.
 async function branchNodeSeries(branch, node, branchLabel) {
+    const history = branch.result?.snapshotMode === 'live' ? liveSampleHistory.get(branch.jobId) : null;
+    if (history?.length) return nodeResultSeries({ ...branch.result, samples: history }, node.userData.definition, branchLabel);
     let series = nodeResultSeries(branch.result, node.userData.definition, branchLabel);
     if (branch.jobId && branch.result?.sampleCount > branch.result.samples.length) {
         const signalIds = node.userData.definition.states.map((state) => state.id);
@@ -3078,6 +3099,24 @@ async function renderNodeResults(node) {
         ...otherBranchUuids.map((uuid) => [branches.get(uuid).label, branches.get(uuid).color])
     ]) : undefined;
     await nodeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0, { branchColors: branchColorMap });
+}
+
+// While a run goes, a live run's window holds only its latest sample, so the selected node's plot is read again from the run's record
+// (branchNodeSeries) every half second while it is on screen, and once more when the run ends; otherwise it stays as it was drawn when
+// its tab opened.
+let nodeResultsRefreshTimer = null;
+const nodeResultsShown = () => Boolean(selectedNode) && !$('#nodeEditor').classList.contains('hidden') && !$('[data-node-panel="results"]').hidden;
+function refreshNodeResultsSoon() {
+    if (nodeResultsRefreshTimer !== null || !nodeResultsShown()) return;
+    nodeResultsRefreshTimer = setTimeout(async () => {
+        try {
+            if (nodeResultsShown()) await renderNodeResults(selectedNode);
+        } catch (error) {
+            console.error('Could not draw the node\'s results again.', error);
+        } finally {
+            nodeResultsRefreshTimer = null;
+        }
+    }, 500);
 }
 
 function selectNodeEditorTab(tabName) {
@@ -7006,6 +7045,7 @@ function renderForkParameterControls() {
 function applyLiveResult(jobId, result) {
     if (!simulationRunning || (activeEngineJobId && jobId !== activeEngineJobId)) return;
     activeEngineJobId ??= jobId;
+    recordLiveSamples(jobId, result);
     const followLatest = !activeResult || activeResultSampleIndex >= activeResult.samples.length - 1;
     if (pendingRestart) {
         // The engine's result holds the run it continues as well (see startSimulation's continuesJobId), the window's copy of that
@@ -7031,6 +7071,7 @@ function applyLiveResult(jobId, result) {
         updateLiveResultControls();
     }
     updateLiveWaveformCursors(result.samples.at(-1)?.time);
+    refreshNodeResultsSoon();
     releaseRunWaiters();
 }
 
@@ -13343,6 +13384,7 @@ const tour = createTour({
                 edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
                 edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
                 runDialogOpen: $('#runLaunchDialog').open,
+                runDialog: { online: $('#runOnlineMode').checked, pacing: $('#runPacingMode').value, targetTime: $('#runTargetTime').value },
                 closeResultsDialogOpen: $('#closeResultsDialog').open,
                 // The close button of an editor open at the side, which can cover the end of the timeline.
                 openEditorClose: document.querySelector('.contextCard.editorCard:not(.hidden) > header [data-close-card]'),

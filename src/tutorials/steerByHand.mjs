@@ -6,6 +6,8 @@
 // which the closing card says. Steering needs a run that takes commands while it goes; the web edition's threaded build has one and its
 // other build does not, so this tutorial is for the desktop app.
 
+import { onlineRunTarget } from './steps.mjs';
+
 export const steerByHandValues = Object.freeze({
     joint: 'Joint link',
     setpoint: { name: 'Setpoint angle', symbol: 'setpointAngle', parameterId: 21 },
@@ -49,7 +51,7 @@ const steps = Object.freeze([
         id: 'startRun',
         title: 'Start a run in real time',
         text: `Close Settings and press Run. Turn on "Online", set the pacing to "Real time" so a second of the model takes a second, set "Run until" to ${values.runSeconds} s, and press Start.`,
-        target: (ui) => (ui.settingsOpen ? '#settingsClose' : ui.runDialogOpen ? '#runOnlineMode' : '#runButton'), skip: 'startOnlineRun', runSeconds: values.runSeconds,
+        target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
         done: ({ ui }) => ui.steerable || ui.steered.includes(values.setpoint.parameterId)
     },
     {

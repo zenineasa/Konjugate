@@ -7,6 +7,8 @@
 // with the result. With no joystick at hand, skipping the first step binds four pairs of keys instead, and skipping the dig has the
 // excavator do it by itself. Steering needs a run that takes commands while it goes, so this tutorial is for the desktop app.
 
+import { onlineRunTarget } from './steps.mjs';
+
 export const driveWithJoysticksValues = Object.freeze({
     // Which joystick and axis drives which command: joystick 0 is the left one, 1 the right; axis 0 is left and right, 1 forward and back.
     // One gamepad stands for both joysticks: its left stick is axes 0 and 1, its right stick 2 and 3. In the model's order, which is the
@@ -82,7 +84,7 @@ const steps = Object.freeze([
         id: 'startRun',
         title: 'Start a run in real time',
         text: `Close Settings and press Run. Turn on "Online", set the pacing to "Real time", set "Run until" to ${values.runSeconds} s, and press Start. The joysticks drive the excavator for as long as it runs.`,
-        target: (ui) => (ui.settingsOpen ? '#settingsClose' : ui.runDialogOpen ? '#runOnlineMode' : '#runButton'), skip: 'startOnlineRun', runSeconds: values.runSeconds,
+        target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
         done: ({ ui }) => ui.steerable || dug(ui)
     },
     {

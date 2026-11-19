@@ -10,7 +10,7 @@ import { decodeProjectBundle } from '../src/projectFile.mjs';
 import { calibrateTank, calibrateTankValues } from '../src/tutorials/calibrateTank.mjs';
 import { firstModel, firstModelValues as tourModel } from '../src/tutorials/firstModel.mjs';
 import { exampleTitle, groupTutorials, tutorialModelFiles, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorials, tutorialsForExample, tutorialStartLabel } from '../src/tutorials/index.mjs';
-import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
+import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, onlineRunTarget, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
 import { tuneController, tuneControllerValues } from '../src/tutorials/tuneController.mjs';
 import { heatingRecordCsv } from '../scripts/generateHeatingRecord.mjs';
 import { buildFromComponentsValues } from '../src/tutorials/buildFromComponents.mjs';
@@ -408,4 +408,14 @@ test('the excavator the joystick tutorial drives is the one its generator writes
     const tip = startingTip();
     assert.ok(tip.height > driveWithJoysticksValues.ground && tip.height < driveWithJoysticksValues.lift);
     assert.ok(shipped.nodes.some((node) => node.name === driveWithJoysticksValues.tip));
+});
+
+test('a step asking for an online run points at what is left to set, one thing after another, and at Start last', () => {
+    const at = (ui) => onlineRunTarget({ settingsOpen: false, runDialogOpen: true, ...ui }, 60);
+    assert.equal(at({ settingsOpen: true }), '#settingsClose');
+    assert.equal(at({ runDialogOpen: false }), '#runButton');
+    assert.equal(at({ runDialog: { online: false, pacing: 'realTime', targetTime: '1' } }), '#runOnlineMode');
+    assert.equal(at({ runDialog: { online: true, pacing: 'limitedRatio', targetTime: '1' } }), '#runPacingMode');
+    assert.equal(at({ runDialog: { online: true, pacing: 'realTime', targetTime: '1' } }), '#runTargetTime');
+    assert.equal(at({ runDialog: { online: true, pacing: 'realTime', targetTime: '60' } }), '#startRun');
 });

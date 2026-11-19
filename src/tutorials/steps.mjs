@@ -62,3 +62,14 @@ export const edgeParameterChanged = (document, start, edgeName, symbol) => {
     const before = edgeParameterValue(start, edgeName, symbol);
     return now !== undefined && before !== undefined && now !== before;
 };
+
+// Where a step that asks for an online run in real time points, following what is left to do: Settings closed, the Run dialog opened,
+// Online on, the pacing at real time, "Run until" at `seconds`, then Start. `ui.runDialog` is what the dialog's fields hold now.
+export function onlineRunTarget(ui, seconds) {
+    if (ui.settingsOpen) return '#settingsClose';
+    if (!ui.runDialogOpen) return '#runButton';
+    if (!ui.runDialog?.online) return '#runOnlineMode';
+    if (ui.runDialog.pacing !== 'realTime') return '#runPacingMode';
+    if (Number(ui.runDialog.targetTime) !== seconds) return '#runTargetTime';
+    return '#startRun';
+}

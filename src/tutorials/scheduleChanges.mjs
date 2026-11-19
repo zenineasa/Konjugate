@@ -5,6 +5,8 @@
 // seconds), the run's record of changes, and the run repeated from that record, the wave at the same steps and the same result. Repeating
 // forks the run from its start, which needs the engine's checkpoints, so this tutorial is for the desktop app.
 
+import { onlineRunTarget } from './steps.mjs';
+
 export const scheduleChangesValues = Object.freeze({
     joint: 'Joint link',
     setpoint: { name: 'Setpoint angle', parameterId: 21 },
@@ -24,7 +26,7 @@ const steps = Object.freeze([
         id: 'startRun',
         title: 'Start a run in real time',
         text: `Press Run, turn on "Online", set the pacing to "Real time", set "Run until" to ${values.runSeconds} s, and press Start.`,
-        target: (ui) => (ui.runDialogOpen ? '#runOnlineMode' : '#runButton'), skip: 'startOnlineRun', runSeconds: values.runSeconds,
+        target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
         done: ({ ui }) => ui.steerable || ui.waveformScheduled
     },
     {

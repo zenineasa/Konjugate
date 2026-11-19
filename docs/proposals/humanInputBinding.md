@@ -68,6 +68,8 @@ Bindings are listed in **Settings** ([Settings](../settings.md), ⚙ in the titl
 
 Every value a control gives is sent to the engine as the slider's is, but only when it has moved by enough to matter (decision 2): by default 1% of the parameter's live range since the value last sent, or one step, whichever is larger; and once more when the control comes to rest (no change for a quarter of a second), so the record ends at the value actually held. A button's press and release are always sent. The engine records each with the simulation time it took effect, as it records the slider's, so the run's parameter changes are its record of what the person did. The threshold is a setting (finer for an experiment where every wobble matters, coarser for a demonstration); a stick's sixty readings a second become a few dozen values a minute.
 
+While a live run goes, a node's Results tab draws the run so far and keeps up with it, so a person steering can watch what they do (the excavator's tip coming down to the ground). A live run's window is sent only its latest samples, and the run's record cannot be read back until it ends, so the window keeps the samples as they come, by run, thinned past 8000, and the plot is drawn again from them every half second while it is on screen. The engine sends a live run's samples a few times a second; once the run ends, the plot is drawn from the whole record.
+
 ## Repeating a run from its record
 
 **Repeat from the record**, at the foot of the parameter changes panel for a finished run, starts a new branch from the run's first checkpoint with every recorded change made again, with no controller attached, and gives the same result to the bit.

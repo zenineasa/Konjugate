@@ -9929,6 +9929,14 @@ export async function runInteractionTests(driver) {
             await press('#settingsClose');
             await press('.tourFloating .tourSkipStep');
             await waitForStep('dig', 20000);
+            // The Bucket tip's plot, open while the run goes, draws the run so far and keeps up with it (a live run's window holds only its
+            // latest sample, so the plot keeps its own).
+            await evaluate(window, `[...document.querySelectorAll('.node-label-container')].find((label) => label.textContent.includes('Bucket tip')).click()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-node-tab="results"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The Bucket tip\'s editor did not open.');
+            await evaluate(window, `document.querySelector('[data-node-tab="results"]').click()`);
+            await waitFor(window, `(document.querySelector('#nodeResultPlot').data?.[0]?.x.length ?? 0) >= 3`, 'The Bucket tip\'s plot did not draw the run so far.');
+            const plotted = await evaluate(window, `document.querySelector('#nodeResultPlot').data[0].x.at(-1)`);
+            await waitFor(window, `document.querySelector('#nodeResultPlot').data[0].x.at(-1) > ${plotted} + 0.5`, 'The Bucket tip\'s plot did not keep up with the run.');
             // Dig with the right joystick: forward lowers the boom until the tip touches the ground, back raises it with the bucket curled.
             await axis(right, 1, -1);
             await waitFor(window, `(() => { const project = window.__debugProject.serialize(); const tip = project.nodes.find((node) => node.name === 'Bucket tip'); const id = tip.states.find((state) => state.symbol === 'height').id; return (window.__debugSteering.result()?.samples.at(-1)?.states.find((entry) => entry.stateId === id)?.value ?? 1) <= 0; })()`, 'The tip did not reach the ground.', 20000);

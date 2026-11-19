@@ -9798,9 +9798,72 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.componentLibrary.list().then((templates) => Promise.all(templates.filter((template) => template.source === 'user' && template.name === 'Pair').map((template) => window.componentLibrary.removeUser(template.id))))`);
     });
 
+    await run('the joystick tutorial binds two joysticks\' four axes to an excavator and digs with them in a real-time run', async () => {
+        const { press, waitForStep, clean } = tutorialHelpers();
+        const left = 'Left joystick (simulated)';
+        const right = 'Right joystick (simulated)';
+        const axis = (pad, index, value) => evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.moveAxis(${JSON.stringify(pad)}, ${index}, ${value}); devices.poll(); })()`);
+        const tipHeight = () => evaluate(window, `(() => { const project = window.__debugProject.serialize(); const tip = project.nodes.find((node) => node.name === 'Bucket tip'); const id = tip.states.find((state) => state.symbol === 'height').id; return window.__debugSteering.result()?.samples.at(-1)?.states.find((entry) => entry.stateId === id)?.value ?? null; })()`);
+        await clean();
+        await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
+        try {
+            assert.equal(await evaluate(window, `window.__debugTour.startTutorial('driveWithJoysticks')`), true);
+            await waitForStep('welcome');
+            await press('.tourFloating .tourPrimary');
+            await waitForStep('connect');
+            // Two joysticks plugged in, two axes each.
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(left)}, { axes: 2, buttons: 4 }); devices.connectGamepad(${JSON.stringify(right)}, { axes: 2, buttons: 4 }); devices.poll(); })()`);
+            await waitForStep('bindLeft');
+            // The left joystick bound by hand in Settings › Controllers: each command chosen, Bind, and the axis moved.
+            await press('#settingsButton');
+            await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await press('[data-settings-target="controllers"]');
+            for (const [name, index] of [['Swing command', 0], ['Stick command', 1]]) {
+                await evaluate(window, `(() => { const select = document.querySelector('#controllerBindParameter'); select.value = [...select.options].find((option) => option.textContent.startsWith(${JSON.stringify(name)})).value; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+                await press('#controllerBindButton');
+                await waitFor(window, `document.querySelector('#controllerBindButton').textContent.startsWith('Move a control')`, 'Bind did not wait for a control.');
+                await axis(left, index, 0.9);
+                await new Promise((resolve) => setTimeout(resolve, 150));
+                await axis(left, index, 0);
+                await waitFor(window, `window.__debugSteering.steering.document.bindings.some((binding) => binding.parameter.name === ${JSON.stringify(name)})`, `${name} was not bound.`);
+            }
+            await waitForStep('bindRight');
+            const leftBindings = await evaluate(window, `window.__debugSteering.steering.document.bindings.map((binding) => [binding.parameter.symbol, binding.device.id, binding.control.type, binding.control.index])`);
+            assert.deepEqual(leftBindings, [['swingCommand', left, 'axis', 0], ['stickCommand', left, 'axis', 1]]);
+            // The right joystick by skipping: bound to its axes the same way.
+            await press('.tourFloating .tourSkipStep');
+            await waitForStep('startRun');
+            assert.deepEqual(await evaluate(window, `window.__debugSteering.steering.document.bindings.filter((binding) => binding.device.id === ${JSON.stringify(right)}).map((binding) => [binding.parameter.symbol, binding.control.index])`), [['boomCommand', 1], ['bucketCommand', 0]]);
+            await press('#settingsClose');
+            await press('.tourFloating .tourSkipStep');
+            await waitForStep('dig', 20000);
+            // Dig with the right joystick: forward lowers the boom until the tip touches the ground, back raises it with the bucket curled.
+            await axis(right, 1, -1);
+            await waitFor(window, `(() => { const project = window.__debugProject.serialize(); const tip = project.nodes.find((node) => node.name === 'Bucket tip'); const id = tip.states.find((state) => state.symbol === 'height').id; return (window.__debugSteering.result()?.samples.at(-1)?.states.find((entry) => entry.stateId === id)?.value ?? 1) <= 0; })()`, 'The tip did not reach the ground.', 20000);
+            await axis(right, 1, 1);
+            await axis(right, 0, -1);
+            await waitForStep('record', 30000);
+            await axis(right, 1, 0);
+            await axis(right, 0, 0);
+            assert.ok(await tipHeight() >= 2.5, 'The tip was lifted.');
+            const record = await evaluate(window, `window.__debugSteering.result().interventions.filter((change) => change.kind !== 'restart').length`);
+            assert.ok(record > 0, 'The joysticks\' movements were recorded.');
+            assert.equal(await evaluate(window, `document.querySelector('#controlHistoryPanel').hidden`), false, 'The record is shown as the run is driven.');
+            await press('.tourFloating .tourPrimary');
+            await waitForStep('finish');
+            await press('.tourFloating .tourPrimary');
+            await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
+        } finally {
+            // The real-time run is stopped rather than left to play out its minute, for the scenarios after.
+            await evaluate(window, `document.querySelector('#simulationStop')?.click()`);
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The run did not stop.', 15000).catch(() => {});
+            await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.disconnectGamepad(${JSON.stringify(left)}); devices.disconnectGamepad(${JSON.stringify(right)}); devices.poll(); return window.__debugSteering.steering.save({ bindings: [] }); })()`);
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'the joystick tutorial is for the desktop app' });
+
     await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {
         const { press, clean } = tutorialHelpers();
-        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])]) {
+        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])]) {
             await clean();
             // The assistant's model is the person's to set up; here, the fake Ollama's, in use (as an earlier test may have left it).
             if (id === 'askAssistant') {
@@ -9874,6 +9937,9 @@ export async function runInteractionTests(driver) {
             } else if (id === 'optimiseObjective') {
                 assert.equal(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent.includes('All limits hold')`), true, 'The skipped search held to its limit.');
                 await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
+            } else if (id === 'driveWithJoysticks') {
+                assert.ok((await evaluate(window, `window.__debugSteering.result().interventions`)).some((change) => change.kind !== 'restart'), 'The skipped dig was recorded.');
+                await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
             } else if (id === 'steerByHand') {
                 assert.ok((await evaluate(window, `window.__debugSteering.result().interventions`)).some((change) => change.parameterId === 21), 'The skipped steering was recorded.');
                 await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
@@ -9902,6 +9968,11 @@ export async function runInteractionTests(driver) {
             }
             await press('.tourFloating .tourPrimary');
             await waitFor(window, `!window.__debugTour.active()`, `${id} did not finish.`);
+            // A real-time run is stopped rather than left to play out, for the tutorials after.
+            if (await evaluate(window, `window.__debugTour.blockers().simulationRunning`)) {
+                await evaluate(window, `document.querySelector('#simulationStop')?.click()`);
+                await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The run did not stop.', 15000).catch(() => {});
+            }
             if (['liveTwin', 'matchSignals', 'refitTwin'].includes(id)) await closeTutorialTwin();
         }
     });

@@ -14,7 +14,8 @@
         { "id": "tankCalibration", "domains": ["thermal"] },
         { "id": "springMassDamper", "domains": ["mechanical"] },
         { "id": "twoRoomBuilding", "domains": ["thermal"] },
-        { "id": "thermalEquilibrium", "domains": ["thermal"] }
+        { "id": "thermalEquilibrium", "domains": ["thermal"] },
+        { "id": "excavator", "domains": ["mechanical", "robotics"] }
     ]
 }
 

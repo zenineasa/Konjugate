@@ -11,7 +11,7 @@ implementation: complete
 
 # Tutorials
 
-**Status: built**, in the desktop and web editions, with twenty-three tutorials, in three waves, between them covering every feature of the app (see [What the tutorials cover](#what-the-tutorials-cover)). Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
+**Status: built**, in the desktop and web editions, with twenty-five tutorials, in three waves and two since, between them covering every feature of the app (see [What the tutorials cover](#what-the-tutorials-cover)). Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
 
 ## The decision this rests on
 
@@ -120,6 +120,7 @@ The third wave is thirteen, so that every feature is taught somewhere:
 | Parameters and run settings | *Spring Mass Damper* | Modelling | Opens the Parameters table, makes the two relationships' separate copies of the mass one shared parameter, changes it to 2 kg in the table, reads the run settings, runs it, opens the execution summary and plots a bounce √2 slower |
 | Lay out and dress a model | *Heated Water Tank* | Modelling | Moves the heater with the Move tool, gives the tank the shape library's Tank shape, makes it taller, locks the camera to 2D and changes the labels' detail |
 | Schedule changes during a run | *Position Controlled Joint* | Control | Starts an online run in real time, opens the live controls, gives the target angle a sine wave, reads the Changes record, repeats the run from it and plots the joint chasing the wave. Desktop |
+| Drive with two joysticks | *Excavator* | Control | Connects two joysticks (or one gamepad's two sticks), binds their four axes in Settings › Controllers to the excavator's swing, stick, boom and bucket commands in the usual operator layout, starts a real-time online run and digs: the bucket's tip down to the ground and up above 3 m. Skipping the first step binds four pairs of keys instead, for anyone without joysticks, and skipping the dig has the excavator do it by itself. Desktop |
 | Keep and share your work | *Thermal Management* | Results | Reads the project's properties, runs it and (desktop) extends the run, exports the results as CSV and saves the project with its results (answering whose details the copy carries) |
 | Take a model elsewhere | *Spring Mass Damper* | Results | Exports the model as a standalone Python program and (desktop) as an FMI 2.0 FMU |
 | Extend Konjugate | *Thermal Management* | Results | Opens Extensions › Discover, reads Results Analysis, installs it, restarts Konjugate to activate it (the tutorial carries on after the restart), runs the model and opens the add-on on its results. Desktop |
@@ -127,7 +128,7 @@ The third wave is thirteen, so that every feature is taught somewhere:
 | Match your signals to the model | An empty canvas | Data | In the twin's window, chooses "A plant's names", reviews the suggested matches and unit conversions, uses them and opens the control room. Desktop |
 | Refit a drifting twin | An empty canvas | Data | Plays "A rig that drifts" at 60×, refits the heat loss in the Engineer view and keeps it in the model, and tries the heater off in the sandbox, kept as a draft scenario. Desktop |
 
-The lab's log is `examples/dataSources/labVesselLog.csv`, written by `labVessel.py` with its default seed (the same file every time); a tutorial may start from a model beside the examples, like the lab vessel's, which the example loader opens for the tutorials that list it and for nothing else.
+The excavator (`examples/excavator.kjt`, written by `scripts/generateExcavatorExample.mjs`, with its guide and thumbnail) was made for the joystick tutorial: no shipped example had four live parameters. Each of its four joints follows a live command from −1 to 1 through a 0.3 s hydraulic lag; relationships that set values carry each part's absolute angle down the arm, and three of them, summed, set the bucket tip's height and reach exactly at every step. A unit test checks the shipped file is the one the script writes. A live run keeps only its latest sample in the window, so a check over a run's values (the dig's) keeps what it reads at each look. The lab's log is `examples/dataSources/labVesselLog.csv`, written by `labVessel.py` with its default seed (the same file every time); a tutorial may start from a model beside the examples, like the lab vessel's, which the example loader opens for the tutorials that list it and for nothing else.
 
 ## What the tutorials cover
 
@@ -146,7 +147,8 @@ Every feature is taught by at least one tutorial, as a step the person does (or 
 | Moving, rotating and scaling, the shape library, the 2D lock, label detail | Lay out and dress a model |
 | Validation warnings, numerical stability, substeps | Fix an unstable model |
 | Editing a relationship's parameters, closing results to edit | Tune a controller |
-| Live parameters steered by keys (and gamepads, MIDI), Settings › Controllers | Steer a model by hand |
+| Live parameters steered by keys, Settings › Controllers | Steer a model by hand |
+| Joysticks and gamepads, four analog axes at once, a keyboard fallback | Drive with two joysticks |
 | Online runs, real-time pacing, live controls, schedules and waveforms, the Changes record, repeating from it | Schedule changes during a run; Steer a model by hand |
 | Branches: forking, fork parameters, comparing | Ask what if, with branches |
 | Project properties, saving with results, extending a run, exporting results as CSV | Keep and share your work |

@@ -12933,6 +12933,8 @@ const tutorialLibraryComponents = new Set();
 
 // Whether the person has been inside a subsystem while a tutorial ran.
 let tutorialEnteredSubsystem = false;
+// The values a tutorial's checks have read from a live run, by run and state (a live run keeps only its latest sample).
+const tutorialSeriesSeen = new Map();
 let tutorialExecutionSummaryShown = false;
 // The view while a tutorial ran: whether the camera has been locked to 2D, and the node labels' detail it started with.
 let tutorialLockedTo2D = false;
@@ -13111,6 +13113,22 @@ const tour = createTour({
                 runOnline: Boolean(runLaunchSettings.online),
                 // A live run's parameters can be steered once its first results are in.
                 steerable: liveControlsOffered(),
+                gamepads: humanInput.devices().filter((device) => device.kind === 'gamepad').length,
+                // A state's values over the run on screen, by its node's name and its symbol. A live run keeps only its latest sample
+                // here, so what each look finds is kept as well (by the run), and the longer of the two is given.
+                resultSeries: (nodeName, symbol) => {
+                    const node = model.nodes.find((candidate) => !candidate.deleted && candidate.title === nodeName);
+                    const stateId = node?.states.find((candidate) => candidate.symbol === symbol)?.id;
+                    if (stateId === undefined || !activeResult) return [];
+                    const valueIn = (sample) => sample?.states.find((entry) => entry.stateId === stateId)?.value;
+                    const key = `${activeEngineJobId}:${stateId}`;
+                    const seen = tutorialSeriesSeen.get(key) ?? [];
+                    const latest = valueIn(activeResult.samples.at(-1));
+                    if (Number.isFinite(latest) && seen.at(-1) !== latest) seen.push(latest);
+                    tutorialSeriesSeen.set(key, seen);
+                    const full = activeResult.samples.map(valueIn).filter((value) => Number.isFinite(value));
+                    return full.length >= seen.length ? full : seen;
+                },
                 selectedCount: selectedNodeIds.size,
                 canPaste: !$('#pasteSelection').disabled,
                 subsystemDialogOpen: $('#subsystemDialog').open,
@@ -13463,6 +13481,44 @@ const tour = createTour({
             setField('#runPacingMode', 'realTime', 'change');
             $('#startRun').click();
             await waitUntil(() => liveControlsOffered(), 15000);
+        },
+        // No joystick at hand: each command bound to a pair of keys instead, as Settings › Controllers binds a key and adds one for down.
+        bindKeyboardFallback: async (step) => {
+            const document = steering.document;
+            const symbols = new Set(step.commands.map((command) => command.symbol));
+            await steering.save({ ...document, bindings: [...document.bindings.filter((entry) => !symbols.has(entry.parameter.symbol)),
+                ...step.commands.map((command) => ({ id: crypto.randomUUID(), device: { kind: 'keyboard' }, control: { type: 'keys', up: command.keys.up, down: command.keys.down }, parameter: { symbol: command.symbol, name: command.name } }))] });
+        },
+        // Each command bound to its joystick's axis, as Bind and a movement of the axis bind it: joystick 0 and 1 are the first two
+        // gamepads seen; with one gamepad, its left stick (axes 0 and 1) stands for the left joystick and its right stick (2 and 3) for the right.
+        bindJoystickAxes: async (step) => {
+            const pads = humanInput.devices().filter((device) => device.kind === 'gamepad');
+            if (!pads.length) return;
+            const document = steering.document;
+            const symbols = new Set(step.commands.map((command) => command.symbol));
+            const bindings = step.commands.map((command) => {
+                const device = pads[command.joystick] ?? pads[0];
+                const index = pads[command.joystick] ? command.axis : command.axis + 2 * command.joystick;
+                return { id: crypto.randomUUID(), device: { kind: 'gamepad', id: device.id, name: device.name }, control: { type: 'axis', index }, centred: true, parameter: { symbol: command.symbol, name: command.name } };
+            });
+            await steering.save({ ...document, bindings: [...document.bindings.filter((entry) => !symbols.has(entry.parameter.symbol)), ...bindings] });
+        },
+        // The excavator digs by itself: the boom lowered until the tip touches the ground, then raised with the bucket curling until the
+        // tip is above the lift height, every change sent and recorded as a stick's would be.
+        digByItself: async (step) => {
+            await waitUntil(() => liveControlsOffered(), 15000);
+            const parameterId = (symbol) => parameterOwnersInModel().find(({ parameter }) => parameter.symbol === symbol)?.parameter.id;
+            const tip = model.nodes.find((node) => !node.deleted && node.title === 'Bucket tip');
+            const heightId = tip?.states.find((state) => state.symbol === 'height')?.id;
+            const height = () => activeResult?.samples.at(-1)?.states.find((entry) => entry.stateId === heightId)?.value ?? NaN;
+            const command = (symbol, value) => { const id = parameterId(symbol); if (id !== undefined) scheduleLiveParameterUpdate(id, value, true); };
+            command('boomCommand', -1);
+            await waitUntil(() => height() <= step.dig.ground || !simulationRunning, 20000);
+            command('boomCommand', 1);
+            command('bucketCommand', -1);
+            await waitUntil(() => height() >= step.dig.lift || !simulationRunning, 30000);
+            command('boomCommand', 0);
+            command('bucketCommand', 0);
         },
         // The up key held for a moment, as a person holds it, with no field in use.
         steerWithKeys: async (step) => {
@@ -14029,6 +14085,7 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     Object.assign(tutorialTwin, { sawRunning: false, movesSeen: 0, sawAlarm: false });
     tutorialSteered.clear();
     tutorialEnteredSubsystem = false;
+    tutorialSeriesSeen.clear();
     tutorialExecutionSummaryShown = false;
     tutorialLockedTo2D = false;
     tutorialWaveformRuns.clear();
@@ -14045,6 +14102,8 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     // add-on installed), and until it was read they read as undone ("Something from step 1 is no longer there").
     await refreshTutorialInstalledPackages(true);
     tutorialNodeLabelDetail = $('#nodeLabelsButton').title;
+    // A tutorial about controllers reads the devices from the start, so a joystick connected is seen before anything is bound.
+    if (tutorial.inputDevices) humanInput.start();
     tour.start(tutorial, { start: serializeProjectDocument(), at: resumeAt });
     return true;
 }

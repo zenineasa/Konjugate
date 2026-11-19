@@ -26,6 +26,8 @@ import { replayLogValues } from '../src/tutorials/replayLog.mjs';
 import { refitTwinValues } from '../src/tutorials/refitTwin.mjs';
 import { scheduleChangesValues } from '../src/tutorials/scheduleChanges.mjs';
 import { organiseModelValues } from '../src/tutorials/organiseModel.mjs';
+import { driveWithJoysticksValues } from '../src/tutorials/driveWithJoysticks.mjs';
+import { excavatorProject, startingTip } from '../scripts/generateExcavatorExample.mjs';
 import { objectiveVocabulary } from '../src/renderer/tuningObjective.mjs';
 
 // The first-model tour's tests below were written against its own step list; these bind the shared functions to it.
@@ -389,4 +391,20 @@ test('the third wave\'s names, ids and starting values are the shipped models\' 
     const mass = JSON.parse(await readFile(join(root, 'assets', 'componentLibrary', `${organiseModelValues.mass.template}.json`), 'utf8'));
     assert.equal(mass.name, organiseModelValues.mass.name);
     assert.equal(mass.states[0].initialValue, organiseModelValues.mass.from);
+});
+
+test('the excavator the joystick tutorial drives is the one its generator writes, with a live command for each of the four axes', async () => {
+    const shipped = await exampleDocument('excavator.kjt');
+    assert.deepEqual(shipped, JSON.parse(JSON.stringify(excavatorProject())), 'examples/excavator.kjt has drifted from scripts/generateExcavatorExample.mjs: run the script again.');
+    const live = shipped.nodes.flatMap((node) => node.sourceTerms.flatMap((term) => term.parameters)).filter((parameter) => parameter.mode === 'live');
+    assert.deepEqual(live.map((parameter) => parameter.symbol).sort(), driveWithJoysticksValues.commands.map((command) => command.symbol).sort());
+    for (const parameter of live) assert.deepEqual([parameter.control.minimum, parameter.control.maximum, parameter.value], [-1, 1, 0], `${parameter.name} is centred, from −1 to 1.`);
+    // Each joystick drives two commands, on two different axes; the keys stand in for all four, each pair distinct.
+    for (const joystick of [0, 1]) assert.deepEqual(driveWithJoysticksValues.commands.filter((command) => command.joystick === joystick).map((command) => command.axis).sort(), [0, 1]);
+    const keys = driveWithJoysticksValues.commands.flatMap((command) => [command.keys.up, command.keys.down]);
+    assert.equal(new Set(keys).size, keys.length);
+    // The tip starts above the ground and below the lift height, so the dig asks for both.
+    const tip = startingTip();
+    assert.ok(tip.height > driveWithJoysticksValues.ground && tip.height < driveWithJoysticksValues.lift);
+    assert.ok(shipped.nodes.some((node) => node.name === driveWithJoysticksValues.tip));
 });

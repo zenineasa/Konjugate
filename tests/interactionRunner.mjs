@@ -71,7 +71,9 @@ async function waitFor(window, expression, message, timeout = 5000) {
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
     const visibleError = await evaluate(window, `document.querySelector('#assistantError:not([hidden])')?.textContent ?? ''`);
-    const assistantStatus = await evaluate(window, `document.querySelector('#assistantProposalStatus')?.textContent ?? ''`);
+    // The status bar's own line (Validating…, Model valid), and the assistant's progress only while its proposal is showing: hidden,
+    // it still holds its first words, which say nothing about the window.
+    const assistantStatus = await evaluate(window, `[document.querySelector('#statusText')?.textContent, document.querySelector('#assistantProposalStatus')?.checkVisibility?.() ? document.querySelector('#assistantProposalStatus').textContent : ''].filter(Boolean).join(' · ')`);
     // Where a run had got to, when one is showing: one far short of its end was slowed (a runner throttling the app's
     // timers), one stuck at a value had stopped.
     const run = await evaluate(window, `(() => { const mode = document.querySelector('.resultMode small')?.textContent; const progress = document.querySelector('#simulationProgress'); return mode && !document.querySelector('#resultTransport')?.hidden ? \`\${mode}\${progress && getComputedStyle(progress).display !== 'none' ? ', at ' + progress.value : ''}; window \${document.hidden ? 'hidden' : 'visible'}, \${document.hasFocus() ? 'focused' : 'not focused'}\` : ''; })()`).catch(() => '');
@@ -8425,7 +8427,9 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.connectGamepad(${JSON.stringify(pad)}); devices.poll(); })()`);
 
         await openRunDialog(window);
-        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '8'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
+        // Twenty seconds kept to the clock: long enough for every step below to happen while it is going. Each move of the stick is a
+        // round trip to the window, and on a slow runner the sixty-three of them took longer than an eight-second run lasted.
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '20'; document.querySelector('#runOnlineMode').checked = true; document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#runPacingMode').value = 'realTime'; document.querySelector('#startRun').click(); })()`);
         await waitFor(window, `!document.querySelector('#liveParameterButton').hidden`, 'The live controls were not offered during the run.', 10000);
         await evaluate(window, `document.querySelector('#liveParameterButton').click()`);
         await waitFor(window, `Boolean(document.querySelector('#liveParameterRows [data-bind]'))`, 'The live control has no Bind… button.');
@@ -8450,7 +8454,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'The chip did not say the slider took over.');
         await stick(0.7);
         await waitFor(window, `!/the slider took over/.test(document.querySelector('#liveParameterRows .inputBindingChip').textContent)`, 'Moving the stick again did not take the parameter back.');
-        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The steered run did not finish.', 30000);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The steered run did not finish.', 40000);
 
         // Recorded by the size of each change (a fiftieth of the range, at least), and once where the stick came to rest.
         const steered = await evaluate(window, `window.__debugSteering.result()`);

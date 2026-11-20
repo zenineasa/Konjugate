@@ -11,7 +11,50 @@ implementation: none
 
 # Neural Toolbox
 
-**Status: proposed. A throwaway prototype (November 2026, not kept in the repository) proved the mapping onto the engine and measured the canvas at scale. Core change 2 is built; core change 1 is superseded by [Rates and values](ratesAndValues.md); nothing of the toolbox itself is built.**
+**Status: paused (21 November 2026). A throwaway prototype (November 2026, not kept in the repository) proved the mapping onto the engine and measured the canvas at scale. Nothing of the toolbox is built. While it was paused, the question of how values are worked out at all was reopened, which changes how a network would run; see [Paused, and why](#paused-and-why) before the rest, much of which assumes values settled at the same instant.**
+
+## Paused, and why
+
+Deep learning is not being explored at this point. The proposal is kept because the thinking is not wasted, and because working it through changed something more basic than the toolbox: how Konjugate works values out.
+
+### Values at the same instant, and rings
+
+Everything below "How a network maps onto Konjugate" assumes a network's layers are settled *at the same instant*: within one synchronization instant, every value is worked out after the values it reads, so a chain of layers is exact with no delay. That only works on a graph without cycles. In a ring -- `a` worked out from `c`, `b` from `a`, `c` from `b`, all at one instant -- there is no first value; it is an equation to solve, not to evaluate, and the engine refuses it (`algebraicLoop`). For a tool whose point is drawing graphs, where rings are ordinary (a logistics loop, a circuit mesh, a closed linkage, a recurrent network), that is the wrong rule.
+
+The direction instead is two kinds of state, both reading the states at the start of a step and both taking effect after it: a **Rate** is integrated over the step (`d x/dt = …`), an **Update** replaces the value at its end (`x_{k+1} = …`). Every term reads the same snapshot, so the order terms are worked out in never matters, and a ring is simply a loop that goes around once per step. Time is the one exception to "read the start of the step": it is known in advance, so a term reads the time at the end of the step, and a recorded input, a schedule or a clock lands exactly on its sample rather than a step late. This is to be written up properly by revising [Rates and values](ratesAndValues.md), whose same-instant direction it replaces.
+
+### Same-instant results depend on the order of evaluation
+
+Even setting refusal aside, a same-instant rule on a graph with cycles has no single answer to give. Suppose the engine tried to settle a ring by working its values out in turn, each reading the latest values. The result then depends on *which value it starts from and the order it goes round*: starting at `a`, `b` reads the new `a`; starting at `b`, it reads the old one. Two runs of the same model, or the same model on two backends that visit nodes in a different order (serial, a thread pool, partitions), would disagree, and nothing in the model would say which is right.
+
+This is sharpest for **graph neural networks**. A graph neural network passes messages between neighbouring nodes in rounds, on graphs that are full of cycles, and its definition is *synchronous*: in round `k + 1`, every node reads its neighbours' values from round `k`. Updating in place, so that some nodes read values already changed in the same round, is a different network, and a different one for every visiting order. Update states are exactly the synchronous rule: one round of message passing is one step's Update. So whatever form "running a network" eventually takes, it must keep that property: **every value worked out within one pass reads the values from before the pass, never the ones being written in it.** Results then never depend on the order of evaluation, the backend or the number of threads.
+
+### How a network can run under Rate and Update, inefficiently
+
+Four ways, from simplest to most general. All are well defined on any graph, including rings, and all are deterministic.
+
+1. **The network as one Update term.** The whole network is a program worked out in one call per step: one step late however deep it is. Opening it up would mean exposing each neuron's activation as a state the block sets and each weight as a parameter it reads -- probes and knobs, with no delay added and no edges to draw.
+2. **Layers as Update states, one step per layer.** A network `D` layers deep answers `D` steps late. The delay is `D` times the step, so it is small, and even realistic, when the step is small beside the time that matters: a three-layer policy acting every 20 ms on a robot simulated at 1 ms answers 3 ms late, inside one control period. For steady inputs the output settles after `D` steps.
+3. **Several synchronous sweeps per step.** Within a step, the Update terms are worked out `k` times, each sweep reading only the previous sweep's values, with Rate states held. With `k` equal to a network's depth, a feed-forward network is exact within the step; on a ring, `k` sweeps are `k` rounds -- for a graph neural network, `k` rounds of message passing. This mirrors substeps, which let a node take several Rate steps per global step; it would be chosen per node or per subsystem, as substeps are, since a recurrent layer should advance once per step while a feed-forward block beside it settles.
+4. **Sweep until nothing changes.** As 3, but stopping when the values stop changing, up to a limit. A network without cycles settles exactly after its depth plus one sweep, found without anyone counting layers; a ring that converges settles on its true fixed point, which is the correct answer to the loops refused today; one that does not stops at the limit with a warning naming the loop rather than an error.
+
+### The bottleneck to solve before it runs efficiently
+
+Ways 3 and 4 give the right answers but waste work, and the waste grows with the network:
+
+- **Every sweep works out every Update term.** A network `D` layers deep, swept `D` times, does `D` times the work of working each layer out once, although in each sweep only one layer's values actually change. For a 64-wide, 8-deep network written as scalar relationships that is 8 × 33,000 evaluations per step instead of 33,000.
+- **Every sweep is a synchronization point.** Synchronous sweeps need every value of a sweep finished before the next begins. On the thread-pool and partitioned backends that is a barrier per sweep, and partitions must exchange boundary values each time; the engine today synchronizes once per step.
+- **A network written as scalar relationships is slow per weight.** The prototype measured about 240 ns per relationship per evaluation, a scalar expression each; a layer as a matrix-vector product in an optimized library is orders of magnitude cheaper per weight.
+- **The canvas cannot show it.** Measured: comfortable to about 4,000 relationships, 3.7 frames per second at 16,500 (see [What the prototype showed](#what-the-prototype-showed)).
+
+What would solve each, without giving up the synchronous rule:
+
+- **Work only what changed.** Within a step, work an Update out only when something it reads changed in the previous sweep. On the parts of a graph without cycles this visits each term once, in dependency order -- the same values as settling at the same instant, at the same cost -- while rings are swept, synchronously, until they settle. Results stay independent of the order because each sweep still reads only the previous sweep's values.
+- **One barrier per settled region, not per sweep.** Sweeps confined to the nodes that need them (a network's subsystem), with the rest of the model synchronized once per step as now.
+- **A layer as one term.** A layer worked out as one vector term (a matrix-vector product with its activation), rather than one scalar relationship per weight -- or the whole network as one block (way 1), run by an optimized runtime such as ONNX Runtime.
+- **Drawing edges in batches** and only when something changed (core change 4 below).
+
+Until those exist, ways 1 and 2 are the practical ones: a network as one block, or small opened-up networks at fine steps.
 
 ## The problem
 

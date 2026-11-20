@@ -11,6 +11,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -92,18 +93,99 @@ void aChainAcrossNodesSettlesWithinOneInstantInDependencyOrder() {
     require(at(21) == 9 && at(31) == 15, "A live gain of 3 should give y = 9 and z = 15.");
 }
 
-void aLoopOfRelationshipsSettingValuesIsRefused() {
+// A model whose states carry no kind settles its updates within a step, as the engine before Rates and Updates did. A
+// ring of them is valid: C.z feeds B.y back, so y = 2 x + z and z = y + 1 + u has no fixed point, and the sweeps stop
+// at the node's limit and say so rather than refusing the model.
+void aRingOfRelationshipsSettlingValuesIsSweptToItsLimit() {
     const auto loop = R"json(,
         {"id": 8, "name": "C to B", "directionality": "directed", "source": {"nodeId": 3}, "target": {"nodeId": 2},
          "parameters": [],
          "equationModel": {
             "bindings": [{"symbol": "z", "kind": "state", "role": "source", "nodeId": 3, "stateId": 31}],
             "outputs": [{"role": "target", "stateId": 21, "mathJson": "z", "setsValue": true}]}})json";
-    const auto document = parse(chainProject(loop));
-    require(hasIssue(konjugate::validateModel(document), "algebraicLoop"), "A loop of relationships setting values should be algebraicLoop.");
-    bool threw = false;
-    try { static_cast<void>(konjugate::compileExecutionPlan(document)); } catch (const std::runtime_error&) { threw = true; }
-    require(threw, "Compiling a loop of relationships setting values should fail clearly.");
+    auto document = parse(chainProject(loop));
+    for (auto& node : document.get_child("nodes")) node.second.put("updatesLimit", 5);
+    require(!hasIssue(konjugate::validateModel(document), "algebraicLoop") && konjugate::validateModel(document).valid,
+        "A ring of relationships setting values is valid: it is settled within the step.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    bool sawRing = false;
+    for (const auto& group : plan.settleGroups) if (group.ring) { sawRing = true; require(group.limit == 5, "A ring's limit is its nodes' updatesLimit."); }
+    require(sawRing, "B.y and C.z feeding each other should be one ring.");
+    auto states = plan.initialStates;
+    const auto outcome = konjugate::applyUpdates(plan, states, {}, {}, 0, false);
+    require(outcome.ringsUnsettled == 1, "A ring with no fixed point should stop at its limit and be counted as unsettled.");
+}
+
+// A ring that has a fixed point settles to it: x = y / 2 + 1 and y = x / 2 give x = 4 / 3 and y = 2 / 3.
+void aRingWithAFixedPointSettlesToIt() {
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "A to B", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "outputs": [{"role": "target", "stateId": 21, "mathJson": ["Multiply", 0.5, "x"], "setsValue": true}]}},
+        {"id": 6, "name": "B to A", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 1}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "y", "kind": "state", "role": "source", "nodeId": 2, "stateId": 21}],
+            "outputs": [{"role": "target", "stateId": 11, "mathJson": ["Add", ["Multiply", 0.5, "y"], 1], "setsValue": true}]}}
+    ]})json");
+    require(konjugate::validateModel(document).valid, "A ring with a fixed point should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto states = plan.initialStates;
+    const auto outcome = konjugate::applyUpdates(plan, states, {}, {}, 0, false);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(outcome.ringsUnsettled == 0, "The ring should settle within its limit.");
+    require(std::abs(at(11) - 4.0 / 3) < 1e-11 && std::abs(at(21) - 2.0 / 3) < 1e-11, "The ring should settle to x = 4/3, y = 2/3.");
+}
+
+// Explicit kinds: x is a rate (x' = 1), y = 2 x, z = y + 1 and n = n + 1 are updates. After each step an update reads
+// rates as the step reached them and updates as they stood at its start, once, so the order they are listed in never
+// matters: z trails y by a step, and n counts steps.
+void updatesReadRatesAfterTheStepAndUpdatesBeforeIt() {
+    const auto term = [](int id, const char* state, int outputId, const std::string& mathJson, const std::string& bindings) {
+        return std::string(R"json({"id": )json") + std::to_string(id) + R"json(, "state": ")json" + state + R"json(", "expression": "e", "parameters": [],
+            "expressionModel": {"mathJson": )json" + mathJson + R"json(, "bindings": [)json" + bindings + R"json(], "output": {"stateId": )json" +
+            std::to_string(outputId) + "}}}";
+    };
+    const auto binding = [](const char* symbol, int stateId) {
+        return std::string(R"json({"symbol": ")json") + symbol + R"json(", "kind": "state", "stateId": )json" + std::to_string(stateId) + "}";
+    };
+    const auto document = parse(std::string(R"json({"format": "konjugate", "version": 1, "nodes": [{"id": 1, "name": "A",
+        "numerics": {"substepsPerGlobalStep": 2},
+        "states": [{"id": 11, "name": "Z", "symbol": "z", "initialValue": 0, "kind": "update"},
+                   {"id": 12, "name": "Y", "symbol": "y", "initialValue": 0, "kind": "update"},
+                   {"id": 13, "name": "X", "symbol": "x", "initialValue": 0, "kind": "rate"},
+                   {"id": 14, "name": "N", "symbol": "n", "initialValue": 0, "kind": "update"}],
+        "sourceTerms": [)json") +
+        term(21, "z", 11, R"json(["Add", "y", 1])json", binding("y", 12)) + "," +
+        term(22, "y", 12, R"json(["Multiply", 2, "x"])json", binding("x", 13)) + "," +
+        term(23, "x", 13, "1", "") + "," +
+        term(24, "n", 14, R"json(["Add", "n", 1])json", binding("n", 14)) + R"json(]}], "edges": []})json");
+    const auto validation = konjugate::validateModel(document);
+    for (const auto& issue : validation.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(validation.valid, "Rates and updates with explicit kinds, an update reading itself among them, should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    require(plan.settleGroups.empty(), "A model whose states say their kind updates once per step unless a node asks to settle.");
+    auto states = plan.initialStates;
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    const double step = 0.5;
+    for (int index = 0; index < 2; ++index) {
+        states = konjugate::integrateNode(plan.nodes.front(), states, {}, index * step, step).states;
+        konjugate::applyUpdates(plan, states, {}, {}, (index + 1) * step, true, step);
+    }
+    require(std::abs(at(13) - 1) < 1e-12, "x' = 1 over two steps of 0.5 should reach 1.");
+    require(std::abs(at(12) - 2) < 1e-12, "y = 2 x should read x as the step reached it: 2.");
+    require(std::abs(at(11) - 2) < 1e-12, "z = y + 1 should read y as it stood at the step's start (1), giving 2.");
+    require(at(14) == 2, "n = n + 1 should count the two steps.");
+
+    // The same model with the node settling: z now reads y as worked out in the same step.
+    auto settling = document;
+    settling.get_child("nodes").front().second.put("updates", "settle");
+    const auto settlingPlan = konjugate::compileExecutionPlan(settling);
+    auto settled = settlingPlan.initialStates;
+    settled = konjugate::integrateNode(settlingPlan.nodes.front(), settled, {}, 0, step).states;
+    konjugate::applyUpdates(settlingPlan, settled, {}, {}, step, true, step);
+    require(std::abs(settled.at(settlingPlan.stateIndexes.at(11)) - 2) < 1e-12, "Settling, z = y + 1 should read this step's y (1), giving 2.");
 }
 
 void theValidatorCatchesMalformedRelationshipsWithSeveralEquations() {
@@ -116,8 +198,8 @@ void theValidatorCatchesMalformedRelationshipsWithSeveralEquations() {
         {"id": 9, "name": "Rate", "directionality": "directed", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 3, "stateId": 32},
          "parameters": [],
          "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": 32}}})json";
-    require(hasIssue(konjugate::validateModel(parse(chainProject(rate))), "algebraicStateMixed"),
-        "A state set by relationships and also given a rate should be algebraicStateMixed.");
+    require(hasIssue(konjugate::validateModel(parse(chainProject(rate))), "rateIntoUpdateState"),
+        "A state set by relationships and also given a rate should be rateIntoUpdateState.");
     auto bidirectional = parse(chainProject());
     bidirectional.get_child("edges").front().second.put("directionality", "bidirectional");
     require(hasIssue(konjugate::validateModel(bidirectional), "relationshipOutputsInvalid"),
@@ -393,13 +475,12 @@ void validationHandsBackTheCompiledPlan() {
     konjugate::evaluateAlgebraicRelationships(*result.plan, fromValidation, {}, {}, 0);
     konjugate::evaluateAlgebraicRelationships(compiled, fromCompile, {}, {}, 0);
     require(fromValidation == fromCompile, "The plan validation hands back should be the one compiling gives.");
-    const auto loop = R"json(,
-        {"id": 8, "name": "C to B", "directionality": "directed", "source": {"nodeId": 3}, "target": {"nodeId": 2},
+    // A rate into a state relationships set is invalid.
+    const auto rate = R"json(,
+        {"id": 9, "name": "Rate", "directionality": "directed", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 3, "stateId": 32},
          "parameters": [],
-         "equationModel": {
-            "bindings": [{"symbol": "z", "kind": "state", "role": "source", "nodeId": 3, "stateId": 31}],
-            "outputs": [{"role": "target", "stateId": 21, "mathJson": "z", "setsValue": true}]}})json";
-    require(!konjugate::validateModel(parse(chainProject(loop))).plan, "An invalid model's validation should hand back no plan.");
+         "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": 32}}})json";
+    require(!konjugate::validateModel(parse(chainProject(rate))).plan, "An invalid model's validation should hand back no plan.");
 }
 
 }
@@ -407,7 +488,9 @@ void validationHandsBackTheCompiledPlan() {
 int main() {
     try {
         aChainAcrossNodesSettlesWithinOneInstantInDependencyOrder();
-        aLoopOfRelationshipsSettingValuesIsRefused();
+        aRingOfRelationshipsSettlingValuesIsSweptToItsLimit();
+        aRingWithAFixedPointSettlesToIt();
+        updatesReadRatesAfterTheStepAndUpdatesBeforeIt();
         theValidatorCatchesMalformedRelationshipsWithSeveralEquations();
         aSemiImplicitNodeUpdatesEachStateFromTheOnesUpdatedBeforeIt();
         inverseTrigonometricAndHyperbolicFunctionsEvaluate();

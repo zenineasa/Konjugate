@@ -4,7 +4,7 @@ title: Rates and updates
 description: One governing equation for every node, with two kinds of state - a Rate, integrated over the step, and an Update, replaced at its end - both reading the start of the step, so every graph shape is valid, rings included, and no result depends on the order terms are worked out in; with settling within a step as an option, and a migration that keeps released models' numbers.
 tags: [proposals, engine, equations, schema, execution]
 status: draft
-implementation: none
+implementation: partial
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
@@ -117,6 +117,8 @@ Elsewhere: **causal-inference replay** (today a generated C++ program with the r
 ## Order of work
 
 1. **The engine**: the execution rule, `kind` and `updates` read from the file, older markers mapped onto them, settling with its limit and warning; and a comparison, run over the examples and both toolboxes, of every sample against the engine before it -- the numbers in the table above, measured. Nothing ships until that comparison is understood.
+
+   **Built.** The engine follows the rule above, reads `kind`, `updates` and `updatesLimit` ([Project schema](../projectSchema.md)), and reads a file that says no kind as settling everywhere. Settling works out a node's Updates in dependency order, a chain in one pass, and sweeps only the rings, each until it settles or reaches its limit, warning once when one does not. The comparison: every run the bundled examples' tests, the Logistics Toolbox's and the Robotics Toolbox's engine tests make (188 runs, 141 of them with values set within the step) was replayed on v1.4.15 and on this engine, and every sample of every state is identical to the bit. The substep caution above was confirmed on a model built for it -- $x' = y$, $y = t$ on a node with two substeps reaches 0.45 at $t = 1$ against 0.475 before -- and no released model reads its own Update from its rates within substeps. The validator gives the new rules their codes (`rateIntoUpdateState`, `valueIntoRateState`, `stateKindInvalid`, `nodeUpdatesInvalid`); their wording in plain words is the next stage. Code export refuses a model that says a `kind` or a node's `updates`, by name.
 2. **The validator**, in plain words: a rate and a value on one state; a settling region that did not settle.
 3. **The editors**: the shared card, the Term editor, choosing a kind by its two equations, the settle setting.
 4. **Code export** of the new rule.

@@ -287,17 +287,20 @@ struct NodeExecutionPlan {
     std::vector<EntityId> stateIds;
     std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;
-    // Source terms authored as "sets the value" rather than "updates the derivative" -- a genuine
-    // algebraic state (in the Differential-Algebraic-Equation sense), never integrated via any
-    // solver's update rule. Stored in dependency-resolved order (an algebraic task may bind
-    // another algebraic task's own output state, e.g. "y = 2x, z = y + 1" -- z's task follows y's
-    // here) so applyAlgebraicTasks() can evaluate them once, in this order, before any ordinary
-    // (differential) contribution in the same substep, with each write immediately visible to
-    // whatever comes after it. Never contains edges (edges always contribute a derivative) --
-    // see docs/projectSchema.md's `setsValue` paragraph and
-    // docs/proposals/causalInferenceInputReplay.md for why this needs to be a genuinely
-    // recomputed-fresh value rather than a solver-specific derivative trick.
+    // The node's own terms into its Update states (docs/proposals/ratesAndUpdates.md): a source term that sets its
+    // value (setsValue), or any source term into a state whose kind is "update". They are worked out after the step, in
+    // the update phase (applyUpdates), never within the node's substeps: through a step an Update state holds its value
+    // from the step's start. Several may set one state; they sum. Kept in dependency order within the node, every term
+    // setting a state before any term reading it where the terms have no cycle (stability analysis reads them so).
     std::vector<ContributionTask> algebraicTasks;
+    // Terms of relationships into this node's Update states (a relationship's single equation into a state whose kind is
+    // "update"), worked out in the update phase too; bindings as for a contribution of this node.
+    std::vector<ContributionTask> valueTerms;
+    // How the node's Update states are worked out (`updates`): once per step, from the values at the step's start, or
+    // settled within the step -- worked out in dependency order, rings swept until nothing changes or `settleLimit`
+    // sweeps. A document that gives no state a kind settles every node, as values settled at the same instant before.
+    bool settles = false;
+    std::size_t settleLimit = 1000;
     std::optional<NodeProviderTask> nodeProvider;
     std::size_t estimatedOperationsPerSubstep = 0;
     // True when any parameter of this node's tasks follows a stored schedule, so its values are
@@ -342,12 +345,45 @@ struct AlgebraicOutput {
     std::vector<std::size_t> eagerDefinitions;
 };
 
+// One term of the update phase: something that sets an Update state.
+enum class UpdateStepKind {
+    relationshipOutput, // plan.algebraicOutputs[index]
+    ownTerm,            // plan.nodes[node].algebraicTasks[index]
+    valueTerm           // plan.nodes[node].valueTerms[index]
+};
+
+struct UpdateStep {
+    UpdateStepKind kind = UpdateStepKind::relationshipOutput;
+    std::size_t node = 0;
+    std::size_t index = 0;
+    // The state it adds its value to, and the states it reads (those its equation uses; every one a program binds).
+    std::size_t writes = 0;
+    std::vector<std::size_t> reads;
+};
+
+// Steps that settle together: one step in no cycle, worked out once; or the steps of a ring (a strongly connected set),
+// swept together -- every sweep reading only the previous sweep's values -- until nothing changes or `limit` sweeps.
+struct SettleGroup {
+    std::vector<std::size_t> steps;
+    bool ring = false;
+    std::size_t limit = 1000;
+};
+
 struct ExecutionPlan {
     std::vector<AlgebraicRelationship> algebraicRelationships;
-    // In the order they are evaluated: every output writing a state comes before any output reading it.
+    // A relationship's several equations, each setting an Update state; where they form no ring, in an order in which
+    // every output setting a state comes before any output reading it.
     std::vector<AlgebraicOutput> algebraicOutputs;
-    // The states algebraic relationships set, each the sum of its outputs.
+    // Every state the update phase sets, each the sum of the steps setting it.
     std::vector<std::size_t> algebraicStateIndexes;
+    // The update phase (docs/proposals/ratesAndUpdates.md, applyUpdates): every term setting an Update state; those of
+    // nodes worked out once per step, from the values at the step's start; and those of settling nodes, in groups in
+    // dependency order.
+    std::vector<UpdateStep> updateSteps;
+    std::vector<std::size_t> oncePerStepSteps;
+    std::vector<SettleGroup> settleGroups;
+    // The states the settling steps set.
+    std::vector<std::size_t> settleStateIndexes;
     StateValues initialStates;
     std::unordered_map<EntityId, EntityId> stateNodes;
     std::unordered_map<EntityId, std::size_t> stateIndexes;
@@ -408,10 +444,10 @@ NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
 
-// A node's genuine algebraic states (see NodeExecutionPlan::algebraicTasks): recomputes each task
-// in algebraicTasks, in the caller-supplied (already dependency-sorted) order, and writes the
-// result directly into localStates.at(task.outputStateIndex) -- a plain replacement, never
-// accumulated, never divided by stepSize. Because each write lands in the same localStates array
+// A node's own value terms (NodeExecutionPlan::algebraicTasks) worked out from localStates alone, as stability analysis
+// and settleAlgebraicStates use them: sets each state the tasks set to zero, then recomputes each task in the given
+// order and adds its value -- several terms setting one state sum -- never divided by stepSize. The run itself works
+// these out in the update phase (applyUpdates). Because each write lands in the same localStates array
 // every later algebraic task and every ordinary (differential) contribution in this same substep
 // reads from, this composes with any solver: there is no derivative or stepSize-dependent
 // arithmetic here at all, unlike the Euler-specific pseudo-derivative trick this replaces. Always
@@ -446,17 +482,31 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const std::vector<ParameterSchedule>& activeSchedules = {},
                                     double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN());
 
-// Sets every node's algebraic states in `states` (the global state vector) from its other states at
-// `time`, before a run's first step or its first step after a restart. A stored algebraic value --
-// an initial value, or one computed under parameters a fork has since changed -- need not match
-// its expression, and other nodes read it through the synchronization snapshot before its own node
-// recomputes it. `stepSize` is only passed on to programmable terms' providers.
-// Sets every state algebraic relationships set: each to zero, then each output's value added, in
-// dependency order, from `states` (which it updates), at simulationTime. A definition is worked out at
-// most once in the instant, and only if an equation needs it: one read only in a branch not taken is
-// not. Returns how many definitions were worked out.
+// What one run of the update phase did: how many relationship definitions it worked out (each at most once per
+// sweep, and only if an equation needed it), and how many rings stopped at their limit without settling.
+struct UpdateOutcome {
+    std::size_t definitionsWorked = 0;
+    std::size_t ringsUnsettled = 0;
+};
+
+// The update phase (docs/proposals/ratesAndUpdates.md). `states` holds every Rate state as the step left it and every
+// Update state as it was at the step's start; on return every Update state holds its new value.
+// - After a step (`afterStep`): every Update of a node worked out once per step reads `states` as given -- Rate states
+//   at the step's end, Update states at its start, the time `simulationTime` (the step's end) -- and all are set at
+//   once, so their order never matters. Then the settling nodes' Updates, in groups in dependency order, each reading
+//   the latest values: a group of one step once, a ring swept until nothing changes or its limit.
+// - Settling at an instant (`afterStep` false: a run's start, a resume, a parameter set): only the settling nodes'
+//   Updates are worked out, from `states` as they stand; an Update worked out once per step keeps its value.
+// stepSize and providerEvaluator are only passed on to programs.
+UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime, bool afterStep,
+                           double stepSize = 0, ProviderEvaluator* providerEvaluator = nullptr);
+
+// Settles the settling nodes' Updates at simulationTime, from `states` as they stand (applyUpdates, not after a step).
+// Returns how many relationship definitions were worked out.
 std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
-                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime);
+                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
+                                    double stepSize = 0, ProviderEvaluator* providerEvaluator = nullptr);
 
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                            double time, double stepSize, ProviderEvaluator* providerEvaluator = nullptr,

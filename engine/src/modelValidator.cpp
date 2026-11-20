@@ -545,6 +545,21 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     std::vector<std::pair<std::string, std::string>> remoteNodeProviderBindings;
     // The states relationships' equations set (equationModel.outputs).
     std::set<std::string> relationshipStateIds;
+    // What each state is (its `kind`, docs/proposals/ratesAndUpdates.md) against what reaches it: the kind a state says;
+    // the states a setsValue source term or a program's setsValue output sets; and per state, how many terms add a rate to
+    // it (a source term or relationship that does not say it sets a value, into a state that does not say it is an
+    // Update) and how many of those are a program's. Each state's "Node · State" name and node, for the messages.
+    std::unordered_map<std::string, std::string> declaredKinds;
+    std::set<std::string> termValueStateIds;
+    std::set<std::string> programValueStateIds;
+    std::unordered_map<std::string, int> plainRateCounts;
+    std::unordered_map<std::string, int> programRateCounts;
+    std::unordered_map<std::string, std::string> stateLabels;
+    std::unordered_map<std::string, std::string> stateOwners;
+    const auto declaredKind = [&](const std::string& stateId) {
+        const auto found = declaredKinds.find(stateId);
+        return found == declaredKinds.end() ? std::string{} : found->second;
+    };
     for (const auto& entry : *nodesOptional) {
         const auto& node = entry.second;
         const auto id = value(node, "id");
@@ -573,6 +588,20 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             } else if (integration == "semiImplicit" && node.get_child_optional("implementation")) {
                 add(result, "nodeIntegrationInvalid", "error", "A node with a computational-node provider is integrated explicitly.", "node", id, "numerics");
             }
+            // How its Updates are worked out: once per step, or settled within the step, up to a number of sweeps.
+            const auto updates = value(node, "updates");
+            if (!updates.empty() && updates != "oncePerStep" && updates != "settle") {
+                add(result, "nodeUpdatesInvalid", "error", "A node's updates are oncePerStep or settle.", "node", id, "numerics");
+            }
+            if (const auto limit = node.get_optional<std::string>("updatesLimit")) {
+                try {
+                    std::size_t consumed = 0;
+                    const auto sweeps = std::stoull(*limit, &consumed);
+                    if (consumed != limit->size() || !sweeps) throw std::out_of_range("updatesLimit");
+                } catch (...) {
+                    add(result, "nodeUpdatesInvalid", "error", "A node's updatesLimit is a positive whole number of sweeps.", "node", id, "numerics");
+                }
+            }
         } else {
             disabledNodeIds.insert(id);
         }
@@ -586,6 +615,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             stateIds[id].insert(stateId);
             if (!nodeEnabled) continue;
             if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
+            stateOwners[stateId] = id;
+            stateLabels[stateId] = value(node, "name") + " · " + value(state, "name");
+            if (const auto kind = state.get_optional<std::string>("kind")) {
+                if (*kind == "rate" || *kind == "update") declaredKinds[stateId] = *kind;
+                else add(result, "stateKindInvalid", "error", "State \"" + value(state, "name") + "\" has kind \"" + *kind +
+                    "\": a state is a rate (it changes over time by what reaches it) or an update (what reaches it is its next value).", "node", id, "states");
+            }
             // A state's initial value can be a fitting target too, with the same bounds as a parameter.
             if (state.get_child_optional("tuning")) {
                 const auto minimum = state.get_optional<double>("tuning.minimum");
@@ -648,6 +684,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 const auto termOutputStateId = value(term, termProgrammable ? "implementation.output.stateId" : "expressionModel.output.stateId");
                 if (!termOutputStateId.empty()) {
                     stateContributorCounts[termOutputStateId] += 1;
+                    // A value when it says so or when its state says it is an Update; otherwise a rate.
+                    if (value(term, "setsValue") == "true") termValueStateIds.insert(termOutputStateId);
+                    else if (declaredKind(termOutputStateId) != "update") plainRateCounts[termOutputStateId] += 1;
                     if (value(term, "setsValue") == "true") {
                         setsValueStateIds.insert(termOutputStateId);
                         std::vector<std::string> referencedStateIds;
@@ -743,39 +782,15 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 add(result, "sourceOutputMissing", "error", "Source term requires an existing output state.", "node", id, "sourceTerms");
             }
         }
-        if (!algebraicCandidates.empty()) {
-            std::unordered_map<std::string, std::size_t> algebraicIndexByStateId;
-            for (std::size_t index = 0; index < algebraicCandidates.size(); ++index) {
-                algebraicIndexByStateId[algebraicCandidates[index].first] = index;
-            }
-            bool selfReferenceFound = false;
-            for (const auto& [outputStateId, referencedStateIds] : algebraicCandidates) {
-                if (std::find(referencedStateIds.begin(), referencedStateIds.end(), outputStateId) != referencedStateIds.end()) {
-                    selfReferenceFound = true;
-                }
-            }
-            if (selfReferenceFound) {
+        // A value set at the same instant (a setsValue term into a state that does not say its kind) may not read itself; an
+        // Update may (a counter reads its value from the step's start). Rings of them are no longer refused: an Update reads
+        // others from the step's start, and a settling node sweeps a ring (docs/proposals/ratesAndUpdates.md).
+        for (const auto& [outputStateId, referencedStateIds] : algebraicCandidates) {
+            if (declaredKind(outputStateId) == "update") continue;
+            if (std::find(referencedStateIds.begin(), referencedStateIds.end(), outputStateId) != referencedStateIds.end()) {
                 add(result, "setsValueSelfReference", "error",
                     "A source term that sets its value directly may not reference its own state.", "node", id, "sourceTerms");
-            } else {
-                std::vector<int> visitState(algebraicCandidates.size(), 0); // 0=unvisited, 1=visiting, 2=done
-                bool cycleFound = false;
-                std::function<void(std::size_t)> visit = [&](std::size_t index) {
-                    if (cycleFound || visitState[index] == 2) return;
-                    if (visitState[index] == 1) { cycleFound = true; return; }
-                    visitState[index] = 1;
-                    for (const auto& referencedStateId : algebraicCandidates[index].second) {
-                        const auto found = algebraicIndexByStateId.find(referencedStateId);
-                        if (found != algebraicIndexByStateId.end()) visit(found->second);
-                    }
-                    visitState[index] = 2;
-                };
-                for (std::size_t index = 0; index < algebraicCandidates.size() && !cycleFound; ++index) visit(index);
-                if (cycleFound) {
-                    add(result, "setsValueAlgebraicLoop", "error",
-                        "Two or more source terms that set their value directly form a dependency cycle, which has no defined solution.",
-                        "node", id, "sourceTerms");
-                }
+                break;
             }
         }
         if (nodeEnabled) {
@@ -860,6 +875,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
                     } else {
                         stateContributorCounts[outputStateId] += 1;
+                        if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
+                        else programRateCounts[outputStateId] += 1;
                         if (value(output, "setsValue") == "true") {
                             setsValueStateIds.insert(outputStateId);
                             // A setsValue output reading its own target state back through one of
@@ -904,13 +921,18 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         // (role/stateId); a bidirectional edge also reciprocates onto the other endpoint.
         const auto countEdgeContribution = [&](const std::string& role, const std::string& stateId) {
             if (stateId.empty()) return;
+            // A single equation adds a rate, unless its state says it is an Update, when it is a value.
             stateContributorCounts[stateId] += 1;
+            if (declaredKind(stateId) != "update") plainRateCounts[stateId] += 1;
             if (value(edge, "directionality") != "bidirectional") return;
             const auto otherNodeId = role == "target" ? sourceNode : targetNode;
             const auto otherStateField = role == "target" ? "source.stateId" : "target.stateId";
             auto otherStateId = value(edge, otherStateField);
             if (otherStateId.empty()) otherStateId = firstStateIdOf(nodesById, otherNodeId);
-            if (!otherStateId.empty()) stateContributorCounts[otherStateId] += 1;
+            if (!otherStateId.empty()) {
+                stateContributorCounts[otherStateId] += 1;
+                if (declaredKind(otherStateId) != "update") plainRateCounts[otherStateId] += 1;
+            }
         };
         // An edge is inert -- and its content unvalidated -- if it's disabled itself, or either
         // endpoint node is (an edge into a disabled node can't contribute to anything either,
@@ -1067,13 +1089,31 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             add(result, "edgeOutputMissing", "error", "Choose the state updated by this equation.", "edge", id, "output");
         }
     }
-    // A state relationships set takes nothing else: no rate, no source term, no provider.
-    for (const auto& stateId : relationshipStateIds) {
-        if (stateContributorCounts[stateId] == 0) continue;
-        const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(), [&](const auto& entry) { return entry.second.contains(stateId); });
-        add(result, "algebraicStateMixed", "error",
-            "A state set by relationships' equations is the sum of what they set, and takes no other contribution.",
-            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
+    // What a state is against what reaches it (docs/proposals/ratesAndUpdates.md). A state is an Update when it says so,
+    // or, saying nothing, when a setsValue source term or a relationship's several equations set it; what sets an Update
+    // is summed. A program's setsValue output is the program's alone: it reports where the program got to.
+    const auto label = [&](const std::string& stateId) { return stateLabels.contains(stateId) ? stateLabels.at(stateId) : stateId; };
+    const auto owner = [&](const std::string& stateId) { return stateOwners.contains(stateId) ? stateOwners.at(stateId) : std::string{}; };
+    std::set<std::string> checked;
+    for (const auto* setters : {&termValueStateIds, &relationshipStateIds, &programValueStateIds}) {
+        for (const auto& stateId : *setters) {
+            if (declaredKind(stateId) != "rate" || !checked.insert(stateId).second) continue;
+            add(result, "valueIntoRateState", "error", label(stateId) + " is a rate, so nothing can set its value. Make it an update, or "
+                "make what sets it add a rate.", "node", owner(stateId), "states");
+        }
+    }
+    std::set<std::string> updates(termValueStateIds.begin(), termValueStateIds.end());
+    updates.insert(relationshipStateIds.begin(), relationshipStateIds.end());
+    for (const auto& [stateId, kind] : declaredKinds) if (kind == "update") updates.insert(stateId);
+    for (const auto& stateId : updates) {
+        if (declaredKind(stateId) == "rate") continue;
+        // Into a state that says it is an Update only a program's rate is a rate; into one that is an Update only because
+        // something sets it, any term that does not say it sets a value is.
+        const auto rates = declaredKind(stateId) == "update" ? programRateCounts[stateId] : plainRateCounts[stateId] + programRateCounts[stateId];
+        if (rates > 0) {
+            add(result, "rateIntoUpdateState", "error", label(stateId) + " is an update, so nothing can add a rate to it. Make what adds a "
+                "rate set a value, or give the rate to a state that is a rate.", "node", owner(stateId), "states");
+        }
     }
     // The plan compiled here, if any, serves the stability pass below too: compiling a large model takes seconds.
     std::shared_ptr<const ExecutionPlan> compiledPlan;
@@ -1081,16 +1121,14 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         try {
             compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
         } catch (const std::exception& error) {
-            add(result, std::string(error.what()).find("form a loop") != std::string::npos ? "algebraicLoop" : "modelCompileFailed", "error", error.what(), "model", "");
+            add(result, "modelCompileFailed", "error", error.what(), "model", "");
         }
     }
-    for (const auto& stateId : setsValueStateIds) {
-        if (stateContributorCounts[stateId] == 1) continue;
-        const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(),
-            [&](const auto& entry) { return entry.second.contains(stateId); });
+    // A program's setsValue output is where the program got to: nothing else can set or add to that state.
+    for (const auto& stateId : programValueStateIds) {
+        if (stateContributorCounts[stateId] <= 1 && !relationshipStateIds.contains(stateId)) continue;
         add(result, "setsValueNotSoleContributor", "error",
-            "A source term or computational-node-provider output that sets its state's value directly must be the only contribution to that state.",
-            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
+            label(stateId) + " is set by its node's program after each step, so nothing else can reach it.", "node", owner(stateId), "states");
     }
     // Pre-run phase of docs/proposals/numericalStabilityDiagnostics.md: a local, linearized
     // Explicit Euler stability check per node, against the active run configuration's step size.

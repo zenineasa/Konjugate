@@ -1121,15 +1121,15 @@ void validatorRejectsASetsValueSourceTermSharingItsStateWithAnotherSourceTerm() 
 
     const auto sharedWithSetsValue = konjugate::validateModel(twoEquationSourceTermsSharingOneStateProject(true));
     require(!sharedWithSetsValue.valid, "A setsValue source term sharing its state with another source term was accepted.");
-    require(hasIssue(sharedWithSetsValue, "setsValueNotSoleContributor"),
-        "The shared-state setsValue conflict was not diagnosed with the expected issue code.");
+    require(hasIssue(sharedWithSetsValue, "rateIntoUpdateState"),
+        "A rate into a state a setsValue source term sets was not diagnosed as rateIntoUpdateState.");
 }
 
 void validatorRejectsASetsValueSourceTermSharingItsStateWithAnIncomingEdge() {
     const auto result = konjugate::validateModel(setsValueSourceTermWithIncomingEdgeProject());
     require(!result.valid, "A setsValue source term with an incoming edge to the same state was accepted.");
-    require(hasIssue(result, "setsValueNotSoleContributor"),
-        "A setsValue/edge conflict on the same state was not diagnosed with the expected issue code.");
+    require(hasIssue(result, "rateIntoUpdateState"),
+        "A rate from an edge into a state a setsValue source term sets was not diagnosed as rateIntoUpdateState.");
 }
 
 boost::property_tree::ptree setsValueSelfReferenceProject() {
@@ -1224,18 +1224,14 @@ void validatorRejectsASetsValueSourceTermReferencingItsOwnState() {
     require(threw, "compileExecutionPlan should also defensively reject self-reference (main.cpp's run path skips validateModel entirely).");
 }
 
-void validatorRejectsASetsValueAlgebraicLoop() {
+// x = y and y = x: a ring of updates settled within the step (the model says no kinds), valid and compiled as a ring.
+void aRingOfSetsValueSourceTermsIsSettled() {
     const auto result = konjugate::validateModel(setsValueAlgebraicLoopProject());
-    require(!result.valid, "A dependency cycle between two setsValue source terms was accepted.");
-    require(hasIssue(result, "setsValueAlgebraicLoop"), "The algebraic loop was not diagnosed with the expected issue code.");
-
-    bool threw = false;
-    try {
-        konjugate::compileExecutionPlan(setsValueAlgebraicLoopProject());
-    } catch (const std::exception&) {
-        threw = true;
-    }
-    require(threw, "compileExecutionPlan should also defensively reject an algebraic loop (main.cpp's run path skips validateModel entirely).");
+    require(result.valid, "A ring of setsValue source terms is settled within the step, not refused.");
+    const auto plan = konjugate::compileExecutionPlan(setsValueAlgebraicLoopProject());
+    require(plan.settleGroups.size() == 1 && plan.settleGroups.front().ring, "x = y and y = x should be compiled as one ring.");
+    auto states = plan.initialStates;
+    require(konjugate::applyUpdates(plan, states, {}, {}, 0, false).ringsUnsettled == 0, "x = y, y = x from zero is already settled.");
 }
 
 void compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly() {
@@ -1364,11 +1360,13 @@ void setsValueProgrammableTaskReportsTheStepEndTime() {
     konjugate::ProviderRuntime runtime(config);
     runtime.initialize(plan);
 
-    // One global step of duration 1.0, split into 2 substeps of 0.5 each. The provider is last
-    // evaluated after the final update, at the step's end, so the node reports t = 1.0.
-    const konjugate::StateValues snapshot = {0};
-    const auto result = konjugate::integrateNode(plan.nodes.at(0), snapshot, {}, 0.0, 1.0, &runtime);
-    require(std::abs(result.states[0] - 1.0) < 1e-9,
+    // One global step of duration 1.0, split into 2 substeps of 0.5 each. An update is worked out after the step, at its
+    // end, so it reports t = 1.0; the step itself leaves it as it stood.
+    konjugate::StateValues states = {0};
+    states = konjugate::integrateNode(plan.nodes.at(0), states, {}, 0.0, 1.0, &runtime).states;
+    require(states[0] == 0, "integrateNode should leave an update as it stood at the step's start.");
+    konjugate::applyUpdates(plan, states, {}, {}, 1.0, true, 1.0, &runtime);
+    require(std::abs(states[0] - 1.0) < 1e-9,
         "The algebraic state should report the global step's END time (1.0), not the last substep's START time (0.5).");
 
     runtime.shutdown();
@@ -1425,7 +1423,7 @@ int main() {
     validatorRejectsASetsValueSourceTermSharingItsStateWithAnotherSourceTerm();
     validatorRejectsASetsValueSourceTermSharingItsStateWithAnIncomingEdge();
     validatorRejectsASetsValueSourceTermReferencingItsOwnState();
-    validatorRejectsASetsValueAlgebraicLoop();
+    aRingOfSetsValueSourceTermsIsSettled();
     compileExecutionPlanOrdersDependentAlgebraicTasksCorrectly();
     setsValueSourceTermsOnlyReferenceTheSymbolsTheyUse();
     setsValueProgrammableTaskReportsTheStepEndTime();

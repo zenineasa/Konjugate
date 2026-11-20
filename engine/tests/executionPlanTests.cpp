@@ -372,17 +372,14 @@ void applyAlgebraicTasksRejectsANonFiniteResult() {
     require(threw, "A non-finite algebraic result should throw rather than silently corrupt localStates.");
 }
 
-// End-to-end via the real (shared, deduplicated) integrateNode: an algebraic task and an ordinary
-// differential contribution on the SAME node, where the differential contribution reads the
-// algebraic state as one of its own bindings -- proves algebraic tasks are recomputed before
-// differential contributions are evaluated in the same substep, so the latter sees the fresh
-// value, not the previous substep's.
-void integrateNodeAppliesAlgebraicTasksBeforeDifferentialContributionsEachSubstep() {
+// Rates and Updates: integrateNode advances only a node's rates. An update state is read as it stood at the start of
+// the step (y = 10 here, from the snapshot), and the node hands it back untouched; applyUpdates works it out afterwards.
+void integrateNodeReadsUpdatesAtTheStartOfTheStepAndLeavesThemAlone() {
     konjugate::NodeExecutionPlan node;
     node.nodeId = 1;
-    node.substeps = 1;
-    node.stateIndexes = {0, 1}; // global positions in the snapshot: local index 0 -> global 0, local 1 -> global 1.
-    node.algebraicTasks = {literalAlgebraicTask(5, 0, 10)}; // state id 5 (metadata only): algebraic, "y = 10".
+    node.substeps = 2;
+    node.stateIndexes = {0, 1};
+    node.algebraicTasks = {literalAlgebraicTask(5, 0, 99)}; // y = 99 once worked out, after the step
 
     konjugate::ContributionTask differential;
     differential.outputStateId = 6;
@@ -392,38 +389,9 @@ void integrateNodeAppliesAlgebraicTasksBeforeDifferentialContributionsEachSubste
     differential.expression = {konjugate::ExpressionOperation::symbol, 0, "y", 0, {}};
     node.contributions = {differential};
 
-    const konjugate::StateValues snapshot = {0, 0}; // both states start at 0 (global-index order matches stateIndexes here).
-    const auto result = konjugate::integrateNode(node, snapshot, {}, 0.0, 0.5);
-    require(result.states[0] == 10, "The algebraic state was not recomputed by integrateNode.");
-    require(result.states[1] == 5, "The differential contribution did not see the algebraic state's fresh value (expected 0 + 10*0.5 = 5).");
-}
-
-// x' = 1 and y = 2x on one node: after one step of 0.5 from x = 0, the node must hand back
-// y = 2 * 0.5 beside x = 0.5, not the y computed from x = 0 before the update. Other nodes read the
-// returned values, so a stale y would reach them one step late.
-void integrateNodeHandsBackAlgebraicStatesThatMatchTheUpdatedStates() {
-    konjugate::NodeExecutionPlan node;
-    node.nodeId = 1;
-    node.substeps = 2;
-    node.stateIndexes = {0, 1};
-
-    konjugate::ContributionTask rate = literalAlgebraicTask(5, 0, 1); // x' = 1
-    rate.outputStateId = 5;
-    rate.outputStateIndex = 0;
-    node.contributions = {rate};
-
-    konjugate::ContributionTask doubled;
-    doubled.outputStateId = 6;
-    doubled.outputStateIndex = 1;
-    doubled.bindings = {{"x", konjugate::BindingSource::localState, 5}};
-    doubled.bindings[0].valueIndex = 0;
-    doubled.expression = {konjugate::ExpressionOperation::multiply, 0, "", 0,
-        {{konjugate::ExpressionOperation::literal, 2, "", 0, {}}, {konjugate::ExpressionOperation::symbol, 0, "x", 0, {}}}};
-    node.algebraicTasks = {doubled};
-
-    const auto result = konjugate::integrateNode(node, {0, 0}, {}, 0.0, 0.5);
-    require(std::abs(result.states[0] - 0.5) < 1e-12, "x' = 1 over 0.5 should reach 0.5.");
-    require(std::abs(result.states[1] - 1.0) < 1e-12, "The node must hand back y = 2x for the updated x (expected 1).");
+    const auto result = konjugate::integrateNode(node, {10, 0}, {}, 0.0, 0.5);
+    require(result.states[0] == 10, "integrateNode should hand back an update state as it stood at the start of the step.");
+    require(std::abs(result.states[1] - 5) < 1e-12, "The rate should read y = 10 throughout the step (0 + 10 * 0.5 = 5).");
 }
 
 void taskExecutorBoundsConcurrentWorkAndPropagatesResults() {
@@ -930,8 +898,7 @@ int main() {
         applyAlgebraicTasksSnapsMismatchedStateToTargetImmediately();
         applyAlgebraicTasksResolveDependencyOrderWithinOnePass();
         applyAlgebraicTasksRejectsANonFiniteResult();
-        integrateNodeAppliesAlgebraicTasksBeforeDifferentialContributionsEachSubstep();
-        integrateNodeHandsBackAlgebraicStatesThatMatchTheUpdatedStates();
+        integrateNodeReadsUpdatesAtTheStartOfTheStepAndLeavesThemAlone();
         taskExecutorBoundsConcurrentWorkAndPropagatesResults();
         taskSubmissionPrioritizesEstimatedWorkAndKeepsStableTies();
         dependencyGraphAggregatesParallelTasksAndPreservesDirection();

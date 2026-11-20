@@ -738,16 +738,12 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
     plan.algebraicRelationships.push_back(std::move(relationship));
 }
 
-// Orders the outputs so every output writing a state comes before any output reading it. A cycle
-// has no defined solution at an instant, and is refused. An output reads the states its equation and the definitions
-// it needs use. Those are found for each definition once, in order, from the states it reads and those the earlier
-// definitions it reads need (a relationship's outputs share most of their definitions, which may be thousands): only the
-// states other outputs write, which are few.
-void orderAlgebraicOutputs(ExecutionPlan& plan) {
-    if (plan.algebraicOutputs.empty()) return;
-    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
-    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
-    // Per relationship, a bit for each binding reading a state some output writes; per definition, the bits of those it
+// For each output, in plan.algebraicOutputs' order, the states in `written` it reads: those its equation and the
+// definitions it needs use. Those are found for each definition once, in order, from the states it reads and those the
+// earlier definitions it reads need (a relationship's outputs share most of their definitions, which may be thousands):
+// only the states in `written`, which are few.
+std::vector<std::vector<std::size_t>> algebraicOutputReads(const ExecutionPlan& plan, const std::unordered_set<std::size_t>& written) {
+    // Per relationship, a bit for each binding reading a written state; per definition, the bits of those it
     // reads directly or through the definitions it reads. A definition reads only those before it, so each one's bits
     // are known when it is reached; most relationships read no written state and need none.
     struct Reads {
@@ -779,7 +775,7 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
         for (std::size_t symbol = 0; symbol < relationship.bindings.size(); ++symbol) {
             const auto& binding = relationship.bindings[symbol];
             if (binding.source != BindingSource::synchronizationSnapshot && binding.source != BindingSource::localState) continue;
-            if (!writers.contains(binding.valueIndex)) continue;
+            if (!written.contains(binding.valueIndex)) continue;
             reads.bitOfSymbol[symbol] = reads.stateOfBit.size();
             reads.stateOfBit.push_back(binding.valueIndex);
         }
@@ -790,18 +786,35 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
             readBits(relationship.definitions[definition], relationship, reads, reads.definitionBits.data() + definition * reads.words);
         }
     }
-    const auto count = plan.algebraicOutputs.size();
-    std::vector<std::vector<std::size_t>> after(count);
-    std::vector<std::size_t> waiting(count, 0);
+    std::vector<std::vector<std::size_t>> result(plan.algebraicOutputs.size());
     std::vector<std::uint64_t> bits;
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) {
         const auto& output = plan.algebraicOutputs[index];
         const auto& reads = relationshipReads[output.relationship];
         if (!reads.words) continue;
         bits.assign(reads.words, 0);
         readBits(output.expression, plan.algebraicRelationships[output.relationship], reads, bits.data());
-        std::vector<std::size_t> statesRead;
-        for (std::size_t bit = 0; bit < reads.stateOfBit.size(); ++bit) if (bits[bit / 64] >> (bit % 64) & 1) statesRead.push_back(reads.stateOfBit[bit]);
+        for (std::size_t bit = 0; bit < reads.stateOfBit.size(); ++bit) if (bits[bit / 64] >> (bit % 64) & 1) result[index].push_back(reads.stateOfBit[bit]);
+    }
+    return result;
+}
+
+// Orders the outputs so every output setting a state comes before any output reading it, where they form no ring (the
+// order applyUpdates settles them in, and the order they were evaluated in before a ring was allowed). Outputs in or
+// after a ring keep their document order; the update phase sweeps a ring rather than ordering it.
+void orderAlgebraicOutputs(ExecutionPlan& plan) {
+    if (plan.algebraicOutputs.empty()) return;
+    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
+    std::unordered_set<std::size_t> written;
+    for (const auto& [state, writing] : writers) written.insert(state);
+    const auto outputReads = algebraicOutputReads(plan, written);
+    const auto count = plan.algebraicOutputs.size();
+    std::vector<std::vector<std::size_t>> after(count);
+    std::vector<std::size_t> waiting(count, 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto& statesRead = outputReads[index];
+        if (statesRead.empty()) continue;
         std::set<std::size_t> dependencies;
         for (const auto read : statesRead) {
             const auto& writing = writers.at(read);
@@ -822,17 +835,221 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
         ordered.push_back(std::move(plan.algebraicOutputs[index]));
         for (auto next = after[index].rbegin(); next != after[index].rend(); ++next) if (!--waiting[*next]) ready.push_back(*next);
     }
-    if (ordered.size() != count) throw std::runtime_error("Relationships that set states' values form a loop, which has no defined solution.");
+    // A ring leaves its outputs, and those after it, waiting: they follow in document order.
+    if (ordered.size() != count) {
+        std::vector<AlgebraicOutput> rest;
+        for (std::size_t index = 0; index < count; ++index) if (waiting[index]) rest.push_back(std::move(plan.algebraicOutputs[index]));
+        for (auto& output : rest) ordered.push_back(std::move(output));
+    }
     plan.algebraicOutputs = std::move(ordered);
     std::set<std::size_t> states;
     for (const auto& output : plan.algebraicOutputs) states.insert(output.outputStateIndex);
     plan.algebraicStateIndexes.assign(states.begin(), states.end());
 }
 
+// Builds the update phase (docs/proposals/ratesAndUpdates.md): every term setting an Update state, as one step each,
+// with the state it sets and the states it reads that the phase sets; the steps of nodes worked out once per step; and
+// those of settling nodes in groups in dependency order -- each strongly connected set of steps one group, a ring if it
+// has more than one step or a step reading what it sets, the groups ordered so every group setting a state comes before
+// any group reading it, ties going to the lowest step. Relationship outputs come first, in the order orderAlgebraicOutputs
+// gave them, so where they form no ring they are worked out in exactly that order.
+void buildUpdatePhase(ExecutionPlan& plan) {
+    plan.updateSteps.clear();
+    plan.oncePerStepSteps.clear();
+    plan.settleGroups.clear();
+    plan.settleStateIndexes.clear();
+    constexpr auto none = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> nodeOfState(plan.initialStates.size(), none);
+    for (std::size_t node = 0; node < plan.nodes.size(); ++node) for (const auto index : plan.nodes[node].stateIndexes) nodeOfState[index] = node;
+    std::unordered_set<std::size_t> written;
+    for (const auto& output : plan.algebraicOutputs) written.insert(output.outputStateIndex);
+    for (const auto& node : plan.nodes) {
+        for (const auto* tasks : {&node.algebraicTasks, &node.valueTerms}) for (const auto& task : *tasks) written.insert(node.stateIndexes.at(task.outputStateIndex));
+    }
+    // A term's reads among the states the phase sets: every state a program binds, only those an equation uses.
+    const auto readsOf = [&](const NodeExecutionPlan& node, const ContributionTask& task) {
+        std::vector<std::size_t> reads;
+        for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+            const auto& binding = task.bindings[index];
+            if (task.implementation == ContributionImplementation::equation && !expressionReadsSymbol(task.expression, index)) continue;
+            std::size_t state = none;
+            if (binding.source == BindingSource::localState) state = node.stateIndexes.at(binding.valueIndex);
+            else if (binding.source == BindingSource::synchronizationSnapshot) state = binding.valueIndex;
+            if (state != none && written.contains(state)) reads.push_back(state);
+        }
+        return reads;
+    };
+    const auto outputReads = algebraicOutputReads(plan, written);
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) {
+        const auto state = plan.algebraicOutputs[index].outputStateIndex;
+        plan.updateSteps.push_back({UpdateStepKind::relationshipOutput, nodeOfState.at(state), index, state, outputReads[index]});
+    }
+    for (std::size_t node = 0; node < plan.nodes.size(); ++node) {
+        const auto& compiled = plan.nodes[node];
+        for (std::size_t index = 0; index < compiled.algebraicTasks.size(); ++index) {
+            const auto& task = compiled.algebraicTasks[index];
+            plan.updateSteps.push_back({UpdateStepKind::ownTerm, node, index, compiled.stateIndexes.at(task.outputStateIndex), readsOf(compiled, task)});
+        }
+        for (std::size_t index = 0; index < compiled.valueTerms.size(); ++index) {
+            const auto& task = compiled.valueTerms[index];
+            plan.updateSteps.push_back({UpdateStepKind::valueTerm, node, index, compiled.stateIndexes.at(task.outputStateIndex), readsOf(compiled, task)});
+        }
+    }
+    {
+        std::set<std::size_t> states(written.begin(), written.end());
+        plan.algebraicStateIndexes.assign(states.begin(), states.end());
+    }
+    // Once per step, or settled with the node's others.
+    std::vector<std::size_t> settling;
+    for (std::size_t index = 0; index < plan.updateSteps.size(); ++index) {
+        if (plan.nodes.at(plan.updateSteps[index].node).settles) settling.push_back(index);
+        else plan.oncePerStepSteps.push_back(index);
+    }
+    if (settling.empty()) return;
+    {
+        std::set<std::size_t> states;
+        for (const auto index : settling) states.insert(plan.updateSteps[index].writes);
+        plan.settleStateIndexes.assign(states.begin(), states.end());
+    }
+    // The settling steps as a graph: from each step to every settling step reading the state it sets.
+    const auto count = settling.size();
+    std::unordered_map<std::size_t, std::vector<std::size_t>> settlingWriters;
+    for (std::size_t local = 0; local < count; ++local) settlingWriters[plan.updateSteps[settling[local]].writes].push_back(local);
+    std::vector<std::vector<std::size_t>> after(count);
+    std::vector<bool> readsItself(count, false);
+    for (std::size_t local = 0; local < count; ++local) {
+        std::set<std::size_t> from;
+        for (const auto state : plan.updateSteps[settling[local]].reads) {
+            const auto found = settlingWriters.find(state);
+            if (found != settlingWriters.end()) from.insert(found->second.begin(), found->second.end());
+        }
+        for (const auto writer : from) {
+            if (writer == local) readsItself[local] = true;
+            else after[writer].push_back(local);
+        }
+    }
+    // Strongly connected sets (Tarjan's algorithm, iterative: a robot's chains of thousands of steps must not run out of stack).
+    std::vector<std::size_t> order(count, none);
+    std::vector<std::size_t> low(count, 0);
+    std::vector<std::size_t> component(count, none);
+    std::vector<bool> onStack(count, false);
+    std::vector<std::size_t> stack;
+    std::vector<std::vector<std::size_t>> components;
+    std::size_t visited = 0;
+    for (std::size_t root = 0; root < count; ++root) {
+        if (order[root] != none) continue;
+        std::vector<std::pair<std::size_t, std::size_t>> calls{{root, 0}};
+        order[root] = low[root] = visited++;
+        stack.push_back(root);
+        onStack[root] = true;
+        while (!calls.empty()) {
+            auto& [at, next] = calls.back();
+            if (next < after[at].size()) {
+                const auto to = after[at][next++];
+                if (order[to] == none) {
+                    order[to] = low[to] = visited++;
+                    stack.push_back(to);
+                    onStack[to] = true;
+                    calls.emplace_back(to, 0);
+                } else if (onStack[to]) {
+                    low[at] = std::min(low[at], order[to]);
+                }
+                continue;
+            }
+            if (low[at] == order[at]) {
+                components.emplace_back();
+                std::size_t member = none;
+                do {
+                    member = stack.back();
+                    stack.pop_back();
+                    onStack[member] = false;
+                    component[member] = components.size() - 1;
+                    components.back().push_back(member);
+                } while (member != at);
+            }
+            const auto finished = at;
+            calls.pop_back();
+            if (!calls.empty()) low[calls.back().first] = std::min(low[calls.back().first], low[finished]);
+        }
+    }
+    // The sets in dependency order, the one with the lowest step first among those ready.
+    const auto sets = components.size();
+    std::vector<std::size_t> lowest(sets, none);
+    for (std::size_t local = 0; local < count; ++local) lowest[component[local]] = std::min(lowest[component[local]], local);
+    std::vector<std::set<std::size_t>> successors(sets);
+    std::vector<std::size_t> waiting(sets, 0);
+    for (std::size_t local = 0; local < count; ++local) {
+        for (const auto to : after[local]) {
+            if (component[to] != component[local] && successors[component[local]].insert(component[to]).second) ++waiting[component[to]];
+        }
+    }
+    std::set<std::pair<std::size_t, std::size_t>> ready;
+    for (std::size_t set = 0; set < sets; ++set) if (!waiting[set]) ready.emplace(lowest[set], set);
+    while (!ready.empty()) {
+        const auto set = ready.begin()->second;
+        ready.erase(ready.begin());
+        SettleGroup group;
+        group.limit = 0;
+        std::vector<std::size_t> members = components[set];
+        std::sort(members.begin(), members.end());
+        for (const auto local : members) {
+            group.steps.push_back(settling[local]);
+            group.limit = std::max(group.limit, plan.nodes.at(plan.updateSteps[settling[local]].node).settleLimit);
+        }
+        group.ring = members.size() > 1 || readsItself[members.front()];
+        if (!group.ring) group.limit = 1;
+        plan.settleGroups.push_back(std::move(group));
+        for (const auto next : successors[set]) if (!--waiting[next]) ready.emplace(lowest[next], next);
+    }
+}
+
+}
+
+namespace {
+
+// The state at the other end of a bidirectional relationship, which takes its value negated: the edge's own source or
+// target stateId when it names one of that node's states, else the node's first state, so an older saved edge without
+// one still resolves sensibly. otherNodeStateIds are that node's states, in order; zero when it has none.
+EntityId bidirectionalOtherStateId(const boost::property_tree::ptree& edge, const std::string& outputRole, const std::vector<EntityId>& otherNodeStateIds) {
+    if (otherNodeStateIds.empty()) return 0;
+    const auto otherStateText = value(edge, outputRole == "target" ? "source.stateId" : "target.stateId");
+    if (!otherStateText.empty()) {
+        std::size_t consumed = 0;
+        const auto parsed = std::stoull(otherStateText, &consumed);
+        if (parsed && consumed == otherStateText.size() &&
+            std::find(otherNodeStateIds.begin(), otherNodeStateIds.end(), parsed) != otherNodeStateIds.end()) {
+            return parsed;
+        }
+    }
+    return otherNodeStateIds.front();
+}
+
+// What a document says of its states' kinds (docs/proposals/ratesAndUpdates.md). explicitUpdates: the states whose
+// `kind` is "update", into which every term is a value. legacy: no state says its kind -- a document written before
+// kinds existed -- whose values set at the same instant are Updates every node settles, so it gives the numbers it gave.
+struct StateKinds {
+    std::unordered_set<EntityId> explicitUpdates;
+    bool legacy = true;
+};
+
+StateKinds scanStateKinds(const boost::property_tree::ptree& document) {
+    StateKinds kinds;
+    for (const auto& nodeItem : document.get_child("nodes")) {
+        for (const auto& stateItem : nodeItem.second.get_child("states")) {
+            const auto kind = value(stateItem.second, "kind");
+            if (kind.empty()) continue;
+            kinds.legacy = false;
+            if (kind == "update") kinds.explicitUpdates.insert(idValue(stateItem.second, "id"));
+        }
+    }
+    return kinds;
+}
+
 }
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     const auto sharedParameters = collectSharedParameters(document);
+    const auto stateKinds = scanStateKinds(document);
     std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>> storedSchedules;
     ExecutionPlan plan;
     std::unordered_map<EntityId, std::size_t> nodeIndexes;
@@ -852,6 +1069,12 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         const auto integration = node.get<std::string>("numerics.integration", "explicit");
         if (integration != "explicit" && integration != "semiImplicit") throw std::runtime_error("A node's numerics.integration must be explicit or semiImplicit.");
         compiledNode.semiImplicit = integration == "semiImplicit";
+        // How its Updates are worked out: settled within the step, or once per step; a legacy document settles them all.
+        const auto updates = value(node, "updates");
+        if (!updates.empty() && updates != "oncePerStep" && updates != "settle") throw std::runtime_error("A node's updates must be oncePerStep or settle.");
+        compiledNode.settles = stateKinds.legacy || updates == "settle";
+        compiledNode.settleLimit = node.get<std::size_t>("updatesLimit", 1000);
+        if (!compiledNode.settleLimit) throw std::runtime_error("A node's updatesLimit must be a positive whole number.");
         if (!compiledNode.substeps || compiledNode.substeps > 10000) {
             throw std::runtime_error("Node substepsPerGlobalStep must be an integer from 1 through 10000.");
         }
@@ -896,7 +1119,8 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             }
             bindTask(task);
             compiledNode.estimatedOperationsPerSubstep += termProgrammable ? task.bindings.size() + 1 : task.expression.operationCount();
-            if (termSetsValue) algebraicCandidates.push_back(std::move(task));
+            // A term is a value when it says it sets one, or when its state's kind is "update".
+            if (termSetsValue || stateKinds.explicitUpdates.contains(task.outputStateId)) algebraicCandidates.push_back(std::move(task));
             else compiledNode.contributions.push_back(std::move(task));
         }
         // Algebraic ("sets the value") source terms are recomputed fresh every substep, never
@@ -907,14 +1131,18 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         // check below) -- that would readmit exactly the hidden-recurrence, solver-specific
         // feedback this mechanism exists to eliminate, not a legitimate algebraic dependency.
         if (!algebraicCandidates.empty()) {
-            std::unordered_map<EntityId, std::size_t> algebraicIndexByStateId;
+            // Several terms may set one state (they sum): a term reading it comes after every one.
+            std::unordered_map<EntityId, std::vector<std::size_t>> algebraicIndexesByStateId;
             for (std::size_t index = 0; index < algebraicCandidates.size(); ++index) {
-                algebraicIndexByStateId[algebraicCandidates[index].outputStateId] = index;
+                algebraicIndexesByStateId[algebraicCandidates[index].outputStateId].push_back(index);
             }
             std::vector<std::vector<EntityId>> statesRead;
             for (const auto& task : algebraicCandidates) {
                 statesRead.push_back(localStatesRead(task));
-                if (std::find(statesRead.back().begin(), statesRead.back().end(), task.outputStateId) != statesRead.back().end()) {
+                // An Update may read its own value from the step's start (a counter); a value set at the same instant,
+                // as a document without kinds means it, may not.
+                if (!stateKinds.explicitUpdates.contains(task.outputStateId) &&
+                    std::find(statesRead.back().begin(), statesRead.back().end(), task.outputStateId) != statesRead.back().end()) {
                     throw std::runtime_error(
                         "A source term that sets its value directly may not reference its own state.");
                 }
@@ -924,14 +1152,14 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             algebraicOrder.reserve(algebraicCandidates.size());
             std::function<void(std::size_t)> visit = [&](std::size_t index) {
                 if (visitState[index] == 2) return;
-                if (visitState[index] == 1) {
-                    throw std::runtime_error(
-                        "Two or more source terms that set their value directly form a dependency cycle, which has no defined solution.");
-                }
+                // A ring of a node's own terms is no longer refused: the update phase sweeps it. Here it keeps the order
+                // it is found in.
+                if (visitState[index] == 1) return;
                 visitState[index] = 1;
                 for (const auto stateId : statesRead[index]) {
-                    const auto found = algebraicIndexByStateId.find(stateId);
-                    if (found != algebraicIndexByStateId.end()) visit(found->second);
+                    if (stateId == algebraicCandidates[index].outputStateId) continue;
+                    const auto found = algebraicIndexesByStateId.find(stateId);
+                    if (found != algebraicIndexesByStateId.end()) for (const auto writer : found->second) visit(writer);
                 }
                 visitState[index] = 2;
                 algebraicOrder.push_back(index);
@@ -1080,6 +1308,11 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
             }
             bindTask(task);
+            // Into a state whose kind is "update", the term is a value, worked out after the step.
+            if (stateKinds.explicitUpdates.contains(contributionStateId)) {
+                contributionNode.valueTerms.push_back(std::move(task));
+                return;
+            }
             contributionNode.estimatedOperationsPerSubstep += programmable ? task.bindings.size() + 1 : task.expression.operationCount();
             contributionNode.contributions.push_back(std::move(task));
         };
@@ -1087,32 +1320,19 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         buildContribution(outputNodeId, outputStateId, false);
 
         if (value(edge, "directionality") == "bidirectional") {
-            // A bidirectional edge applies the same computed value to both connected nodes, with
-            // the sign flipped for the other side -- what leaves one enters the other. The other
-            // side's state is the edge's own source/target stateId when the model provides one
-            // (see src/renderer/renderer.mjs's edge creation, which defaults it to the endpoint
-            // node's first state); otherwise fall back to that node's first state directly, so an
-            // older saved edge without one still resolves sensibly.
+            // A bidirectional edge applies the same computed value to both connected nodes, with the sign flipped for the
+            // other side -- what leaves one enters the other (see bidirectionalOtherStateId for which state that is).
             const auto otherNodeId = outputRole == "target" ? idValue(edge, "source.nodeId") : idValue(edge, "target.nodeId");
-            const auto otherStateField = outputRole == "target" ? "source.stateId" : "target.stateId";
-            const auto otherStateText = value(edge, otherStateField);
             const auto& otherNode = plan.nodes.at(nodeIndexes.at(otherNodeId));
             if (otherNode.stateIds.empty()) {
                 throw std::runtime_error("A bidirectional relationship's other endpoint has no states.");
             }
-            EntityId otherStateId = otherNode.stateIds.front();
-            if (!otherStateText.empty()) {
-                std::size_t consumed = 0;
-                const auto parsed = std::stoull(otherStateText, &consumed);
-                if (parsed && consumed == otherStateText.size() &&
-                    std::find(otherNode.stateIds.begin(), otherNode.stateIds.end(), parsed) != otherNode.stateIds.end()) {
-                    otherStateId = parsed;
-                }
-            }
+            const auto otherStateId = bidirectionalOtherStateId(edge, outputRole, otherNode.stateIds);
             buildContribution(otherNodeId, otherStateId, true);
         }
     }
     orderAlgebraicOutputs(plan);
+    buildUpdatePhase(plan);
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
     plan.taskSubmissionOrder = planTaskSubmissionOrder(plan.nodes);
     const auto scheduled = [](const std::vector<ContributionTask>& tasks) {
@@ -1122,7 +1342,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
     };
     // Each equation as a program, now that its symbols are bound and nothing changes them.
     for (auto& node : plan.nodes) {
-        for (auto* tasks : {&node.contributions, &node.algebraicTasks}) {
+        for (auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
             for (auto& task : *tasks) if (task.implementation == ContributionImplementation::equation) task.program = expressionProgram(task.expression);
         }
     }
@@ -1431,9 +1651,34 @@ std::vector<std::pair<std::size_t, double>> reduceContributions(
     return derivatives;
 }
 
+namespace {
+
+// A value term's value from its symbols' values at evaluationTime: its equation's, or its program's.
+double algebraicTaskValue(const ContributionTask& task, const std::vector<double>& symbols, double evaluationTime, double stepSize,
+                          ProviderEvaluator* providerEvaluator) {
+    double value = 0;
+    if (task.implementation == ContributionImplementation::equation) {
+        value = evaluateTask(task, symbols);
+    } else {
+        if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
+        const std::vector<const ContributionTask*> batchTasks{&task};
+        const std::vector<std::span<const double>> inputs{symbols};
+        // The provider sees the same instant as the states it reads.
+        const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, evaluationTime, stepSize);
+        if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
+        value = results.front();
+    }
+    if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
+    return value;
+}
+
+}
+
 void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, StateValues& localStates,
                          const NodeParameterValues& parameterValues, double evaluationTime, double stepSize,
                          ProviderEvaluator* providerEvaluator) {
+    // Each state the tasks set is their sum: nothing is carried over from before.
+    for (const auto& task : algebraicTasks) localStates.at(task.outputStateIndex) = 0;
     for (std::size_t taskIndex = 0; taskIndex < algebraicTasks.size(); ++taskIndex) {
         const auto& task = algebraicTasks[taskIndex];
         std::vector<double> symbols(task.bindings.size());
@@ -1454,24 +1699,7 @@ void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, St
             }
         }
 
-        double value = 0;
-        if (task.implementation == ContributionImplementation::equation) {
-            value = evaluateTask(task, symbols);
-        } else {
-            if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
-            const std::vector<const ContributionTask*> batchTasks{&task};
-            const std::vector<std::span<const double>> inputs{symbols};
-            // The provider sees the same instant as the states it reads (see the declaration).
-            const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, evaluationTime, stepSize);
-            if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
-            value = results.front();
-        }
-        if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
-        // A plain replacement, never accumulated and never divided by anything -- this is the
-        // whole point: an algebraic state is recomputed fresh, not integrated, so it composes
-        // with any solver (see NodeExecutionPlan::algebraicTasks and this function's declaration
-        // comment in executionPlan.hpp).
-        localStates.at(task.outputStateIndex) = value;
+        localStates.at(task.outputStateIndex) += algebraicTaskValue(task, symbols, evaluationTime, stepSize, providerEvaluator);
     }
 }
 
@@ -1496,6 +1724,9 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     ProviderEvaluator* providerEvaluator,
                                     const std::vector<ParameterSchedule>& activeSchedules,
                                     double synchronizationEndTime) {
+    // The node's Update states are not worked out here: through the step they hold their values from its start, and the
+    // update phase (applyUpdates) sets them after it, from the Rate states this leaves (docs/proposals/ratesAndUpdates.md).
+    static_cast<void>(synchronizationEndTime);
     const auto startedAt = std::chrono::steady_clock::now();
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
@@ -1509,7 +1740,6 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     // (multi-rate models like HFT order routing per docs/proposals/fintechToolbox.md).
     const auto hasSchedules = !activeSchedules.empty() || node.hasParameterSchedules;
     auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
-    auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, simulationTime);
     // Semi-implicit: the node's contributions, one group per state it updates, in the node's order.
     std::vector<NodeExecutionPlan> semiImplicitTasks;
     if (node.semiImplicit) {
@@ -1521,13 +1751,7 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
         if (hasSchedules && substep > 0) {
             parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, substepTime);
-            algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, substepTime);
         }
-        // Algebraic states are recomputed first, in their precomputed dependency order, from the
-        // states at the start of this substep and at its start time, so a later algebraic task and
-        // every ordinary (differential) contribution evaluated next read g(x_k, t_k) -- the same
-        // instant explicit Euler evaluates everything else at.
-        applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, substepTime, nodeTimeStep, providerEvaluator);
         std::vector<std::pair<std::size_t, double>> algebraicNodeProviderWrites;
         // The provider's parameters at this substep's start, as its other inputs are read then.
         const auto providerParameterValues = node.nodeProvider && !node.nodeProvider->parameters.empty()
@@ -1554,18 +1778,6 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         for (const auto& [stateIndex, algebraicValue] : algebraicNodeProviderWrites) localStates.at(stateIndex) = algebraicValue;
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
-    }
-    // And once more after the last update, so the node hands back g(x_{k+1}, t_{k+1}) beside x_{k+1}.
-    // Other nodes read this through the next step's synchronization snapshot; without it they would
-    // read a value computed from the states one step earlier, and a bidirectional edge reading it
-    // would add one amount at this end and subtract another at the other.
-    if (!node.algebraicTasks.empty()) {
-        // The time the caller says the step ends at, which is the time it records the step's sample at: worked out from the
-        // number of steps, not by adding the step to the start, the two can differ in the last bit, and a value that changes
-        // sharply at that instant (a noise draw, the edge of a pulse, a held input) must be read at the same time everywhere.
-        const auto endTime = std::isnan(synchronizationEndTime) ? simulationTime + synchronizationStep : synchronizationEndTime;
-        if (hasSchedules) algebraicParameterValues = resolveParameterValues(node.algebraicTasks, liveParameterValues, activeSchedules, endTime);
-        applyAlgebraicTasks(node.algebraicTasks, localStates, algebraicParameterValues, endTime, nodeTimeStep, providerEvaluator);
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
     return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
@@ -1642,48 +1854,132 @@ struct DefinitionReader {
 
 }
 
-std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
-                                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
-    std::size_t definitionsWorked = 0;
-    if (plan.algebraicOutputs.empty()) return definitionsWorked;
-    for (const auto index : plan.algebraicStateIndexes) states.at(index) = 0;
-    // Each relationship's parameters, resolved once for this instant; and its definitions, kept for the instant, so
-    // each is worked out once however many of its equations need it. That is sound because the outputs are in
-    // dependency order: when an equation needing a definition is reached, every state the definition reads is already
-    // settled, so it has the same value whichever of the relationship's equations first needs it.
+UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime, bool afterStep,
+                           double stepSize, ProviderEvaluator* providerEvaluator) {
+    UpdateOutcome outcome;
+    if (plan.updateSteps.empty()) return outcome;
+    // Each relationship's parameters, resolved for the instant, and its definitions, kept while the values read do not
+    // change (an epoch): worked out once however many of its equations need them. Within a pass that is sound because
+    // the steps are in dependency order -- when an equation needing a definition is reached, every state the definition
+    // reads is already set -- and a new epoch begins wherever the values read change (a new pass, a ring's next sweep).
     std::vector<std::vector<double>> symbolValues(plan.algebraicRelationships.size());
     std::vector<std::vector<char>> worked(plan.algebraicRelationships.size());
-    std::vector<bool> resolved(plan.algebraicRelationships.size(), false);
+    std::vector<std::size_t> resolvedIn(plan.algebraicRelationships.size(), 0);
+    std::size_t epoch = 0;
     std::vector<std::size_t> found;
     std::vector<std::size_t> pending;
-    for (const auto& output : plan.algebraicOutputs) {
-        const auto& relationship = plan.algebraicRelationships[output.relationship];
-        auto& symbols = symbolValues[output.relationship];
-        auto& done = worked[output.relationship];
-        if (!resolved[output.relationship]) {
-            symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
-            done.assign(relationship.definitions.size(), 0);
-            for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
-                const auto& binding = relationship.bindings[index];
-                if (binding.source == BindingSource::parameter) {
-                    symbols[index] = resolveParameterValue(relationship.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
-                } else if (binding.source == BindingSource::simulationTime) {
-                    symbols[index] = simulationTime;
+    const auto evaluate = [&](const UpdateStep& step, const StateValues& read) -> double {
+        if (step.kind == UpdateStepKind::relationshipOutput) {
+            const auto& output = plan.algebraicOutputs[step.index];
+            const auto& relationship = plan.algebraicRelationships[output.relationship];
+            auto& symbols = symbolValues[output.relationship];
+            auto& done = worked[output.relationship];
+            if (resolvedIn[output.relationship] != epoch) {
+                symbols.assign(relationship.bindings.size() + relationship.definitions.size(), 0.0);
+                done.assign(relationship.definitions.size(), 0);
+                for (std::size_t index = 0; index < relationship.bindings.size(); ++index) {
+                    const auto& binding = relationship.bindings[index];
+                    if (binding.source == BindingSource::parameter) {
+                        symbols[index] = resolveParameterValue(relationship.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
+                    } else if (binding.source == BindingSource::simulationTime) {
+                        symbols[index] = simulationTime;
+                    }
                 }
+                resolvedIn[output.relationship] = epoch;
             }
-            resolved[output.relationship] = true;
+            // The definitions it reads whatever its choices take, in ascending order; any other when a branch taken reads it.
+            DefinitionReader reader{relationship, read, symbols, done, outcome.definitionsWorked, found, pending};
+            for (const auto definition : output.eagerDefinitions) if (done[definition] != 1) reader.workOutOne(definition);
+            const auto result = evaluateCompiled(output.expression, output.program, reader);
+            if (!std::isfinite(result)) {
+                throw std::runtime_error("The relationship " + std::to_string(relationship.edgeId) + " produced a non-finite value for state " +
+                    std::to_string(output.outputStateId) + " at " + std::to_string(simulationTime) + " s.");
+            }
+            return result;
         }
-        // The definitions it reads whatever its choices take, in ascending order; any other when a branch taken reads it.
-        DefinitionReader read{relationship, states, symbols, done, definitionsWorked, found, pending};
-        for (const auto definition : output.eagerDefinitions) if (done[definition] != 1) read.workOutOne(definition);
-        const auto result = evaluateCompiled(output.expression, output.program, read);
-        if (!std::isfinite(result)) {
-            throw std::runtime_error("The relationship " + std::to_string(relationship.edgeId) + " produced a non-finite value for state " +
-                std::to_string(output.outputStateId) + " at " + std::to_string(simulationTime) + " s.");
+        const auto& node = plan.nodes[step.node];
+        const auto& task = step.kind == UpdateStepKind::ownTerm ? node.algebraicTasks[step.index] : node.valueTerms[step.index];
+        std::vector<double> symbols(task.bindings.size());
+        for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+            const auto& binding = task.bindings[index];
+            if (binding.source == BindingSource::parameter) {
+                symbols[index] = resolveParameterValue(task.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
+            } else if (binding.source == BindingSource::simulationTime) {
+                symbols[index] = simulationTime;
+            } else if (binding.source == BindingSource::localState) {
+                symbols[index] = read.at(node.stateIndexes.at(binding.valueIndex));
+            } else {
+                symbols[index] = read.at(binding.valueIndex);
+            }
         }
-        states.at(output.outputStateIndex) += result;
+        const auto value = algebraicTaskValue(task, symbols, simulationTime, stepSize / static_cast<double>(node.substeps), providerEvaluator);
+        // A relationship's term at the far end of a bidirectional relationship is negated, as a rate there would be.
+        return step.kind == UpdateStepKind::valueTerm ? finalizeContribution(task, value) : value;
+    };
+    // Once per step: every Update reads the same values -- Rate states at the step's end, Update states at its start --
+    // and all are set at once, so their order never matters.
+    if (afterStep && !plan.oncePerStepSteps.empty()) {
+        const StateValues read = states;
+        ++epoch;
+        for (const auto index : plan.oncePerStepSteps) states.at(plan.updateSteps[index].writes) = 0;
+        for (const auto index : plan.oncePerStepSteps) {
+            const auto& step = plan.updateSteps[index];
+            states.at(step.writes) += evaluate(step, read);
+        }
     }
-    return definitionsWorked;
+    if (plan.settleGroups.empty()) return outcome;
+    // Settling: each state the settling steps set is the sum of its steps, worked out group by group in dependency order,
+    // each reading the latest values. A ring's states start from their values as they stood.
+    const StateValues prior = states;
+    for (const auto index : plan.settleStateIndexes) states.at(index) = 0;
+    ++epoch;
+    for (const auto& group : plan.settleGroups) {
+        if (!group.ring) {
+            const auto& step = plan.updateSteps[group.steps.front()];
+            states.at(step.writes) += evaluate(step, states);
+            continue;
+        }
+        // A ring: swept, every sweep reading only the previous sweep's values, until nothing changes or its limit. What
+        // steps outside the ring have already added to its states (`base`) is kept; the ring's own part is swept.
+        std::vector<std::size_t> ringStates;
+        for (const auto index : group.steps) ringStates.push_back(plan.updateSteps[index].writes);
+        std::sort(ringStates.begin(), ringStates.end());
+        ringStates.erase(std::unique(ringStates.begin(), ringStates.end()), ringStates.end());
+        std::unordered_map<std::size_t, double> base;
+        std::unordered_map<std::size_t, double> part;
+        for (const auto state : ringStates) {
+            base[state] = states.at(state);
+            part[state] = prior.at(state) - states.at(state);
+        }
+        bool settled = false;
+        for (std::size_t sweep = 0; sweep < group.limit && !settled; ++sweep) {
+            for (const auto state : ringStates) states.at(state) = base[state] + part[state];
+            const StateValues read = states;
+            ++epoch;
+            std::unordered_map<std::size_t, double> next;
+            for (const auto state : ringStates) next[state] = 0;
+            for (const auto index : group.steps) {
+                const auto& step = plan.updateSteps[index];
+                next[step.writes] += evaluate(step, read);
+            }
+            settled = true;
+            for (const auto state : ringStates) {
+                const auto change = std::abs(next[state] - part[state]);
+                if (!(change <= 1e-12 * std::max(1.0, std::abs(base[state] + next[state])))) settled = false;
+            }
+            part = std::move(next);
+        }
+        for (const auto state : ringStates) states.at(state) = base[state] + part[state];
+        if (!settled) ++outcome.ringsUnsettled;
+    }
+    return outcome;
+}
+
+std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
+                                           double stepSize, ProviderEvaluator* providerEvaluator) {
+    return applyUpdates(plan, states, liveParameterValues, activeSchedules, simulationTime, false, stepSize, providerEvaluator).definitionsWorked;
 }
 
 }

@@ -243,6 +243,13 @@ export function buildModel(sourceDocument) {
         if (node.numerics?.integration === 'semiImplicit') {
             throw new Error(`Node "${node.name}" is integrated semi-implicitly, which code export cannot write yet.`);
         }
+        // Rates and Updates (docs/proposals/ratesAndUpdates.md): the exported loop still works values out at the same instant,
+        // so a model that says its states' kinds, or how a node's Updates are worked out, is refused until it writes them.
+        const kinded = (node.states ?? []).find((state) => state.kind !== undefined);
+        if (kinded) throw new Error(`State "${node.name} · ${kinded.name}" says its kind (rate or update), which code export cannot write yet.`);
+        if (node.updates !== undefined || node.updatesLimit !== undefined) {
+            throw new Error(`Node "${node.name}" says how its Updates are worked out, which code export cannot write yet.`);
+        }
     }
     for (const edge of document.edges ?? []) {
         if (edge.enabled === false) continue;

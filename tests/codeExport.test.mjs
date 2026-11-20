@@ -498,4 +498,10 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     several.edges.push({ id: id(), name: 'Joint', source: { nodeId: several.nodes[0].id }, target: { nodeId: several.nodes[0].id }, parameters: [],
         equationModel: { bindings: [], outputs: [] } });
     assert.throws(() => generateStandaloneProgram(several, 'python'), /sets several states with its equations, which code export cannot write yet/);
+    const kinded = singleNodeSourceTermModel();
+    kinded.nodes[0].states[0].kind = 'update';
+    assert.throws(() => generateStandaloneProgram(kinded, 'python'), /"Tank · Pressure" says its kind \(rate or update\), which code export cannot write yet/);
+    const settling = singleNodeSourceTermModel();
+    settling.nodes[0].updates = 'settle';
+    assert.throws(() => generateStandaloneProgram(settling, 'python'), /Node "Tank" says how its Updates are worked out, which code export cannot write yet/);
 });

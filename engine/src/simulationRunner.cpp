@@ -18,6 +18,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <future>
 #include <memory>
@@ -793,6 +794,9 @@ public:
     void captureBoundary();
     void writeResult(const std::string& lifecycle, double simulationTime, bool completeSnapshot = false);
     void settleIfParametersChanged();
+    // Runs the update phase (applyUpdates) on `states` at `time`, and says once, on standard error, if a ring did not
+    // settle within its limit.
+    void updateStates(double time, bool afterStep, double stepSize);
     void integrateStep(std::size_t step, double synchronizationStep, double elapsed);
     void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double stepStartTime, double stepEndTime);
     // Where real-time and limited-ratio pacing measure from: the wall-clock moment a simulated time was due, at the pace
@@ -862,6 +866,8 @@ private:
     double nextOutputTime = 0;
     // How many parameter changes the algebraic states were last set with (see settleIfParametersChanged).
     std::size_t settledInterventions = 0;
+    // How many times a ring of settling Updates stopped at its limit without settling.
+    std::size_t ringsUnsettled = 0;
     // A session's own: the states it sends samples of, its checkpoints (one every checkpointInterval from the time it began,
     // the latest pass through each kept), the time it was last restored to and how many steps it has taken since, the step
     // counter partitions are told (never reused), and the states the model computes from others, which cannot be set.
@@ -1012,12 +1018,10 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         steps = static_cast<std::size_t>(wholeSteps ? std::round(stepsExactly) : std::ceil(stepsExactly));
     }
     nodeMetrics.resize(executionPlan.nodes.size());
-    // Algebraic states are set from their expressions before anything is recorded or read, so the
-    // first sample, the first checkpoint and every node's first step all see consistent values --
-    // after a restart too, where a fork may have changed the parameters they depend on.
-    settleAlgebraicStates(executionPlan, states, runControl.parameterValues, startTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
-    // And the states algebraic relationships set, across nodes, in dependency order.
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime);
+    // The settling nodes' Updates are settled before anything is recorded or read, so the first sample, the first
+    // checkpoint and every node's first step all see consistent values -- after a restart too, where a fork may have
+    // changed the parameters they depend on. An Update worked out once per step starts at its initial value.
+    updateStates(startTime, false, globalTimeStep);
     samples = {{startTime, states}};
     checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
@@ -1447,8 +1451,7 @@ void Simulation::refreshRunControl(bool force) {
 void Simulation::settleIfParametersChanged() {
     if (runControl.interventions.size() == settledInterventions) return;
     settledInterventions = runControl.interventions.size();
-    settleAlgebraicStates(executionPlan, states, runControl.parameterValues, currentTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
+    updateStates(currentTime, false, globalTimeStep);
     if (!samples.empty() && samples.back().time == currentTime) samples.back().states = states;
     if (!checkpoints.empty() && checkpoints.back().time == currentTime) checkpoints.back().states = states;
 }
@@ -1480,7 +1483,7 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     currentTime = elapsed;
     // The states algebraic relationships set, from the states the step reached, at its end: every
     // node reads them from the next step's synchronization snapshot.
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
+    updateStates(currentTime, true, synchronizationStep);
     if (!stabilityMonitoredNodeIds.empty()) {
         auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);
         stabilityFindings.insert(stabilityFindings.end(),
@@ -1547,10 +1550,18 @@ long long Simulation::checkpointKey(double time) const {
     return static_cast<long long>(rounded);
 }
 
+void Simulation::updateStates(double time, bool afterStep, double stepSize) {
+    const auto outcome = applyUpdates(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time, afterStep, stepSize, providerRuntime.get());
+    if (outcome.ringsUnsettled && !ringsUnsettled) {
+        std::cerr << "warning: a ring of Updates that settle within the step did not settle within its limit at " << time
+                  << " s; its values are those of the last sweep.\n";
+    }
+    ringsUnsettled += outcome.ringsUnsettled;
+}
+
 // The algebraic states set again for the instant, as a run does when it starts or resumes from a checkpoint.
 void Simulation::settleAt(double time) {
-    settleAlgebraicStates(executionPlan, states, runControl.parameterValues, time, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time);
+    updateStates(time, false, globalTimeStep);
 }
 
 void Simulation::restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates) {

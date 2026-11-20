@@ -11,7 +11,7 @@ implementation: none
 
 # Rates and values
 
-**Status: proposed, November 2026. Nothing here is built. It comes from building core changes 1 and 2 of the [Neural Toolbox](neuralToolbox.md), which showed that the engine's ways of setting a value had grown into a patchwork.**
+**Status: proposed, November 2026. Step 1 is built: a state's `changes`, kept by the codec and checked by the validator against what reaches it, with no run changed. The rest is not. It comes from building core changes 1 and 2 of the [Neural Toolbox](neuralToolbox.md), which showed that the engine's ways of setting a value had grown into a patchwork.**
 
 ## The problem
 
@@ -137,8 +137,8 @@ Building the Neural Toolbox's core changes 1 and 2 produced a cross-model pass o
 
 ## Order of work
 
-1. The `changes` field read and written by the codec, with older markers mapped onto it; the engine compiling from it; the validator's new rules and codes. No model's numbers change; the existing tests are the guard.
-2. Values summing from every kind of term, and the runtime check on pure programs, with the SDK and plugin declaration.
+1. *Built.* The `changes` field kept by the codec; the validator's new rules and codes, checking it against what reaches a state and working a state's kind out from the older markers where it is absent. No model's numbers change; the existing tests are the guard. The engine does not compile from it yet: nothing it runs depends on a state's kind until step 2, and the validator keeps the field and the markers in agreement until then.
+2. The engine compiling from a state's kind (the field, or the older markers where it is absent), so that values sum from every kind of term; and the runtime check on pure programs, with the SDK and plugin declaration.
 3. The node editor: the node setting, state toggles, the "sum of" display, and the offer to add a worked-out state.
 4. Recorded signals in the new form: causal-inference replay through a schedule (and its comparison with the generated program on the validation system), data-log inputs mapped to states, and live-twin input detection by kind.
 5. The README and the schema documentation; the Robotics and Logistics model builders moved to the field.

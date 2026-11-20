@@ -116,8 +116,9 @@ void theValidatorCatchesMalformedRelationshipsWithSeveralEquations() {
         {"id": 9, "name": "Rate", "directionality": "directed", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 3, "stateId": 32},
          "parameters": [],
          "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": 32}}})json";
-    require(hasIssue(konjugate::validateModel(parse(chainProject(rate))), "algebraicStateMixed"),
-        "A state set by relationships and also given a rate should be algebraicStateMixed.");
+    const auto mixed = konjugate::validateModel(parse(chainProject(rate)));
+    require(hasIssue(mixed, "rateIntoWorkedOutState") && !hasIssue(mixed, "algebraicStateMixed"),
+        "A state set by relationships and also given a rate should be rateIntoWorkedOutState, said once.");
     auto bidirectional = parse(chainProject());
     bidirectional.get_child("edges").front().second.put("directionality", "bidirectional");
     require(hasIssue(konjugate::validateModel(bidirectional), "relationshipOutputsInvalid"),
@@ -481,6 +482,72 @@ void aLoopThroughASourceTermIsRefused() {
 
 }
 
+// ---- A state's `changes`: overTime or atEachInstant, checked against what reaches it ----
+
+// Sets state `stateId`'s `changes` in `document`.
+boost::property_tree::ptree withChanges(boost::property_tree::ptree document, konjugate::EntityId stateId, const std::string& changes) {
+    for (auto& node : document.get_child("nodes")) {
+        for (auto& state : node.second.get_child("states")) {
+            if (state.second.get<konjugate::EntityId>("id") == stateId) state.second.put("changes", changes);
+        }
+    }
+    return document;
+}
+
+bool onlyIssue(const konjugate::ValidationResult& result, const std::string& code) {
+    return std::all_of(result.issues.begin(), result.issues.end(), [&](const auto& issue) { return issue.severity != "error" || issue.code == code; }) &&
+        hasIssue(result, code);
+}
+
+void declaringWhatAStateAlreadyIsChangesNothing() {
+    // y and z are set by relationships, s and t by setsValue source terms, x changes over time.
+    auto document = parse(sourceTermChain());
+    for (const auto stateId : {21, 22, 23, 31}) document = withChanges(document, stateId, "atEachInstant");
+    document = withChanges(document, 11, "overTime");
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid && result.issues.empty(), "Declaring what each state already is should be valid, with nothing to say.");
+    const auto declaredPlan = konjugate::compileExecutionPlan(document);
+    const auto plainPlan = konjugate::compileExecutionPlan(parse(sourceTermChain()));
+    auto declaredStates = declaredPlan.initialStates;
+    auto plainStates = plainPlan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(declaredPlan, declaredStates, {}, {}, 0);
+    konjugate::evaluateAlgebraicRelationships(plainPlan, plainStates, {}, {}, 0);
+    require(declaredStates == plainStates, "Declaring what each state is should not change a single value.");
+}
+
+void theValidatorChecksAStatesChangesAgainstWhatReachesIt() {
+    const auto base = parse(sourceTermChain());
+    // s is set by a source term, so it cannot change over time.
+    require(onlyIssue(konjugate::validateModel(withChanges(base, 22, "overTime")), "valueIntoChangingState"),
+        "A state a source term sets, marked as changing over time, should be valueIntoChangingState alone.");
+    // y is set by a relationship, likewise.
+    require(onlyIssue(konjugate::validateModel(withChanges(base, 21, "overTime")), "valueIntoChangingState"),
+        "A state a relationship sets, marked as changing over time, should be valueIntoChangingState alone.");
+    require(hasIssue(konjugate::validateModel(withChanges(base, 22, "sometimes")), "stateChangesInvalid"),
+        "An unknown changes should be stateChangesInvalid.");
+    // x: nothing sets it and nothing gives it a rate, so marking it worked out is allowed but worth a word.
+    const auto unset = konjugate::validateModel(withChanges(base, 11, "atEachInstant"));
+    require(unset.valid && hasIssue(unset, "workedOutStateUnset"), "A worked-out state nothing sets should be valid, with workedOutStateUnset.");
+    // A rate into a state marked worked out, with nothing setting it.
+    const auto rateEdge = R"json(,
+        {"id": 70, "name": "Rate", "directionality": "directed", "source": {"nodeId": 3, "stateId": 31}, "target": {"nodeId": 1, "stateId": 11},
+         "parameters": [], "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": 11}}})json";
+    require(onlyIssue(konjugate::validateModel(withChanges(parse(sourceTermChain("", rateEdge)), 11, "atEachInstant")), "rateIntoWorkedOutState"),
+        "A rate into a state marked worked out should be rateIntoWorkedOutState alone.");
+    // A program sets its output after each step: not a value worked out at each instant.
+    const auto program = R"json(,
+        {"id": 4, "name": "P", "states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0}], "sourceTerms": [],
+         "implementation": {"kind": "python", "providerApiVersion": 1, "source": "class P: pass",
+                            "bindings": [{"key": "in", "kind": "state", "nodeId": 2, "stateId": 21}],
+                            "outputs": [{"key": "out", "stateId": 41, "setsValue": true}]}})json";
+    require(konjugate::validateModel(parse(sourceTermChain(program))).valid, "A program setting its output should be valid as it is.");
+    require(onlyIssue(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "atEachInstant")), "programOutputWorkedOut"),
+        "A program's output marked worked out should be programOutputWorkedOut alone.");
+    require(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "overTime")).valid,
+        "A program's output marked as changing over time should be valid.");
+}
+
 int main() {
     try {
         aChainAcrossNodesSettlesWithinOneInstantInDependencyOrder();
@@ -496,6 +563,8 @@ int main() {
         aChoiceSettledEarlyLeavesTheRestUnworked();
         aSourceTermReadingAStateThePassSetsJoinsIt();
         aLoopThroughASourceTermIsRefused();
+        declaringWhatAStateAlreadyIsChangesNothing();
+        theValidatorChecksAStatesChangesAgainstWhatReachesIt();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

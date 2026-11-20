@@ -298,6 +298,11 @@ struct NodeExecutionPlan {
     // docs/proposals/causalInferenceInputReplay.md for why this needs to be a genuinely
     // recomputed-fresh value rather than a solver-specific derivative trick.
     std::vector<ContributionTask> algebraicTasks;
+    // Terms setting a worked-out state of this node that something outside the node also reaches: a relationship into
+    // a state marked atEachInstant, or one of the node's own terms setting a state a relationship sets too. They are
+    // worked out only in the cross-model algebraic pass (AlgebraicStepKind::valueTerm), each added to its state, so the
+    // state holds its value from the instant through the step. Bindings are as for a contribution of this node.
+    std::vector<ContributionTask> valueTerms;
     std::optional<NodeProviderTask> nodeProvider;
     std::size_t estimatedOperationsPerSubstep = 0;
     // True when any parameter of this node's tasks follows a stored schedule, so its values are
@@ -346,10 +351,13 @@ struct AlgebraicOutput {
 enum class AlgebraicStepKind {
     // plan.algebraicOutputs[index]: added to its state, which every output writing it sums.
     relationshipOutput,
-    // plan.nodes[node].algebraicTasks[index]: a setsValue source term that reads, directly or through another source
-    // term of its node, a state the pass sets. It is evaluated in its node's substeps as every setsValue source term
-    // is, and again here, after what it reads, so the value it holds at the instant is from that instant's values.
-    sourceTerm
+    // plan.nodes[node].algebraicTasks[index]: one of a node's own value terms setting a state that reads, directly or
+    // through another of its node's value terms, a state the pass sets (with every other term setting that state). It
+    // is evaluated in its node's substeps as every such term is, and again here, after what it reads, so the value its
+    // state holds at the instant is from that instant's values.
+    sourceTerm,
+    // plan.nodes[node].valueTerms[index]: added to its state, which the pass sets to zero first.
+    valueTerm
 };
 
 struct AlgebraicStep {
@@ -364,10 +372,11 @@ struct ExecutionPlan {
     std::vector<AlgebraicOutput> algebraicOutputs;
     // The cross-model algebraic pass, in the order it is evaluated: everything that sets a state's value at a
     // synchronization instant from other states' values at that instant, each step after every step setting a state it
-    // reads. The relationship outputs, in the order above, with (interleaved where they depend on each other) the
-    // setsValue source terms that read a state the pass sets. Empty when the plan has none of them.
+    // reads. The relationship outputs, in the order above, with (interleaved where they depend on each other) the value
+    // terms and the node-local value terms that read a state the pass sets. Empty when the plan has none of them.
     std::vector<AlgebraicStep> algebraicPass;
-    // The states algebraic relationships set, each the sum of its outputs.
+    // The states the pass sets, each the sum of the steps setting it: those relationships' several equations set, those
+    // value terms set, and those of node-local value terms that join the pass. None is integrated.
     std::vector<std::size_t> algebraicStateIndexes;
     StateValues initialStates;
     std::unordered_map<EntityId, EntityId> stateNodes;
@@ -429,10 +438,12 @@ NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
 
-// A node's genuine algebraic states (see NodeExecutionPlan::algebraicTasks): recomputes each task
-// in algebraicTasks, in the caller-supplied (already dependency-sorted) order, and writes the
-// result directly into localStates.at(task.outputStateIndex) -- a plain replacement, never
-// accumulated, never divided by stepSize. Because each write lands in the same localStates array
+// A node's genuine algebraic states (see NodeExecutionPlan::algebraicTasks): sets each state the
+// tasks set to zero, then recomputes each task in algebraicTasks, in the caller-supplied (already
+// dependency-sorted, every task setting a state before any task reading it) order, and adds the
+// result to localStates.at(task.outputStateIndex): a state several of a node's own terms set is
+// their sum, one set by one term is that term's value. Nothing is ever carried over from before the
+// call, and nothing is divided by stepSize. Because each write lands in the same localStates array
 // every later algebraic task and every ordinary (differential) contribution in this same substep
 // reads from, this composes with any solver: there is no derivative or stepSize-dependent
 // arithmetic here at all, unlike the Euler-specific pseudo-derivative trick this replaces. Always

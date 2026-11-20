@@ -529,12 +529,18 @@ void theValidatorChecksAStatesChangesAgainstWhatReachesIt() {
     // x: nothing sets it and nothing gives it a rate, so marking it worked out is allowed but worth a word.
     const auto unset = konjugate::validateModel(withChanges(base, 11, "atEachInstant"));
     require(unset.valid && hasIssue(unset, "workedOutStateUnset"), "A worked-out state nothing sets should be valid, with workedOutStateUnset.");
-    // A rate into a state marked worked out, with nothing setting it.
-    const auto rateEdge = R"json(,
-        {"id": 70, "name": "Rate", "directionality": "directed", "source": {"nodeId": 3, "stateId": 31}, "target": {"nodeId": 1, "stateId": 11},
-         "parameters": [], "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": 11}}})json";
-    require(onlyIssue(konjugate::validateModel(withChanges(parse(sourceTermChain("", rateEdge)), 11, "atEachInstant")), "rateIntoWorkedOutState"),
-        "A rate into a state marked worked out should be rateIntoWorkedOutState alone.");
+    // An ordinary relationship into a state marked worked out sets its value; into one worked out only because a
+    // source term sets it, it is a rate, and refused.
+    const auto plainEdge = [](konjugate::EntityId targetNode, konjugate::EntityId targetState) {
+        return R"json(,
+        {"id": 70, "name": "Plain", "directionality": "directed", "source": {"nodeId": 3, "stateId": 31}, "target": {"nodeId": )json" + std::to_string(targetNode) +
+            R"json(, "stateId": )json" + std::to_string(targetState) + R"json(},
+         "parameters": [], "equationModel": {"latex": "1", "mathJson": 1, "bindings": [], "output": {"role": "target", "stateId": )json" + std::to_string(targetState) + "}}}";
+    };
+    require(konjugate::validateModel(withChanges(parse(sourceTermChain("", plainEdge(1, 11))), 11, "atEachInstant")).valid,
+        "An ordinary relationship into a state marked worked out should be valid: it sets the value.");
+    require(onlyIssue(konjugate::validateModel(parse(sourceTermChain("", plainEdge(2, 23)))), "rateIntoWorkedOutState"),
+        "An ordinary relationship into a state a setsValue term sets, with no changes given, should be rateIntoWorkedOutState alone.");
     // A program sets its output after each step: not a value worked out at each instant.
     const auto program = R"json(,
         {"id": 4, "name": "P", "states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0}], "sourceTerms": [],
@@ -546,6 +552,160 @@ void theValidatorChecksAStatesChangesAgainstWhatReachesIt() {
         "A program's output marked worked out should be programOutputWorkedOut alone.");
     require(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "overTime")).valid,
         "A program's output marked as changing over time should be valid.");
+}
+
+// ---- Values from every kind of term sum (Rates and values, step 2) ----
+
+// An ordinary single-equation relationship from `from`.`fromState` to `to`.`toState`, reading the source state as x.
+std::string plainRelationship(int id, int from, int fromState, int to, int toState, const std::string& mathJson,
+                              const std::string& directionality = "directed") {
+    return R"json({"id": )json" + std::to_string(id) + R"json(, "name": "E)json" + std::to_string(id) + R"json(", "directionality": ")json" + directionality +
+        R"json(", "source": {"nodeId": )json" + std::to_string(from) + R"json(, "stateId": )json" + std::to_string(fromState) +
+        R"json(}, "target": {"nodeId": )json" + std::to_string(to) + R"json(, "stateId": )json" + std::to_string(toState) + R"json(}, "parameters": [],
+        "equationModel": {"latex": "x", "mathJson": )json" + mathJson + R"json(, "output": {"role": "target", "stateId": )json" + std::to_string(toState) +
+        R"json(}, "bindings": [{"kind": "state", "role": "source", "nodeId": )json" + std::to_string(from) + R"json(, "stateId": )json" + std::to_string(fromState) +
+        R"json(, "symbol": "x"}]}})json";
+}
+
+std::string project(const std::string& nodes, const std::string& edges) {
+    return R"json({"format": "konjugate", "version": 1, "nodes": [)json" + nodes + R"json(], "edges": [)json" + edges + "]}";
+}
+
+void aNeuronIsItsEquation() {
+    // z = 0.8 x1 - 0.5 x2 + 0.3, with the bias the neuron's own term; y = 2 tanh(z). Every term an ordinary one.
+    const auto document = parse(project(R"json(
+        {"id": 1, "name": "In 1", "states": [{"id": 11, "name": "X1", "symbol": "x1", "initialValue": 0.5}], "sourceTerms": []},
+        {"id": 2, "name": "In 2", "states": [{"id": 21, "name": "X2", "symbol": "x2", "initialValue": -1}], "sourceTerms": []},
+        {"id": 3, "name": "Neuron", "states": [{"id": 31, "name": "Z", "symbol": "z", "initialValue": 0, "changes": "atEachInstant"}],
+         "sourceTerms": [{"id": 32, "state": "z", "expression": "0.3", "expressionModel": {"latex": "0.3", "output": {"stateId": 31}, "mathJson": 0.3, "bindings": []}}]},
+        {"id": 4, "name": "Out", "states": [{"id": 41, "name": "Y", "symbol": "y", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": []})json",
+        plainRelationship(5, 1, 11, 3, 31, R"json(["Multiply", 0.8, "x"])json") + "," +
+        plainRelationship(6, 2, 21, 3, 31, R"json(["Multiply", -0.5, "x"])json") + "," +
+        plainRelationship(7, 3, 31, 4, 41, R"json(["Multiply", 2, ["Tanh", "x"]])json")));
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid && result.issues.empty(), "A neuron written with ordinary terms into worked-out states should be valid, with nothing to say.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    const auto& neuron = *std::find_if(plan.nodes.begin(), plan.nodes.end(), [](const auto& node) { return node.nodeId == 3; });
+    require(neuron.valueTerms.size() == 3 && neuron.algebraicTasks.empty() && neuron.contributions.empty(),
+        "The neuron's two weighted inputs and its bias should be its three value terms: a relationship's term belongs to the node it lands on.");
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    const auto z = 0.8 * 0.5 - 0.5 * -1 + 0.3;
+    require(std::abs(states.at(plan.stateIndexes.at(31)) - z) < 1e-15, "z should be the sum of the weighted inputs and the bias.");
+    require(std::abs(states.at(plan.stateIndexes.at(41)) - 2 * std::tanh(z)) < 1e-15, "y should read z as summed within the instant.");
+    // Worked out again from the same states, nothing is carried over.
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(std::abs(states.at(plan.stateIndexes.at(31)) - z) < 1e-15, "Working the pass out again should give the same z, not twice it.");
+}
+
+void valuesFromRelationshipsAndSourceTermsSum() {
+    // y = 2x from a relationship's several equations, plus 1 from a setsValue source term: 7. s = y + 1 and z = 10 s follow.
+    auto text = sourceTermChain();
+    const std::string terms = R"json("sourceTerms": [
+            {"id": 24,)json";
+    const std::string withOne = R"json("sourceTerms": [
+            {"id": 26, "state": "y", "expression": "1", "setsValue": true,
+             "expressionModel": {"latex": "1", "output": {"stateId": 21}, "mathJson": 1, "bindings": []}},
+            {"id": 24,)json";
+    text.replace(text.find(terms), terms.size(), withOne);
+    const auto document = parse(text);
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid, "A setsValue source term and a relationship setting one state should be valid: they sum.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(at(21) == 7 && at(22) == 8 && at(31) == 80, "y = 2x + 1, s = y + 1 and z = 10 s should settle within one instant.");
+}
+
+void aNodesOwnTermsSumAndAreRefreshedEverySubstep() {
+    // x grows at 1 per second; v = x and v = 2 from two of the node's own setsValue terms: v = x + 2, at every substep.
+    const auto document = parse(project(R"json(
+        {"id": 1, "name": "A", "numerics": {"substepsPerGlobalStep": 4},
+         "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 0}, {"id": 12, "name": "V", "symbol": "v", "initialValue": 0}],
+         "sourceTerms": [
+            {"id": 13, "state": "x", "expression": "1", "expressionModel": {"latex": "1", "output": {"stateId": 11}, "mathJson": 1, "bindings": []}},
+            {"id": 14, "state": "v", "expression": "x", "setsValue": true,
+             "expressionModel": {"latex": "x", "output": {"stateId": 12}, "mathJson": "x", "bindings": [{"kind": "state", "nodeId": 1, "stateId": 11, "symbol": "x"}]}},
+            {"id": 15, "state": "v", "expression": "2", "setsValue": true,
+             "expressionModel": {"latex": "2", "output": {"stateId": 12}, "mathJson": 2, "bindings": []}}]})json", ""));
+    const auto result = konjugate::validateModel(document);
+    require(result.valid && hasIssue(result, "ownTermsAddUp"), "Two of a node's own terms setting one state should be valid, with ownTermsAddUp.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    require(plan.algebraicPass.empty() && plan.nodes.at(0).algebraicTasks.size() == 2, "Terms only the node reaches stay its own, out of the pass.");
+    auto states = plan.initialStates;
+    konjugate::settleAlgebraicStates(plan, states, {}, 0, 1);
+    require(states.at(1) == 2, "Settled before the first step, v = 0 + 2.");
+    const auto integrated = konjugate::integrateNode(plan.nodes.at(0), states, {}, 0, 1);
+    require(integrated.states.at(0) == 1 && integrated.states.at(1) == 3, "After the step, x = 1 and v = x + 2 = 3, not carried over from before.");
+}
+
+void aBidirectionalRelationshipBetweenWorkedOutStatesAddsAndSubtracts() {
+    // A flow of 2 from J1 to J2 between two junctions: J2 gains 2, J1 loses 2, as currents through a resistor.
+    const auto document = parse(project(R"json(
+        {"id": 1, "name": "J1", "states": [{"id": 11, "name": "I", "symbol": "i", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": []},
+        {"id": 2, "name": "J2", "states": [{"id": 21, "name": "I", "symbol": "i", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": []})json",
+        plainRelationship(5, 1, 11, 2, 21, "2", "bidirectional")));
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid, "A bidirectional relationship between worked-out states should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    require(states.at(plan.stateIndexes.at(11)) == -2 && states.at(plan.stateIndexes.at(21)) == 2, "J1 should be -2 and J2 +2.");
+}
+
+void aLoopOfOrdinaryRelationshipsBetweenWorkedOutStatesIsRefused() {
+    const auto document = parse(project(R"json(
+        {"id": 1, "name": "A", "states": [{"id": 11, "name": "A", "symbol": "a", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "B", "symbol": "b", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": []})json",
+        plainRelationship(5, 1, 11, 2, 21, "\"x\"") + "," + plainRelationship(6, 2, 21, 1, 11, "\"x\"")));
+    require(hasIssue(konjugate::validateModel(document), "algebraicLoop"), "Worked-out states setting each other in a loop should be algebraicLoop.");
+}
+
+void aProgramsOutputIsItsAlone() {
+    // A program sets P.o after each step; a relationship's several equations set it too.
+    const auto program = R"json(,
+        {"id": 4, "name": "P", "states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0}], "sourceTerms": [],
+         "implementation": {"kind": "python", "providerApiVersion": 1, "source": "class P: pass",
+                            "bindings": [{"key": "in", "kind": "state", "nodeId": 2, "stateId": 21}],
+                            "outputs": [{"key": "out", "stateId": 41, "setsValue": true}]}})json";
+    const auto shared = R"json(,
+        {"id": 71, "name": "Into P", "directionality": "directed", "source": {"nodeId": 3}, "target": {"nodeId": 4}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "z", "kind": "state", "role": "source", "nodeId": 3, "stateId": 31}],
+                           "outputs": [{"role": "target", "stateId": 41, "mathJson": "z", "setsValue": true}]}})json";
+    require(onlyIssue(konjugate::validateModel(parse(sourceTermChain(program, shared))), "setsValueNotSoleContributor"),
+        "A program's output also set by a relationship should be setsValueNotSoleContributor alone.");
+}
+
+void anUnusedBindingIsNeitherADependencyNorALoop() {
+    // B.t = 5 is bound to B.y as the node editor binds every state of a node to each source term, but does not use it.
+    // C.z = t and B.y = z: y depends on t, t does not depend on y, so there is no loop.
+    const auto document = parse(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0}, {"id": 22, "name": "T", "symbol": "t", "initialValue": 0}],
+         "sourceTerms": [{"id": 23, "state": "t", "expression": "5", "setsValue": true,
+                          "expressionModel": {"latex": "5", "output": {"stateId": 22}, "mathJson": 5,
+                                              "bindings": [{"kind": "state", "nodeId": 2, "stateId": 21, "symbol": "y"}]}}]},
+        {"id": 3, "name": "C", "states": [{"id": 31, "name": "Z", "symbol": "z", "initialValue": 0}], "sourceTerms": []}
+    ], "edges": [
+        {"id": 5, "name": "B to C", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 3}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "t", "kind": "state", "role": "source", "nodeId": 2, "stateId": 22}],
+                           "outputs": [{"role": "target", "stateId": 31, "mathJson": "t", "setsValue": true}]}},
+        {"id": 6, "name": "C to B", "directionality": "directed", "source": {"nodeId": 3}, "target": {"nodeId": 2}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "z", "kind": "state", "role": "source", "nodeId": 3, "stateId": 31}],
+                           "outputs": [{"role": "target", "stateId": 21, "mathJson": "z", "setsValue": true}]}}
+    ]})json");
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid, "A binding an equation does not use should not make a loop.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    auto states = plan.initialStates;
+    konjugate::settleAlgebraicStates(plan, states, {}, 0, 1);
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(at(22) == 5 && at(31) == 5 && at(21) == 5, "t = 5, z = t and y = z.");
 }
 
 int main() {
@@ -565,6 +725,13 @@ int main() {
         aLoopThroughASourceTermIsRefused();
         declaringWhatAStateAlreadyIsChangesNothing();
         theValidatorChecksAStatesChangesAgainstWhatReachesIt();
+        aNeuronIsItsEquation();
+        valuesFromRelationshipsAndSourceTermsSum();
+        aNodesOwnTermsSumAndAreRefreshedEverySubstep();
+        aBidirectionalRelationshipBetweenWorkedOutStatesAddsAndSubtracts();
+        aLoopOfOrdinaryRelationshipsBetweenWorkedOutStatesIsRefused();
+        aProgramsOutputIsItsAlone();
+        anUnusedBindingIsNeitherADependencyNorALoop();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

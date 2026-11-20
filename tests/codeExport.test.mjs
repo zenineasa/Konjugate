@@ -498,4 +498,17 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     several.edges.push({ id: id(), name: 'Joint', source: { nodeId: several.nodes[0].id }, target: { nodeId: several.nodes[0].id }, parameters: [],
         equationModel: { bindings: [], outputs: [] } });
     assert.throws(() => generateStandaloneProgram(several, 'python'), /sets several states with its equations, which code export cannot write yet/);
+    // A state worked out at each instant that an ordinary term sets, and a state two setsValue terms set (their sum).
+    const declared = singleNodeSourceTermModel();
+    declared.nodes[0].states[0].changes = 'atEachInstant';
+    assert.throws(() => generateStandaloneProgram(declared, 'python'), /"Tank · Pressure" is worked out at each instant, and one of its node's source terms sets it without saying so, which code export cannot write yet/);
+    const summed = singleNodeSourceTermModel();
+    const term = summed.nodes[0].sourceTerms[0];
+    term.setsValue = true;
+    term.expressionModel = { ...term.expressionModel, bindings: [], mathJson: 2 };
+    summed.nodes[0].sourceTerms.push({ ...structuredClone(term), id: id() });
+    assert.throws(() => generateStandaloneProgram(summed, 'python'), /"Tank · Pressure" is the sum of 2 of its node's own terms, which code export cannot write yet/);
+    // One setsValue term, as before, still exports.
+    summed.nodes[0].sourceTerms.pop();
+    assert.doesNotThrow(() => generateStandaloneProgram(summed, 'python'));
 });

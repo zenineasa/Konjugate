@@ -1500,8 +1500,9 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
         // A programmable ("sets the value") algebraic task is evaluated through the exact same
         // evaluateBatch()/providerProcessKey()/sourceId lookup path as an ordinary programmable
         // contribution (see applyAlgebraicTasks in executionPlan.cpp) -- it must be registered
-        // here identically, or its first evaluation throws "Task not registered in ProviderRuntime."
-        for (const auto& task : node.algebraicTasks) {
+        // here identically, or its first evaluation throws "Task not registered in ProviderRuntime." So must a value
+        // term's (NodeExecutionPlan::valueTerms), evaluated the same way in the cross-model algebraic pass.
+        for (const auto* tasks : {&node.algebraicTasks, &node.valueTerms}) for (const auto& task : *tasks) {
             if (task.implementation == ContributionImplementation::equation) continue;
 
             const std::string key = providerProcessKey(task);
@@ -1652,7 +1653,7 @@ bool planRequiresProviders(const ExecutionPlan& plan) {
         for (const auto& task : node.contributions) {
             if (task.implementation != ContributionImplementation::equation) return true;
         }
-        for (const auto& task : node.algebraicTasks) {
+        for (const auto* tasks : {&node.algebraicTasks, &node.valueTerms}) for (const auto& task : *tasks) {
             if (task.implementation != ContributionImplementation::equation) return true;
         }
     }

@@ -11,7 +11,7 @@ implementation: none
 
 # Rates and values
 
-**Status: proposed, November 2026. Step 1 is built: a state's `changes`, kept by the codec and checked by the validator against what reaches it, with no run changed. The rest is not. It comes from building core changes 1 and 2 of the [Neural Toolbox](neuralToolbox.md), which showed that the engine's ways of setting a value had grown into a patchwork.**
+**Status: proposed, November 2026. Steps 1 and the first half of 2 are built: a state's `changes`, kept by the codec and checked by the validator; the engine compiling from a state's kind; values summing from every kind of term, an ordinary relationship or source term into a state marked worked out setting its value. Pure programs and the rest are not. It comes from building core changes 1 and 2 of the [Neural Toolbox](neuralToolbox.md), which showed that the engine's ways of setting a value had grown into a patchwork.**
 
 ## The problem
 
@@ -138,7 +138,7 @@ Building the Neural Toolbox's core changes 1 and 2 produced a cross-model pass o
 ## Order of work
 
 1. *Built.* The `changes` field kept by the codec; the validator's new rules and codes, checking it against what reaches a state and working a state's kind out from the older markers where it is absent. No model's numbers change; the existing tests are the guard. The engine does not compile from it yet: nothing it runs depends on a state's kind until step 2, and the validator keeps the field and the markers in agreement until then.
-2. The engine compiling from a state's kind (the field, or the older markers where it is absent), so that values sum from every kind of term; and the runtime check on pure programs, with the SDK and plugin declaration.
+2. *First half built.* The engine compiling from a state's kind (the field, or the older markers where it is absent), so that values sum from every kind of term. An ordinary term becomes a value only where the state is marked `atEachInstant`; where a state is worked out only because a `setsValue` term or a relationship sets it, an ordinary term into it is still refused, so no file already written changes meaning. A node's own value terms are worked out at each substep where only they set the state, and in the cross-model pass, holding through the step, where something outside the node sets it too. `algebraicStateMixed` is gone (each case it covered is now a sum or a clearer error); `setsValueNotSoleContributor` remains for programs only. Code export refuses the new forms by name. Still to do: the runtime check on pure programs, with the SDK and plugin declaration.
 3. The node editor: the node setting, state toggles, the "sum of" display, and the offer to add a worked-out state.
 4. Recorded signals in the new form: causal-inference replay through a schedule (and its comparison with the generated program on the validation system), data-log inputs mapped to states, and live-twin input detection by kind.
 5. The README and the schema documentation; the Robotics and Logistics model builders moved to the field.

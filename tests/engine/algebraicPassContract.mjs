@@ -123,7 +123,39 @@ try {
     // The program is a co-simulation step: o(t + h) = 3 s(t), from its initial value 0 at t = 0.
     assert.deepEqual(samples.map(({ value }) => value[31]), [0, 3, 9, 15, 21], 'A node program\'s output at t + h is from the inputs it read at t.');
 
-    console.log('✓ algebraic pass contract: a chain through a setsValue source term settles within each instant, an ordinary edge reads it at each step\'s start, and a node program stays one co-simulation step behind its inputs.');
+    // A neuron written as the equation says: states marked worked out at each instant, ordinary relationships into them
+    // and the bias as the neuron's own term. z = 2a + 1 and y = 3z, so y = 6t + 3 at every sample.
+    const plain = (id, name, from, fromState, to, toState, mathJson) => ({
+        id, name, directionality: 'directed', source: { nodeId: from, stateId: fromState }, target: { nodeId: to, stateId: toState }, equation: 'x', parameters: [],
+        equationModel: { latex: 'x', output: { role: 'target', stateId: toState }, mathJson, bindings: [{ kind: 'state', role: 'source', nodeId: from, stateId: fromState, symbol: 'x' }] }
+    });
+    const neuron = {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' },
+        nodes: [
+            document.nodes[0],
+            {
+                id: 6, name: 'Neuron', position: [3, 0, 0], appearance,
+                states: [{ id: 61, name: 'z', symbol: 'z', initialValue: 0, unit: '', changes: 'atEachInstant' }],
+                sourceTerms: [{ id: 62, state: 'z', expression: '1', expressionModel: { latex: '1', output: { stateId: 61 }, mathJson: 1, bindings: [] } }]
+            },
+            { id: 7, name: 'Out', position: [6, 0, 0], appearance, sourceTerms: [], states: [{ id: 71, name: 'y', symbol: 'y', initialValue: 0, unit: '', changes: 'atEachInstant' }] }
+        ],
+        edges: [plain(8, 'Weight', 1, 11, 6, 61, ['Multiply', 2, 'x']), plain(9, 'Out', 6, 61, 7, 71, ['Multiply', 3, 'x'])]
+    };
+    const neuronPath = join(directory, 'neuron.kjt');
+    await writeFile(neuronPath, await encodeProjectFile(JSON.stringify(neuron)));
+    assert.equal(await execute(executable, ['validate', neuronPath, '--report', reportPath]), 0);
+    const neuronReport = decodeValidationReport(await readFile(reportPath));
+    assert.equal(neuronReport.valid, true, JSON.stringify(neuronReport.issues));
+    assert.deepEqual(neuronReport.issues, [], 'A neuron written as the equation says has nothing to warn about.');
+    assert.equal(await execute(executable, ['run', neuronPath, '--configuration', configurationPath, '--output', outputPath]), 0);
+    for (const sample of decodeResultFile(await readFile(outputPath)).samples) {
+        const value = Object.fromEntries(sample.states.map((state) => [state.stateId, state.value]));
+        assert.equal(value[61], 2 * sample.time + 1, `z = 2a + 1 within the instant at t=${sample.time}`);
+        assert.equal(value[71], 6 * sample.time + 3, `y = 3z within the instant at t=${sample.time}`);
+    }
+
+    console.log('✓ algebraic pass contract: a chain through a setsValue source term settles within each instant, an ordinary edge reads it at each step\'s start, a node program stays one co-simulation step behind its inputs, and a neuron of ordinary terms into worked-out states is its equation at every instant.');
 } finally {
     await rm(directory, { recursive: true, force: true });
 }

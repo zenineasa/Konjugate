@@ -46,22 +46,36 @@ const sdkFiles = [
     ['konjugate/providerSharedMemoryChannel.hpp', 'include/konjugate/providerSharedMemoryChannel.hpp']
 ];
 
+// Where the clang sandbox comes from: @wasmer/sdk and the SDK files, beside this module in the web shell (scripts/buildWebShell.mjs
+// copies both there). Replaceable before the sandbox is first made (setCppProviderSources), so a test can stand a sandbox of its own
+// in for Wasmer's, whose clang is fetched from Wasmer's registry.
+let sources = {
+    async createSandbox() {
+        const [{ Wasmer }, ...responses] = await Promise.all([
+            import(new URL('./node_modules/@wasmer/sdk/dist/index.js', import.meta.url).href),
+            ...sdkFiles.map(([relativePath]) => fetch(new URL(`./cppProviderSdk/${relativePath}`, import.meta.url)))
+        ]);
+        const files = {};
+        for (const [index, [, mountPath]] of sdkFiles.entries()) {
+            if (!responses[index].ok) throw new Error(`Could not fetch the C++ provider SDK file '${sdkFiles[index][0]}'.`);
+            files[mountPath] = await responses[index].text();
+        }
+        const wasmer = await Wasmer.create();
+        return wasmer.sandboxes.create({ packages: ['clang/clang'], files });
+    }
+};
+
+export function setCppProviderSources(replacement) {
+    if (sandboxPromise) throw new Error('The C++ toolchain is already loaded: its sources can only be set before it is first used.');
+    sources = { ...sources, ...replacement };
+}
+
 let sandboxPromise = null;
 async function ensureSandbox() {
     if (!sandboxPromise) {
-        sandboxPromise = (async () => {
-            const [{ Wasmer }, ...responses] = await Promise.all([
-                import(new URL('./node_modules/@wasmer/sdk/dist/index.js', import.meta.url).href),
-                ...sdkFiles.map(([relativePath]) => fetch(new URL(`./cppProviderSdk/${relativePath}`, import.meta.url)))
-            ]);
-            const files = {};
-            for (const [index, [, mountPath]] of sdkFiles.entries()) {
-                if (!responses[index].ok) throw new Error(`Could not fetch the C++ provider SDK file '${sdkFiles[index][0]}'.`);
-                files[mountPath] = await responses[index].text();
-            }
-            const wasmer = await Wasmer.create();
-            return wasmer.sandboxes.create({ packages: ['clang/clang'], files });
-        })();
+        sandboxPromise = sources.createSandbox();
+        // A sandbox that could not be made (Wasmer's registry out of reach) must not be kept, or no provider could compile after it.
+        sandboxPromise.catch(() => { sandboxPromise = null; });
     }
     return sandboxPromise;
 }
@@ -95,7 +109,8 @@ async function compileProvider(source) {
         }
         return WebAssembly.compile(output.stdout.bytes);
     })();
-    modulePromise.then((resolved) => resolvedModulesBySource.set(source, resolved), () => {});
+    // A failure is not kept either: the same source is compiled again when next asked for (a compile error simply comes back again).
+    modulePromise.then((resolved) => resolvedModulesBySource.set(source, resolved), () => compiledModulesBySource.delete(source));
     compiledModulesBySource.set(source, modulePromise);
     return modulePromise;
 }

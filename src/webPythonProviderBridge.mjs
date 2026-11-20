@@ -17,22 +17,38 @@
 
 const sdkFiles = ['__init__.py', '__main__.py', '_webBridge.py'];
 
+// Where Pyodide and the provider SDK come from: beside this module in the web shell, which scripts/buildWebShell.mjs assembles with
+// both. Replaceable before Pyodide is first loaded (setPythonProviderSources), so a test can run the same bridge on the Pyodide in
+// node_modules and the SDK in engine/sdk/python.
+let sources = {
+    importPyodide: () => import(new URL('./node_modules/pyodide/pyodide.mjs', import.meta.url).href),
+    indexURL: new URL('./node_modules/pyodide/', import.meta.url).href,
+    async readSdkFile(fileName) {
+        const response = await fetch(new URL(`./pythonProviderSdk/konjugate/${fileName}`, import.meta.url));
+        if (!response.ok) throw new Error(`Could not fetch the Python provider SDK file '${fileName}'.`);
+        return response.text();
+    }
+};
+
+export function setPythonProviderSources(replacement) {
+    if (pyodidePromise) throw new Error('Pyodide is already loaded: its sources can only be set before it is first used.');
+    sources = { ...sources, ...replacement };
+}
+
 let pyodidePromise = null;
 function ensurePyodideLoaded() {
     if (!pyodidePromise) {
         pyodidePromise = (async () => {
-            const { loadPyodide } = await import(new URL('./node_modules/pyodide/pyodide.mjs', import.meta.url).href);
-            const pyodide = await loadPyodide({ indexURL: new URL('./node_modules/pyodide/', import.meta.url).href });
+            const { loadPyodide } = await sources.importPyodide();
+            const pyodide = await loadPyodide({ indexURL: sources.indexURL });
             pyodide.FS.mkdirTree('/konjugateSdk/konjugate');
             pyodide.FS.mkdirTree('/konjugateProviders');
-            for (const fileName of sdkFiles) {
-                const response = await fetch(new URL(`./pythonProviderSdk/konjugate/${fileName}`, import.meta.url));
-                if (!response.ok) throw new Error(`Could not fetch the Python provider SDK file '${fileName}'.`);
-                pyodide.FS.writeFile(`/konjugateSdk/konjugate/${fileName}`, await response.text());
-            }
+            for (const fileName of sdkFiles) pyodide.FS.writeFile(`/konjugateSdk/konjugate/${fileName}`, await sources.readSdkFile(fileName));
             pyodide.runPython('import sys\nif "/konjugateSdk" not in sys.path: sys.path.insert(0, "/konjugateSdk")');
             return pyodide;
         })();
+        // A failed load (an SDK file that did not come down) must not be kept, or every later provider would fail with it.
+        pyodidePromise.catch(() => { pyodidePromise = null; });
     }
     return pyodidePromise;
 }

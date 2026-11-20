@@ -48,7 +48,7 @@ See [Konjugate Web](proposals/webEdition.md) for the design and current scope. T
 npm run setup:web
 ```
 
-This installs the Emscripten SDK (a pinned version, matching `vcpkg.json`'s own pinned-baseline convention) into the ignored `.tools/emsdk` directory, and vcpkg into `.tools/vcpkg` if not already present, via `scripts/setupWebBuild.mjs`. It requires `cmake`, `git` and `python3` on `PATH` in addition to the platform prerequisites above. `make setupWeb` runs the same script from the Makefile.
+This installs the Emscripten SDK (a pinned version, matching `vcpkg.json`'s own pinned-baseline convention) into the ignored `.tools/emsdk` directory, and vcpkg into `.tools/vcpkg` if not already present, via `scripts/setupWebBuild.mjs`. It requires `cmake`, `git` and `python3` on `PATH` in addition to the platform prerequisites above. `make setupWeb` runs the same script from the Makefile. With it installed, `npm test` also runs the C++ provider bridge's tests (`tests/webCppProviderBridge.test.mjs`), which build their stand-in providers with its clang into `out/testFixtures`; without it they are skipped, saying so.
 
 ```bash
 npm run build:web

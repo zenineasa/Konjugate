@@ -121,16 +121,3 @@ test('providers are made ready only for a model that has them', async () => {
     assert.deepEqual(Module, {}, 'Neither Pyodide nor a C++ toolchain is loaded, and nothing is installed on the module.');
     assert.deepEqual(await checkSubstepConvergenceWithWebEngine(), { available: false });
 });
-
-// The C++ bridge compiles with a clang fetched from Wasmer's registry, which only the browser suite can reach; what it refuses
-// without one is checked here.
-test('the C++ provider bridge refuses a provider that was never compiled, and a dispatch to none', async () => {
-    const { ensureCppProvidersReady: ensureReady, installCppProviderBridge } = await import('../src/webCppProviderBridge.mjs');
-    const untouched = {};
-    await ensureReady(untouched, JSON.stringify({ nodes: [{ implementation: { kind: 'cpp' } }], edges: [] }));
-    assert.deepEqual(untouched, {}, 'A C++ provider with no source has nothing to compile.');
-    const Module = {};
-    installCppProviderBridge(Module);
-    assert.throws(() => Module.registerCppProviderBridge('provider-1', 'int main() {}'), /has not finished compiling/);
-    assert.throws(() => Module.dispatchCppProviderBridge('provider-1', new Uint8Array([1])), /No web C\+\+ provider instance for 'provider-1'/);
-});

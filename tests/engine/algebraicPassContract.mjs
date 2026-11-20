@@ -155,7 +155,40 @@ try {
         assert.equal(value[71], 6 * sample.time + 3, `y = 3z within the instant at t=${sample.time}`);
     }
 
-    console.log('✓ algebraic pass contract: a chain through a setsValue source term settles within each instant, an ordinary edge reads it at each step\'s start, a node program stays one co-simulation step behind its inputs, and a neuron of ordinary terms into worked-out states is its equation at every instant.');
+    // A program setting a state marked worked out is a term like any other: o = 3s at the instant, no step behind.
+    const pure = structuredClone(document);
+    const program = pure.nodes.find((node) => node.id === 3);
+    program.states[0].changes = 'atEachInstant';
+    delete program.implementation.outputs[0].setsValue;
+    const purePath = join(directory, 'pure.kjt');
+    await writeFile(purePath, await encodeProjectFile(JSON.stringify(pure)));
+    assert.equal(await execute(executable, ['validate', purePath, '--report', reportPath]), 0);
+    assert.equal(await execute(executable, ['run', purePath, '--configuration', configurationPath, '--output', outputPath]), 0);
+    for (const sample of decodeResultFile(await readFile(outputPath)).samples) {
+        const value = Object.fromEntries(sample.states.map((state) => [state.stateId, state.value]));
+        assert.equal(value[31], 6 * sample.time + 3, `a program setting a worked-out state gives o = 3s at the instant, t=${sample.time}`);
+    }
+    // The same wiring with a program that keeps state (its checkpoint holds its running total) is stopped before the
+    // first step, naming the node: worked out at each instant it may be asked more than once at one instant.
+    const stateful = structuredClone(pure);
+    stateful.nodes.find((node) => node.id === 3).implementation.source = providerSource
+        .replace('    def evaluate(self, context, inputs, outputs):\n        outputs.add_gradient("out", 3 * inputs["s"])',
+            '    total = 0.0\n\n    def evaluate(self, context, inputs, outputs):\n        self.total += inputs["s"]\n        outputs.add_gradient("out", self.total)')
+        .replace('        return b""', '        import struct\n        return struct.pack("!d", self.total)');
+    assert.match(stateful.nodes.find((node) => node.id === 3).implementation.source, /self\.total \+= inputs/, 'The stateful program was not written as meant.');
+    const statefulPath = join(directory, 'stateful.kjt');
+    await writeFile(statefulPath, await encodeProjectFile(JSON.stringify(stateful)));
+    const failure = await new Promise((resolve, reject) => {
+        const child = spawn(executable, ['run', statefulPath, '--configuration', configurationPath, '--output', outputPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+        let stderr = '';
+        child.stderr.on('data', (chunk) => { stderr += chunk; });
+        child.once('error', reject);
+        child.once('exit', (code) => resolve({ code, stderr }));
+    });
+    assert.notEqual(failure.code, 0, 'A program keeping state, setting a worked-out state, should stop the run.');
+    assert.match(failure.stderr, /The program of node 3 sets states worked out at each instant, so it must keep no state of its own, but its checkpoint holds 8 bytes/);
+
+    console.log('✓ algebraic pass contract: a chain through a setsValue source term settles within each instant, an ordinary edge reads it at each step\'s start, a node program stays one co-simulation step behind its inputs, a neuron of ordinary terms into worked-out states is its equation at every instant, and a program setting a worked-out state is worked out at the instant, or stopped before the first step if it keeps state.');
 } finally {
     await rm(directory, { recursive: true, force: true });
 }

@@ -244,6 +244,12 @@ struct NodeProviderTask {
     // values, stored schedules and recorded interventions reach them as they reach any parameter.
     std::vector<CompiledParameter> parameters;
     std::vector<NodeProviderOutputBinding> outputs; // N named outputs -> this node's own states
+    // Every output sets a state marked as worked out at each instant (docs/projectSchema.md, a state's `changes`): the
+    // program is then a term like any other, worked out once per synchronization instant in the cross-model algebraic
+    // pass (AlgebraicStepKind::program), from the states at that instant, its outputs added to their states; and it must
+    // keep no state of its own, which the run checks of its checkpoint. Otherwise it advances with its node's substeps
+    // and reports after each, as a co-simulation step.
+    bool atEachInstant = false;
 };
 
 class ProviderEvaluator {
@@ -357,7 +363,9 @@ enum class AlgebraicStepKind {
     // state holds at the instant is from that instant's values.
     sourceTerm,
     // plan.nodes[node].valueTerms[index]: added to its state, which the pass sets to zero first.
-    valueTerm
+    valueTerm,
+    // plan.nodes[node].nodeProvider, worked out at each instant: each output added to its state.
+    program
 };
 
 struct AlgebraicStep {

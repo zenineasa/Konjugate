@@ -878,6 +878,20 @@ void buildAlgebraicPass(ExecutionPlan& plan) {
             written.insert(output);
             joined.push_back({{AlgebraicStepKind::valueTerm, nodeIndex, termIndex}, readsOf(node, term), {output}});
         }
+        // A program worked out at each instant: it reads every state it binds (what it uses is not known) and adds to
+        // each state its outputs set.
+        if (node.nodeProvider && node.nodeProvider->atEachInstant) {
+            Joined program{{AlgebraicStepKind::program, nodeIndex, 0}, {}, {}};
+            for (const auto& binding : node.nodeProvider->bindings) {
+                if (binding.source == BindingSource::localState) program.reads.push_back(node.stateIndexes.at(binding.valueIndex));
+                else if (binding.source == BindingSource::synchronizationSnapshot) program.reads.push_back(binding.valueIndex);
+            }
+            for (const auto& output : node.nodeProvider->outputs) {
+                program.writes.push_back(node.stateIndexes.at(output.stateIndex));
+                written.insert(program.writes.back());
+            }
+            joined.push_back(std::move(program));
+        }
     }
     // A node's own terms read only its own states and are in dependency order, every term setting a state before any
     // reading it, so one sweep finds every state that joins: what relationships and value terms set is known before it.
@@ -989,6 +1003,13 @@ StateKinds scanStateKinds(const boost::property_tree::ptree& document) {
         for (const auto& stateItem : node.get_child("states")) {
             states.push_back(idValue(stateItem.second, "id"));
             if (value(stateItem.second, "changes") == "atEachInstant") kinds.declaredWorkedOut.insert(states.back());
+        }
+        // A program setting a worked-out state is worked out in the pass, so its node's own terms setting that state are too.
+        if (const auto outputs = node.get_child_optional("implementation.outputs")) {
+            for (const auto& output : *outputs) {
+                const auto stateId = idValue(output.second, "stateId");
+                if (kinds.declaredWorkedOut.contains(stateId)) kinds.reachedFromOutside.insert(stateId);
+            }
         }
     }
     for (const auto& edgeItem : document.get_child("edges")) {
@@ -1195,13 +1216,22 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 output.setsValue = value(outputEntry, "setsValue") == "true";
                 providerTask.outputs.push_back(std::move(output));
             }
+            // A program whose outputs all set states marked as worked out at each instant is a term like any other,
+            // worked out at the instant (see NodeProviderTask::atEachInstant). One reaching both kinds would have to be
+            // both a value at the instant and a step that advances, and is refused.
+            const auto worked = static_cast<std::size_t>(std::count_if(providerTask.outputs.begin(), providerTask.outputs.end(),
+                [&](const auto& output) { return stateKinds.declaredWorkedOut.contains(output.stateId); }));
+            if (worked && worked != providerTask.outputs.size()) {
+                throw std::runtime_error("A computational-node provider sets both states worked out at each instant and states that change over time.");
+            }
+            providerTask.atEachInstant = worked == providerTask.outputs.size() && worked > 0;
             // Same reasoning, and same defensive necessity (main.cpp's run command compiles
             // without validating), as the algebraic-source-term self-reference throw above: a
             // setsValue output reading its own target state back through one of this provider's
             // own (shared, not per-output) bindings would make it a hidden, substep-count-dependent
             // recurrence rather than a genuine algebraic value.
             for (const auto& output : providerTask.outputs) {
-                if (!output.setsValue) continue;
+                if (!output.setsValue && !providerTask.atEachInstant) continue;
                 for (const auto& binding : providerTask.bindings) {
                     if (binding.source == BindingSource::localState && binding.valueId == output.stateId) {
                         throw std::runtime_error(
@@ -1425,7 +1455,9 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
         }
     }
 
-    if (node.nodeProvider) {
+    // A program worked out at each instant is evaluated in the cross-model algebraic pass instead (see
+    // NodeProviderTask::atEachInstant): through the step its outputs hold the values the pass set when the step began.
+    if (node.nodeProvider && !node.nodeProvider->atEachInstant) {
         const auto& task = *node.nodeProvider;
         std::vector<double> inputs(task.bindings.size());
         for (std::size_t index = 0; index < task.bindings.size(); ++index) {
@@ -1876,6 +1908,31 @@ std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValue
             }
             states.at(node.stateIndexes.at(task.outputStateIndex)) +=
                 algebraicTaskValue(task, symbols, simulationTime, stepSize / static_cast<double>(node.substeps), providerEvaluator);
+            continue;
+        }
+        if (step.kind == AlgebraicStepKind::program) {
+            // A program worked out at each instant, from the states as they stand; each output added to its state.
+            const auto& node = plan.nodes[step.node];
+            const auto& task = *node.nodeProvider;
+            const auto parameterValues = task.parameters.empty()
+                ? std::vector<double>{} : resolveNodeProviderParameterValues(task, liveParameterValues, activeSchedules, simulationTime);
+            std::vector<double> inputs(task.bindings.size());
+            for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+                const auto& binding = task.bindings[index];
+                if (binding.source == BindingSource::parameter) inputs[index] = parameterValues.at(binding.parameterIndex);
+                else if (binding.source == BindingSource::simulationTime) inputs[index] = simulationTime;
+                else if (binding.source == BindingSource::localState) inputs[index] = states.at(node.stateIndexes.at(binding.valueIndex));
+                else inputs[index] = states.at(binding.valueIndex);
+            }
+            if (!providerEvaluator) throw std::runtime_error("A computational-node provider requires an initialized provider runtime.");
+            for (const auto& [outputKey, outputValue] : providerEvaluator->evaluateNode(task, inputs, simulationTime, stepSize)) {
+                const auto output = std::find_if(task.outputs.begin(), task.outputs.end(), [&](const auto& candidate) { return candidate.key == outputKey; });
+                if (output == task.outputs.end()) {
+                    throw std::runtime_error("A computational-node provider returned an undeclared output key '" + outputKey + "'.");
+                }
+                if (!std::isfinite(outputValue)) throw std::runtime_error("A computational-node provider produced a non-finite value.");
+                states.at(node.stateIndexes.at(output->stateIndex)) += outputValue;
+            }
             continue;
         }
         if (step.kind == AlgebraicStepKind::valueTerm) {

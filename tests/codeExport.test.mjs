@@ -508,6 +508,13 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     term.expressionModel = { ...term.expressionModel, bindings: [], mathJson: 2 };
     summed.nodes[0].sourceTerms.push({ ...structuredClone(term), id: id() });
     assert.throws(() => generateStandaloneProgram(summed, 'python'), /"Tank · Pressure" is the sum of 2 of its node's own terms, which code export cannot write yet/);
+    // A program setting a worked-out state.
+    const program = singleNodeSourceTermModel();
+    program.nodes[0].sourceTerms = [];
+    program.nodes[0].states[0].changes = 'atEachInstant';
+    program.nodes[0].implementation = { kind: 'python', providerApiVersion: 1, source: 'class P: pass', bindings: [],
+        outputs: [{ key: 'out', stateId: program.nodes[0].states[0].id }] };
+    assert.throws(() => generateStandaloneProgram(program, 'python'), /The program of node "Tank" sets "Tank · Pressure", a state worked out at each instant, which code export cannot write yet/);
     // One setsValue term, as before, still exports.
     summed.nodes[0].sourceTerms.pop();
     assert.doesNotThrow(() => generateStandaloneProgram(summed, 'python'));

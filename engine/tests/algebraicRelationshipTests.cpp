@@ -548,8 +548,19 @@ void theValidatorChecksAStatesChangesAgainstWhatReachesIt() {
                             "bindings": [{"key": "in", "kind": "state", "nodeId": 2, "stateId": 21}],
                             "outputs": [{"key": "out", "stateId": 41, "setsValue": true}]}})json";
     require(konjugate::validateModel(parse(sourceTermChain(program))).valid, "A program setting its output should be valid as it is.");
-    require(onlyIssue(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "atEachInstant")), "programOutputWorkedOut"),
-        "A program's output marked worked out should be programOutputWorkedOut alone.");
+    // Its one output marked worked out, the program is worked out at each instant: a term like any other.
+    require(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "atEachInstant")).valid,
+        "A program whose outputs all set states marked worked out should be valid: it is worked out at each instant.");
+    // One output of each kind cannot be both.
+    auto mixedProgram = std::string(program);
+    const std::string oneOutput = R"json([{"key": "out", "stateId": 41, "setsValue": true}])json";
+    mixedProgram.replace(mixedProgram.find(oneOutput), oneOutput.size(),
+        R"json([{"key": "out", "stateId": 41, "setsValue": true}, {"key": "rate", "stateId": 42}])json");
+    const std::string oneState = R"json("states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0}])json";
+    mixedProgram.replace(mixedProgram.find(oneState), oneState.size(),
+        R"json("states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0}, {"id": 42, "name": "R", "symbol": "r", "initialValue": 0}])json");
+    require(onlyIssue(konjugate::validateModel(withChanges(parse(sourceTermChain(mixedProgram)), 41, "atEachInstant")), "programOutputsMixed"),
+        "A program setting a worked-out state and a changing one should be programOutputsMixed alone.");
     require(konjugate::validateModel(withChanges(parse(sourceTermChain(program)), 41, "overTime")).valid,
         "A program's output marked as changing over time should be valid.");
 }
@@ -708,6 +719,55 @@ void anUnusedBindingIsNeitherADependencyNorALoop() {
     require(at(22) == 5 && at(31) == 5 && at(21) == 5, "t = 5, z = t and y = z.");
 }
 
+// Answers a program with out = 3 in, counting the calls.
+class TriplingNodeEvaluator final : public konjugate::ProviderEvaluator {
+public:
+    std::vector<double> evaluateBatch(const std::vector<const konjugate::ContributionTask*>&,
+                                      const std::vector<std::span<const double>>&, double, double) override {
+        throw std::runtime_error("This test expects only computational-node evaluation.");
+    }
+    std::vector<std::pair<std::string, double>> evaluateNode(const konjugate::NodeProviderTask& task, std::span<const double> inputs,
+                                                             double simulationTime, double stepSize) override {
+        require(task.atEachInstant, "Only the program worked out at each instant should be evaluated.");
+        require(inputs.size() == 1, "The program reads one input.");
+        lastTime = simulationTime;
+        lastStep = stepSize;
+        ++calls;
+        return {{"out", 3 * inputs[0]}};
+    }
+    int calls = 0;
+    double lastTime = -1;
+    double lastStep = -1;
+};
+
+void aProgramSettingWorkedOutStatesIsWorkedOutAtTheInstant() {
+    // P reads B.y = 2x = 6 and sets its own o = 3y, marked worked out; a relationship sets D.v = o + 1.
+    const auto program = R"json(,
+        {"id": 4, "name": "P", "states": [{"id": 41, "name": "O", "symbol": "o", "initialValue": 0, "changes": "atEachInstant"}], "sourceTerms": [],
+         "implementation": {"kind": "python", "providerApiVersion": 1, "source": "class P: pass",
+                            "bindings": [{"key": "in", "kind": "state", "nodeId": 2, "stateId": 21}],
+                            "outputs": [{"key": "out", "stateId": 41}]}},
+        {"id": 8, "name": "D", "states": [{"id": 81, "name": "V", "symbol": "v", "initialValue": 0}], "sourceTerms": []})json";
+    const auto reading = R"json(,
+        {"id": 9, "name": "P to D", "directionality": "directed", "source": {"nodeId": 4}, "target": {"nodeId": 8}, "parameters": [],
+         "equationModel": {"bindings": [{"symbol": "o", "kind": "state", "role": "source", "nodeId": 4, "stateId": 41}],
+                           "outputs": [{"role": "target", "stateId": 81, "mathJson": ["Add", "o", 1], "setsValue": true}]}})json";
+    const auto document = parse(sourceTermChain(program, reading));
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid, "A program between two relationships, setting a state marked worked out, should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    TriplingNodeEvaluator evaluator;
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 2.5, 0.1, &evaluator);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(evaluator.calls == 1 && evaluator.lastTime == 2.5 && evaluator.lastStep == 0.1, "The program should be worked out once, at the instant.");
+    require(at(21) == 6 && at(41) == 18 && at(81) == 19, "y = 2x, o = 3y and v = o + 1 should all settle within one instant.");
+    const auto& node = *std::find_if(plan.nodes.begin(), plan.nodes.end(), [](const auto& candidate) { return candidate.nodeId == 4; });
+    const auto integrated = konjugate::integrateNode(node, states, {}, 2.5, 0.1, &evaluator);
+    require(evaluator.calls == 1 && integrated.states.at(0) == 18, "Inside its node's step the program is not worked out: o holds its value.");
+}
+
 int main() {
     try {
         aChainAcrossNodesSettlesWithinOneInstantInDependencyOrder();
@@ -732,6 +792,7 @@ int main() {
         aLoopOfOrdinaryRelationshipsBetweenWorkedOutStatesIsRefused();
         aProgramsOutputIsItsAlone();
         anUnusedBindingIsNeitherADependencyNorALoop();
+        aProgramSettingWorkedOutStatesIsWorkedOutAtTheInstant();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

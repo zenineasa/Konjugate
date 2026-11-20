@@ -874,6 +874,20 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 std::set<std::string> outputKeys;
                 bool nodeProviderSelfReference = false;
                 const auto outputs = implementation->get_child_optional("outputs");
+                // A program whose outputs all set states marked as worked out at each instant is a term like any other,
+                // worked out at the instant; one reaching both kinds cannot be both that and a step that advances.
+                const auto declaredWorked = [&](const std::string& stateId) {
+                    const auto found = declaredChanges.find(stateId);
+                    return found != declaredChanges.end() && found->second == "atEachInstant";
+                };
+                const auto workedOutputs = outputs ? std::count_if(outputs->begin(), outputs->end(),
+                    [&](const auto& entry) { return declaredWorked(value(entry.second, "stateId")); }) : 0;
+                const bool programAtEachInstant = outputs && workedOutputs > 0 && static_cast<std::size_t>(workedOutputs) == outputs->size();
+                if (outputs && workedOutputs > 0 && !programAtEachInstant) {
+                    add(result, "programOutputsMixed", "error", "The program of " + value(node, "name") + " sets both states worked out at each "
+                        "instant and states that change over time. A program is either worked out at each instant, keeping no state of its own, "
+                        "or a step that advances: mark all the states it sets alike.", "node", id, "implementation");
+                }
                 if (!outputs || outputs->empty()) {
                     add(result, "nodeProviderOutputsEmpty", "error", "A computational-node provider must declare at least one named output.", "node", id, "implementation");
                 } else for (const auto& outputEntry : *outputs) {
@@ -889,12 +903,16 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
                     } else {
                         stateContributorCounts[outputStateId] += 1;
-                        if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
+                        if (declaredWorked(outputStateId)) {
+                            // A term setting the value, added to the state's others (or, from a program setting both
+                            // kinds, already said above). Reading its own output back would be a loop.
+                            if (nodeProviderBindingStateIds.contains(outputStateId)) nodeProviderSelfReference = true;
+                        } else if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
                         else {
                             rateContributorCounts[outputStateId] += 1;
                             programRateCounts[outputStateId] += 1;
                         }
-                        if (value(output, "setsValue") == "true") {
+                        if (value(output, "setsValue") == "true" && !declaredWorked(outputStateId)) {
                             setsValueStateIds.insert(outputStateId);
                             // A setsValue output reading its own target state back through one of
                             // this provider's (shared, per-node not per-output) bindings would make
@@ -1131,11 +1149,6 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             add(result, "rateIntoWorkedOutState", "error",
                 label(stateId) + " is worked out at each instant, so nothing can add a rate to it. Make what adds a rate set a value instead, "
                 "or give the rate to a state that changes over time.", "node", owner(stateId), "states");
-        }
-        if (declared(stateId) == "atEachInstant" && programValueStateIds.contains(stateId)) {
-            add(result, "programOutputWorkedOut", "error",
-                label(stateId) + " is set by its node's program after each step, which is not a value worked out at each instant: "
-                "mark it as changing over time.", "node", owner(stateId), "states");
         }
         if (declared(stateId) == "atEachInstant" && stateContributorCounts[stateId] == 0 && !relationshipStateIds.contains(stateId)) {
             add(result, "workedOutStateUnset", "warning",

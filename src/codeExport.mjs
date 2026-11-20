@@ -240,6 +240,12 @@ export function buildModel(sourceDocument) {
         for (const [stateId, count] of setsValueCounts) {
             if (count > 1) throw new Error(`${workedOutName(stateId)} is the sum of ${count} of its node's own terms, which code export cannot write yet.`);
         }
+        // A program setting a worked-out state is worked out at each instant; the exported loop runs every program as a
+        // step that advances, which would put its outputs a step behind.
+        const workedOutOutput = (plan.node.implementation?.outputs ?? []).find((output) => workedOutStateIds.has(output.stateId));
+        if (workedOutOutput) {
+            throw new Error(`The program of node "${plan.node.name}" sets ${workedOutName(workedOutOutput.stateId)}, a state worked out at each instant, which code export cannot write yet.`);
+        }
     }
     for (const plan of nodePlans) {
         for (const term of plan.node.sourceTerms ?? []) {

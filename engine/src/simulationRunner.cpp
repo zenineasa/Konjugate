@@ -1178,7 +1178,17 @@ ProviderCheckpointStates Simulation::captureProviderStates() {
     ProviderCheckpointStates result;
     if (!providerRuntime) return result;
     for (const auto& node : executionPlan.nodes) {
-        if (node.nodeProvider) result.emplace_back(node.nodeId, providerRuntime->requestNodeCheckpoint(*node.nodeProvider));
+        if (!node.nodeProvider) continue;
+        auto payload = providerRuntime->requestNodeCheckpoint(*node.nodeProvider);
+        // A program worked out at each instant may be asked for its outputs more than once at one instant (a slider
+        // moved, a resume), which is only harmless if it keeps nothing between calls. A checkpoint holding anything says
+        // it does; the first is taken before the first step, so such a program stops the run before it starts.
+        if (node.nodeProvider->atEachInstant && !payload.empty()) {
+            throw std::runtime_error("The program of node " + std::to_string(node.nodeId) + " sets states worked out at each instant, so it must keep no "
+                "state of its own, but its checkpoint holds " + std::to_string(payload.size()) + " bytes. Mark the states it sets as changing over "
+                "time to run it as a step that advances, or make its checkpoint empty.");
+        }
+        result.emplace_back(node.nodeId, std::move(payload));
     }
     return result;
 }

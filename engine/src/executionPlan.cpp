@@ -1934,7 +1934,8 @@ UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const
     const StateValues prior = states;
     for (const auto index : plan.settleStateIndexes) states.at(index) = 0;
     ++epoch;
-    for (const auto& group : plan.settleGroups) {
+    for (std::size_t groupIndex = 0; groupIndex < plan.settleGroups.size(); ++groupIndex) {
+        const auto& group = plan.settleGroups[groupIndex];
         if (!group.ring) {
             const auto& step = plan.updateSteps[group.steps.front()];
             states.at(step.writes) += evaluate(step, states);
@@ -1953,6 +1954,7 @@ UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const
             part[state] = prior.at(state) - states.at(state);
         }
         bool settled = false;
+        UnsettledRing largest{groupIndex, ringStates.front(), 0};
         for (std::size_t sweep = 0; sweep < group.limit && !settled; ++sweep) {
             for (const auto state : ringStates) states.at(state) = base[state] + part[state];
             const StateValues read = states;
@@ -1964,14 +1966,19 @@ UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const
                 next[step.writes] += evaluate(step, read);
             }
             settled = true;
+            largest.change = 0;
             for (const auto state : ringStates) {
                 const auto change = std::abs(next[state] - part[state]);
                 if (!(change <= 1e-12 * std::max(1.0, std::abs(base[state] + next[state])))) settled = false;
+                if (!(change <= largest.change)) largest = {groupIndex, state, change};
             }
             part = std::move(next);
         }
         for (const auto state : ringStates) states.at(state) = base[state] + part[state];
-        if (!settled) ++outcome.ringsUnsettled;
+        if (!settled) {
+            ++outcome.ringsUnsettled;
+            outcome.unsettledRings.push_back(largest);
+        }
     }
     return outcome;
 }

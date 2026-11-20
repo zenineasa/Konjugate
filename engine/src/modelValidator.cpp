@@ -556,6 +556,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     std::unordered_map<std::string, int> programRateCounts;
     std::unordered_map<std::string, std::string> stateLabels;
     std::unordered_map<std::string, std::string> stateOwners;
+    // Per state, what adds a rate to it and what sets its value, named as a person finds them: a node's source term (by
+    // what it says), a node's program, a relationship (by its name).
+    std::unordered_map<std::string, std::vector<std::string>> rateSources;
+    std::unordered_map<std::string, std::vector<std::string>> valueSources;
+    const auto note = [](std::vector<std::string>& sources, const std::string& source) {
+        if (std::find(sources.begin(), sources.end(), source) == sources.end()) sources.push_back(source);
+    };
     const auto declaredKind = [&](const std::string& stateId) {
         const auto found = declaredKinds.find(stateId);
         return found == declaredKinds.end() ? std::string{} : found->second;
@@ -685,8 +692,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (!termOutputStateId.empty()) {
                     stateContributorCounts[termOutputStateId] += 1;
                     // A value when it says so or when its state says it is an Update; otherwise a rate.
+                    const auto expression = value(term, "expression");
+                    const auto termName = termProgrammable || expression.empty() ? value(node, "name") + "'s source term"
+                        : value(node, "name") + "'s source term \"" + (expression.size() > 40 ? expression.substr(0, 37) + "..." : expression) + "\"";
                     if (value(term, "setsValue") == "true") termValueStateIds.insert(termOutputStateId);
                     else if (declaredKind(termOutputStateId) != "update") plainRateCounts[termOutputStateId] += 1;
+                    if (value(term, "setsValue") == "true" || declaredKind(termOutputStateId) == "update") note(valueSources[termOutputStateId], termName);
+                    else note(rateSources[termOutputStateId], termName);
                     if (value(term, "setsValue") == "true") {
                         setsValueStateIds.insert(termOutputStateId);
                         std::vector<std::string> referencedStateIds;
@@ -877,6 +889,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         stateContributorCounts[outputStateId] += 1;
                         if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
                         else programRateCounts[outputStateId] += 1;
+                        note(value(output, "setsValue") == "true" ? valueSources[outputStateId] : rateSources[outputStateId], value(node, "name") + "'s program");
                         if (value(output, "setsValue") == "true") {
                             setsValueStateIds.insert(outputStateId);
                             // A setsValue output reading its own target state back through one of
@@ -924,6 +937,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             // A single equation adds a rate, unless its state says it is an Update, when it is a value.
             stateContributorCounts[stateId] += 1;
             if (declaredKind(stateId) != "update") plainRateCounts[stateId] += 1;
+            const auto edgeName = "relationship \"" + value(edge, "name") + "\"";
+            note(declaredKind(stateId) == "update" ? valueSources[stateId] : rateSources[stateId], edgeName);
             if (value(edge, "directionality") != "bidirectional") return;
             const auto otherNodeId = role == "target" ? sourceNode : targetNode;
             const auto otherStateField = role == "target" ? "source.stateId" : "target.stateId";
@@ -932,6 +947,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (!otherStateId.empty()) {
                 stateContributorCounts[otherStateId] += 1;
                 if (declaredKind(otherStateId) != "update") plainRateCounts[otherStateId] += 1;
+                note(declaredKind(otherStateId) == "update" ? valueSources[otherStateId] : rateSources[otherStateId], edgeName);
             }
         };
         // An edge is inert -- and its content unvalidated -- if it's disabled itself, or either
@@ -992,6 +1008,10 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         // the bindings and the definitions (named intermediate quantities) before it.
         if (const auto outputs = edge.get_child_optional("equationModel.outputs")) {
             validateAlgebraicRelationship(result, edge, *outputs, stateIds, parameterIds, sourceNode, targetNode, id, relationshipStateIds);
+            for (const auto& output : *outputs) {
+                const auto stateId = value(output.second, "stateId");
+                if (!stateId.empty()) note(valueSources[stateId], "relationship \"" + value(edge, "name") + "\"");
+            }
             continue;
         }
         const auto implementation = edge.get_child_optional("implementation");
@@ -1094,12 +1114,26 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     // is summed. A program's setsValue output is the program's alone: it reports where the program got to.
     const auto label = [&](const std::string& stateId) { return stateLabels.contains(stateId) ? stateLabels.at(stateId) : stateId; };
     const auto owner = [&](const std::string& stateId) { return stateOwners.contains(stateId) ? stateOwners.at(stateId) : std::string{}; };
+    // "A", "A and B", "A, B and C", "A, B, C and 2 others".
+    const auto list = [](const std::vector<std::string>& names) {
+        std::string text;
+        const std::size_t shown = std::min<std::size_t>(names.size(), 3);
+        for (std::size_t index = 0; index < shown; ++index) {
+            if (index) text += index + 1 == shown && shown == names.size() ? " and " : ", ";
+            text += names[index];
+        }
+        if (shown < names.size()) text += " and " + std::to_string(names.size() - shown) + (names.size() - shown == 1 ? " other" : " others");
+        return text;
+    };
     std::set<std::string> checked;
     for (const auto* setters : {&termValueStateIds, &relationshipStateIds, &programValueStateIds}) {
         for (const auto& stateId : *setters) {
             if (declaredKind(stateId) != "rate" || !checked.insert(stateId).second) continue;
-            add(result, "valueIntoRateState", "error", label(stateId) + " is a rate, so nothing can set its value. Make it an update, or "
-                "make what sets it add a rate.", "node", owner(stateId), "states");
+            const auto& setBy = valueSources[stateId];
+            const auto who = setBy.empty() ? std::string("something") : list(setBy);
+            add(result, "valueIntoRateState", "error", label(stateId) + " is a rate: it changes by what is added to it over each step. "
+                "But " + who + (setBy.size() == 1 ? " sets" : " set") + " its value. Make it an update, so its value is set after "
+                "each step, or make " + (setBy.size() == 1 ? "that" : "those") + " add a rate instead.", "node", owner(stateId), "states");
         }
     }
     std::set<std::string> updates(termValueStateIds.begin(), termValueStateIds.end());
@@ -1111,8 +1145,15 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         // something sets it, any term that does not say it sets a value is.
         const auto rates = declaredKind(stateId) == "update" ? programRateCounts[stateId] : plainRateCounts[stateId] + programRateCounts[stateId];
         if (rates > 0) {
-            add(result, "rateIntoUpdateState", "error", label(stateId) + " is an update, so nothing can add a rate to it. Make what adds a "
-                "rate set a value, or give the rate to a state that is a rate.", "node", owner(stateId), "states");
+            const auto& addedBy = rateSources[stateId];
+            const auto& setBy = valueSources[stateId];
+            const auto why = declaredKind(stateId) == "update" || setBy.empty() ? std::string(": its value is set after each step")
+                : std::string(", because ") + list(setBy) + (setBy.size() == 1 ? " sets" : " set") + " its value after each step";
+            const auto who = addedBy.empty() ? std::string("something") : list(addedBy);
+            add(result, "rateIntoUpdateState", "error", label(stateId) + " is an update" + why + ". But " + who +
+                (addedBy.size() == 1 ? " adds" : " add") + " a rate to it, and an update has no rate to add to. Make " +
+                (addedBy.size() == 1 ? "that" : "those") + " set a value too, or give the rate to a state that is a rate.",
+                "node", owner(stateId), "states");
         }
     }
     // The plan compiled here, if any, serves the stability pass below too: compiling a large model takes seconds.
@@ -1181,6 +1222,32 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         } catch (const std::exception&) {
             // Some other, already-reported structural problem (or a genuinely uncompilable
             // document this pass has no business diagnosing) -- nothing to add here.
+        }
+    }
+    // A ring of Updates in settling nodes is valid, and swept each step until it settles or reaches its limit: said here, once
+    // per ring, so its cost, and a ring that never settles, are no surprise when the run warns.
+    const bool hasUpdates = !termValueStateIds.empty() || !relationshipStateIds.empty() ||
+        std::any_of(declaredKinds.begin(), declaredKinds.end(), [](const auto& entry) { return entry.second == "update"; });
+    if (hasUpdates && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
+        try {
+            if (!compiledPlan) compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
+            for (const auto& group : compiledPlan->settleGroups) {
+                if (!group.ring) continue;
+                std::vector<std::string> names;
+                std::string firstState;
+                for (const auto stepIndex : group.steps) {
+                    const auto stateId = std::to_string(compiledPlan->stateIds.at(compiledPlan->updateSteps.at(stepIndex).writes));
+                    if (firstState.empty()) firstState = stateId;
+                    const auto name = label(stateId);
+                    if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
+                }
+                add(result, "updatesRing", "warning", "These values are set from each other in a ring: " + list(names) + ". Their nodes "
+                    "settle within the step, so each step the ring is worked out again and again until it settles, up to " +
+                    std::to_string(group.limit) + " times. If it has no settled value the run carries on and says so. To have the ring "
+                    "go round once a step instead, let its nodes update once per step.", "node", owner(firstState), "numerics");
+            }
+        } catch (const std::exception&) {
+            // Reported above, or not this check's to report.
         }
     }
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });

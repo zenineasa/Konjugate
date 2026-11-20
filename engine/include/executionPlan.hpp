@@ -484,9 +484,18 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 
 // What one run of the update phase did: how many relationship definitions it worked out (each at most once per
 // sweep, and only if an equation needed it), and how many rings stopped at their limit without settling.
+// A ring of settling Updates that reached its limit still changing: which of `settleGroups` it is, the state that changed
+// most in its last sweep, and by how much.
+struct UnsettledRing {
+    std::size_t group = 0;
+    std::size_t stateIndex = 0;
+    double change = 0;
+};
+
 struct UpdateOutcome {
     std::size_t definitionsWorked = 0;
     std::size_t ringsUnsettled = 0;
+    std::vector<UnsettledRing> unsettledRings;
 };
 
 // The update phase (docs/proposals/ratesAndUpdates.md). `states` holds every Rate state as the step left it and every

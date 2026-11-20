@@ -794,8 +794,8 @@ public:
     void captureBoundary();
     void writeResult(const std::string& lifecycle, double simulationTime, bool completeSnapshot = false);
     void settleIfParametersChanged();
-    // Runs the update phase (applyUpdates) on `states` at `time`, and says once, on standard error, if a ring did not
-    // settle within its limit.
+    // Runs the update phase (applyUpdates) on `states` at `time`. A ring that did not settle within its limit is a finding
+    // (ringDidNotSettle), one per ring however many steps it fails in, and is said once on standard error.
     void updateStates(double time, bool afterStep, double stepSize);
     void integrateStep(std::size_t step, double synchronizationStep, double elapsed);
     void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double stepStartTime, double stepEndTime);
@@ -866,8 +866,12 @@ private:
     double nextOutputTime = 0;
     // How many parameter changes the algebraic states were last set with (see settleIfParametersChanged).
     std::size_t settledInterventions = 0;
-    // How many times a ring of settling Updates stopped at its limit without settling.
+    // How many times a ring of settling Updates stopped at its limit without settling; for each such ring (by its index in
+    // the plan's settleGroups), its finding in stabilityFindings and the steps it failed in; and what to call each state.
     std::size_t ringsUnsettled = 0;
+    struct UnsettledRingRecord { std::size_t finding = 0; std::size_t times = 0; double largestChange = 0; EntityId largestState = 0; };
+    std::unordered_map<std::size_t, UnsettledRingRecord> unsettledRingRecords;
+    std::unordered_map<EntityId, std::string> stateLabels;
     // A session's own: the states it sends samples of, its checkpoints (one every checkpointInterval from the time it began,
     // the latest pass through each kept), the time it was last restored to and how many steps it has taken since, the step
     // counter partitions are told (never reused), and the states the model computes from others, which cannot be set.
@@ -1018,6 +1022,16 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         steps = static_cast<std::size_t>(wholeSteps ? std::round(stepsExactly) : std::ceil(stepsExactly));
     }
     nodeMetrics.resize(executionPlan.nodes.size());
+    if (std::any_of(executionPlan.settleGroups.begin(), executionPlan.settleGroups.end(), [](const auto& group) { return group.ring; })) {
+        for (const auto& nodeItem : document.get_child("nodes")) {
+            const auto nodeName = nodeItem.second.get<std::string>("name", "");
+            for (const auto& stateItem : nodeItem.second.get_child("states")) {
+                const auto stateId = stateItem.second.get<EntityId>("id", 0);
+                const auto symbol = stateItem.second.get<std::string>("symbol", stateItem.second.get<std::string>("name", ""));
+                stateLabels[stateId] = nodeName.empty() ? symbol : nodeName + "'s " + symbol;
+            }
+        }
+    }
     // The settling nodes' Updates are settled before anything is recorded or read, so the first sample, the first
     // checkpoint and every node's first step all see consistent values -- after a restart too, where a fork may have
     // changed the parameters they depend on. An Update worked out once per step starts at its initial value.
@@ -1557,6 +1571,47 @@ void Simulation::updateStates(double time, bool afterStep, double stepSize) {
                   << " s; its values are those of the last sweep.\n";
     }
     ringsUnsettled += outcome.ringsUnsettled;
+    for (const auto& ring : outcome.unsettledRings) {
+        const auto& group = executionPlan.settleGroups.at(ring.group);
+        const auto label = [&](EntityId stateId) {
+            const auto found = stateLabels.find(stateId);
+            return found != stateLabels.end() && !found->second.empty() ? found->second : "state " + std::to_string(stateId);
+        };
+        const auto changedState = executionPlan.stateIds.at(ring.stateIndex);
+        auto [record, first] = unsettledRingRecords.try_emplace(ring.group);
+        if (first) {
+            DuringRunStabilityFinding finding;
+            finding.stateId = changedState;
+            finding.nodeId = executionPlan.stateNodes.count(changedState) ? executionPlan.stateNodes.at(changedState) : 0;
+            finding.code = "ringDidNotSettle";
+            finding.globalTime = time;
+            record->second.finding = stabilityFindings.size();
+            stabilityFindings.push_back(finding);
+        }
+        auto& kept = record->second;
+        ++kept.times;
+        if (!(ring.change <= kept.largestChange)) { kept.largestChange = ring.change; kept.largestState = changedState; }
+        // The states the ring sets, in the order they are first set, named as the canvas names them.
+        std::vector<EntityId> ringStates;
+        for (const auto stepIndex : group.steps) {
+            const auto stateId = executionPlan.stateIds.at(executionPlan.updateSteps.at(stepIndex).writes);
+            if (std::find(ringStates.begin(), ringStates.end(), stateId) == ringStates.end()) ringStates.push_back(stateId);
+        }
+        std::string names;
+        const std::size_t shown = std::min<std::size_t>(ringStates.size(), 6);
+        for (std::size_t index = 0; index < shown; ++index) {
+            if (index) names += index + 1 == shown && shown == ringStates.size() ? " and " : ", ";
+            names += label(ringStates[index]);
+        }
+        if (shown < ringStates.size()) names += " and " + std::to_string(ringStates.size() - shown) + " more";
+        std::ostringstream message;
+        message << "A ring of values settled within the step (" << names << ") was still changing after " << group.limit
+                << (group.limit == 1 ? " sweep" : " sweeps") << ", by up to " << kept.largestChange << " in " << label(kept.largestState)
+                << ", in " << kept.times << (kept.times == 1 ? " step" : " steps") << " of the run. The run carried on with the last "
+                << "sweep's values. The ring may have no settled value; if it settles slowly, give its nodes more sweeps, or let them "
+                << "update once per step, so the ring goes round once a step.";
+        stabilityFindings.at(kept.finding).message = message.str();
+    }
 }
 
 // The algebraic states set again for the instant, as a run does when it starts or resumes from a checkpoint.

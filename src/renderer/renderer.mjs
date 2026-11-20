@@ -5382,8 +5382,9 @@ function renderValidationStatus() {
     relationshipObjects.forEach((relationship, id) => {
         relationship.line.userData.validationSeverity = severityByEntity.get(id) ?? null;
     });
+    const bundlesByKey = new Map(activeRelationshipBundles().map((bundle) => [bundle.key, bundle]));
     relationshipBundleObjects.forEach((overlay, key) => {
-        const bundle = activeRelationshipBundles().find((candidate) => candidate.key === key);
+        const bundle = bundlesByKey.get(key);
         const severities = bundle?.relationships.map((item) => severityByEntity.get(item.id)).filter(Boolean) ?? [];
         overlay.element.classList.toggle('validationError', severities.includes('error'));
         overlay.element.classList.toggle('validationWarning', !severities.includes('error') && severities.includes('warning'));

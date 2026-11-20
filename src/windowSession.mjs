@@ -354,7 +354,8 @@ export class WindowSession {
                     // The estimator's members run the next stride again from this anchor, so they need its input readings.
                     { type: 'retainCheckpointsFrom', time: this.estimated.length ? anchor : nextAnchor }
                 ]);
-                // The restore at now is not the move's: the move's is the anchor's, the first one.
+                // The restore at now is not the move's: the move's is the anchor's, the last one before it (after skipped anchors, a
+                // catch-up's restore, from an earlier time, comes first).
                 replies = [...toNow, { ...onward[0], values: [] }, ...onward.slice(1)];
                 break;
             } catch (error) {
@@ -364,7 +365,7 @@ export class WindowSession {
         }
         const wallSeconds = (performance.now() - started) / 1000;
         const checkpointsTaken = replies.reduce((sum, reply) => sum + reply.checkpointsTaken, 0);
-        const restored = replies.find((reply) => reply.values.length);
+        const restored = replies.findLast((reply) => reply.values.length);
         const advances = replies.filter((reply) => reply.samples.length);
         const samples = advances.flatMap((reply) => reply.samples);
         const computeSeconds = replies.reduce((sum, reply) => sum + reply.computeNanoseconds, 0) / 1e9;

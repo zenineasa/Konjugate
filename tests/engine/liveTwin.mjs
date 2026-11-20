@@ -179,8 +179,9 @@ try {
     assert.ok(sameNumbers(outcome(detached.cycles), outcome(steady.cycles)), 'Nothing done in the sandbox reached the live twin.');
     assert.equal(heaterPowerParameterId, 40);
 
-    // Falling behind: the whole log at once, to a twin that keeps up with live data, skips to the newest anchor, rebuilding the
-    // checkpoint there from the start, and says how many moves it skipped.
+    // Already behind at the start: the whole log at once, to a twin that keeps up with live data, skips to the newest anchor,
+    // rebuilding the checkpoint there from the start, and says how many moves it passed over (history when it started, not moves
+    // it fell behind on, which `skipped` counts).
     {
         const { readDataLog } = await import('../../src/dataLog.mjs');
         const { readFile } = await import('node:fs/promises');
@@ -193,7 +194,9 @@ try {
         behind.push(log.observations);
         await behind.end();
         const stats = behind.stats();
-        assert.equal(stats.skipped, expectedCycles - 1, `It skipped to the newest anchor: ${stats.skipped} moves skipped.`);
+        assert.equal(stats.passedOver, expectedCycles - 1, `It started at the newest anchor: ${stats.passedOver} moves passed over.`);
+        assert.equal(stats.skipped, 0, 'Starting late is not falling behind.');
+        assert.equal(behind.cycles[0].restored.time, behind.cycles[0].anchor, 'The move logs its own anchor\'s state, not the catch-up\'s.');
         assert.equal(behind.cycles.length, 1);
         assert.equal(behind.cycles[0].now, duration);
         const last = steady.cycles.at(-1);

@@ -686,12 +686,6 @@ export function describeComponentDocument(componentDocument) {
     };
 }
 
-// A subsystem of any project, as a component document of its own (for placing one subsystem out of a project that is not
-// a component).
-export function componentFromProjectSubsystem(projectDocument, subsystemId) {
-    return componentDocumentOf(projectDocument, subsystemId);
-}
-
 // The path of names from the top to a subsystem ("Pump 2 / Impeller"), for naming states out of context.
 export function subsystemPath(document, subsystemId) {
     const names = [];

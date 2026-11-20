@@ -25,7 +25,7 @@
 // does not have.
 
 import { replayTargets } from './dataLogReplay.mjs';
-import { parseUnit, quantityName, unitConversion } from './units.mjs';
+import { parseUnit, unitConversion } from './units.mjs';
 
 // Words that decorate a name without saying what it is (process value, measured, actual, value...).
 const decorations = new Set(['pv', 'value', 'val', 'meas', 'measured', 'measurement', 'actual', 'act', 'raw', 'signal', 'sig', 'data', 'reading', 'read', 'the', 'of', 'in', 'out', 'ns', 's', 'i']);
@@ -324,5 +324,3 @@ export function rememberMapping(memory, mapping, document) {
     }
     return next;
 }
-
-export { quantityName };

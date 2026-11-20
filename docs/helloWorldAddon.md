@@ -51,7 +51,7 @@ A copied add-on should use a new identifier, for example `example.resultSummary`
 The following command uses the same validator as the application (run from within a Konjugate-HelloWorld checkout, with Konjugate core checked out as a sibling directory):
 
 ```bash
-node --input-type=module -e "import { readFile } from 'node:fs/promises'; import { validateVisualizerManifest } from '../konjugate/src/addonHost.mjs'; const manifest = JSON.parse(await readFile('package/addon.json', 'utf8')); validateVisualizerManifest(manifest); console.log('Manifest is valid');"
+node --input-type=module -e "import { readFile } from 'node:fs/promises'; import { validateAddonManifest } from '../konjugate/src/addonHost.mjs'; const manifest = JSON.parse(await readFile('package/addon.json', 'utf8')); validateAddonManifest(manifest); console.log('Manifest is valid');"
 ```
 
 ## Permission boundary

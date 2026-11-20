@@ -4,7 +4,6 @@
 // the phone layout's breakpoint (phoneLayout.mjs) and this menu lists them instead. Each entry presses the real button, so a menu item always does
 // exactly what its button does, and a button that appears or disappears elsewhere in the page needs no change here.
 import { onPhoneLayoutChange } from './phoneLayout.mjs';
-export { phoneMaxWidth } from './phoneLayout.mjs';
 
 export const phoneMenuEntries = [
     { id: 'loadButton', label: 'Open project' },

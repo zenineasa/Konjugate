@@ -8,7 +8,7 @@ import { inspectEntries, isPrefixOf, matchingPrefix, namespacePrefixPattern, sig
 
 // What this module used to define itself and others import from here, now in packageInspection.mjs (which has no Node in it).
 export {
-    packageArchiveFormat, packageArchiveVersion, packageExtensions, packageKey, PackageArchiveError, packageCompatibility,
+    packageKey, PackageArchiveError, packageCompatibility,
     readPackageCompatibilityFacts, inspectPackageArchive
 } from './packageInspection.mjs';
 

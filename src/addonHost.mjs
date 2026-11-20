@@ -184,8 +184,6 @@ export function validateAddonManifest(manifest) {
     return structuredClone(manifest);
 }
 
-export const validateVisualizerManifest = validateAddonManifest;
-
 export function publicToolstripContributions(manifest) {
     return (manifest.contributes?.toolstrip ?? []).map((contribution) => ({
         addonId: manifest.addonId,

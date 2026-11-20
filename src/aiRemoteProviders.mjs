@@ -292,5 +292,3 @@ export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operatio
         geminiProvider()
     ].map(bind);
 }
-
-export const aiProviderDefaultEndpoints = defaults;

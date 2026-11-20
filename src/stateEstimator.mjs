@@ -113,31 +113,9 @@ export function analyse(members, observations, normal, { updatable = null, bound
     return { members: updated, gain };
 }
 
-// The share of a state's uncertainty one reading removes (0 to 1), from the members before the analysis: the squared correlation of
-// the state with the measured state, times how much of the measured state's spread the reading can see past its own noise
-// (var / (var + noise²)). How "the readings reach" a state the data does not measure is told.
-export function explainedShare(members, stateIndex, observation) {
-    const { mean } = ensembleStatistics(members);
-    const predictions = observation.predictions ?? members.map((member) => member[observation.index]);
-    const predictedMean = predictions.reduce((sum, value) => sum + value, 0) / predictions.length;
-    let covariance = 0;
-    let stateVariance = 0;
-    let readingVariance = 0;
-    for (const [memberIndex, member] of members.entries()) {
-        const a = member[stateIndex] - mean[stateIndex];
-        const b = predictions[memberIndex] - predictedMean;
-        covariance += a * b;
-        stateVariance += a * a;
-        readingVariance += b * b;
-    }
-    if (!(stateVariance > 0) || !(readingVariance > 0)) return 0;
-    const correlationSquared = covariance * covariance / (stateVariance * readingVariance);
-    const variance = readingVariance / (members.length - 1);
-    return correlationSquared * variance / (variance + observation.noise ** 2);
-}
-
 // The share of a state's uncertainty a set of readings removes together (0 to 1): what the analysis would take off its variance,
-// P_xy (P_yy + R)⁻¹ P_yx, over its variance; for one reading, the same as explainedShare.
+// P_xy (P_yy + R)⁻¹ P_yx, over its variance. For one reading, that is the squared correlation of the state with the measured
+// state, times how much of the measured state's spread the reading can see past its own noise (var / (var + noise²)).
 export function explainedShareTogether(members, stateIndex, observations) {
     if (!observations.length) return 0;
     const count = members.length;

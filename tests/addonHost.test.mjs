@@ -9,7 +9,7 @@ import {
     publicToolstripContributions,
     publicVisualizerContext,
     readSignalSeries,
-    validateVisualizerManifest,
+    validateAddonManifest,
     visualizerDataFromEntry
 } from '../src/addonHost.mjs';
 
@@ -24,23 +24,23 @@ const manifest = {
 };
 
 test('validates the versioned visualizer manifest and permissions', () => {
-    assert.deepEqual(validateVisualizerManifest(manifest), manifest);
-    assert.throws(() => validateVisualizerManifest({ ...manifest, apiVersion: 2 }), /Unsupported visualizer API/);
-    assert.throws(() => validateVisualizerManifest({ ...manifest, permissions: ['model.write'] }), /unsupported permission/);
-    assert.throws(() => validateVisualizerManifest({ ...manifest, entry: '../renderer/index.html' }), /inside its add-on directory/);
-    assert.doesNotThrow(() => validateVisualizerManifest({
+    assert.deepEqual(validateAddonManifest(manifest), manifest);
+    assert.throws(() => validateAddonManifest({ ...manifest, apiVersion: 2 }), /Unsupported visualizer API/);
+    assert.throws(() => validateAddonManifest({ ...manifest, permissions: ['model.write'] }), /unsupported permission/);
+    assert.throws(() => validateAddonManifest({ ...manifest, entry: '../renderer/index.html' }), /inside its add-on directory/);
+    assert.doesNotThrow(() => validateAddonManifest({
         ...manifest,
         permissions: ['results.read', 'results.live.read', 'simulation.status.read', 'simulation.pacing.read', 'simulation.pacing.control']
     }));
 });
 
 test('publishes manifest-declared toolstrip commands without add-on-specific host code', () => {
-    const contributedManifest = validateVisualizerManifest(manifest);
+    const contributedManifest = validateAddonManifest(manifest);
     assert.deepEqual(publicToolstripContributions(contributedManifest), [{
         addonId: manifest.addonId, addonName: manifest.name, commandId: 'openViewer',
         label: 'Viewer', tooltip: 'Open viewer', symbol: 'V', when: 'resultsActive', contexts: ['resultSession']
     }]);
-    assert.throws(() => validateVisualizerManifest({
+    assert.throws(() => validateAddonManifest({
         ...manifest,
         contributes: { toolstrip: [{ commandId: '../bad', label: 'Bad', tooltip: 'Bad', contexts: [] }] }
     }), /invalid toolstrip contribution/);
@@ -118,11 +118,11 @@ test('reads only requested signal ranges and downsamples host-side', () => {
 
 test('a visualizer may keep data with the project and settings for the user, and may require them', () => {
     const keeping = { ...manifest, permissions: ['results.read', 'project.data', 'settings.store'], requires: ['projectData', 'addonSettings'] };
-    assert.deepEqual(validateVisualizerManifest(keeping), keeping);
-    assert.throws(() => validateVisualizerManifest({ ...keeping, requires: ['projectData', 'somethingNewer'] }), /needs somethingNewer, which this version of Konjugate does not provide/);
-    assert.throws(() => validateVisualizerManifest({ ...keeping, requires: 'projectData' }), /requires must be a list of names/);
+    assert.deepEqual(validateAddonManifest(keeping), keeping);
+    assert.throws(() => validateAddonManifest({ ...keeping, requires: ['projectData', 'somethingNewer'] }), /needs somethingNewer, which this version of Konjugate does not provide/);
+    assert.throws(() => validateAddonManifest({ ...keeping, requires: 'projectData' }), /requires must be a list of names/);
     // Launcher-only permissions stay launcher-only.
-    assert.throws(() => validateVisualizerManifest({ ...manifest, permissions: ['files.store'] }), /unsupported permission/);
+    assert.throws(() => validateAddonManifest({ ...manifest, permissions: ['files.store'] }), /unsupported permission/);
 });
 
 test('a visualizer\'s data is kept as a versioned entry, and read back from one', () => {

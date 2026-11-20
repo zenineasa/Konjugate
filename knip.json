@@ -22,7 +22,6 @@
     ],
     "ignoreExportsUsedInFile": true,
     "ignoreDependencies": [
-        "@codemirror/.*",
         "@wasmer/sdk",
         "pyodide",
         "scrypt-js",

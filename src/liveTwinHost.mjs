@@ -45,7 +45,7 @@ export function cycleEvent(cycle, stats) {
         type: 'cycle',
         cycle: {
             index: cycle.index, anchor: cycle.anchor, now: cycle.now, jumps: cycle.jumps, window: cycle.window, forecast: cycle.forecast, trend: cycle.trend, trends: cycle.trends, wallSeconds: cycle.wallSeconds,
-            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null, runaway: cycle.runaway ?? [],
+            corrections: cycle.corrections, observed: cycle.observed, unobserved: cycle.unobserved, refit: cycle.refit ?? null, estimate: cycle.estimate ?? null, runaway: cycle.runaway ?? [], inputCorrections: cycle.inputCorrections ?? [],
             // Each input's last reading up to now, for a sandbox to start its controls from.
             inputs: Object.fromEntries(Object.entries(cycle.inputs).map(([signal, readings]) => [signal, readings.at(-1)?.value ?? null])),
             // What was done over the move's window, for the control room's timeline of the inputs.

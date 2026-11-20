@@ -71,7 +71,8 @@ export class WindowSession {
     #origin = null;
     #latest = -Infinity;
     #nextCycle = 0;
-    #inputsSent = new Map(); // parameterId -> the time of the last reading sent to the engine
+    #sent = new Map(); // parameterId -> the input readings this engine was given, [{ time, value }] in time order, as it holds them
+    #rebase = null; // the state a refit or a model change restarted the twin from, and how many moves had been made by then
     #recoveries = 0;
     #skipped = 0;
     #passedOver = 0; // moves passed over before the first, in data that was already there when the twin started
@@ -177,7 +178,7 @@ export class WindowSession {
 
     async #startEngine() {
         this.#engine = await EngineSession.start(JSON.stringify(this.document), this.#engineConfiguration(), this.engineOptions);
-        this.#inputsSent.clear();
+        this.#sent.clear();
     }
 
     // Takes observations as they arrive; the cycles they make due are run in order, one after another.
@@ -278,19 +279,79 @@ export class WindowSession {
         return result;
     }
 
-    // The input readings a cycle with this now has not yet sent, as commands; a reading corrected after it was sent is sent again
-    // with everything after it.
-    #inputCommands(now) {
+    // An input's good readings up to a time, as the engine is given them.
+    #inputReadings(entry, upTo) {
+        return this.#goodReadings(entry.signal, upTo).map(({ time, value }) => ({ time, value }));
+    }
+
+    // The earliest time at which what this engine was given of an input no longer matches its readings: a reading corrected (a later
+    // revision), marked bad, or made good after it was sent, or one that arrived late, before the last sent. null when they match.
+    #changedFrom(entry, now) {
+        const sent = this.#sent.get(entry.parameterId) ?? [];
+        if (!sent.length) return null;
+        const upTo = sent.at(-1).time;
+        const given = new Map(sent.map(({ time, value }) => [time, value]));
+        const known = new Map(this.#inputReadings(entry, Math.min(now, upTo)).map(({ time, value }) => [time, value]));
+        let earliest = null;
+        for (const time of new Set([...given.keys(), ...known.keys()])) {
+            if (given.get(time) !== known.get(time) && (earliest === null || time < earliest)) earliest = time;
+        }
+        return earliest;
+    }
+
+    // The input readings a move with this now needs sent, as commands. New readings are appended. From a reading that changed after it
+    // was sent, everything is sent again in place of what the engine holds (`replaceFrom`, which the engine takes as a correction).
+    // With `resendFrom`, a run from that time follows (a catch-up, or a rebuild after a late correction): every input is sent again from
+    // the reading in force then, since the engine keeps only the readings it still needs for the moves ahead.
+    #inputCommands(now, resendFrom = null) {
         const commands = [];
         for (const entry of this.inputs) {
-            const readings = this.#goodReadings(entry.signal, now);
-            const sentUpTo = this.#inputsSent.get(entry.parameterId) ?? -Infinity;
-            const fresh = readings.filter((reading) => reading.time > sentUpTo);
-            if (!fresh.length) continue;
-            commands.push({ type: 'appendInputSamples', parameterId: entry.parameterId, samples: fresh.map(({ time, value }) => ({ time, value })) });
-            this.#inputsSent.set(entry.parameterId, fresh.at(-1).time);
+            const readings = this.#inputReadings(entry, now);
+            const sent = this.#sent.get(entry.parameterId) ?? [];
+            const inForce = resendFrom === null ? null : (readings.filter((reading) => reading.time <= resendFrom + 1e-9).at(-1) ?? readings[0] ?? { time: resendFrom }).time;
+            const changed = this.#changedFrom(entry, now);
+            const from = inForce === null ? changed : changed === null ? inForce : Math.min(inForce, changed);
+            const samples = from === null ? readings.filter((reading) => reading.time > (sent.at(-1)?.time ?? -Infinity)) : readings.filter((reading) => reading.time >= from);
+            if (from === null && !samples.length) continue;
+            commands.push({ type: 'appendInputSamples', parameterId: entry.parameterId, samples, ...(from === null ? {} : { replaceFrom: from }) });
+            this.#sent.set(entry.parameterId, [...(from === null ? sent : sent.filter((reading) => reading.time < from)), ...samples]);
         }
         return commands;
+    }
+
+    // What a move does about input readings that changed after they were sent, and the record it keeps of each. A change from where
+    // the move's run starts on is simply sent again. One before it changed what the engine holds at that start, a checkpoint taken with
+    // the reading as it was: the twin is run again to the move's anchor from the latest state it logged at or before the change, with
+    // every input sent again from there and each later move's reset at its anchor made again, so the move starts where it would have
+    // had the correction come in time. Not before a refit or a model change, which restarted the twin from a state of its own; and not
+    // for a twin with the estimator, whose members' past cannot be run again: there the change is said not to have been applied.
+    #correctionPlan(index, previous, estimating) {
+        const changes = previous ? this.inputs.flatMap((entry) => {
+            const time = this.#changedFrom(entry, this.#anchor(index) + this.window);
+            return time === null ? [] : [{ signal: entry.signal, time }];
+        }) : [];
+        const skipping = previous !== null && index !== previous.index + 1;
+        const logged = this.#restartFrom ?? previous?.restored ?? null;
+        const plan = { origin: null, resendFrom: skipping ? logged.time : null, records: changes.map((change) => ({ ...change, applied: 'resent' })) };
+        if (!changes.length) return plan;
+        const start = estimating ? this.#ensemble.anchor : skipping ? logged.time : this.#anchor(index);
+        const earliest = Math.min(...changes.map((change) => change.time));
+        if (!(earliest < start - 1e-9)) return plan;
+        if (estimating) {
+            plan.records = plan.records.map((record) => (record.time < start - 1e-9
+                ? { signal: record.signal, time: record.time, applied: null, reason: 'before the estimator\'s last analysis, which is not run again' } : record));
+            return plan;
+        }
+        // The states the twin logged that it can run again from: since its last restart, if it had one, and that restart's own.
+        const madeAfter = this.#rebase?.madeAfter ?? 0;
+        const states = [...(this.#rebase ? [this.#rebase.state] : []), ...this.cycles.slice(madeAfter).map((cycle) => cycle.restored)].sort((a, b) => a.time - b.time);
+        const origin = states.filter((state) => state.time <= earliest + 1e-9).at(-1) ?? states[0];
+        plan.origin = origin;
+        plan.resendFrom = origin.time;
+        plan.records = plan.records.map((record) => (record.time < origin.time - 1e-9
+            ? { signal: record.signal, time: record.time, applied: 'rebuilt', from: origin.time, reason: 'from the earliest state the twin can run again from: before it, the twin ran on the reading as it was' }
+            : { signal: record.signal, time: record.time, applied: 'rebuilt', from: origin.time }));
+        return plan;
     }
 
     async #runCycle(index) {
@@ -327,6 +388,7 @@ export class WindowSession {
         }
         const started = performance.now();
         const estimating = this.estimated.length > 0 && this.#ensemble !== null && previous !== null;
+        const plan = this.#correctionPlan(index, previous, estimating);
         let replies;
         let analysis = null;
         let forecastFrom = {};
@@ -338,11 +400,11 @@ export class WindowSession {
                 if (estimating) analysis = await this.#analyse(anchor, now, previous, corrections);
                 const start = estimating
                     ? [...this.#parameterCommands(analysis.mean), { type: 'restoreState', time: anchor, values: analysis.mean.slice(0, this.#engine.stateIds.length), providerStates: previous.restored.providerStates }]
-                    : [...this.#catchUp(index, previous), { type: 'restoreCheckpoint', time: anchor, overrides }];
+                    : [...this.#catchUp(index, previous, plan.origin), { type: 'restoreCheckpoint', time: anchor, overrides }];
                 // Two checkpoints are taken: the next anchor's, for the next move, and now's, for the forecast to start from.
                 const nextAnchor = anchor + this.stride;
                 const toNow = await this.#engine.run([
-                    ...this.#inputCommands(now),
+                    ...this.#inputCommands(now, estimating ? null : plan.resendFrom),
                     ...start,
                     { type: 'advanceTo', time: nextAnchor, takeCheckpoints: true },
                     ...(now > nextAnchor + 1e-9 ? [{ type: 'advanceTo', time: now - this.timeStep }, { type: 'advanceTo', time: now, takeCheckpoints: true }] : [])
@@ -397,6 +459,10 @@ export class WindowSession {
             forecastFrom: Object.fromEntries(Object.entries(forecastFrom).map(([signal, { stateId, ...entry }]) => [signal, entry])),
             // A refit applied since the last move: the parameters it changed, and the states it set at that move's anchor.
             ...(this.#refit ? { refit: this.#refit } : {}),
+            // Input readings that changed after they were sent (a correction, a reading marked bad or good, one that arrived late):
+            // each { signal, time, applied }, applied 'resent', 'rebuilt' (run again from the logged state at `from`), or null with
+            // the reason it was not.
+            ...(plan.records.length ? { inputCorrections: plan.records } : {}),
             // Which states the data reaches: those compared with a measurement, and those the model carries alone, unchecked.
             observed: this.outputs.map((entry) => entry.stateId),
             unobserved: this.#engine.stateIds.filter((stateId) => !this.outputs.some((entry) => entry.stateId === stateId))
@@ -603,20 +669,32 @@ export class WindowSession {
     }
 
     // After skipping anchors, the checkpoint at this one was never kept: run to it from the last cycle's logged state (or from the
-    // start), on the real inputs, keeping it.
-    #catchUp(index, previous) {
+    // start), on the real inputs, keeping it. With `origin` (an input reading changed before what the engine holds, see
+    // #correctionPlan), run to it again from that logged state instead, making each later move's reset at its anchor again on the way.
+    #catchUp(index, previous, origin = null) {
         const expected = previous ? previous.index + 1 : 0;
-        if (index === expected) return [];
+        if (index === expected && !origin) return [];
         // A refit or a model change since that move restarted the twin from a state of its own, which is where to run from.
-        const logged = this.#restartFrom ?? previous?.restored;
+        const logged = origin ?? this.#restartFrom ?? previous?.restored;
         const from = previous
             ? { type: 'restoreState', time: logged.time, values: logged.values, providerStates: logged.providerStates }
             : { type: 'restoreCheckpoint', time: 0, overrides: this.outputs.flatMap((entry) => {
                 const measured = this.#measurementAt(entry.signal, 0, this.#anchor(index) + this.window);
                 return measured === null ? [] : [{ stateId: entry.stateId, value: measured }];
             }) };
+        // The measured states each move since set at its anchor, set there again: the values it applied (a nudged state's, worked out
+        // from the prediction as it was then).
+        const resets = !origin ? [] : this.cycles.slice(this.#rebase?.madeAfter ?? 0)
+            .filter((cycle) => cycle.anchor > logged.time + 1e-9 && cycle.anchor < this.#anchor(index) - 1e-9)
+            .flatMap((cycle) => [
+                { type: 'advanceTo', time: cycle.anchor, takeCheckpoints: true, discardSamples: true },
+                { type: 'restoreCheckpoint', time: cycle.anchor, overrides: this.outputs.flatMap((entry) => {
+                    const applied = cycle.corrections[entry.signal]?.applied;
+                    return applied === null || applied === undefined ? [] : [{ stateId: entry.stateId, value: applied }];
+                }) }
+            ]);
         // Only the state it reaches matters: its samples, at every step of what may be hours, are not kept.
-        return [from, { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true, discardSamples: true }];
+        return [from, ...resets, { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true, discardSamples: true }];
     }
 
     // The model's own series for a signal in a cycle, from the restored value at the anchor through the window and the forecast, at
@@ -765,6 +843,7 @@ export class WindowSession {
                 throw error;
             }
             this.#restartFrom = from;
+            this.#rebase = { state: from, madeAfter: this.cycles.length };
             this.#refit = { fromCycle: target.index, anchor: target.anchor, states };
             // The next move is the first made with the new values; its stretch of the record starts where the latest move ended.
             takesEffect = this.cycles.at(-1).now;
@@ -812,6 +891,7 @@ export class WindowSession {
                     { type: 'advanceTo', time: this.#anchor(this.#nextCycle), takeCheckpoints: true, discardSamples: true }
                 ]);
                 this.#restartFrom = from;
+                this.#rebase = { state: from, madeAfter: this.cycles.length };
                 this.#ensemble = null;
                 outcome = { carried: newIds.filter((stateId) => oldIds.includes(stateId)), added: newIds.filter((stateId) => !oldIds.includes(stateId)), removed: oldIds.filter((stateId) => !newIds.includes(stateId)) };
                 // Where the twin's record starts with it, as for a refit.

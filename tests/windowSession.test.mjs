@@ -195,17 +195,131 @@ test('input readings are sent once each, up to the move\'s now, and drive the mo
     await twin.close();
 });
 
-// #inputCommands' comment says a reading corrected after it was sent is sent again with everything after it, but only readings
-// later than the last one sent are sent: the correction reaches the move's record (cycle.inputs, and freshRunFor) and not the engine.
-test('an input reading corrected after it was sent reaches the engine', { todo: 'corrections to sent input readings are not resent yet' }, async (t) => {
-    const engines = installFakeEngine(t, tankModel);
+// ---- input readings that change after they were sent ------------------------------------------------------------------------
+
+// The heater warms the wall, which no sensor measures, as well as the tank: a reset at the anchor puts the tank back on its reading
+// whatever the heater did, so the wall is where an input the engine got wrong still shows.
+const heatedModel = { derivatives: { 2: ({ input }) => input(20), 3: ({ input }) => input(20) } };
+const heater = (from, to, value = () => 0) => {
+    const list = [];
+    for (let time = from; time <= to + 1e-9; time += 100) list.push(reading('heater', time, value(time)));
+    return list;
+};
+const steady = (from, to) => [...heater(from, to), ...temperatures(from, to, () => 20)];
+// What a move computed, to compare one twin's with another's.
+const outcome = (cycle) => ({ restored: cycle.restored, model: cycle.model, inferred: cycle.inferred, forecast: cycle.forecast });
+
+// Feeds two twins the same readings in the same batches, except that one has a reading as it was corrected from the start and the
+// other is sent the correction later, with the batch named; answers both twins' moves.
+async function corrected(t, { batches, correction, at, options = {} }) {
+    const run = async (late) => {
+        const engines = installFakeEngine(t, heatedModel);
+        const twin = session({ ...options });
+        for (const [position, batch] of batches.entries()) {
+            const readings = batch.map((entry) => (!late && entry.signal === correction.signal && entry.time === origin + correction.time ? { ...entry, value: correction.value } : entry));
+            twin.push(late && position === at ? [...readings, reading(correction.signal, correction.time, correction.value, { revision: 1 })] : readings);
+            await twin.idle();
+        }
+        await twin.close();
+        return { twin, engines };
+    };
+    return { late: await run(true), reference: await run(false) };
+}
+
+test('a corrected input reading the next move runs over is sent again in place of the old, and that move is as if it had come in time', async (t) => {
+    // Move 0 (anchor 0, now 600) runs on the heater off at 500 s; then the reading at 500 s is corrected to on. Move 1's run starts at
+    // its anchor, 200 s, so the correction falls inside it.
+    const { late, reference } = await corrected(t, { batches: [steady(0, 700), steady(800, 900)], correction: { signal: 'heater', time: 500, value: 0.01 }, at: 1 });
+    assert.equal(late.twin.cycles.length, 2);
+    assert.deepEqual(late.twin.cycles[1].inputCorrections, [{ signal: 'heater', time: 500, applied: 'resent' }]);
+    const replaced = late.engines[0].batches.flat().find((command) => command.type === 'appendInputSamples' && command.replaceFrom !== undefined);
+    assert.deepEqual(replaced, { type: 'appendInputSamples', parameterId: 20, replaceFrom: 500, samples: [500, 600, 700, 800].map((time) => ({ time, value: time === 500 ? 0.01 : 0 })) },
+        'From the corrected reading on, in place of what the engine held.');
+    assert.notDeepEqual(outcome(late.twin.cycles[0]), outcome(reference.twin.cycles[0]), 'Move 0 keeps the record of what was known when it was made.');
+    assert.deepEqual(outcome(late.twin.cycles[1]), outcome(reference.twin.cycles[1]));
+    assert.deepEqual(late.twin.freshRunFor(late.twin.cycles[1]), reference.twin.freshRunFor(reference.twin.cycles[1]), 'Its record reproduces what it ran.');
+    assert.equal(reference.twin.cycles[1].inputCorrections, undefined, 'A twin with nothing corrected says nothing of corrections.');
+});
+
+test('a corrected input reading from before the checkpoint a move starts at runs the twin again from the state it logged before it', async (t) => {
+    // The reading at 100 s is corrected after moves 0 and 1: move 2 starts at its anchor, 400 s, from a checkpoint taken with the heater
+    // off at 100 s. It is run again from move 0's logged state (0 s), with move 1's reset at 200 s made again on the way.
+    const { late, reference } = await corrected(t, { batches: [steady(0, 900), steady(1000, 1100)], correction: { signal: 'heater', time: 100, value: 0.01 }, at: 1 });
+    const [, , move] = late.twin.cycles;
+    assert.deepEqual(move.inputCorrections, [{ signal: 'heater', time: 100, applied: 'rebuilt', from: 0 }]);
+    assert.equal(move.inferred[3][0].value, 6, 'The wall had the heater\'s 100 s on it, which a run on the old reading would not.');
+    assert.deepEqual(outcome(move), outcome(reference.twin.cycles[2]));
+    const rebuild = late.engines[0].batches.at(-2);
+    assert.deepEqual(rebuild.filter((command) => command.type === 'restoreState' || command.type === 'restoreCheckpoint').map((command) => [command.type, command.time]),
+        [['restoreState', 0], ['restoreCheckpoint', 200], ['restoreCheckpoint', 400]], 'From move 0\'s state, through move 1\'s reset, to the move\'s own anchor.');
+});
+
+test('a correction from before the earliest state the twin can run again from is applied from there, and the record says so', async (t) => {
+    // Keeping up, the twin started at move 11 (anchor 2200 s): a reading at 1000 s corrected after that can only be run again from 2200 s.
+    const { late } = await corrected(t, { batches: [steady(0, 3000), steady(3100, 3100)], correction: { signal: 'heater', time: 1000, value: 0.01 }, at: 1, options: { keepUp: true } });
+    assert.deepEqual(late.twin.cycles.map((cycle) => cycle.index), [11, 12]);
+    assert.deepEqual(late.twin.cycles[1].inputCorrections, [{
+        signal: 'heater', time: 1000, applied: 'rebuilt', from: 2200, reason: 'from the earliest state the twin can run again from: before it, the twin ran on the reading as it was'
+    }]);
+});
+
+test('a refit restarts the twin from a state of its own, which a later rebuild runs from rather than from before it', async (t) => {
+    const engines = installFakeEngine(t, heatedModel);
     const twin = session();
-    twin.push([...[0, 100, 200, 300, 400, 500, 600, 700].map((time) => reading('heater', time, 0)), ...temperatures(0, 700, () => 20)]);
+    twin.push(steady(0, 900));
     await twin.idle();
-    twin.push([reading('heater', 300, 0.01, { revision: 1 }), reading('heater', 800, 0), ...temperatures(800, 900, () => 20)]);
+    await twin.applyRefit({ values: [{ parameterId: 3, value: 9 }], cycle: 1 });
+    twin.push([reading('heater', 100, 0.01, { revision: 1 }), ...steady(1000, 1100)]);
     await twin.idle();
-    const sent = engines[0].batches.flat().filter((command) => command.type === 'appendInputSamples').flatMap((command) => command.samples);
-    assert.ok(sent.some((sample) => sample.time === 300 && sample.value === 0.01));
+    const move = twin.cycles.at(-1);
+    assert.deepEqual(move.inputCorrections, [{ signal: 'heater', time: 100, applied: 'rebuilt', from: 200, reason: 'from the earliest state the twin can run again from: before it, the twin ran on the reading as it was' }]);
+    const rebuild = engines.at(-1).batches.at(-2).find((command) => command.type === 'restoreState');
+    assert.equal(rebuild.values[1], 9, 'From the wall the refit found at 200 s.');
+    await twin.close();
+});
+
+test('with the estimator, a correction from before its last analysis is said not to have been applied, and a later one is sent again', async (t) => {
+    const engines = installFakeEngine(t, heatedModel);
+    const twin = session({ corrections: { T: { estimate: true, noise: 0.1 } } });
+    twin.push(steady(0, 900));
+    await twin.idle();
+    twin.push([reading('heater', 100, 0.01, { revision: 1 }), reading('heater', 700, 0.01, { revision: 1 }), ...steady(1000, 1100)]);
+    await twin.idle();
+    assert.deepEqual(twin.cycles.at(-1).inputCorrections, [{ signal: 'heater', time: 100, applied: null, reason: 'before the estimator\'s last analysis, which is not run again' }],
+        'One record for the input, at its earliest change.');
+    const replaced = engines[0].batches.flat().filter((command) => command.replaceFrom !== undefined);
+    assert.deepEqual(replaced.map((command) => command.replaceFrom), [100], 'The engine still gets the readings as they now are.');
+    await twin.close();
+});
+
+test('an input reading marked bad after it was sent is taken back, and one that arrives late is put in its place', async (t) => {
+    const engines = installFakeEngine(t, heatedModel);
+    const twin = session();
+    twin.push([...heater(0, 700, (time) => (time === 400 ? 0.01 : 0)).filter((entry) => entry.time !== origin + 300), ...temperatures(0, 700, () => 20)]);
+    await twin.idle();
+    twin.push([reading('heater', 400, 0.01, { quality: 'bad', revision: 1 }), reading('heater', 300, 0.02), ...steady(800, 900)]);
+    await twin.idle();
+    const replaced = engines[0].batches.flat().find((command) => command.replaceFrom !== undefined);
+    assert.deepEqual(replaced.replaceFrom, 300);
+    assert.deepEqual(replaced.samples.map((sample) => [sample.time, sample.value]), [[300, 0.02], [500, 0], [600, 0], [700, 0], [800, 0]]);
+    assert.deepEqual(twin.cycles[1].inputCorrections, [{ signal: 'heater', time: 300, applied: 'resent' }]);
+    await twin.close();
+});
+
+test('after skipping a backlog, the catch-up runs on the inputs that were applied, not on what the engine kept for the move after', async (t) => {
+    installFakeEngine(t, heatedModel);
+    const twin = session({ keepUp: true, maxBehind: 3 });
+    // The heater is on for 100 s from 2200 s, the anchor move 11 logs; the engine then keeps only the readings from 2400 s on (and the
+    // last before it, the heater off at 2300 s), so a catch-up from 2200 s on what it kept would miss that 100 s.
+    const on = (time) => (time === 2200 ? 0.01 : 0);
+    twin.push([...heater(0, 3000, on), ...temperatures(0, 3000, () => 20)]);
+    await twin.idle();
+    twin.push(steady(3100, 4000));
+    await twin.idle();
+    const [first, skipped] = twin.cycles;
+    assert.deepEqual([first.index, skipped.index], [11, 16]);
+    assert.equal(skipped.restored.values[1] - first.restored.values[1], 1, 'The wall warmed by the heater\'s 100 s between the two anchors.');
+    assert.equal(skipped.inputCorrections, undefined, 'Sending the readings again for a catch-up is not a correction.');
     await twin.close();
 });
 

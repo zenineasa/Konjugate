@@ -795,6 +795,13 @@ function cycleEvents(cycle, stats) {
                 ? `The twin steps every ${formatSpan(step)}, longer than the ${formatSpan(own)} the model's own runs take: a fast model can grow without end at a step too long for it. Shorten the time step under Engineer, Timing.`
                 : `A time step too long for the model (now ${formatSpan(step)}) is the usual cause: shorten it under Engineer, Timing.`, cycle.now);
     }
+    // An input reading the source changed after the twin had run on it (a logger's correction, a reading marked bad, one that came late).
+    for (const correction of cycle.inputCorrections ?? []) {
+        const what = `${inputName(correction.signal)}'s reading at ${dataTime(correction.time)} changed after the twin had run on it`;
+        if (correction.applied === null) addEvent('lean', `${what}: it is used from here, but the estimate made before it is kept`, `The estimator's members are not run again over the past (${correction.reason}).`, cycle.now);
+        else if (correction.reason) addEvent('lean', `${what}: the twin was run again with it from ${dataTime(correction.from)}`, 'Before that, the twin had restarted (its first move, a refit or a model change), so it keeps what it ran on the reading as it was.', cycle.now);
+        else addEvent('info', `${what}: the twin ${correction.applied === 'rebuilt' ? `was run again with it from ${dataTime(correction.from)}` : 'uses the corrected reading from this move on'}`, 'The moves already made keep their record.', cycle.now);
+    }
     twin.drift = driftOf(cycle.trend);
     if (stats.passedOver && !twin.stats.passedOver) addEvent('info', `The twin started at the latest readings, passing over ${plural(stats.passedOver, 'move')} of what the source already held`, '', cycle.now);
     if (stats.skipped > twin.stats.skipped) addEvent('lean', `The twin fell behind the data, and skipped ${plural(stats.skipped - twin.stats.skipped, 'move')} to keep up`, 'a longer stride or a shorter window (Engineer, Timing) keeps up', cycle.now);

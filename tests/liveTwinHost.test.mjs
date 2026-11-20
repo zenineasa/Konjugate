@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { inputChanges, playRecording, thinned } from '../src/liveTwinHost.mjs';
+import { cycleEvent, inputChanges, playRecording, thinned } from '../src/liveTwinHost.mjs';
 
 const log = [
     '# konjugate data log: 1', '# time: seconds since start', '# inputs: u', '# outputs: y', 'time,u [-],y [-]',
@@ -55,4 +55,11 @@ test('an input is sent as its changes: each step\'s first reading', () => {
     const readings = [0, 0, 0, 5, 5, 2, 2, 2].map((value, time) => ({ time, value }));
     assert.deepEqual(inputChanges(readings), [{ time: 0, value: 0 }, { time: 3, value: 5 }, { time: 5, value: 2 }]);
     assert.deepEqual(inputChanges([]), []);
+});
+
+test('a move sent to the twin window says what it did about input readings that changed after they were sent', () => {
+    const cycle = { index: 2, anchor: 400, now: 1000, jumps: {}, window: {}, forecast: {}, trend: null, trends: {}, wallSeconds: 0, corrections: {}, observed: [], unobserved: [], inputs: { heater: [] }, inferred: {} };
+    assert.deepEqual(cycleEvent(cycle, {}).cycle.inputCorrections, [], 'None, when nothing changed.');
+    const inputCorrections = [{ signal: 'heater', time: 100, applied: 'rebuilt', from: 0 }];
+    assert.deepEqual(cycleEvent({ ...cycle, inputCorrections }, {}).cycle.inputCorrections, inputCorrections);
 });

@@ -45,6 +45,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinTim
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'liveTwinOpcUa.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'labTrial.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowCorrections.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowInputCorrections.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowRefit.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'windowEstimator.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'interventionRecord.mjs'), executable]);

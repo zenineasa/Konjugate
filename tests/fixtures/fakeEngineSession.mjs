@@ -47,9 +47,11 @@ export class FakeEngine {
 
     #get = (stateId) => this.values[this.stateIds.indexOf(stateId)];
 
+    // As the engine's held piecewise schedule (engine/src/executionPlan.cpp): the reading in force, and before the first, the first.
     #input(parameterId, time) {
-        const held = (this.inputs.get(parameterId) ?? []).filter((sample) => sample.time <= time + 1e-9).at(-1);
-        return held ? held.value : this.parameters.get(parameterId) ?? 0;
+        const samples = this.inputs.get(parameterId) ?? [];
+        if (!samples.length) return this.parameters.get(parameterId) ?? 0;
+        return (samples.filter((sample) => sample.time <= time + 1e-9).at(-1) ?? samples[0]).value;
     }
 
     // The computed states, from the others.
@@ -106,17 +108,28 @@ export class FakeEngine {
                 this.time = command.time;
                 this.#settle();
                 return this.#reply(command, { values: [...this.values], providerStates: command.providerStates ?? [] });
+            // As Simulation::appendInputSamples (engine/src/simulationRunner.cpp): with replaceFrom, the readings kept at or after it go
+            // first; what is left must come before what arrives.
             case 'appendInputSamples': {
-                const from = command.replaceFrom ?? command.samples[0]?.time ?? Infinity;
-                const kept = (this.inputs.get(command.parameterId) ?? []).filter((sample) => sample.time < from - 1e-9);
-                this.inputs.set(command.parameterId, [...kept, ...command.samples].sort((a, b) => a.time - b.time));
+                let kept = this.inputs.get(command.parameterId) ?? [];
+                if (command.replaceFrom !== undefined) kept = kept.filter((sample) => sample.time < command.replaceFrom);
+                if (kept.length && command.samples.length && !(command.samples[0].time > kept.at(-1).time)) {
+                    return { ok: false, type: command.type, message: 'Input readings must come in time order; a corrected reading is sent with replace.', time: this.time, values: [], samples: [], checkpointsTaken: 0, computeNanoseconds: 0 };
+                }
+                this.inputs.set(command.parameterId, [...kept, ...command.samples]);
                 return this.#reply(command);
             }
             case 'setParameterValue':
                 this.parameters.set(command.parameterId, command.value);
                 return this.#reply(command);
+            // As Simulation::retainFrom: the checkpoints before the time go, and every input reading before it but the last.
             case 'retainCheckpointsFrom':
                 for (const time of [...this.checkpoints.keys()]) if (time < command.time - 1e-9) this.checkpoints.delete(time);
+                for (const [parameterId, samples] of this.inputs) {
+                    const firstKept = samples.findIndex((sample) => sample.time > command.time);
+                    const from = (firstKept < 0 ? samples.length : firstKept) - 1;
+                    if (from > 0) this.inputs.set(parameterId, samples.slice(from));
+                }
                 return this.#reply(command);
             default:
                 return { ok: false, type: command.type, message: `Unknown command ${command.type}.`, time: this.time, values: [], samples: [], checkpointsTaken: 0, computeNanoseconds: 0 };

@@ -52,7 +52,7 @@
         "test:engine": "node scripts/testEngine.mjs",
         "test:engine:sanitize": "node scripts/testEngineSanitized.mjs",
         "lint:engine": "node scripts/lintEngine.mjs",
-        "lint:deadcode": "knip",
+        "lint:deadcode": "knip && node scripts/checkIpcChannels.mjs && node scripts/checkPreloadApis.mjs",
         "test:package": "make verifyPackage",
         "flatpak:generate-sources": "node scripts/generateFlatpakNodeSources.mjs",
         "homebrew:generate-cask": "node scripts/generateHomebrewCask.mjs",

@@ -362,12 +362,10 @@ export const providerToolchains = {
 
 export const aiProviders = {
     listConfigurations: async () => [],
-    listModels: async () => [],
     listDraftModels: async () => [],
     saveConfiguration: async () => ({ available: false }),
     removeConfiguration: async () => ({ available: false }),
     setActiveConfiguration: async () => ({ available: false }),
-    testConnection: async () => ({ available: false }),
     testDraftConnection: async () => ({ available: false }),
     generateProposal: async () => {
         throw new Error('AI-assisted authoring is not available in the web edition yet.');

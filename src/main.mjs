@@ -750,14 +750,6 @@ async function openWelcomeOrOfferTour(projectWindow) {
     startTourIn(projectWindow);
     return true;
 }
-ipcMain.handle('welcomeStartTour', (event) => {
-    const guideWindow = BrowserWindow.fromWebContents(event.sender);
-    const projectWindow = [...projectWindows].find((window) => projectWindowState.get(window)?.exampleGuideWindow === guideWindow);
-    if (!projectWindow) return false;
-    guideWindow.close();
-    startTourIn(projectWindow);
-    return true;
-});
 ipcMain.handle('tourRecordCompleted', async () => { await welcomeState().update(withTourCompleted); return true; });
 // The tutorials (docs/proposals/tutorials.md). A window reports a finished tutorial by id, checked against the shipped list, and reads
 // which ones are finished for the ticks in its Tutorials list; an example guide's "Take the tutorial" starts one in the window it belongs
@@ -2998,13 +2990,6 @@ ipcMain.handle('aiListConfigurations', async (event) => {
     return { ...result, providers: aiProviderRegistry.descriptors() };
 });
 
-ipcMain.handle('aiListModels', async (event, configurationUuid) => {
-    requireProjectWindow(event);
-    const resolved = await resolveAIConfiguration(configurationUuid);
-    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
-        (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
-});
-
 ipcMain.handle('aiListDraftModels', async (event, configuration, credential) => {
     requireProjectWindow(event);
     const resolved = await resolveAIDraft(configuration, credential);
@@ -3025,13 +3010,6 @@ ipcMain.handle('aiRemoveConfiguration', async (event, configurationUuid) => {
 ipcMain.handle('aiSetActiveConfiguration', async (event, configurationUuid) => {
     requireProjectWindow(event);
     return aiConfigurationStore.setActive(configurationUuid);
-});
-
-ipcMain.handle('aiTestConnection', async (event, configurationUuid) => {
-    requireProjectWindow(event);
-    const resolved = await resolveAIConfiguration(configurationUuid);
-    return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
-        (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
 ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential) => {

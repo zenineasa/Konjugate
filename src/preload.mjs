@@ -45,7 +45,6 @@ contextBridge.exposeInMainWorld('appUpdate', {
 contextBridge.exposeInMainWorld('applicationInfo', {
     get: () => ipcRenderer.invoke('applicationInfo'),
     openWelcome: () => ipcRenderer.invoke('applicationOpenWelcome'),
-    openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),
     restart: () => ipcRenderer.invoke('applicationRestart')
 });
 
@@ -347,12 +346,10 @@ const invokePlainly = (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 
 contextBridge.exposeInMainWorld('aiProviders', {
     listConfigurations: () => invokePlainly('aiListConfigurations'),
-    listModels: (configurationUuid) => invokePlainly('aiListModels', configurationUuid),
     listDraftModels: (configuration, credential) => invokePlainly('aiListDraftModels', configuration, credential),
     saveConfiguration: (configuration, credential) => invokePlainly('aiSaveConfiguration', configuration, credential),
     removeConfiguration: (configurationUuid) => invokePlainly('aiRemoveConfiguration', configurationUuid),
     setActiveConfiguration: (configurationUuid) => invokePlainly('aiSetActiveConfiguration', configurationUuid),
-    testConnection: (configurationUuid) => invokePlainly('aiTestConnection', configurationUuid),
     testDraftConnection: (configuration, credential) => invokePlainly('aiTestDraftConnection', configuration, credential),
     generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
         const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });

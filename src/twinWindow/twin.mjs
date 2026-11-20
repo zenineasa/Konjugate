@@ -36,6 +36,11 @@ const state = {
 $('#minimize').addEventListener('click', () => window.windowControls.minimize());
 $('#maximize').addEventListener('click', () => window.windowControls.toggleMaximize());
 $('#close').addEventListener('click', () => window.windowControls.close());
+// The button says what it will do, as the project window's and the example guide's do.
+window.windowControls.onMaximizedChange((maximized) => {
+    $('#maximize').textContent = maximized ? '❐' : '□';
+    $('#maximize').ariaLabel = maximized ? 'Restore' : 'Maximize';
+});
 
 // ---- Step 1: the model ---------------------------------------------------------------------------------------------------------
 function renderModel() {

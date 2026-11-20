@@ -21,7 +21,7 @@ const node = {
     id: 1, name: 'Motor', type: 'Actuator', description: 'Turns current into torque.', subsystemId: 20, enabled: false,
     numerics: { substepsPerGlobalStep: 4, integration: 'semiImplicit' },
     position: [1, 2, 3], rotation: [0.1, 0.2, 0.3], scale: [2, 2, 2],
-    states: [{ id: 2, name: 'Current', symbol: 'current', initialValue: 1.5, unit: 'A' }, { id: 11, name: 'Torque', symbol: 'torque', initialValue: 0, unit: 'N m', changes: 'atEachInstant' }],
+    states: [{ id: 2, name: 'Current', symbol: 'current', initialValue: 1.5, unit: 'A' }],
     sourceTerms: [{
         id: 3, state: 'current', expression: 'gain', parameters: [{ id: 4, name: 'Gain', symbol: 'gain', value: 2, mode: 'live', control: { minimum: 0, maximum: 5, step: 0.1 } }],
         expressionModel: { latex: 'gain', bindings: [], mathJson: 'gain' }

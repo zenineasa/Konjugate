@@ -220,33 +220,6 @@ export function buildModel(sourceDocument) {
     // Stored parameter schedules, one table per shared parameter however many parameters link to it.
     const schedules = { list: [], byKey: new Map() };
 
-    // A state marked as worked out at each instant (docs/projectSchema.md, `changes`), into which every term is a value,
-    // and the states several setsValue terms set, which are their sum: the exported loop writes one term's value into a
-    // state and adds rates, so it cannot write either yet.
-    const workedOutStateIds = new Set(enabledNodes.flatMap((node) => (node.states ?? []).filter((state) => state.changes === 'atEachInstant').map((state) => state.id)));
-    const workedOutName = (stateId) => {
-        const node = nodeById.get(stateOwnerNodeId.get(stateId));
-        return `"${node?.name} · ${node?.states.find((state) => state.id === stateId)?.name}"`;
-    };
-    for (const plan of nodePlans) {
-        const setsValueCounts = new Map();
-        for (const term of plan.node.sourceTerms ?? []) {
-            const outputStateId = term.implementation != null ? term.implementation.output.stateId : term.expressionModel.output.stateId;
-            if (term.setsValue === true) setsValueCounts.set(outputStateId, (setsValueCounts.get(outputStateId) ?? 0) + 1);
-            if (term.setsValue !== true && workedOutStateIds.has(outputStateId)) {
-                throw new Error(`${workedOutName(outputStateId)} is worked out at each instant, and one of its node's source terms sets it without saying so, which code export cannot write yet.`);
-            }
-        }
-        for (const [stateId, count] of setsValueCounts) {
-            if (count > 1) throw new Error(`${workedOutName(stateId)} is the sum of ${count} of its node's own terms, which code export cannot write yet.`);
-        }
-        // A program setting a worked-out state is worked out at each instant; the exported loop runs every program as a
-        // step that advances, which would put its outputs a step behind.
-        const workedOutOutput = (plan.node.implementation?.outputs ?? []).find((output) => workedOutStateIds.has(output.stateId));
-        if (workedOutOutput) {
-            throw new Error(`The program of node "${plan.node.name}" sets ${workedOutName(workedOutOutput.stateId)}, a state worked out at each instant, which code export cannot write yet.`);
-        }
-    }
     for (const plan of nodePlans) {
         for (const term of plan.node.sourceTerms ?? []) {
             const programmable = term.implementation != null;
@@ -281,9 +254,6 @@ export function buildModel(sourceDocument) {
         const outputRole = programmable ? edge.implementation.output.role : edge.equationModel.output.role;
         const outputStateId = programmable ? edge.implementation.output.stateId : edge.equationModel.output.stateId;
         const outputPlan = nodePlanById.get(stateOwnerNodeId.get(outputStateId));
-        if (workedOutStateIds.has(outputStateId)) {
-            throw new Error(`Relationship "${edge.name}" sets ${workedOutName(outputStateId)}, a state worked out at each instant, which code export cannot write yet.`);
-        }
         const bindings = programmable ? edge.implementation.bindings : edge.equationModel.bindings;
         const mathJson = programmable ? null : edge.equationModel.mathJson;
         const identifierField = programmable ? 'key' : 'symbol';
@@ -305,9 +275,6 @@ export function buildModel(sourceDocument) {
                     otherStateId = otherNode.states[0]?.id;
                 }
                 if (otherStateId == null) throw new Error(`Bidirectional relationship "${edge.name}" has an endpoint with no states.`);
-                if (workedOutStateIds.has(otherStateId)) {
-                    throw new Error(`Relationship "${edge.name}" sets ${workedOutName(otherStateId)}, a state worked out at each instant, which code export cannot write yet.`);
-                }
                 otherPlan.contributions.push(buildContribution({
                     entityLabel: `relationship "${edge.name}"`, ownerPlan: otherPlan, alwaysLocal: false,
                     bindings, outputStateId: otherStateId, mathJson, implementation: edge.implementation ?? null, negate: true,

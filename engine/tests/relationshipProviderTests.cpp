@@ -1121,15 +1121,15 @@ void validatorRejectsASetsValueSourceTermSharingItsStateWithAnotherSourceTerm() 
 
     const auto sharedWithSetsValue = konjugate::validateModel(twoEquationSourceTermsSharingOneStateProject(true));
     require(!sharedWithSetsValue.valid, "A setsValue source term sharing its state with another source term was accepted.");
-    require(hasIssue(sharedWithSetsValue, "rateIntoWorkedOutState") && !hasIssue(sharedWithSetsValue, "setsValueNotSoleContributor"),
-        "A setsValue source term's state given a rate by another source term should be rateIntoWorkedOutState, said once.");
+    require(hasIssue(sharedWithSetsValue, "setsValueNotSoleContributor"),
+        "The shared-state setsValue conflict was not diagnosed with the expected issue code.");
 }
 
 void validatorRejectsASetsValueSourceTermSharingItsStateWithAnIncomingEdge() {
     const auto result = konjugate::validateModel(setsValueSourceTermWithIncomingEdgeProject());
     require(!result.valid, "A setsValue source term with an incoming edge to the same state was accepted.");
-    require(hasIssue(result, "rateIntoWorkedOutState") && !hasIssue(result, "setsValueNotSoleContributor"),
-        "A setsValue source term's state given a rate by an incoming edge should be rateIntoWorkedOutState, said once.");
+    require(hasIssue(result, "setsValueNotSoleContributor"),
+        "A setsValue/edge conflict on the same state was not diagnosed with the expected issue code.");
 }
 
 boost::property_tree::ptree setsValueSelfReferenceProject() {

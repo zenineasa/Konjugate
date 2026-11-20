@@ -23,7 +23,7 @@ const nodeDocumentKeys = new Set([
     'id', 'name', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
     'states', 'sourceTerms', 'implementation', 'appearance'
 ]);
-const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning', 'changes']);
+const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning']);
 const relationshipDocumentKeys = new Set([
     'id', 'groupId', 'name', 'description', 'source', 'target', 'directionality', 'enabled', 'equation', 'equationModel',
     'implementation', 'parameters', 'appearance'
@@ -76,8 +76,6 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
             exactValue: context.stateValueText(state.initialValue, state.unit).exact,
             className: '',
             ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
-            // Whether it changes over time or is worked out at each instant (docs/projectSchema.md), where the document says.
-            ...(state.changes ? { changes: state.changes } : {}),
             // A state's other fields (its `definitionKey` in a component, a field from a newer Konjugate) are kept too.
             ...unknownFields(state, stateDocumentKeys)
         })),
@@ -111,9 +109,7 @@ export function nodeToDocument(definition, context) {
             initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
             unit: state.unit ?? '',
             // A tunable initial value: a fitting target with bounds, as for a parameter.
-            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
-            // Written only where it was given, so a model that never says keeps saving exactly as before.
-            ...(state.changes ? { changes: state.changes } : {})
+            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {})
         })),
         sourceTerms: (definition.sourceTerms ?? []).map((term) => ({
             ...term,

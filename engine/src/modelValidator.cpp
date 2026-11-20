@@ -416,21 +416,6 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     // term at all (most states have none, and never need the count checked).
     std::unordered_map<std::string, int> stateContributorCounts;
     std::set<std::string> setsValueStateIds;
-    // What each state is (its `changes`, docs/projectSchema.md) against what reaches it. rateContributorCounts counts the
-    // contributions adding a rate (a source term or program output not setting the value, a single-equation
-    // relationship); termValueStateIds names the states a setsValue source term sets, programValueStateIds those a
-    // program's output sets after each step. declaredChanges holds a state's `changes` where the document gives one.
-    std::unordered_map<std::string, int> rateContributorCounts;
-    // Of those, the ones from a program's outputs: a program keeps state and reports after each step, so its rate is
-    // never a value, whatever the state is. And per state, how many of its node's own source terms set it.
-    std::unordered_map<std::string, int> programRateCounts;
-    std::unordered_map<std::string, int> ownValueTermCounts;
-    std::set<std::string> termValueStateIds;
-    std::set<std::string> programValueStateIds;
-    std::unordered_map<std::string, std::string> declaredChanges;
-    // Each enabled state's owner node and its "Node · State" name, for the messages.
-    std::unordered_map<std::string, std::string> stateOwners;
-    std::unordered_map<std::string, std::string> stateLabels;
     auto registerId = [&](const std::string& id, const std::string& kind, const std::string& entityId, const std::string& label) {
         bool validId = std::regex_match(id, entityIdPattern);
         if (validId) {
@@ -601,13 +586,6 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             stateIds[id].insert(stateId);
             if (!nodeEnabled) continue;
             if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
-            stateOwners[stateId] = id;
-            stateLabels[stateId] = value(node, "name") + " · " + value(state, "name");
-            if (const auto changes = state.get_optional<std::string>("changes")) {
-                if (*changes == "overTime" || *changes == "atEachInstant") declaredChanges[stateId] = *changes;
-                else add(result, "stateChangesInvalid", "error", "State \"" + value(state, "name") + "\" has changes \"" + *changes +
-                    "\": a state either changes over time (overTime) or is worked out at each instant (atEachInstant).", "node", id, "states");
-            }
             // A state's initial value can be a fitting target too, with the same bounds as a parameter.
             if (state.get_child_optional("tuning")) {
                 const auto minimum = state.get_optional<double>("tuning.minimum");
@@ -670,13 +648,6 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 const auto termOutputStateId = value(term, termProgrammable ? "implementation.output.stateId" : "expressionModel.output.stateId");
                 if (!termOutputStateId.empty()) {
                     stateContributorCounts[termOutputStateId] += 1;
-                    if (value(term, "setsValue") == "true") termValueStateIds.insert(termOutputStateId);
-                    else rateContributorCounts[termOutputStateId] += 1;
-                    // A source term sets its state when it says so, or when the state is marked as worked out.
-                    const auto declaredHere = declaredChanges.find(termOutputStateId);
-                    if (value(term, "setsValue") == "true" || (declaredHere != declaredChanges.end() && declaredHere->second == "atEachInstant")) {
-                        ownValueTermCounts[termOutputStateId] += 1;
-                    }
                     if (value(term, "setsValue") == "true") {
                         setsValueStateIds.insert(termOutputStateId);
                         std::vector<std::string> referencedStateIds;
@@ -874,20 +845,6 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 std::set<std::string> outputKeys;
                 bool nodeProviderSelfReference = false;
                 const auto outputs = implementation->get_child_optional("outputs");
-                // A program whose outputs all set states marked as worked out at each instant is a term like any other,
-                // worked out at the instant; one reaching both kinds cannot be both that and a step that advances.
-                const auto declaredWorked = [&](const std::string& stateId) {
-                    const auto found = declaredChanges.find(stateId);
-                    return found != declaredChanges.end() && found->second == "atEachInstant";
-                };
-                const auto workedOutputs = outputs ? std::count_if(outputs->begin(), outputs->end(),
-                    [&](const auto& entry) { return declaredWorked(value(entry.second, "stateId")); }) : 0;
-                const bool programAtEachInstant = outputs && workedOutputs > 0 && static_cast<std::size_t>(workedOutputs) == outputs->size();
-                if (outputs && workedOutputs > 0 && !programAtEachInstant) {
-                    add(result, "programOutputsMixed", "error", "The program of " + value(node, "name") + " sets both states worked out at each "
-                        "instant and states that change over time. A program is either worked out at each instant, keeping no state of its own, "
-                        "or a step that advances: mark all the states it sets alike.", "node", id, "implementation");
-                }
                 if (!outputs || outputs->empty()) {
                     add(result, "nodeProviderOutputsEmpty", "error", "A computational-node provider must declare at least one named output.", "node", id, "implementation");
                 } else for (const auto& outputEntry : *outputs) {
@@ -903,16 +860,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
                     } else {
                         stateContributorCounts[outputStateId] += 1;
-                        if (declaredWorked(outputStateId)) {
-                            // A term setting the value, added to the state's others (or, from a program setting both
-                            // kinds, already said above). Reading its own output back would be a loop.
-                            if (nodeProviderBindingStateIds.contains(outputStateId)) nodeProviderSelfReference = true;
-                        } else if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
-                        else {
-                            rateContributorCounts[outputStateId] += 1;
-                            programRateCounts[outputStateId] += 1;
-                        }
-                        if (value(output, "setsValue") == "true" && !declaredWorked(outputStateId)) {
+                        if (value(output, "setsValue") == "true") {
                             setsValueStateIds.insert(outputStateId);
                             // A setsValue output reading its own target state back through one of
                             // this provider's (shared, per-node not per-output) bindings would make
@@ -956,18 +904,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         // (role/stateId); a bidirectional edge also reciprocates onto the other endpoint.
         const auto countEdgeContribution = [&](const std::string& role, const std::string& stateId) {
             if (stateId.empty()) return;
-            // A single-equation relationship always adds a rate.
             stateContributorCounts[stateId] += 1;
-            rateContributorCounts[stateId] += 1;
             if (value(edge, "directionality") != "bidirectional") return;
             const auto otherNodeId = role == "target" ? sourceNode : targetNode;
             const auto otherStateField = role == "target" ? "source.stateId" : "target.stateId";
             auto otherStateId = value(edge, otherStateField);
             if (otherStateId.empty()) otherStateId = firstStateIdOf(nodesById, otherNodeId);
-            if (!otherStateId.empty()) {
-                stateContributorCounts[otherStateId] += 1;
-                rateContributorCounts[otherStateId] += 1;
-            }
+            if (!otherStateId.empty()) stateContributorCounts[otherStateId] += 1;
         };
         // An edge is inert -- and its content unvalidated -- if it's disabled itself, or either
         // endpoint node is (an edge into a disabled node can't contribute to anything either,
@@ -1124,69 +1067,29 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             add(result, "edgeOutputMissing", "error", "Choose the state updated by this equation.", "edge", id, "output");
         }
     }
-    // What a state is against what reaches it. A state is worked out at each instant when the document says so, or, where
-    // it says nothing, when a setsValue source term or a relationship's equation sets it; a state a program's output sets
-    // is a program's own, set after each step. Each mistake is said once, here or below.
-    const auto declared = [&](const std::string& stateId) {
-        const auto found = declaredChanges.find(stateId);
-        return found == declaredChanges.end() ? std::string{} : found->second;
-    };
-    const auto setByValue = [&](const std::string& stateId) { return termValueStateIds.contains(stateId) || relationshipStateIds.contains(stateId); };
-    const auto label = [&](const std::string& stateId) { return stateLabels.contains(stateId) ? stateLabels.at(stateId) : stateId; };
-    const auto owner = [&](const std::string& stateId) { return stateOwners.contains(stateId) ? stateOwners.at(stateId) : std::string{}; };
-    // The worked-out states given a rate: said here, and not again below.
-    std::set<std::string> rateIntoWorkedOut;
-    std::set<std::string> workedOut;
-    for (const auto& [stateId, changes] : declaredChanges) if (changes == "atEachInstant") workedOut.insert(stateId);
-    for (const auto& stateId : termValueStateIds) if (declared(stateId).empty()) workedOut.insert(stateId);
-    for (const auto& stateId : relationshipStateIds) if (declared(stateId).empty()) workedOut.insert(stateId);
-    for (const auto& stateId : workedOut) {
-        // Into a state marked worked out, every term is a value (a program's output excepted); into one worked out only
-        // because a setsValue term or a relationship sets it, a term that does not say it sets the value is a rate.
-        const auto rates = declared(stateId) == "atEachInstant" ? programRateCounts[stateId] : rateContributorCounts[stateId];
-        if (rates > 0) {
-            rateIntoWorkedOut.insert(stateId);
-            add(result, "rateIntoWorkedOutState", "error",
-                label(stateId) + " is worked out at each instant, so nothing can add a rate to it. Make what adds a rate set a value instead, "
-                "or give the rate to a state that changes over time.", "node", owner(stateId), "states");
-        }
-        if (declared(stateId) == "atEachInstant" && stateContributorCounts[stateId] == 0 && !relationshipStateIds.contains(stateId)) {
-            add(result, "workedOutStateUnset", "warning",
-                label(stateId) + " is worked out at each instant, but nothing sets it.", "node", owner(stateId), "states");
-        }
-        // Several of a node's own terms setting one state add up, which is sometimes a mistake (two terms each meant to
-        // be the value). Many relationships setting one state is the normal case and is not remarked on.
-        if (ownValueTermCounts[stateId] > 1 && !rateIntoWorkedOut.contains(stateId)) {
-            add(result, "ownTermsAddUp", "warning",
-                label(stateId) + " is the sum of " + std::to_string(ownValueTermCounts[stateId]) + " of its node's own terms. "
-                "If one is meant to replace another, remove it.", "node", owner(stateId), "states");
-        }
-    }
-    for (const auto& [stateId, changes] : declaredChanges) {
-        if (changes != "overTime" || !setByValue(stateId)) continue;
-        add(result, "valueIntoChangingState", "error",
-            label(stateId) + " changes over time, so a source term or relationship cannot set its value. Mark it as worked out at each "
-            "instant, or make what sets it add a rate.", "node", owner(stateId), "states");
+    // A state relationships set takes nothing else: no rate, no source term, no provider.
+    for (const auto& stateId : relationshipStateIds) {
+        if (stateContributorCounts[stateId] == 0) continue;
+        const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(), [&](const auto& entry) { return entry.second.contains(stateId); });
+        add(result, "algebraicStateMixed", "error",
+            "A state set by relationships' equations is the sum of what they set, and takes no other contribution.",
+            "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
     }
     // The plan compiled here, if any, serves the stability pass below too: compiling a large model takes seconds.
     std::shared_ptr<const ExecutionPlan> compiledPlan;
-    // Compiling orders the cross-model algebraic pass and finds a loop in it, which relationships' several equations, or
-    // relationships into states marked worked out, can make.
-    const auto anyDeclaredWorkedOut = std::any_of(declaredChanges.begin(), declaredChanges.end(), [](const auto& entry) { return entry.second == "atEachInstant"; });
-    if ((!relationshipStateIds.empty() || anyDeclaredWorkedOut) && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
+    if (!relationshipStateIds.empty() && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
         try {
             compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
         } catch (const std::exception& error) {
             add(result, std::string(error.what()).find("form a loop") != std::string::npos ? "algebraicLoop" : "modelCompileFailed", "error", error.what(), "model", "");
         }
     }
-    // A program's output is the program's alone: it reports where it got to after each step, which nothing else can add to.
-    for (const auto& stateId : programValueStateIds) {
-        if (stateContributorCounts[stateId] <= 1 && !relationshipStateIds.contains(stateId)) continue;
+    for (const auto& stateId : setsValueStateIds) {
+        if (stateContributorCounts[stateId] == 1) continue;
         const auto ownerNode = std::find_if(stateIds.begin(), stateIds.end(),
             [&](const auto& entry) { return entry.second.contains(stateId); });
         add(result, "setsValueNotSoleContributor", "error",
-            label(stateId) + " is set by its node's program after each step, so nothing else can reach it.",
+            "A source term or computational-node-provider output that sets its state's value directly must be the only contribution to that state.",
             "node", ownerNode != stateIds.end() ? ownerNode->first : std::string{});
     }
     // Pre-run phase of docs/proposals/numericalStabilityDiagnostics.md: a local, linearized

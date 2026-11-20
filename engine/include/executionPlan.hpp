@@ -342,10 +342,31 @@ struct AlgebraicOutput {
     std::vector<std::size_t> eagerDefinitions;
 };
 
+// One step of the cross-model algebraic pass (ExecutionPlan::algebraicPass).
+enum class AlgebraicStepKind {
+    // plan.algebraicOutputs[index]: added to its state, which every output writing it sums.
+    relationshipOutput,
+    // plan.nodes[node].algebraicTasks[index]: a setsValue source term that reads, directly or through another source
+    // term of its node, a state the pass sets. It is evaluated in its node's substeps as every setsValue source term
+    // is, and again here, after what it reads, so the value it holds at the instant is from that instant's values.
+    sourceTerm
+};
+
+struct AlgebraicStep {
+    AlgebraicStepKind kind = AlgebraicStepKind::relationshipOutput;
+    std::size_t node = 0;
+    std::size_t index = 0;
+};
+
 struct ExecutionPlan {
     std::vector<AlgebraicRelationship> algebraicRelationships;
     // In the order they are evaluated: every output writing a state comes before any output reading it.
     std::vector<AlgebraicOutput> algebraicOutputs;
+    // The cross-model algebraic pass, in the order it is evaluated: everything that sets a state's value at a
+    // synchronization instant from other states' values at that instant, each step after every step setting a state it
+    // reads. The relationship outputs, in the order above, with (interleaved where they depend on each other) the
+    // setsValue source terms that read a state the pass sets. Empty when the plan has none of them.
+    std::vector<AlgebraicStep> algebraicPass;
     // The states algebraic relationships set, each the sum of its outputs.
     std::vector<std::size_t> algebraicStateIndexes;
     StateValues initialStates;
@@ -451,12 +472,15 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
 // an initial value, or one computed under parameters a fork has since changed -- need not match
 // its expression, and other nodes read it through the synchronization snapshot before its own node
 // recomputes it. `stepSize` is only passed on to programmable terms' providers.
-// Sets every state algebraic relationships set: each to zero, then each output's value added, in
-// dependency order, from `states` (which it updates), at simulationTime. A definition is worked out at
-// most once in the instant, and only if an equation needs it: one read only in a branch not taken is
-// not. Returns how many definitions were worked out.
+// The cross-model algebraic pass (ExecutionPlan::algebraicPass) at simulationTime, from `states` (which it updates):
+// every state algebraic relationships set to zero, then each step in order -- a relationship output's value added to
+// its state, a joined source term's value replacing its state's. A definition is worked out at most once in the instant,
+// and only if an equation needs it: one read only in a branch not taken is not. stepSize and providerEvaluator are only
+// passed on to a programmable source term; a plan with one needs the evaluator. Returns how many definitions were
+// worked out.
 std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
-                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime);
+                                    const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
+                                    double stepSize = 0, ProviderEvaluator* providerEvaluator = nullptr);
 
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                            double time, double stepSize, ProviderEvaluator* providerEvaluator = nullptr,

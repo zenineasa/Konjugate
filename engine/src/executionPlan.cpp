@@ -743,11 +743,10 @@ void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tre
 // it needs use. Those are found for each definition once, in order, from the states it reads and those the earlier
 // definitions it reads need (a relationship's outputs share most of their definitions, which may be thousands): only the
 // states other outputs write, which are few.
-void orderAlgebraicOutputs(ExecutionPlan& plan) {
-    if (plan.algebraicOutputs.empty()) return;
-    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
-    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
-    // Per relationship, a bit for each binding reading a state some output writes; per definition, the bits of those it
+// For each output, in plan.algebraicOutputs' order, the states in `written` that it reads: those its equation and the
+// definitions it needs use (worked out as orderAlgebraicOutputs describes). Empty for an output reading none.
+std::vector<std::vector<std::size_t>> algebraicOutputReads(const ExecutionPlan& plan, const std::unordered_set<std::size_t>& written) {
+    // Per relationship, a bit for each binding reading a written state; per definition, the bits of those it
     // reads directly or through the definitions it reads. A definition reads only those before it, so each one's bits
     // are known when it is reached; most relationships read no written state and need none.
     struct Reads {
@@ -779,7 +778,7 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
         for (std::size_t symbol = 0; symbol < relationship.bindings.size(); ++symbol) {
             const auto& binding = relationship.bindings[symbol];
             if (binding.source != BindingSource::synchronizationSnapshot && binding.source != BindingSource::localState) continue;
-            if (!writers.contains(binding.valueIndex)) continue;
+            if (!written.contains(binding.valueIndex)) continue;
             reads.bitOfSymbol[symbol] = reads.stateOfBit.size();
             reads.stateOfBit.push_back(binding.valueIndex);
         }
@@ -790,18 +789,32 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
             readBits(relationship.definitions[definition], relationship, reads, reads.definitionBits.data() + definition * reads.words);
         }
     }
-    const auto count = plan.algebraicOutputs.size();
-    std::vector<std::vector<std::size_t>> after(count);
-    std::vector<std::size_t> waiting(count, 0);
+    std::vector<std::vector<std::size_t>> result(plan.algebraicOutputs.size());
     std::vector<std::uint64_t> bits;
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) {
         const auto& output = plan.algebraicOutputs[index];
         const auto& reads = relationshipReads[output.relationship];
         if (!reads.words) continue;
         bits.assign(reads.words, 0);
         readBits(output.expression, plan.algebraicRelationships[output.relationship], reads, bits.data());
-        std::vector<std::size_t> statesRead;
-        for (std::size_t bit = 0; bit < reads.stateOfBit.size(); ++bit) if (bits[bit / 64] >> (bit % 64) & 1) statesRead.push_back(reads.stateOfBit[bit]);
+        for (std::size_t bit = 0; bit < reads.stateOfBit.size(); ++bit) if (bits[bit / 64] >> (bit % 64) & 1) result[index].push_back(reads.stateOfBit[bit]);
+    }
+    return result;
+}
+
+void orderAlgebraicOutputs(ExecutionPlan& plan) {
+    if (plan.algebraicOutputs.empty()) return;
+    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
+    for (std::size_t index = 0; index < plan.algebraicOutputs.size(); ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
+    std::unordered_set<std::size_t> written;
+    for (const auto& [state, writing] : writers) written.insert(state);
+    const auto outputReads = algebraicOutputReads(plan, written);
+    const auto count = plan.algebraicOutputs.size();
+    std::vector<std::vector<std::size_t>> after(count);
+    std::vector<std::size_t> waiting(count, 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto& statesRead = outputReads[index];
+        if (statesRead.empty()) continue;
         std::set<std::size_t> dependencies;
         for (const auto read : statesRead) {
             const auto& writing = writers.at(read);
@@ -827,6 +840,77 @@ void orderAlgebraicOutputs(ExecutionPlan& plan) {
     std::set<std::size_t> states;
     for (const auto& output : plan.algebraicOutputs) states.insert(output.outputStateIndex);
     plan.algebraicStateIndexes.assign(states.begin(), states.end());
+}
+
+// Builds plan.algebraicPass (see ExecutionPlan::algebraicPass) once the relationship outputs are ordered. A setsValue
+// source term joins it when it reads a state the pass sets -- a relationship's or another joined source term's -- since
+// only then would the value its node works out at the end of a step be from the values of the instant before. The steps
+// are ordered so that each comes after every step setting a state it reads, keeping the relationship outputs' own order
+// where nothing else decides. A loop has no defined solution and is refused.
+void buildAlgebraicPass(ExecutionPlan& plan) {
+    struct Joined {
+        AlgebraicStep step;
+        std::vector<std::size_t> reads;
+        std::vector<std::size_t> writes;
+    };
+    std::unordered_set<std::size_t> written(plan.algebraicStateIndexes.begin(), plan.algebraicStateIndexes.end());
+    std::vector<Joined> joined;
+    // A source term reads only its own node's states, and a node's are in dependency order, so one sweep finds every one
+    // that joins: the states relationships set are all known before it starts.
+    for (std::size_t nodeIndex = 0; nodeIndex < plan.nodes.size(); ++nodeIndex) {
+        const auto& node = plan.nodes[nodeIndex];
+        for (std::size_t taskIndex = 0; taskIndex < node.algebraicTasks.size(); ++taskIndex) {
+            const auto& task = node.algebraicTasks[taskIndex];
+            std::vector<std::size_t> reads;
+            for (const auto& binding : task.bindings) {
+                if (binding.source == BindingSource::localState) reads.push_back(node.stateIndexes.at(binding.valueIndex));
+            }
+            if (std::none_of(reads.begin(), reads.end(), [&](std::size_t state) { return written.contains(state); })) continue;
+            const auto output = node.stateIndexes.at(task.outputStateIndex);
+            written.insert(output);
+            joined.push_back({{AlgebraicStepKind::sourceTerm, nodeIndex, taskIndex}, std::move(reads), {output}});
+        }
+    }
+    plan.algebraicPass.clear();
+    const auto outputs = plan.algebraicOutputs.size();
+    if (joined.empty()) {
+        for (std::size_t index = 0; index < outputs; ++index) plan.algebraicPass.push_back({AlgebraicStepKind::relationshipOutput, 0, index});
+        return;
+    }
+    // Steps 0 .. outputs - 1 are the relationship outputs, the rest the joined steps.
+    const auto count = outputs + joined.size();
+    std::unordered_map<std::size_t, std::vector<std::size_t>> writers;
+    for (std::size_t index = 0; index < outputs; ++index) writers[plan.algebraicOutputs[index].outputStateIndex].push_back(index);
+    for (std::size_t index = 0; index < joined.size(); ++index) {
+        for (const auto state : joined[index].writes) writers[state].push_back(outputs + index);
+    }
+    auto reads = algebraicOutputReads(plan, written);
+    for (auto& step : joined) reads.push_back(std::move(step.reads));
+    std::vector<std::vector<std::size_t>> after(count);
+    std::vector<std::size_t> waiting(count, 0);
+    for (std::size_t index = 0; index < count; ++index) {
+        std::set<std::size_t> dependencies;
+        for (const auto state : reads[index]) {
+            const auto found = writers.find(state);
+            if (found != writers.end()) dependencies.insert(found->second.begin(), found->second.end());
+        }
+        for (const auto dependency : dependencies) {
+            after[dependency].push_back(index);
+            ++waiting[index];
+        }
+    }
+    // The lowest ready step first: the relationship outputs in their own order, then the joined steps.
+    std::set<std::size_t> ready;
+    for (std::size_t index = 0; index < count; ++index) if (!waiting[index]) ready.insert(index);
+    while (!ready.empty()) {
+        const auto index = *ready.begin();
+        ready.erase(ready.begin());
+        plan.algebraicPass.push_back(index < outputs ? AlgebraicStep{AlgebraicStepKind::relationshipOutput, 0, index} : joined[index - outputs].step);
+        for (const auto next : after[index]) if (!--waiting[next]) ready.insert(next);
+    }
+    if (plan.algebraicPass.size() != count) {
+        throw std::runtime_error("Relationships and source terms that set states' values form a loop, which has no defined solution.");
+    }
 }
 
 }
@@ -1113,6 +1197,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         }
     }
     orderAlgebraicOutputs(plan);
+    buildAlgebraicPass(plan);
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
     plan.taskSubmissionOrder = planTaskSubmissionOrder(plan.nodes);
     const auto scheduled = [](const std::vector<ContributionTask>& tasks) {
@@ -1431,6 +1516,29 @@ std::vector<std::pair<std::size_t, double>> reduceContributions(
     return derivatives;
 }
 
+namespace {
+
+// A setsValue source term's value from its symbols' values at evaluationTime: its equation's, or its program's.
+double algebraicTaskValue(const ContributionTask& task, const std::vector<double>& symbols, double evaluationTime, double stepSize,
+                          ProviderEvaluator* providerEvaluator) {
+    double value = 0;
+    if (task.implementation == ContributionImplementation::equation) {
+        value = evaluateTask(task, symbols);
+    } else {
+        if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
+        const std::vector<const ContributionTask*> batchTasks{&task};
+        const std::vector<std::span<const double>> inputs{symbols};
+        // The provider sees the same instant as the states it reads (see applyAlgebraicTasks' declaration).
+        const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, evaluationTime, stepSize);
+        if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
+        value = results.front();
+    }
+    if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
+    return value;
+}
+
+}
+
 void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, StateValues& localStates,
                          const NodeParameterValues& parameterValues, double evaluationTime, double stepSize,
                          ProviderEvaluator* providerEvaluator) {
@@ -1454,24 +1562,11 @@ void applyAlgebraicTasks(const std::vector<ContributionTask>& algebraicTasks, St
             }
         }
 
-        double value = 0;
-        if (task.implementation == ContributionImplementation::equation) {
-            value = evaluateTask(task, symbols);
-        } else {
-            if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
-            const std::vector<const ContributionTask*> batchTasks{&task};
-            const std::vector<std::span<const double>> inputs{symbols};
-            // The provider sees the same instant as the states it reads (see the declaration).
-            const auto results = providerEvaluator->evaluateBatch(batchTasks, inputs, evaluationTime, stepSize);
-            if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
-            value = results.front();
-        }
-        if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
         // A plain replacement, never accumulated and never divided by anything -- this is the
         // whole point: an algebraic state is recomputed fresh, not integrated, so it composes
         // with any solver (see NodeExecutionPlan::algebraicTasks and this function's declaration
         // comment in executionPlan.hpp).
-        localStates.at(task.outputStateIndex) = value;
+        localStates.at(task.outputStateIndex) = algebraicTaskValue(task, symbols, evaluationTime, stepSize, providerEvaluator);
     }
 }
 
@@ -1643,9 +1738,10 @@ struct DefinitionReader {
 }
 
 std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
-                                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+                                           const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
+                                           double stepSize, ProviderEvaluator* providerEvaluator) {
     std::size_t definitionsWorked = 0;
-    if (plan.algebraicOutputs.empty()) return definitionsWorked;
+    if (plan.algebraicPass.empty()) return definitionsWorked;
     for (const auto index : plan.algebraicStateIndexes) states.at(index) = 0;
     // Each relationship's parameters, resolved once for this instant; and its definitions, kept for the instant, so
     // each is worked out once however many of its equations need it. That is sound because the outputs are in
@@ -1656,7 +1752,27 @@ std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValue
     std::vector<bool> resolved(plan.algebraicRelationships.size(), false);
     std::vector<std::size_t> found;
     std::vector<std::size_t> pending;
-    for (const auto& output : plan.algebraicOutputs) {
+    for (const auto& step : plan.algebraicPass) {
+        if (step.kind == AlgebraicStepKind::sourceTerm) {
+            // A setsValue source term, from its node's states as they stand: those the pass has set are set by now.
+            const auto& node = plan.nodes[step.node];
+            const auto& task = node.algebraicTasks[step.index];
+            std::vector<double> symbols(task.bindings.size());
+            for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+                const auto& binding = task.bindings[index];
+                if (binding.source == BindingSource::parameter) {
+                    symbols[index] = resolveParameterValue(task.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
+                } else if (binding.source == BindingSource::simulationTime) {
+                    symbols[index] = simulationTime;
+                } else {
+                    symbols[index] = states.at(node.stateIndexes.at(binding.valueIndex));
+                }
+            }
+            states.at(node.stateIndexes.at(task.outputStateIndex)) =
+                algebraicTaskValue(task, symbols, simulationTime, stepSize / static_cast<double>(node.substeps), providerEvaluator);
+            continue;
+        }
+        const auto& output = plan.algebraicOutputs[step.index];
         const auto& relationship = plan.algebraicRelationships[output.relationship];
         auto& symbols = symbolValues[output.relationship];
         auto& done = worked[output.relationship];

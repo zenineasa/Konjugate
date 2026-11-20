@@ -402,6 +402,83 @@ void validationHandsBackTheCompiledPlan() {
     require(!konjugate::validateModel(parse(chainProject(loop))).plan, "An invalid model's validation should hand back no plan.");
 }
 
+// ---- The cross-model algebraic pass: setsValue source terms reading what relationships set ----
+
+// A relationship A -> B setting B.y = 2 x, a setsValue source term on B setting s = y + 1 (and, reading nothing the pass
+// sets, t = 5), and a relationship B -> C setting C.z = 10 s. `extraNodes` and `extraEdges` are spliced in.
+std::string sourceTermChain(const std::string& extraNodes = "", const std::string& extraEdges = "",
+                            const std::string& aStates = R"json([{"id": 11, "name": "X", "symbol": "x", "initialValue": 3}])json") {
+    return std::string(R"json({"format": "konjugate", "version": 1, "nodes": [
+        {"id": 1, "name": "A", "states": )json") + aStates + R"json(, "sourceTerms": []},
+        {"id": 2, "name": "B", "states": [{"id": 21, "name": "Y", "symbol": "y", "initialValue": 0},
+                                          {"id": 22, "name": "S", "symbol": "s", "initialValue": 0},
+                                          {"id": 23, "name": "T", "symbol": "t", "initialValue": 0}],
+         "sourceTerms": [
+            {"id": 24, "state": "s", "expression": "y + 1", "setsValue": true,
+             "expressionModel": {"latex": "y + 1", "output": {"stateId": 22}, "mathJson": ["Add", "y", 1],
+                                 "bindings": [{"kind": "state", "nodeId": 2, "stateId": 21, "symbol": "y"}]}},
+            {"id": 25, "state": "t", "expression": "5", "setsValue": true,
+             "expressionModel": {"latex": "5", "output": {"stateId": 23}, "mathJson": 5, "bindings": []}}]},
+        {"id": 3, "name": "C", "states": [{"id": 31, "name": "Z", "symbol": "z", "initialValue": 0}], "sourceTerms": []})json" + extraNodes + R"json(
+    ], "edges": [
+        {"id": 5, "name": "B to C", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 3},
+         "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "s", "kind": "state", "role": "source", "nodeId": 2, "stateId": 22}],
+            "outputs": [{"role": "target", "stateId": 31, "mathJson": ["Multiply", 10, "s"], "setsValue": true}]}},
+        {"id": 6, "name": "A to B", "directionality": "directed", "source": {"nodeId": 1}, "target": {"nodeId": 2},
+         "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "outputs": [{"role": "target", "stateId": 21, "mathJson": ["Multiply", 2, "x"], "setsValue": true}]}})json" + extraEdges + R"json(
+    ]})json";
+}
+
+void aSourceTermReadingAStateThePassSetsJoinsIt() {
+    const auto document = parse(sourceTermChain());
+    const auto result = konjugate::validateModel(document);
+    for (const auto& issue : result.issues) if (issue.severity == "error") std::fprintf(stderr, "  %s: %s\n", issue.code.c_str(), issue.message.c_str());
+    require(result.valid, "A relationship reading a source term that reads a relationship should be valid.");
+    const auto plan = konjugate::compileExecutionPlan(document);
+    require(plan.algebraicPass.size() == 3, "The pass should hold the two relationship outputs and the one source term that reads y.");
+    require(plan.algebraicPass[0].kind == konjugate::AlgebraicStepKind::relationshipOutput &&
+            plan.algebraicPass[1].kind == konjugate::AlgebraicStepKind::sourceTerm &&
+            plan.algebraicPass[2].kind == konjugate::AlgebraicStepKind::relationshipOutput,
+            "The source term should come between the relationship setting y and the one reading s.");
+    auto states = plan.initialStates;
+    konjugate::evaluateAlgebraicRelationships(plan, states, {}, {}, 0);
+    const auto at = [&](konjugate::EntityId id) { return states.at(plan.stateIndexes.at(id)); };
+    require(at(21) == 6 && at(22) == 7 && at(31) == 70, "y = 2x, s = y + 1 and z = 10 s should all settle within one instant.");
+    require(at(23) == 0, "A source term reading nothing the pass sets should not join it (t is set by its node, not here).");
+}
+
+void aLoopThroughASourceTermIsRefused() {
+    // A.w = s (from B), and B.y = w + x (from A): y -> s -> w -> y.
+    const auto aStates = R"json([{"id": 11, "name": "X", "symbol": "x", "initialValue": 3},
+                                  {"id": 12, "name": "W", "symbol": "w", "initialValue": 0}])json";
+    const auto loop = R"json(,
+        {"id": 7, "name": "B to A", "directionality": "directed", "source": {"nodeId": 2}, "target": {"nodeId": 1},
+         "parameters": [],
+         "equationModel": {
+            "bindings": [{"symbol": "s", "kind": "state", "role": "source", "nodeId": 2, "stateId": 22}],
+            "outputs": [{"role": "target", "stateId": 12, "mathJson": "s", "setsValue": true}]}})json";
+    auto text = sourceTermChain("", loop, aStates);
+    const std::string from = R"json("outputs": [{"role": "target", "stateId": 21, "mathJson": ["Multiply", 2, "x"], "setsValue": true}])json";
+    const std::string to = R"json("outputs": [{"role": "target", "stateId": 21, "mathJson": ["Add", "w", "x"], "setsValue": true}])json";
+    text.replace(text.find(from), from.size(), to);
+    const std::string bindings = R"json("bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11}],
+            "outputs": [{"role": "target", "stateId": 21)json";
+    const std::string withW = R"json("bindings": [{"symbol": "x", "kind": "state", "role": "source", "nodeId": 1, "stateId": 11},
+                         {"symbol": "w", "kind": "state", "role": "source", "nodeId": 1, "stateId": 12}],
+            "outputs": [{"role": "target", "stateId": 21)json";
+    text.replace(text.find(bindings), bindings.size(), withW);
+    const auto document = parse(text);
+    require(hasIssue(konjugate::validateModel(document), "algebraicLoop"), "A loop through a setsValue source term should be algebraicLoop.");
+    bool threw = false;
+    try { static_cast<void>(konjugate::compileExecutionPlan(document)); } catch (const std::runtime_error&) { threw = true; }
+    require(threw, "Compiling a loop through a source term should fail clearly.");
+}
+
 }
 
 int main() {
@@ -417,6 +494,8 @@ int main() {
         validationHandsBackTheCompiledPlan();
         everyOperationIsWorkedOutToTheLastBit();
         aChoiceSettledEarlyLeavesTheRestUnworked();
+        aSourceTermReadingAStateThePassSetsJoinsIt();
+        aLoopThroughASourceTermIsRefused();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "algebraicRelationshipTests failed: %s\n", error.what());
         return 1;

@@ -1017,7 +1017,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     // after a restart too, where a fork may have changed the parameters they depend on.
     settleAlgebraicStates(executionPlan, states, runControl.parameterValues, startTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
     // And the states algebraic relationships set, across nodes, in dependency order.
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime);
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime, globalTimeStep, providerRuntime.get());
     samples = {{startTime, states}};
     checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
@@ -1448,7 +1448,7 @@ void Simulation::settleIfParametersChanged() {
     if (runControl.interventions.size() == settledInterventions) return;
     settledInterventions = runControl.interventions.size();
     settleAlgebraicStates(executionPlan, states, runControl.parameterValues, currentTime, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime, globalTimeStep, providerRuntime.get());
     if (!samples.empty() && samples.back().time == currentTime) samples.back().states = states;
     if (!checkpoints.empty() && checkpoints.back().time == currentTime) checkpoints.back().states = states;
 }
@@ -1480,7 +1480,7 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     currentTime = elapsed;
     // The states algebraic relationships set, from the states the step reached, at its end: every
     // node reads them from the next step's synchronization snapshot.
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime);
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, currentTime, synchronizationStep, providerRuntime.get());
     if (!stabilityMonitoredNodeIds.empty()) {
         auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);
         stabilityFindings.insert(stabilityFindings.end(),
@@ -1550,7 +1550,7 @@ long long Simulation::checkpointKey(double time) const {
 // The algebraic states set again for the instant, as a run does when it starts or resumes from a checkpoint.
 void Simulation::settleAt(double time) {
     settleAlgebraicStates(executionPlan, states, runControl.parameterValues, time, globalTimeStep, providerRuntime.get(), runControl.activeSchedules);
-    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time);
+    evaluateAlgebraicRelationships(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time, globalTimeStep, providerRuntime.get());
 }
 
 void Simulation::restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates) {

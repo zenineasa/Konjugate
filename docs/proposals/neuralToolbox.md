@@ -11,7 +11,7 @@ implementation: none
 
 # Neural Toolbox
 
-**Status: proposed. A throwaway prototype (November 2026, not kept in the repository) proved the mapping onto the engine and measured the canvas at scale; nothing here is built.**
+**Status: proposed. A throwaway prototype (November 2026, not kept in the repository) proved the mapping onto the engine and measured the canvas at scale. Core change 2 is built; core change 1 is superseded by [Rates and values](ratesAndValues.md); nothing of the toolbox itself is built.**
 
 ## The problem
 
@@ -210,8 +210,8 @@ So a typical robot policy is imported as a block and opened up one or two layers
 
 Each of these is needed by the flagship workflow, and each is useful without it.
 
-1. **Feedthrough node providers.** A node provider marked as having no state of its own is evaluated in the cross-model algebraic pass, in dependency order with algebraic relationships, instead of as a co-simulation step, so a block adds no step of delay. Required, not only better, once blocks sit between opened-up parts. Any stateless external block benefits: a lookup service, a solver, a surrogate.
-2. **`setsValue` source terms in the algebraic pass.** Either evaluate them in the same cross-model pass as algebraic relationships, or at least warn (`algebraicReadsSourceTerm`) when an algebraic relationship reads a state one sets. Today the step of delay is silent.
+1. **Feedthrough node providers.** *Superseded by [Rates and values](ratesAndValues.md): a program with no state of its own, declared so by its author, is a term like any other and lands on a worked-out state at the instant, with no flag for the modeller.* A node provider marked as having no state of its own is evaluated in the cross-model algebraic pass, in dependency order with algebraic relationships, instead of as a co-simulation step, so a block adds no step of delay. Required, not only better, once blocks sit between opened-up parts. Any stateless external block benefits: a lookup service, a solver, a surrogate.
+2. **`setsValue` source terms in the algebraic pass.** *Built (November 2026): a `setsValue` source term that reads a state the pass sets joins it, so the step of delay is gone rather than warned about; a loop through one is refused as `algebraicLoop`.* Either evaluate them in the same cross-model pass as algebraic relationships, or at least warn when an algebraic relationship reads a state one sets.
 3. **Plugin-packaged node providers.** Computational-node providers can only be inline today; a toolbox needs to ship one (the ONNX Runtime block) in its `.kjp`, as relationship providers already are ([Plugin development](../pluginDevelopment.md)).
 4. **Rendering at scale.** Draw relationships as one batched line geometry (or instanced mesh) rather than one object each, and render only when something has changed. Large logistics networks and interbank meshes benefit as much as networks do.
 5. **An update interval for a group of algebraic relationships and providers.** Evaluated at multiples of the interval and held between, for discrete-time controllers of any kind.

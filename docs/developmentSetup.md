@@ -120,6 +120,14 @@ npm run coverage
 
 Runs the unit tests and the interaction suite with V8's coverage on and writes `out/coverage/report.txt`: for each file under `src/`, the share of its lines of code the unit tests run, the interaction tests run, either runs, and how many neither runs (each such line is listed in `notRun.json`). `node scripts/coverageReport.mjs out/coverage` reports again from what is there. It is a map for deciding what to test next, not a target, and nothing passes or fails on it. It measures every window the scenarios open (each project window, the twin's, the example guide, the provider editor), the command line, and the web edition's suite in Chromium, whose shell it assembles again first so it serves today's `src/` (it is counted against a `src/` file only where the shell serves that file unchanged, so a shell left from before would read as code not run). That needs a web engine as new as the engine's sources (`npm run build:web:threads`, which takes minutes, so it is not built here); without one, the report says so and leaves the web edition out. What it does not see: the web engine's worker, the add-on launcher's own process, the push service's process, and the provider editor's renderer (its window is opened, but its code does not reach the report yet), so those read as not run even where a scenario exercises them.
 
+### Dead code
+
+```bash
+npm run lint:deadcode
+```
+
+Runs [knip](https://knip.dev) over `src/`, `scripts/`, `tests/` and `evals/` and lists files nothing imports, exports nothing uses, dependencies nothing imports, and imports of packages `package.json` does not list. It is a development tool, not a CI gate. It needs no build and takes seconds. Its configuration is `knip.json`. Code the app loads without an import (the windows' `renderer.mjs` from their HTML pages, the preloads, the workers, the web edition's `webShims/`) is listed there as an entry. Packages loaded through an import map or a `<script>` tag (CodeMirror, Plotly, occt-import-js, Pyodide, Wasmer) are listed under `ignoreDependencies`. A new window, worker or package loaded that way needs adding there, or knip reports it as unused. An export used only by the tests counts as used. A finding is a lead to check, not proof: delete the code if nothing really reaches it. If something does reach it in a way knip cannot follow, teach `knip.json` about it rather than keeping the code around for knip's sake.
+
 ### Testing a packaged build
 
 The suites above run against `out/engine/` and a plain `electron .` launch. Some failures only appear once the app is packaged: a missing bundled library, a resource path that only resolves in the packaged layout, or a code-signing side effect. To catch those, run the same suites against a real package:

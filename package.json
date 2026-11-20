@@ -52,6 +52,7 @@
         "test:engine": "node scripts/testEngine.mjs",
         "test:engine:sanitize": "node scripts/testEngineSanitized.mjs",
         "lint:engine": "node scripts/lintEngine.mjs",
+        "lint:deadcode": "knip",
         "test:package": "make verifyPackage",
         "flatpak:generate-sources": "node scripts/generateFlatpakNodeSources.mjs",
         "homebrew:generate-cask": "node scripts/generateHomebrewCask.mjs",
@@ -83,6 +84,7 @@
         "electron": "^43.8.3",
         "esbuild": "^0.28.2",
         "js-yaml": "^5.4.3",
+        "knip": "^6.46.1",
         "node-opcua-server": "^2.187.23",
         "playwright": "^1.64.0",
         "protobufjs-cli": "^2.7.1"

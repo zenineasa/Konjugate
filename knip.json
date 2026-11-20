@@ -1,0 +1,40 @@
+{
+    "$schema": "https://unpkg.com/knip@6/schema.json",
+    "entry": [
+        "src/**/preload*.{mjs,cjs}",
+        "src/addonPreload.cjs",
+        "src/launcherPreload.cjs",
+        "src/renderer/renderer.mjs",
+        "src/twinWindow/twin.mjs",
+        "src/exampleGuide/renderer.mjs",
+        "src/providerEditor/renderer.mjs",
+        "src/renderer/webShims/*.mjs",
+        "src/*Worker.mjs",
+        "scripts/*.{mjs,js}",
+        "tests/**/*.{mjs,cjs}",
+        "evals/**/*.mjs"
+    ],
+    "project": [
+        "src/**/*.{mjs,cjs,js}",
+        "scripts/**/*.{mjs,js}",
+        "tests/**/*.{mjs,cjs}",
+        "evals/**/*.mjs"
+    ],
+    "ignoreExportsUsedInFile": true,
+    "ignoreDependencies": [
+        "@codemirror/.*",
+        "@wasmer/sdk",
+        "pyodide",
+        "scrypt-js",
+        "occt-import-js",
+        "plotly.js-dist-min",
+        "protobufjs-cli"
+    ],
+    "ignoreBinaries": [
+        "make",
+        "makeappx",
+        "openssl",
+        "cl.exe",
+        "c++"
+    ]
+}

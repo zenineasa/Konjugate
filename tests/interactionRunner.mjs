@@ -9922,7 +9922,13 @@ export async function runInteractionTests(driver) {
             // Bound by hand, as the card says: Bind beside Swing command, the left joystick moved, and the page goes on to each command not
             // bound yet by itself, the card saying which control to move for it.
             const status = () => evaluate(window, `document.querySelector('.tourFloating .tourStatus').textContent`);
-            assert.match(await status(), /^Next: Swing command, with the left joystick left or right\. Press Bind beside it\.$/);
+            // The card is drawn again on the tour's poll (every 300 ms), after the page has changed: waited for, then asserted, so a wrong
+            // text is still shown as it was. (Read at once, it once still said "2 of 4 bound" under a loaded coverage run.)
+            const statusSays = async (pattern) => {
+                await waitFor(window, `${pattern}.test(document.querySelector('.tourFloating .tourStatus').textContent)`, '').catch(() => {});
+                assert.match(await status(), pattern);
+            };
+            await statusSays(/^Next: Swing command, with the left joystick left or right\. Press Bind beside it\.$/);
             await press('[data-bind-symbol="swingCommand"]');
             await waitFor(window, `/^Listening for Swing command: move the left joystick left or right/.test(document.querySelector('.tourFloating .tourStatus').textContent)`, 'The card did not say what to move for Swing command.');
             const order = [['swingCommand', left, 0, 'boomCommand'], ['boomCommand', right, 1, 'stickCommand'], ['stickCommand', left, 1, 'bucketCommand']];
@@ -9934,7 +9940,7 @@ export async function runInteractionTests(driver) {
                 await new Promise((resolve) => setTimeout(resolve, 150));
                 await axis(pad, index, 0);
             }
-            assert.match(await status(), /^3 of 4 bound\. Listening for Bucket command: move the right joystick left or right\.$/);
+            await statusSays(/^3 of 4 bound\. Listening for Bucket command: move the right joystick left or right\.$/);
             assert.match(await evaluate(window, `document.querySelector('#controllerBindStatus').textContent`), /^Bound .* to Stick command\. Now Bucket command: move the control for it, or press Esc to stop\.$/);
             const handBindings = await evaluate(window, `window.__debugSteering.steering.document.bindings.map((binding) => [binding.parameter.symbol, binding.device.id, binding.control.type, binding.control.index])`);
             assert.deepEqual(handBindings, [['swingCommand', left, 'axis', 0], ['boomCommand', right, 'axis', 1], ['stickCommand', left, 'axis', 1]]);

@@ -24,7 +24,8 @@ export function downsampleSamples(samples, maximumSamples = defaultPlaybackSampl
 }
 
 export function rendererResultProjection(result, maximumSamples = defaultPlaybackSampleLimit) {
-    const stateCount = result.samples?.[0]?.states?.length ?? 0;
+    // Each sample's values: its states and, in a result that records them, its parts.
+    const stateCount = (result.samples?.[0]?.states?.length ?? 0) + (result.samples?.[0]?.parts?.length ?? 0);
     const valueBoundedLimit = Math.max(2, Math.floor(defaultPlaybackValueLimit / Math.max(1, stateCount)));
     const samples = downsampleSamples(result.samples, Math.min(maximumSamples, valueBoundedLimit));
     return {
@@ -62,4 +63,36 @@ export function nearestResultSample(result, time) {
     if (low === 0) return samples[0];
     return Math.abs(Number(samples[low].time) - time) < Math.abs(Number(samples[low - 1].time) - time)
         ? samples[low] : samples[low - 1];
+}
+
+// ---- Recorded parts (docs/proposals/unifiedEntityEditors.md, decision 11): what each term written as an equation added to, or
+// gave, a state at each sample, in a result that records them (result.parts, each sample's `parts` in that order).
+
+// A part by what it is: the term's or relationship's id, the state it lands on, and whether it is a two-way relationship's
+// negated term at its far end.
+export const partKey = (sourceId, stateId, negated = false) => `${Number(sourceId)}:${Number(stateId)}:${negated ? 1 : 0}`;
+
+// Each recorded part's value at `sample`, by partKey; empty for a result that records none, or a sample without them.
+export function samplePartValues(result, sample) {
+    const values = new Map();
+    const parts = result?.parts ?? [];
+    if (!parts.length || !Array.isArray(sample?.parts) || sample.parts.length !== parts.length) return values;
+    parts.forEach((part, index) => {
+        if (Number.isFinite(sample.parts[index])) values.set(partKey(part.sourceId, part.stateId, part.negated), sample.parts[index]);
+    });
+    return values;
+}
+
+// The series of a relationship's recorded parts over a run, one for each end it lands on; `describe(part)` names each.
+export function relationshipPartSeries(result, relationshipId, describe) {
+    return (result?.parts ?? [])
+        .map((part, index) => ({ part, index }))
+        .filter(({ part }) => Number(part.sourceId) === Number(relationshipId))
+        .map(({ part, index }) => ({
+            ...describe(part),
+            samples: (result.samples ?? [])
+                .filter((sample) => Number.isFinite(sample.parts?.[index]))
+                .map((sample) => ({ time: Number(sample.time), value: sample.parts[index] }))
+        }))
+        .filter((series) => series.samples.length);
 }

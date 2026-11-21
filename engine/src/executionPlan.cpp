@@ -1144,7 +1144,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 if (!stateKinds.explicitUpdates.contains(task.outputStateId) &&
                     std::find(statesRead.back().begin(), statesRead.back().end(), task.outputStateId) != statesRead.back().end()) {
                     throw std::runtime_error(
-                        "A source term that sets its value directly may not reference its own state.");
+                        "A node's own part that sets its state directly may not read that state.");
                 }
             }
             std::vector<int> visitState(algebraicCandidates.size(), 0); // 0=unvisited, 1=visiting, 2=done
@@ -1325,7 +1325,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             const auto otherNodeId = outputRole == "target" ? idValue(edge, "source.nodeId") : idValue(edge, "target.nodeId");
             const auto& otherNode = plan.nodes.at(nodeIndexes.at(otherNodeId));
             if (otherNode.stateIds.empty()) {
-                throw std::runtime_error("A bidirectional relationship's other endpoint has no states.");
+                throw std::runtime_error("A two-way relationship's other end has no states.");
             }
             const auto otherStateId = bidirectionalOtherStateId(edge, outputRole, otherNode.stateIds);
             buildContribution(otherNodeId, otherStateId, true);
@@ -1660,7 +1660,7 @@ double algebraicTaskValue(const ContributionTask& task, const std::vector<double
     if (task.implementation == ContributionImplementation::equation) {
         value = evaluateTask(task, symbols);
     } else {
-        if (!providerEvaluator) throw std::runtime_error("A programmable algebraic source term requires an initialized provider runtime.");
+        if (!providerEvaluator) throw std::runtime_error("A node's own part written as a program requires an initialized provider runtime.");
         const std::vector<const ContributionTask*> batchTasks{&task};
         const std::vector<std::span<const double>> inputs{symbols};
         // The provider sees the same instant as the states it reads.
@@ -1668,7 +1668,7 @@ double algebraicTaskValue(const ContributionTask& task, const std::vector<double
         if (results.size() != 1) throw std::runtime_error("A provider batch evaluation returned the wrong number of results.");
         value = results.front();
     }
-    if (!std::isfinite(value)) throw std::runtime_error("An algebraic source term produced a non-finite value.");
+    if (!std::isfinite(value)) throw std::runtime_error("A node's own part produced a value that is not a finite number.");
     return value;
 }
 
@@ -1987,6 +1987,61 @@ std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValue
                                            const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
                                            double stepSize, ProviderEvaluator* providerEvaluator) {
     return applyUpdates(plan, states, liveParameterValues, activeSchedules, simulationTime, false, stepSize, providerEvaluator).definitionsWorked;
+}
+
+
+namespace {
+
+// The tasks recorded, in their order: node by node, its Rate terms, its relationships' terms into its Update states, its own
+// Update terms; each only when written as an equation.
+template <typename Visit>
+void forEachRecordedTask(const ExecutionPlan& plan, Visit&& visit) {
+    for (const auto& node : plan.nodes) {
+        for (const auto* tasks : {&node.contributions, &node.valueTerms, &node.algebraicTasks}) {
+            for (const auto& task : *tasks) {
+                if (task.implementation == ContributionImplementation::equation) visit(node, task);
+            }
+        }
+    }
+}
+
+}
+
+std::vector<RecordedPart> recordedParts(const ExecutionPlan& plan) {
+    std::vector<RecordedPart> parts;
+    forEachRecordedTask(plan, [&](const NodeExecutionPlan& node, const ContributionTask& task) {
+        const auto stateId = task.outputStateId ? task.outputStateId : node.stateIds.at(task.outputStateIndex);
+        parts.push_back({task.sourceId, stateId, task.negateOutput});
+    });
+    return parts;
+}
+
+std::vector<double> evaluateRecordedParts(const ExecutionPlan& plan, const StateValues& states, const EntityValues& liveParameterValues,
+                                          const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
+    std::vector<double> values;
+    std::vector<double> symbols;
+    forEachRecordedTask(plan, [&](const NodeExecutionPlan& node, const ContributionTask& task) {
+        try {
+            symbols.assign(task.bindings.size(), 0);
+            for (std::size_t index = 0; index < task.bindings.size(); ++index) {
+                const auto& binding = task.bindings[index];
+                if (binding.source == BindingSource::parameter) {
+                    symbols[index] = resolveParameterValue(task.parameters.at(binding.parameterIndex), liveParameterValues, activeSchedules, simulationTime);
+                } else if (binding.source == BindingSource::simulationTime) {
+                    symbols[index] = simulationTime;
+                } else if (binding.source == BindingSource::localState) {
+                    symbols[index] = states.at(node.stateIndexes.at(binding.valueIndex));
+                } else {
+                    symbols[index] = states.at(binding.valueIndex);
+                }
+            }
+            const auto value = evaluateTask(task, symbols);
+            values.push_back(task.negateOutput ? -value : value);
+        } catch (const std::exception&) {
+            values.push_back(std::numeric_limits<double>::quiet_NaN());
+        }
+    });
+    return values;
 }
 
 }

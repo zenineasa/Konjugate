@@ -52,7 +52,8 @@ void writeFramedEvent(std::ostream& output, const protocol::EngineEvent& event) 
     output.flush();
 }
 using Values = StateValues;
-struct Sample { double time; Values states; };
+// `parts`: each recorded part's value at the sample (recordedParts), empty where none were worked out.
+struct Sample { double time; Values states; Values parts; };
 // Each entry pairs a computational-node-provider-owning node's id with that provider instance's
 // opaque checkpoint() payload. Empty for a plan with no computational-node providers.
 using ProviderCheckpointStates = std::vector<std::pair<EntityId, std::vector<std::byte>>>;
@@ -189,6 +190,8 @@ struct StoredResult {
     protocol::ResultFile header;
     std::vector<double> times;
     std::vector<std::vector<double>> values;
+    // Each sample's recorded parts, in header.part_table()'s order; empty rows when the result recorded none.
+    std::vector<std::vector<double>> parts;
 };
 
 std::uint32_t storedResultLength(const std::string& content, std::size_t offset) {
@@ -228,11 +231,19 @@ StoredResult readStoredResult(const std::filesystem::path& path) {
             throw std::runtime_error("The result of the run to continue has samples that cannot be read.");
         }
         const auto stateCount = static_cast<std::size_t>(batch.state_count());
+        const auto partCount = static_cast<std::size_t>(batch.part_count());
+        const auto hasParts = partCount > 0 && static_cast<std::size_t>(batch.part_values_size()) == partCount * static_cast<std::size_t>(batch.times_size());
         for (int sample = 0; sample < batch.times_size(); ++sample) {
             result.times.push_back(batch.times(sample));
             std::vector<double> row(stateCount);
             for (std::size_t state = 0; state < stateCount; ++state) row[state] = batch.values(static_cast<int>(static_cast<std::size_t>(sample) * stateCount + state));
             result.values.push_back(std::move(row));
+            std::vector<double> parts;
+            if (hasParts) {
+                parts.resize(partCount);
+                for (std::size_t part = 0; part < partCount; ++part) parts[part] = batch.part_values(static_cast<int>(static_cast<std::size_t>(sample) * partCount + part));
+            }
+            result.parts.push_back(std::move(parts));
         }
     }
     return result;
@@ -855,6 +866,12 @@ private:
     std::vector<NodeRuntimeMetrics> nodeMetrics;
     std::uint64_t synchronizationComputeNanoseconds = 0;
     std::vector<Sample> samples;
+    // The parts recorded with each sample (recordedParts), and their values from the states as they stand at `time`, with the
+    // parameters as they stand then. Working them out reads the states and changes nothing.
+    std::vector<RecordedPart> partTable;
+    Values partsAt(double time) const {
+        return evaluateRecordedParts(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time);
+    }
     std::vector<Checkpoint> checkpoints;
     // The interventions of the run this one continues, before the restart: written first, so the result keeps the whole record.
     std::vector<protocol::Intervention> continuedInterventions;
@@ -1036,7 +1053,8 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     // checkpoint and every node's first step all see consistent values -- after a restart too, where a fork may have
     // changed the parameters they depend on. An Update worked out once per step starts at its initial value.
     updateStates(startTime, false, globalTimeStep);
-    samples = {{startTime, states}};
+    partTable = recordedParts(executionPlan);
+    samples = {{startTime, states, partsAt(startTime)}};
     checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
     // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
     // this run's result, so the result file holds the whole run and not only the part since the restart -- what is exported,
@@ -1119,12 +1137,30 @@ void Simulation::prependContinuedResult(const std::filesystem::path& path) {
         return ordered;
     };
     const auto before = [&](double time) { return time < startTime - 1e-12; };
+    // Its recorded parts, matched to this run's by what each is: a part it did not record (it was written before parts were,
+    // or the part is new) is NaN, unknown, rather than worked out again with parameters that may not be the ones it ran with.
+    std::vector<std::size_t> storedPart(partTable.size(), std::numeric_limits<std::size_t>::max());
+    const auto& storedParts = stored.header.part_table().parts();
+    for (std::size_t part = 0; part < partTable.size(); ++part) {
+        for (int candidate = 0; candidate < storedParts.size(); ++candidate) {
+            const auto& descriptor = storedParts[candidate];
+            if (descriptor.source_id() == partTable[part].sourceId && descriptor.state_id() == partTable[part].stateId && descriptor.negated() == partTable[part].negated) {
+                storedPart[part] = static_cast<std::size_t>(candidate);
+                break;
+            }
+        }
+    }
     std::vector<Sample> earlierSamples;
     for (std::size_t index = 0; index < stored.times.size(); ++index) {
         if (!before(stored.times[index])) continue;
         Values ordered(states.size());
         for (std::size_t state = 0; state < planIndex.size() && state < stored.values[index].size(); ++state) ordered[planIndex[state]] = stored.values[index][state];
-        earlierSamples.push_back({stored.times[index], std::move(ordered)});
+        Values parts(partTable.size(), std::numeric_limits<double>::quiet_NaN());
+        const auto& storedRow = stored.parts[index];
+        for (std::size_t part = 0; part < partTable.size(); ++part) {
+            if (storedPart[part] < storedRow.size()) parts[part] = storedRow[storedPart[part]];
+        }
+        earlierSamples.push_back({stored.times[index], std::move(ordered), std::move(parts)});
     }
     std::vector<Checkpoint> earlierCheckpoints;
     for (const auto& checkpoint : stored.header.checkpoints()) {
@@ -1226,14 +1262,14 @@ void Simulation::flushSampleEvents() {
 
 void Simulation::appendStreamRecord(const std::string& type, double time, const Values& recordStates, const std::string& uuid) {
     if (eventStream && type == "sample") {
-        pendingEventSamples.push_back({time, recordStates});
+        pendingEventSamples.push_back({time, recordStates, {}});
     }
     static_cast<void>(uuid);
 }
 
 void Simulation::captureBoundary() {
     if (currentTime > samples.back().time + 1e-12) {
-        samples.push_back({currentTime, states});
+        samples.push_back({currentTime, states, partsAt(currentTime)});
         appendStreamRecord("sample", currentTime, states);
     }
     if (currentTime > checkpoints.back().time + 1e-12) {
@@ -1363,6 +1399,12 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
         else *intervention->mutable_schedule() = command.schedule_parameter_value();
     }
     for (const auto stateId : stateIds) result.mutable_state_table()->add_states()->set_state_id(stateId);
+    for (const auto& part : partTable) {
+        auto* descriptor = result.mutable_part_table()->add_parts();
+        descriptor->set_source_id(part.sourceId);
+        descriptor->set_state_id(part.stateId);
+        if (part.negated) descriptor->set_negated(true);
+    }
     // During-run phase of docs/proposals/numericalStabilityDiagnostics.md -- a real protobuf
     // field on ResultFile, not a JSON string: doubles (globalTime, and any future numeric
     // finding data) natively represent Infinity/NaN in protobuf, the same reason the one-shot
@@ -1423,6 +1465,16 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
                     batch.add_values(sample.states.at(executionPlan.stateIndexes.at(stateId)));
                 }
             }
+            // Each sample's recorded parts, NaN where a sample has none (one recorded before a parameter was settled, say).
+            if (!partTable.empty()) {
+                batch.set_part_count(static_cast<std::uint32_t>(partTable.size()));
+                for (std::size_t sampleIndex = start; sampleIndex < end; ++sampleIndex) {
+                    const auto& parts = samples[sampleIndex].parts;
+                    for (std::size_t part = 0; part < partTable.size(); ++part) {
+                        batch.add_part_values(parts.size() == partTable.size() ? parts[part] : std::numeric_limits<double>::quiet_NaN());
+                    }
+                }
+            }
             std::string payload;
             if (!batch.SerializeToString(&payload)) throw std::runtime_error("A result sample batch could not be serialized.");
             auto* entry = index.add_batches();
@@ -1466,7 +1518,10 @@ void Simulation::settleIfParametersChanged() {
     if (runControl.interventions.size() == settledInterventions) return;
     settledInterventions = runControl.interventions.size();
     updateStates(currentTime, false, globalTimeStep);
-    if (!samples.empty() && samples.back().time == currentTime) samples.back().states = states;
+    if (!samples.empty() && samples.back().time == currentTime) {
+        samples.back().states = states;
+        samples.back().parts = partsAt(currentTime);
+    }
     if (!checkpoints.empty() && checkpoints.back().time == currentTime) checkpoints.back().states = states;
 }
 
@@ -1536,7 +1591,7 @@ void Simulation::paceStep(std::chrono::steady_clock::time_point wallStepStarted,
 // At an output boundary (and at the last step): the sample, a checkpoint, and now and then the result file.
 void Simulation::recordStepOutput(std::size_t step, double elapsed) {
     if (!(elapsed + 1e-12 >= nextOutputTime || step + 1 == steps)) return;
-    samples.push_back({elapsed, states});
+    samples.push_back({elapsed, states, partsAt(elapsed)});
     appendStreamRecord("sample", elapsed, states);
     // A checkpoint is captured at every output boundary (not only the final step) so any
     // displayed sample is forkable, matching the documented design intent (see "Result

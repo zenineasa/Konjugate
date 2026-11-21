@@ -82,7 +82,7 @@ import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
-import { suggestedPlaybackRate } from '../resultSession.mjs';
+import { partKey, relationshipPartSeries, samplePartValues, suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv, withInstancePaths } from '../resultExport.mjs';
 import { generateStandaloneProgram } from '../codeExport.mjs';
 import { remapIds, createGraphFragment, remapGraphFragment, validateGraphFragment } from '../graphClipboard.mjs';
@@ -139,7 +139,7 @@ const edgeProgramSection = new ProgramSourceSection({
 const groupProgramSection = new ProgramSourceSection({
     container: document.querySelector('#groupProviderSection'), rows: 10, bindingsClass: 'builderRows',
     ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', reset: 'groupInsertProviderTemplate', source: 'groupProviderSource', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
-    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used on every edge of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
+    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used by every relationship of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -339,7 +339,7 @@ function hydrateProjectDocument(document) {
         throw new Error('This is not a supported Konjugate project document.');
     }
     if (!Array.isArray(document.nodes) || !Array.isArray(document.edges)) {
-        throw new Error('The project must contain node and edge arrays.');
+        throw new Error('The project must contain node and relationship arrays.');
     }
     const ids = new Set();
     const nodeIds = new Set();
@@ -372,17 +372,17 @@ function hydrateProjectDocument(document) {
             stateSymbols.add(state.symbol);
         });
         (node.sourceTerms ?? []).forEach((term) => {
-            registerId(term.id, `Every source term in “${node.name ?? node.id}” must have a unique positive integer id.`);
+            registerId(term.id, `Every equation of “${node.name ?? node.id}”'s own must have a unique positive integer id.`);
             if (!stateSymbols.has(term.state)) {
-                throw new Error(`A source term in “${node.name ?? node.id}” references a missing state symbol.`);
+                throw new Error(`An equation of “${node.name ?? node.id}”'s own references a missing state symbol.`);
             }
             const parameterSymbols = new Set();
             (term.parameters ?? []).forEach((parameter) => {
-                registerId(parameter.id, `Every source-term parameter in “${node.name ?? node.id}” must have a unique positive integer id.`);
+                registerId(parameter.id, `Every parameter of “${node.name ?? node.id}”'s own equations must have a unique positive integer id.`);
                 if (!modelSymbolPattern.test(parameter.symbol) || parameterSymbols.has(parameter.symbol)) {
-                    throw new Error(`Source-term parameter symbols in “${node.name ?? node.id}” must be unique lower camel case identifiers.`);
+                    throw new Error(`Parameter symbols of “${node.name ?? node.id}”'s own equations must be unique lower camel case identifiers.`);
                 }
-                if (!['constant', 'live'].includes(parameter.mode)) throw new Error('Source-term parameter mode must be constant or live.');
+                if (!['constant', 'live'].includes(parameter.mode)) throw new Error('A parameter of a node\'s own equation must be constant or live.');
                 parameterSymbols.add(parameter.symbol);
             });
         });
@@ -409,15 +409,15 @@ function hydrateProjectDocument(document) {
     // duplicate.
     const edgeGroups = hydrateEdgeGroups(document, registerId);
     document.edges.forEach((edge) => {
-        registerId(edge.id, 'Every edge must have a unique positive integer id.');
+        registerId(edge.id, 'Every relationship must have a unique positive integer id.');
         if (!nodeIds.has(edge.source?.nodeId) || !nodeIds.has(edge.target?.nodeId)) {
-            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing node.`);
+            throw new Error(`The relationship “${edge.name ?? edge.id}” references a missing node.`);
         }
         if (edge.source.stateId && !stateIdsByNode.get(edge.source.nodeId)?.has(edge.source.stateId)) {
-            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing source state.`);
+            throw new Error(`The relationship “${edge.name ?? edge.id}” references a missing state at its from end.`);
         }
         if (edge.target.stateId && !stateIdsByNode.get(edge.target.nodeId)?.has(edge.target.stateId)) {
-            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing target state.`);
+            throw new Error(`The relationship “${edge.name ?? edge.id}” references a missing state at its to end.`);
         }
         if (edge.groupId != null) return;
         const parameterSymbols = new Set();
@@ -726,6 +726,13 @@ let assistantConfigurationBaseline = '';
 let assistantDiscoveryTimer = null;
 let assistantDiscoveryRevision = 0;
 const nodeResultPlot = new ResultPlot($('#nodeResultPlot'), {
+    onSeek: (time) => {
+        if (!activeResult) return;
+        stopResultPlayback();
+        projectResultSample(nearestSampleIndex(activeResult.samples, time));
+    }
+});
+const edgeResultPlot = new ResultPlot($('#edgeResultPlot'), {
     onSeek: (time) => {
         if (!activeResult) return;
         stopResultPlayback();
@@ -1383,7 +1390,7 @@ function describeBoundaryCrossing(crossing) {
     const location = subsystemPathName(outside.subsystemId);
     const badge = crossing.direction === 'incoming' ? '→ In' : crossing.direction === 'outgoing' ? 'Out →' : '⇄ Both';
     const relation = crossing.direction === 'incoming' ? 'from' : crossing.direction === 'outgoing' ? 'to' : 'with';
-    const kind = crossing.direction === 'bidirectional' ? 'Bidirectional relationship' : `${crossing.direction === 'incoming' ? 'Incoming' : 'Outgoing'} relationship`;
+    const kind = crossing.direction === 'bidirectional' ? 'Two-way relationship' : `${crossing.direction === 'incoming' ? 'Incoming' : 'Outgoing'} relationship`;
     // The port the relationship reaches inside, if the subsystem declares one there.
     const insideStateId = crossing.role === 'source' ? edge.sourceStateId : edge.targetStateId;
     const port = declaredPortsOf(activeSubsystemId).get(insideStateId);
@@ -1817,7 +1824,7 @@ function setRelationshipEnabled(id, enabled) {
     invalidateRelationshipBundles();
     syncContextualOverlays();
     if (selectedRelationship?.id === id && !$('#edgeEditor').classList.contains('hidden')) {
-        $('#toggleEdgeEnabled').textContent = enabled ? 'Disable edge' : 'Enable edge';
+        $('#toggleEdgeEnabled').textContent = enabled ? 'Disable relationship' : 'Enable relationship';
     }
 }
 
@@ -2516,13 +2523,17 @@ function stateOrderControl(node, state, equations) {
 
 // One read-only part of a state's equation that belongs to something else: a relationship's, written in this node's names, or a
 // program's. It carries its sign, says whose it is, and opens it.
-function partChip(entry, node, equations, names, { first, reader = node.userData.id }) {
+function partChip(entry, node, equations, names, { first, reader = node.userData.id, stateId = null }) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'partChip';
     // It only goes to what it belongs to, so it stays on while results are open.
     chip.dataset.navigation = '';
     chip.dataset.termType = entry.type;
+    // The recorded part it shows, whose value it gives while results are open (showPartValues).
+    if (stateId !== null && (entry.type === 'relationship' || entry.type === 'sourceTerm')) {
+        chip.dataset.partKeys = partKey(entry.type === 'relationship' ? entry.edgeId : entry.termId, stateId, entry.reciprocal === true);
+    }
     let label = '';
     let body = '';
     let open = () => {};
@@ -2810,10 +2821,18 @@ function renderStateLine(node, state, index, equations, names) {
         // The node switched off: its own part is kept, and does nothing in a run.
         if (reaching.some((entry) => entry.type === 'sourceTerm' && entry.nodeId === definition.id && entry.off)) field.firstChild.classList.add('off');
         equation.appendChild(field);
+        // Its value while results are open: its own terms' sum.
+        if (own.equations.length) {
+            const value = document.createElement('span');
+            value.className = 'partValue ownPartValue';
+            value.dataset.partKeys = own.equations.map((term) => partKey(term.id, state.id)).join(' ');
+            value.hidden = true;
+            equation.appendChild(value);
+        }
         let first = !own.equations.length;
         for (const entry of reaching) {
             if (entry.type === 'sourceTerm' && !own.programs.some((term) => term.id === entry.termId)) continue;
-            equation.appendChild(partChip(entry, node, equations, names, { first }));
+            equation.appendChild(partChip(entry, node, equations, names, { first, stateId: state.id }));
             first = false;
         }
         if (pluginProvidersOffered && !own.equations.length && !own.programs.length) {
@@ -2882,7 +2901,7 @@ function stateTermRow(entry, node, equations, index = 0) {
         const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === entry.termId);
         const kind = term?.implementation?.kind ?? 'equation';
         row.classList.add('sourceTermOpen');
-        title = kind === 'cpp' ? 'C++ program' : kind === 'python' ? 'Python program' : kind === 'plugin' ? 'Plugin provider' : 'Source term';
+        title = kind === 'cpp' ? 'C++ program' : kind === 'python' ? 'Python program' : kind === 'plugin' ? 'Plugin provider' : 'Own part';
         detail = 'its own';
         math = kind === 'equation' ? latexMarkup(termLatex(entry, equations)) : '';
         open = () => term && openSourceTermEditor(node, term);
@@ -3206,7 +3225,11 @@ function renderNodeProgram(node) {
         });
         const setsLabel = document.createElement('label');
         setsLabel.className = 'nodeProgramSets';
-        setsLabel.title = 'Checked, the output is the state\'s value; unchecked, it is a rate added to the state.';
+        // Worded by the state's order (docs/proposals/unifiedEntityEditors.md): checked, the output is x; unchecked, it adds to dx/dt.
+        const chosen = definition.states.find((candidate) => candidate.id === output.stateId);
+        setsLabel.title = chosen
+            ? `Checked, the output is ${chosen.symbol}; unchecked, it is added to d${chosen.symbol}/dt.`
+            : 'Checked, the output is its state\'s value; unchecked, it is added to the state\'s rate.';
         const sets = document.createElement('input');
         sets.type = 'checkbox';
         sets.dataset.field = 'setsValue';
@@ -3218,7 +3241,7 @@ function renderNodeProgram(node) {
             if (sets.checked) snapshot.implementation.outputs[index].setsValue = true;
             else delete snapshot.implementation.outputs[index].setsValue;
         }));
-        setsLabel.append(sets, document.createTextNode(' sets the value'));
+        setsLabel.append(sets, document.createTextNode(chosen ? ` sets ${chosen.symbol}, rather than adding to d${chosen.symbol}/dt` : ' sets its state, rather than adding to its rate'));
         row.append(
             keyInput(output.key, 'Output key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].key = key; })),
             state,
@@ -3615,6 +3638,7 @@ function editorCard(id) {
             resultsOpen: () => Boolean(activeResult),
             onSelect: (tab) => {
                 if (id === 'nodeEditor' && tab === 'results' && selectedNode) requestAnimationFrame(() => renderNodeResults(selectedNode));
+                if (id === 'edgeEditor' && tab === 'results' && selectedRelationship) requestAnimationFrame(() => renderRelationshipResults(selectedRelationship));
             }
         }));
     }
@@ -3630,7 +3654,7 @@ function revealEditorControl(selector, { focus = true } = {}) {
 
 function renderSourceTermEditor(node, term) {
     const definition = node.userData.definition;
-    $('#sourceTermEditorTitle').textContent = `${definition.title} · Source term`;
+    $('#sourceTermEditorTitle').textContent = `${definition.title} · own part`;
     const implementationKind = term.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#termImplementationKind').value = implementationKind;
@@ -3752,6 +3776,41 @@ async function branchNodeSeries(branch, node, branchLabel) {
     return series;
 }
 
+// A relationship's Results tab: what it added to each state it lands on over the run (decision 5), one line for each end, or why
+// there is nothing to show.
+async function renderRelationshipResults(definition) {
+    const panel = $('.edgeResultsPanel');
+    const isProgram = Boolean(definition?.implementation?.kind) && definition.implementation.kind !== 'equation';
+    const several = Array.isArray(definition?.equationModel?.outputs);
+    const nodes = model.nodes;
+    const series = activeResult && !isProgram ? relationshipPartSeries(activeResult, definition.id, (part) => {
+        const owner = nodes.find((node) => node.states.some((state) => Number(state.id) === Number(part.stateId)));
+        const state = owner?.states.find((candidate) => Number(candidate.id) === Number(part.stateId));
+        const kind = stateEquationContext().kinds.get(Number(part.stateId))?.kind ?? 'rate';
+        const unit = state?.unit ? (kind === 'update' ? state.unit : `${state.unit}/s`) : '';
+        // Named where it lands: the plot's legend reads `symbol`, its hover `name`.
+        const where = `${owner?.title ?? 'Node'} · ${state?.symbol ?? 'state'}${part.negated ? ' (other end)' : ''}`;
+        return {
+            stateId: part.stateId,
+            name: `${owner?.title ?? 'Node'} · ${state?.label || state?.symbol || 'state'}${part.negated ? ' (other end)' : ''}`,
+            symbol: where,
+            unit
+        };
+    }) : [];
+    panel.classList.toggle('hasResults', series.length > 0);
+    if (!series.length) {
+        edgeResultPlot.clear();
+        $('#edgeResultEmpty strong').textContent = activeResult ? 'Nothing recorded' : 'No simulation results';
+        $('#edgeResultEmpty span').textContent = !activeResult ? 'Run the model to see what this relationship adds over the run.'
+            : isProgram ? 'A relationship written as a program has no recorded values: working it out again would run the program again.'
+                : several ? 'A relationship with several equations has no recorded values yet.'
+                    : !(activeResult.parts ?? []).length ? 'These results were made before each relationship\'s values were recorded. Run the model again to see them.'
+                        : 'This relationship was not part of the run these results are from.';
+        return;
+    }
+    await edgeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0);
+}
+
 async function renderNodeResults(node) {
     const panel = $('.nodeResultsPanel');
     // Keep the active branch's own record fresh before reading it -- this can run mid-live-update,
@@ -3783,6 +3842,7 @@ async function renderNodeResults(node) {
 // its tab opened.
 let nodeResultsRefreshTimer = null;
 const nodeResultsShown = () => Boolean(selectedNode) && !$('#nodeEditor').classList.contains('hidden') && !$('#nodeEditor [data-editor-panel="results"]').hidden;
+const relationshipResultsShown = () => Boolean(selectedRelationship) && !$('#edgeEditor').classList.contains('hidden') && !$('#edgeEditor [data-editor-panel="results"]').hidden;
 function refreshNodeResultsSoon() {
     if (nodeResultsRefreshTimer !== null || !nodeResultsShown()) return;
     nodeResultsRefreshTimer = setTimeout(async () => {
@@ -4012,7 +4072,7 @@ function renderEdgeEditor(definition) {
     showParameterCount($('#edgeParameterCount'), definition.parameters);
     $('#editEdgeName').value = definition.title;
     $('#editEdgeDescription').value = definition.description ?? '';
-    $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
+    $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable relationship' : 'Disable relationship';
     const source = $('#editEdgeSource');
     const target = $('#editEdgeTarget');
     // Every node, not only those in view: an edge ending at a terminal has its other end outside, and a list without it
@@ -4660,7 +4720,7 @@ function relationshipRowChips(landing, context, { before }) {
         if (index === landing.index || (before ? index > landing.index : index < landing.index)) return;
         const owner = nodeObjects.get(entry.nodeId);
         if (!owner) return;
-        chips.push(partChip(entry, owner, context.equations, context.names, { first: index === 0, reader: null }));
+        chips.push(partChip(entry, owner, context.equations, context.names, { first: index === 0, reader: null, stateId: landing.stateId }));
     });
     return chips;
 }
@@ -4786,7 +4846,7 @@ function openEdgeContextMenu(clientX, clientY) {
     hideCards(menu);
     const grouped = selectedRelationship?.groupId != null;
     const enabled = selectedRelationship?.enabled !== false;
-    $('#edgeContextToggleLabel').textContent = enabled ? 'Disable edge' : 'Enable edge';
+    $('#edgeContextToggleLabel').textContent = enabled ? 'Disable relationship' : 'Enable relationship';
     $('#edgeContextAddWaypoint').hidden = grouped || !pendingWaypoint;
     $('#edgeContextToggle').hidden = grouped;
     $('#edgeContextDelete').hidden = grouped;
@@ -5214,16 +5274,16 @@ let componentLibraryType = 'all';
 let componentLibraryPlacementCount = 0;
 
 function componentLibraryKindLabel(template) {
-    if (template.kind === 'bundle') return `Bundle · ${template.edges.length} edges`;
+    if (template.kind === 'bundle') return `Bundle · ${template.edges.length} relationships`;
     if (template.kind === 'component') {
         const ports = template.document.component?.ports?.length ?? 0;
         return `Component · ${ports} port${ports === 1 ? '' : 's'}`;
     }
     if (template.kind === 'fragment') {
         const { nodes, edges } = template.fragment;
-        return `Assembly · ${nodes.length} node${nodes.length === 1 ? '' : 's'}${edges.length ? `, ${edges.length} edge${edges.length === 1 ? '' : 's'}` : ''}`;
+        return `Assembly · ${nodes.length} node${nodes.length === 1 ? '' : 's'}${edges.length ? `, ${edges.length} relationship${edges.length === 1 ? '' : 's'}` : ''}`;
     }
-    return template.kind === 'node' ? 'Node' : 'Edge';
+    return template.kind === 'node' ? 'Node' : 'Relationship';
 }
 
 // Sections of the user's own library the person has folded away, by their path as text; the rest are open.
@@ -5332,7 +5392,7 @@ function renderComponentLibraryResults() {
 }
 
 function renderComponentLibraryChips() {
-    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Edges'], ['bundle', 'Bundles'], ['fragment', 'Assemblies'], ['mine', 'My library']];
+    const types = [['all', 'All'], ['node', 'Nodes'], ['edge', 'Relationships'], ['bundle', 'Bundles'], ['fragment', 'Assemblies'], ['mine', 'My library']];
     $('#componentLibraryTypeChips').replaceChildren(...types.map(([type, label]) => {
         const button = document.createElement('button');
         button.type = 'button';
@@ -5606,7 +5666,7 @@ function applyBundleTemplate(template) {
         definition.equationModel = normalizeEdgeEquationModel(definition);
         const outputState = outputNode.states.find((state) => state.symbol === edge.output.state);
         if (!outputState || definition.equationModel.mathJson === null) {
-            fail(`"${template.name}" could not build its "${edge.name}" edge: ${!outputState ? `${outputNode.title} has no state "${edge.output.state}"` : 'its equation did not resolve'}.`);
+            fail(`"${template.name}" could not build its relationship "${edge.name}": ${!outputState ? `${outputNode.title} has no state "${edge.output.state}"` : 'its equation did not resolve'}.`);
             return;
         }
         definition.equationModel.output = { role: edge.output.role, stateId: outputState.id };
@@ -5623,7 +5683,7 @@ function applyBundleTemplate(template) {
     updateRelationships();
     updateModelStatus();
     updateValidationStatus();
-    $('#statusText').textContent = `Added ${definitions.length} edges from "${template.name}".`;
+    $('#statusText').textContent = `Added ${definitions.length} relationships from "${template.name}".`;
     recordHistory({
         undo: () => {
             definitions.forEach((definition) => setRelationshipVisibility(definition.id, false));
@@ -5989,6 +6049,8 @@ function projectResultSampleValue(sample) {
     $('#resultCurrentTime').value = formatResultTime(sample.time);
     $('#statusText').textContent = `Result · ${formatResultTime(sample.time)}`;
     nodeResultPlot.setCursor(sample.time);
+    edgeResultPlot.setCursor(sample.time);
+    showPartValues();
     window.addons.publishEvent('timeline.change', sample.time);
 }
 
@@ -6036,7 +6098,34 @@ function selectSuggestedPlaybackRate() {
     selector.value = option.value;
 }
 
+// Each recorded part shown (a chip, a node's own part) given its value at the timeline's sample while results are open: the sum
+// of the parts it names. A result made before parts were recorded, or a part not recorded (a program), shows none.
+const formatPartValue = (value) => {
+    if (value === 0) return '0';
+    const magnitude = Math.abs(value);
+    return magnitude >= 1e5 || magnitude < 1e-3 ? value.toExponential(3) : String(Number(value.toPrecision(4)));
+};
+function showPartValues(root = document) {
+    const values = activeResult ? samplePartValues(activeResult, activeResult.samples?.[activeResultSampleIndex]) : new Map();
+    $$('[data-part-keys]', root).forEach((element) => {
+        const keys = element.dataset.partKeys.split(' ').filter(Boolean);
+        const known = keys.length && keys.every((key) => values.has(key));
+        const total = known ? keys.reduce((sum, key) => sum + values.get(key), 0) : null;
+        let badge = element.classList.contains('partValue') ? element : $(':scope > .partValue', element);
+        if (!badge && known) {
+            badge = document.createElement('span');
+            badge.className = 'partValue';
+            element.appendChild(badge);
+        }
+        if (!badge) return;
+        badge.hidden = !known;
+        badge.textContent = known ? `= ${formatPartValue(total)}` : '';
+        badge.title = known ? 'Its value at this point of the results' : '';
+    });
+}
+
 function applyInspectorReadOnly() {
+    showPartValues();
     const locked = Boolean(activeResult);
     $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
     // One rule for every editor card (src/renderer/entityEditor.mjs): its inputs and actions off, what only goes somewhere on.
@@ -6122,6 +6211,7 @@ function toggleComparisonBranch(branchUuid, enabled) {
     if (enabled) comparisonBranchUuids.add(branchUuid);
     else comparisonBranchUuids.delete(branchUuid);
     if (selectedNode) renderNodeResults(selectedNode);
+    if (relationshipResultsShown()) renderRelationshipResults(selectedRelationship);
 }
 
 // All branch UI lives behind one transport-bar button (#branchesButton), which shows the active
@@ -6257,6 +6347,7 @@ function activateBranch(targetUuid) {
     updateLiveResultControls();
     renderBranchSwitcher();
     if (selectedNode) renderNodeResults(selectedNode);
+    if (relationshipResultsShown()) renderRelationshipResults(selectedRelationship);
 }
 
 function activateResult(result) {
@@ -6277,6 +6368,7 @@ function activateResult(result) {
     updateResultExtent();
     projectResultSample(result.samples.length - 1);
     if (selectedNode && !$('#nodeEditor').classList.contains('hidden')) selectNodeEditorTab('results');
+    if (selectedRelationship && !$('#edgeEditor').classList.contains('hidden')) editorCard('edgeEditor').select('results');
 }
 
 function formatExecutionDuration(nanoseconds) {
@@ -6727,7 +6819,7 @@ function parameterOwnersInModel() {
         ...model.relationships.filter((relationship) => !relationship.deleted).flatMap((relationship) => (relationship.parameters ?? [])
             .map((parameter) => ({ parameter, ownerLabel: relationship.title }))),
         ...model.nodes.filter((node) => !node.deleted).flatMap((node) => (node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? [])
-            .map((parameter) => ({ parameter, ownerLabel: `${node.title} · source term` })))),
+            .map((parameter) => ({ parameter, ownerLabel: `${node.title} · own part` })))),
         ...model.nodes.filter((node) => !node.deleted).flatMap((node) => nodeProviderParameterBindings(node)
             .map((binding) => ({ parameter: binding, ownerLabel: `${node.title} · provider` })))
     ];
@@ -6776,7 +6868,7 @@ function collectParameterRows() {
     });
     model.nodes.filter((node) => !node.deleted).forEach((node) => {
         (node.sourceTerms ?? []).forEach((term) => (term.parameters ?? []).forEach((parameter) => place({
-            kind: 'sourceTerm', parameter, node, term, ownerLabel: `${node.title} · source term`
+            kind: 'sourceTerm', parameter, node, term, ownerLabel: `${node.title} · own part`
         })));
         // Shown under the shared parameter it reads, by the provider's input key; edited there.
         nodeProviderParameterBindings(node).forEach((binding) => place({
@@ -7619,6 +7711,8 @@ function applyLiveResult(jobId, result) {
     }
     updateLiveWaveformCursors(result.samples.at(-1)?.time);
     refreshNodeResultsSoon();
+    // A run's streamed samples carry no parts; its finished result does: the relationship's Results is drawn again as each comes.
+    if (relationshipResultsShown()) renderRelationshipResults(selectedRelationship);
     releaseRunWaiters();
 }
 
@@ -7676,7 +7770,9 @@ async function discardResultPlayback({ markProjectChanged = false } = {}) {
     cachedFingerprintFindings = { result: null, findings: [] };
     setResultModeLocked(false);
     nodeResultPlot.clear();
-    $('.nodeResultsPanel').classList.remove('hasResults');
+    edgeResultPlot.clear();
+    $$('.nodeResultsPanel').forEach((panel) => panel.classList.toggle('hasResults', false));
+    if (relationshipResultsShown()) renderRelationshipResults(selectedRelationship);
     $('#resultTransport').hidden = true;
     model.nodes.forEach((node) => node.states.forEach((state) => updateDisplayedState(state.id, state.initialValue)));
     if (nodeDetailsBeforeResult !== null) setLabelDetail('nodes', nodeDetailsBeforeResult);
@@ -9781,7 +9877,7 @@ function renderCausalInferenceInputs() {
             .filter((candidate) => candidate.targetColumn === entry.columnName && candidate.accepted).length;
         const supersedesSelfTerm = (causalInferenceState.selfTerms ?? []).some((term) => term.targetColumn === entry.columnName);
         const supersedes = [
-            supersededEdgeCount ? `${supersededEdgeCount} edge${supersededEdgeCount === 1 ? '' : 's'}` : null,
+            supersededEdgeCount ? `${supersededEdgeCount} relationship${supersededEdgeCount === 1 ? '' : 's'}` : null,
             supersedesSelfTerm ? 'its self term' : null
         ].filter(Boolean).join(' and ');
         if (supersedes) {
@@ -10291,7 +10387,7 @@ function findTunableParametersInModel() {
             for (const parameter of term.parameters ?? []) {
                 if (parameter.tuning) {
                     found.push({
-                        nodeId: node.id, sourceTermId: term.id, ownerName: `${node.name} · source term`, parameterId: parameter.id,
+                        nodeId: node.id, sourceTermId: term.id, ownerName: `${node.name} · own part`, parameterId: parameter.id,
                         name: parameter.name, symbol: parameter.symbol, value: parameter.value, tuning: parameter.tuning
                     });
                 }
@@ -13523,7 +13619,7 @@ window.providerEditor.onApplied(({ source }) => {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
         const node = nodeObjects.get(providerEditTarget.nodeId);
         const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === providerEditTarget.termId);
-        if (!node || node.userData.definition.deleted || !term?.implementation) return fail('This source term no longer exists.');
+        if (!node || node.userData.definition.deleted || !term?.implementation) return fail('This part no longer exists.');
         changeSourceTermModel(node, providerEditTarget.termId, (snapshotTerm) => {
             snapshotTerm.implementation.source = source;
         });
@@ -13539,7 +13635,7 @@ window.providerEditor.onApplied(({ source }) => {
     if (providerEditTarget.type === 'group') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
         const group = model.edgeGroups.find((candidate) => candidate.id === providerEditTarget.groupId && !candidate.deleted);
-        if (!group?.definition.implementation) return fail('This edge group no longer exists.');
+        if (!group?.definition.implementation) return fail('This relationship group no longer exists.');
         changeEdgeGroupModel(group, (snapshot) => { snapshot.definition.implementation.source = source; });
         return succeed();
     }
@@ -17610,11 +17706,11 @@ function confirmEdgeGroupSize(nodeCount) {
     // N(N-1), not C(N,2): one directed edge each way per member pair (docs/edgeDirectionality.md).
     const edgeCount = nodeCount * (nodeCount - 1);
     if (nodeCount > 40) {
-        window.alert(`An edge group can have at most 40 member nodes (${40 * 39} edges in the mesh).`);
+        window.alert(`A relationship group can have at most 40 member nodes (${40 * 39} relationships in the mesh).`);
         return false;
     }
     if (nodeCount > 10) {
-        return window.confirm(`This will create ${edgeCount} edges between ${nodeCount} nodes. Continue?`);
+        return window.confirm(`This will create ${edgeCount} relationships between ${nodeCount} nodes. Continue?`);
     }
     return true;
 }
@@ -17626,7 +17722,7 @@ function createEdgeGroupFromSelection() {
     const id = allocateModelEntityId();
     const group = {
         id,
-        name: `Edge group ${model.edgeGroups.filter((item) => !item.deleted).length + 1}`,
+        name: `Relationship group ${model.edgeGroups.filter((item) => !item.deleted).length + 1}`,
         memberNodeIds: nodeIds,
         color: 0x2fb8a4,
         deleted: false,
@@ -19119,7 +19215,7 @@ $('[data-delete-edge-group]').addEventListener('click', () => {
 });
 $('#groupName').addEventListener('change', (event) => {
     const group = currentEdgeGroup();
-    if (group) changeEdgeGroupModel(group, (snapshot) => { snapshot.name = event.target.value.trim() || 'Untitled edge group'; });
+    if (group) changeEdgeGroupModel(group, (snapshot) => { snapshot.name = event.target.value.trim() || 'Untitled relationship group'; });
 });
 $('#groupColor').addEventListener('change', (event) => {
     const group = currentEdgeGroup();

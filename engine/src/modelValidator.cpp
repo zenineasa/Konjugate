@@ -61,7 +61,7 @@ std::optional<ResolvedAttribution> resolveAttributedParameter(const boost::prope
                     if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
                     const auto edgeName = value(edgeEntry.second, "name");
                     std::ostringstream description;
-                    description << "the edge" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(parameterEntry.second, "name") << "' parameter";
+                    description << "the relationship" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(parameterEntry.second, "name") << "' parameter";
                     return ResolvedAttribution{
                         {"edge", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
                         description.str()
@@ -398,7 +398,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     const auto nodesOptional = document.get_child_optional("nodes");
     const auto edgesOptional = document.get_child_optional("edges");
     if (!nodesOptional || !edgesOptional) {
-        add(result, "invalidDocument", "error", "The project must contain node and edge arrays.");
+        add(result, "invalidDocument", "error", "The project must contain node and relationship arrays.");
         result.valid = false;
         return result;
     }
@@ -649,7 +649,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         std::vector<std::pair<std::string, std::vector<std::string>>> algebraicCandidates;
         if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& termEntry : *terms) {
             const auto& term = termEntry.second;
-            registerId(value(term, "id"), "node", id, "Source term");
+            registerId(value(term, "id"), "node", id, "Own equation");
             std::set<std::string> sourceParameterSymbols;
             std::set<std::string> sourceParameterIds;
             if (const auto parameters = term.get_child_optional("parameters")) for (const auto& parameterEntry : *parameters) {
@@ -693,8 +693,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     stateContributorCounts[termOutputStateId] += 1;
                     // A value when it says so or when its state says it is an Update; otherwise a rate.
                     const auto expression = value(term, "expression");
-                    const auto termName = termProgrammable || expression.empty() ? value(node, "name") + "'s source term"
-                        : value(node, "name") + "'s source term \"" + (expression.size() > 40 ? expression.substr(0, 37) + "..." : expression) + "\"";
+                    const auto termName = termProgrammable || expression.empty() ? value(node, "name") + "'s own part"
+                        : value(node, "name") + "'s own part \"" + (expression.size() > 40 ? expression.substr(0, 37) + "..." : expression) + "\"";
                     if (value(term, "setsValue") == "true") termValueStateIds.insert(termOutputStateId);
                     else if (declaredKind(termOutputStateId) != "update") plainRateCounts[termOutputStateId] += 1;
                     if (value(term, "setsValue") == "true" || declaredKind(termOutputStateId) == "update") note(valueSources[termOutputStateId], termName);
@@ -721,14 +721,14 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 }
             }
             if (termImplementationKind != "equation" && termImplementationKind != "cpp" && termImplementationKind != "python") {
-                add(result, "sourceKindInvalid", "error", "Source term implementation kind must be equation, cpp or python.", "node", id, "sourceTerms");
+                add(result, "sourceKindInvalid", "error", "A node's own part must be written as an equation, a C++ program or a Python program.", "node", id, "sourceTerms");
             }
             if (termImplementationKind == "cpp" || termImplementationKind == "python") {
                 if (value(*termImplementation, "providerApiVersion") != "1") {
-                    add(result, "providerApiVersionInvalid", "error", "Programmable source terms require provider API version 1.", "node", id, "sourceTerms");
+                    add(result, "providerApiVersionInvalid", "error", "A node's own part written as a program requires provider API version 1.", "node", id, "sourceTerms");
                 }
                 if (value(*termImplementation, "source").empty()) {
-                    add(result, "providerSourceEmpty", "error", "Programmable source terms require inline source.", "node", id, "sourceTerms");
+                    add(result, "providerSourceEmpty", "error", "A node's own part written as a program needs its program's source.", "node", id, "sourceTerms");
                 }
                 // Unlike an edge, a source term has no other endpoint to read from, so zero
                 // declared bindings is not itself an error (e.g. a constant contribution).
@@ -740,7 +740,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 const bool hasBindings = providerBindings && !providerBindings->empty();
                 if (!hasBindings && value(*termImplementation, "source").find("TODO: read") != std::string::npos) {
                     add(result, "sourceTermImplementationIncomplete", "warning",
-                        "This programmable source term has no input bindings and still contains the generated template.",
+                        "This own part's program has no inputs and is still the generated template.",
                         "node", id, "sourceTerms");
                 }
                 if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
@@ -768,21 +768,21 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 continue;
             }
             const auto state = value(term, "state");
-            if (!stateSymbols[id].contains(state)) add(result, "sourceStateMissing", "error", "Source term references a missing state.", "node", id, "sourceTerms");
-            if (value(term, "expression").empty()) add(result, "sourceExpressionEmpty", "error", "Source term requires an expression.", "node", id, "sourceTerms");
+            if (!stateSymbols[id].contains(state)) add(result, "sourceStateMissing", "error", "A node's own part lands on a state that no longer exists.", "node", id, "sourceTerms");
+            if (value(term, "expression").empty()) add(result, "sourceExpressionEmpty", "error", "A node's own part needs an equation.", "node", id, "sourceTerms");
             const auto mathJson = term.get_child_optional("expressionModel.mathJson");
-            if (!mathJson) add(result, "sourceExpressionInvalid", "error", "Source term requires a valid executable expression.", "node", id, "sourceTerms");
+            if (!mathJson) add(result, "sourceExpressionInvalid", "error", "A node's own part needs an equation that can be worked out.", "node", id, "sourceTerms");
             else {
                 std::set<std::string> executableSymbols;
                 if (const auto bindings = term.get_child_optional("expressionModel.bindings")) {
                     for (const auto& binding : *bindings) {
                         executableSymbols.insert(value(binding.second, "symbol"));
                         if (value(binding.second, "kind") == "parameter") {
-                            if (!sourceParameterIds.contains(value(binding.second, "parameterId"))) add(result, "sourceBindingMissing", "error", "Source term binding references a missing parameter.", "node", id, "sourceTerms");
+                            if (!sourceParameterIds.contains(value(binding.second, "parameterId"))) add(result, "sourceBindingMissing", "error", "A node's own part reads a parameter that no longer exists.", "node", id, "sourceTerms");
                         } else if (value(binding.second, "kind") == "time") {
                             // Simulation time -- always available, nothing to resolve.
                         } else if (!stateIds[id].contains(value(binding.second, "stateId"))) {
-                            add(result, "sourceBindingMissing", "error", "Source term binding references a missing local state.", "node", id, "sourceTerms");
+                            add(result, "sourceBindingMissing", "error", "A node's own part reads a state of the node that no longer exists.", "node", id, "sourceTerms");
                         }
                     }
                 }
@@ -791,7 +791,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (!errors.empty()) add(result, "sourceExpressionInvalid", "error", errors.front(), "node", id, "sourceTerms");
             }
             if (!stateIds[id].contains(value(term, "expressionModel.output.stateId"))) {
-                add(result, "sourceOutputMissing", "error", "Source term requires an existing output state.", "node", id, "sourceTerms");
+                add(result, "sourceOutputMissing", "error", "A node's own part needs a state to land on.", "node", id, "sourceTerms");
             }
         }
         // A value set at the same instant (a setsValue term into a state that does not say its kind) may not read itself; an
@@ -801,7 +801,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (declaredKind(outputStateId) == "update") continue;
             if (std::find(referencedStateIds.begin(), referencedStateIds.end(), outputStateId) != referencedStateIds.end()) {
                 add(result, "setsValueSelfReference", "error",
-                    "A source term that sets its value directly may not reference its own state.", "node", id, "sourceTerms");
+                    "A node's own part that sets its state directly may not read that state.", "node", id, "sourceTerms");
                 break;
             }
         }

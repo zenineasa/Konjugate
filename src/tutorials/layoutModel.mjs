@@ -57,7 +57,7 @@ const steps = Object.freeze([
     {
         id: 'labels',
         title: 'Choose how much labels say',
-        text: 'At the top right, press Nodes beside Details: it goes from compact labels to full ones, showing every state\'s value, and then to none. Edges does the same for the relationships\' labels. A large model starts with fewer.',
+        text: 'At the top right, press Nodes beside Details: it goes from compact labels to full ones, showing every state\'s value, and then to none. Relationships does the same for theirs. A large model starts with fewer.',
         target: '#nodeLabelsButton', skip: 'cycleNodeLabels',
         done: ({ ui }) => ui.labelDetailChanged
     },

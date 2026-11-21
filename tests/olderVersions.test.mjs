@@ -167,3 +167,44 @@ function uint32(value) {
     buffer.writeUInt32BE(value);
     return buffer;
 }
+
+// ---- Recorded parts (stage G): a result written by this version's engine (tests/fixtures/partsRecorded, the thermal example run
+// for 2 s) carries a part table and each sample's parts, fields v1.4.15 does not know.
+import { openIndexedResult } from '../src/indexedResultReader.mjs';
+import * as releasedIndexedReader from './fixtures/olderVersions/v1.4.15/readers/indexedResultReader.mjs';
+
+const partsResultPath = fileURLToPath(new URL('./fixtures/partsRecorded/thermalManagement.kjr', import.meta.url));
+const withoutParts = (sample) => ({ time: sample.time, states: sample.states });
+
+test('a result that records parts plays in the readers v1.4.15 shipped, every time, state and checkpoint as this version reads them', async () => {
+    const bytes = await readFile(partsResultPath);
+    const now = decodeResultFile(bytes);
+    assert.ok(now.parts.length > 0 && now.samples.every((sample) => sample.parts?.length === now.parts.length), 'The fixture records no parts.');
+    const released = releasedProtocol.decodeResultFile(bytes);
+    assert.deepEqual(released.samples, now.samples.map(withoutParts), 'v1.4.15 reads the samples of a result with parts differently.');
+    assert.deepEqual(released.checkpoints, now.checkpoints);
+    assert.equal(released.sampleCount, now.sampleCount);
+    // The file reader the desktop app uses for a saved result, as v1.4.15 shipped it.
+    const reader = await releasedIndexedReader.openIndexedResult(partsResultPath);
+    try {
+        assert.deepEqual(await reader.readSamples(), now.samples.map(withoutParts), 'v1.4.15\'s indexed reader reads the samples differently.');
+    } finally {
+        await reader.close?.();
+    }
+});
+
+test('this version reads a result\'s parts, and a result v1.4.15 wrote as having none, with everything else as before', async () => {
+    const reader = await openIndexedResult(partsResultPath);
+    try {
+        const samples = await reader.readSamples();
+        assert.deepEqual(reader.metadata.parts, decodeResultFile(await readFile(partsResultPath)).parts);
+        assert.ok(samples.every((sample) => sample.parts.length === reader.metadata.parts.length));
+    } finally {
+        await reader.close?.();
+    }
+    const bundle = await decodeProjectBundle(await readFile(join(fixtures, 'v1.4.15/withResults/thermalManagement.kjt')));
+    const old = decodeResultFile(bundle.result);
+    assert.equal('parts' in old, false, 'A result v1.4.15 wrote has no parts.');
+    assert.ok(old.samples.every((sample) => !('parts' in sample)), 'A sample of a result v1.4.15 wrote was given parts.');
+    assert.deepEqual(old.samples, releasedProtocol.decodeResultFile(bundle.result).samples, 'This version reads a v1.4.15 result\'s samples differently.');
+});

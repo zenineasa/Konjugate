@@ -15,7 +15,7 @@ What only a real phone can confirm. The layout is checked in Chrome at 360 by 76
 
 - Upright and on its side: the tools (a rail down the right edge upright, a row along the top on its side) are all within reach of the thumb, and turning the phone midway through a session keeps the model, the selection and any open panel.
 - The menu button, the tool picker (tap the tool in use) and the actions on a selection open and close without a second tap.
-- Edges: connecting two nodes by touch, with the first node picked from the node's own "Connect to…" button.
+- Relationships: connecting two nodes by touch, with the first node picked from the node's own "Connect to…" button.
 - Dragging a node, then a second finger landing mid-drag (the case behind the DragControls crash), and a long press for the context menu.
 - The on-screen keyboard: a field in the node editor, the parameters sheet and the run dialog stays in view when the keyboard opens, and the math keyboard does not cover its own field.
 - Run a model, scrub, play, open a node's Results tab: the plot's chips toggle curves, and a drag pans the plot without moving the page.

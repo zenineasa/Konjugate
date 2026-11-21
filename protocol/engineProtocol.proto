@@ -31,6 +31,24 @@ message SampleBatch {
     repeated double times = 1;
     uint32 state_count = 2;
     repeated double values = 3;
+    // Each recorded part's value at each sample (ResultFile.part_table), sample by sample as `values`; NaN where a part could not
+    // be worked out. Written to a result file only, never sent while a run streams, and absent from a result written before
+    // parts were recorded: a reader that does not know these fields skips them.
+    uint32 part_count = 4;
+    repeated double part_values = 5;
+}
+
+// One recorded part (docs/proposals/unifiedEntityEditors.md, decision 11): what one term written as an equation -- a node's own
+// source term (source_id is the term's) or a relationship's term at one end (source_id is the relationship's; `negated` at the
+// far end of a bidirectional one) -- adds to, or gives, the state state_id.
+message PartDescriptor {
+    uint64 source_id = 1;
+    uint64 state_id = 2;
+    bool negated = 3;
+}
+
+message PartTable {
+    repeated PartDescriptor parts = 1;
 }
 
 enum PacingMode {
@@ -262,6 +280,9 @@ message ResultFile {
     repeated ResultCheckpoint checkpoints = 5;
     repeated StabilityFindingReport stability_findings = 6;
     repeated Intervention interventions = 7;
+    // The parts each sample batch records, in the order of its part_values. Absent from a result written before parts were
+    // recorded (result_version stays 2: a reader that does not know it skips it, and one that does finds no parts).
+    PartTable part_table = 8;
 }
 
 message ResultBatchIndex {

@@ -775,7 +775,7 @@
                 </div>
                 <div class="toolGroup" role="group" aria-label="Organise">
                     <button id="createSubsystem" class="squareTool" type="button" aria-label="Create subsystem from selected nodes" data-tooltip="Create subsystem" disabled>▤</button>
-                    <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create edge group from selected nodes" data-tooltip="Create edge group" disabled>⬡</button>
+                    <button id="createEdgeGroup" class="squareTool" type="button" aria-label="Create a relationship group from the selected nodes" data-tooltip="Create relationship group" disabled>⬡</button>
                     <button id="saveTemplateButton" class="squareTool" type="button" aria-label="Save selected nodes to my component library" data-tooltip="Save to my library" disabled>⊞</button>
                 </div>
             </div>
@@ -797,7 +797,7 @@
         <div class="labelControls" aria-label="Label detail">
             <span>Details</span>
             <button id="nodeLabelsButton" data-detail="nodes" type="button" title="Node labels: compact">Nodes<i class="detailMode" aria-hidden="true"></i></button>
-            <button id="edgeLabelsButton" data-detail="edges" type="button" title="Relationship labels: compact">Edges<i class="detailMode" aria-hidden="true"></i></button>
+            <button id="edgeLabelsButton" data-detail="edges" type="button" title="Relationship labels: compact">Relationships<i class="detailMode" aria-hidden="true"></i></button>
         </div>
         <button id="runButton" class="runButton" type="button" title="A simulation engine is not configured" disabled><span>▶</span> Run</button>
     </nav>
@@ -848,7 +848,7 @@
         <aside id="componentLibraryPanel" class="componentLibraryPanel" aria-label="Component library" hidden>
             <header><div><span class="contextKicker">Reusable components</span><strong>Component library</strong></div><button id="closeComponentLibraryPanel" type="button" aria-label="Close component library">×</button></header>
             <button id="componentLibraryPlaceFile" class="componentLibraryPlaceFile" type="button">Place component from file…</button>
-            <input id="componentLibrarySearch" type="search" placeholder="Search nodes and edges…" autocomplete="off">
+            <input id="componentLibrarySearch" type="search" placeholder="Search nodes and relationships…" autocomplete="off">
             <div id="componentLibraryTypeChips" class="componentLibraryChips" role="group" aria-label="Filter by type"></div>
             <div id="componentLibraryDomainChips" class="componentLibraryChips" role="group" aria-label="Filter by domain"></div>
             <div id="componentLibraryResults" class="componentLibraryResults"></div>
@@ -933,17 +933,17 @@
             <div data-editor-panel="equations">
             <section>
                 <div id="nodeEditorStates"></div>
-                <button id="editAddState" class="addLinkButton" type="button">＋ Add a state</button>
+                <button id="editAddState" class="addLinkButton" type="button">＋ State</button>
                 <div id="nodeEditorStrayTerms" hidden></div>
             </section>
             <section id="nodeProgramSection">
                 <label class="editorField"><span>Program</span><select id="editNodeProgramKind">
-                    <option value="">None: its states change by their source terms and relationships</option>
+                    <option value="">None: its states change by their own equations and its relationships</option>
                     <option value="python">Python program</option>
                     <option value="cpp">C++ program</option>
                     <option value="fmi">Installed FMU</option>
                 </select></label>
-                <p id="editNodeProgramHint" class="builderHint">A program computes this node's states itself, once per substep, beside its source terms: it reads any node's states and shared parameters, and keeps state of its own across checkpoints.</p>
+                <p id="editNodeProgramHint" class="builderHint">A program computes this node's states itself, once per substep, beside its own equations: it reads any node's states and shared parameters, and keeps state of its own across checkpoints.</p>
                 <div id="nodeProgramFields" hidden>
                     <div id="nodeProgramSourceFields">
                         <div class="equationHeading"><h3>Source</h3><div class="templateButtonGroup">
@@ -1048,7 +1048,7 @@
         </div>
 
         <div id="sourceTermEditor" data-entity-editor="sourceTerm" class="contextCard editorCard edgeEditor hidden">
-            <header><div><span class="contextKicker">Source term</span><strong id="sourceTermEditorTitle">Source term</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span class="contextKicker">Own part</span><strong id="sourceTermEditorTitle">Own part</strong></div><button data-close-card type="button">×</button></header>
             <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="termParameterCount"></span></button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-editor-panel="equations">
@@ -1062,7 +1062,7 @@
                 <div id="termLanding" class="termLanding">
                     <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="termEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div></div>
                     <div class="landingState"><select id="termOutputState"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
-                    <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field><textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
+                    <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="termMathField" class="equationMathField" aria-label="This node's own part"></math-field><textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
                 </div>
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
                 <details id="termFunctions" class="equationFunctions"><summary>Functions</summary><p class="builderHint">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p></details>
@@ -1078,12 +1078,12 @@
                 <div id="termParameters"></div>
             </section>
             </div>
-            <footer><button data-delete-source-term type="button">Delete source term</button></footer>
+            <footer><button data-delete-source-term type="button">Delete this part</button></footer>
         </div>
 
         <div id="edgeEditor" data-entity-editor="relationship" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Relationship</span><strong id="edgeEditorTitle">Relationship</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="edgeParameterCount"></span></button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="edgeParameterCount"></span></button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="results" type="button">Results</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-editor-panel="equations">
             <section>
@@ -1120,18 +1120,27 @@
                 <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
                 <label class="editorField"><span>Description</span><textarea id="editEdgeDescription" rows="3" placeholder="Optional notes on what this relationship represents"></textarea></label>
                 <div class="endpointGrid">
-                    <label class="editorField"><span>Source</span><select id="editEdgeSource"></select></label>
-                    <label class="editorField"><span>Target</span><select id="editEdgeTarget"></select></label>
+                    <label class="editorField"><span>From</span><select id="editEdgeSource"></select></label>
+                    <label class="editorField"><span>To</span><select id="editEdgeTarget"></select></label>
                 </div>
-                <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
+                <label class="editorField"><span>Direction</span><select id="editEdgeDirectionality"><option value="bidirectional">Both ways</option><option value="directed">One way: from → to</option></select></label>
             </section>
+            </div>
+            <div data-editor-panel="results" hidden>
+                <section class="nodeResultsPanel edgeResultsPanel">
+                    <div id="edgeResultPlot" class="nodeResultPlot" role="img" aria-label="What this relationship adds over the run"></div>
+                    <div id="edgeResultEmpty" class="nodeResultEmpty">
+                        <strong>No simulation results</strong>
+                        <span>Run the model to see what this relationship adds over the run.</span>
+                    </div>
+                </section>
             </div>
             <div data-editor-panel="appearance" hidden>
             <section>
                 <label class="editorField"><span>Colour</span><input id="editEdgeColor" type="color"></label>
             </section>
             </div>
-            <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
+            <footer><button data-delete-edge type="button">Delete relationship</button><button id="toggleEdgeEnabled" type="button">Disable relationship</button></footer>
         </div>
 
         <div id="subsystemEditor" class="contextCard editorCard subsystemEditor hidden">
@@ -1169,7 +1178,7 @@
         </div>
 
         <div id="edgeGroupEditor" data-entity-editor="relationshipGroup" class="contextCard editorCard edgeGroupEditor hidden">
-            <header><div><span class="contextKicker">Edge Group</span><strong id="editGroupHeading">Edge group</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span class="contextKicker">Relationship group</span><strong id="editGroupHeading">Relationship group</strong></div><button data-close-card type="button">×</button></header>
             <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters</button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-editor-panel="equations">
@@ -1193,7 +1202,7 @@
             <div data-editor-panel="parameters" hidden>
             <section>
                 <h3>Shared parameters <button id="groupAddParameter" type="button">＋</button></h3>
-                <p class="builderHint">Applied identically to every edge in the mesh -- a member can't override a parameter without detaching.</p>
+                <p class="builderHint">Applied identically to every relationship in the mesh -- a member can't override a parameter without detaching.</p>
                 <div id="groupParameterRows" class="builderRows"></div>
             </section>
             </div>
@@ -1247,7 +1256,7 @@
             </section>
             <section id="causalInferenceCandidatesSection" hidden>
                 <h3>Candidate relationships</h3>
-                <p class="builderHint">One row per proposed directed edge. <strong>Lagged</strong> means the source's past value predicts the target; <strong>correlation-only</strong> means the two are related but no clear direction was found.</p>
+                <p class="builderHint">One row per proposed one-way relationship. <strong>Lagged</strong> means the source's past value predicts the target; <strong>correlation-only</strong> means the two are related but no clear direction was found.</p>
                 <div id="causalInferenceCandidateRows"></div>
                 <div id="causalInferenceSelfTermSection" hidden>
                     <h3>Self terms</h3>
@@ -1256,7 +1265,7 @@
                 </div>
                 <div id="causalInferenceInputSection" hidden>
                     <h3>Inputs</h3>
-                    <p class="builderHint">Check any column that should replay its own recorded values exactly instead of being explained by a fitted equation -- driven by a generated C++ provider, exact at any simulation step size. This replaces whatever candidate edges or self term would otherwise target that column. Most useful for a column nothing else predicts (its only alternative is a self term that settles toward equilibrium rather than reproducing the real fluctuation, or -- if not even that -- staying frozen at its initial value for the entire run), but any column can be replayed this way, for instance to hold it to ground truth while the rest of the model runs on the fitted equations.</p>
+                    <p class="builderHint">Check any column that should replay its own recorded values exactly instead of being explained by a fitted equation -- driven by a generated C++ provider, exact at any simulation step size. This replaces whatever candidate relationships or self term would otherwise target that column. Most useful for a column nothing else predicts (its only alternative is a self term that settles toward equilibrium rather than reproducing the real fluctuation, or -- if not even that -- staying frozen at its initial value for the entire run), but any column can be replayed this way, for instance to hold it to ground truth while the rest of the model runs on the fitted equations.</p>
                     <div id="causalInferenceInputRows"></div>
                 </div>
             </section>
@@ -1431,8 +1440,8 @@
 
         <div id="addPalette" class="contextCard addPalette hidden">
             <span class="contextKicker">Add to model</span>
-            <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and source terms</small></span><b>›</b></button>
-            <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Edge</strong><small>Connect nodes with an equation</small></span><b>›</b></button>
+            <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and their equations</small></span><b>›</b></button>
+            <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Relationship</strong><small>Connect two nodes with an equation</small></span><b>›</b></button>
             <button id="addComponentFromFile" type="button"><i class="primitiveIcon">▤</i><span><strong>Component from file…</strong><small>Place a subsystem saved as a .kjt, or one from any project</small></span><b>›</b></button>
             <hr>
             <span class="contextKicker">Selection</span>
@@ -1441,15 +1450,15 @@
 
         <div id="nodeContextMenu" class="contextCard addPalette hidden">
             <span class="contextKicker">Node</span>
-            <button id="nodeContextConnect" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Connect from here</strong><small>Start a new edge at this node</small></span><b>›</b></button>
+            <button id="nodeContextConnect" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Connect from here</strong><small>Start a new relationship at this node</small></span><b>›</b></button>
             <button id="nodeContextToggle" type="button"><i class="primitiveIcon">⏻</i><span><strong id="nodeContextToggleLabel">Disable node</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
-            <button id="nodeContextAddToGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Add to edge group</strong><small>Join the group currently open for editing</small></span><b>›</b></button>
-            <button id="nodeContextDetachFromGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Detach from edge group</strong><small>Its edges to the group stay, as ordinary edges</small></span><b>›</b></button>
+            <button id="nodeContextAddToGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Add to relationship group</strong><small>Join the group currently open for editing</small></span><b>›</b></button>
+            <button id="nodeContextDetachFromGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Detach from relationship group</strong><small>Its relationships to the group stay, as ordinary ones</small></span><b>›</b></button>
             <button id="nodeContextSaveTemplate" type="button"><i class="primitiveIcon">⊞</i><span><strong>Save to my library</strong><small>Keep the selection as a reusable component</small></span><b>›</b></button>
             <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
             <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
             <div id="nodeContextMoveTargets"></div>
-            <button id="nodeContextCreateEdgeGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Create edge group</strong><small>One relationship, meshed across the selection</small></span><b>›</b></button>
+            <button id="nodeContextCreateEdgeGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Create relationship group</strong><small>One relationship, meshed across the selection</small></span><b>›</b></button>
             <hr>
             <button id="nodeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong id="nodeContextDeleteLabel">Delete node</strong></span><b>›</b></button>
         </div>
@@ -1465,12 +1474,12 @@
         </div>
 
         <div id="edgeContextMenu" class="contextCard addPalette hidden">
-            <span class="contextKicker">Edge</span>
-            <button id="edgeContextAddWaypoint" type="button"><i class="primitiveIcon edgeIcon">✛</i><span><strong>Add waypoint here</strong><small>Route the edge around this point</small></span><b>›</b></button>
-            <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable edge</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
-            <button id="edgeContextOpenGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Open edge group</strong><small>Detach a member from its own row in the editor</small></span><b>›</b></button>
+            <span class="contextKicker">Relationship</span>
+            <button id="edgeContextAddWaypoint" type="button"><i class="primitiveIcon edgeIcon">✛</i><span><strong>Add waypoint here</strong><small>Route the relationship around this point</small></span><b>›</b></button>
+            <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable relationship</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
+            <button id="edgeContextOpenGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Open relationship group</strong><small>Detach a member from its own row in the editor</small></span><b>›</b></button>
             <hr>
-            <button id="edgeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete edge</strong></span><b>›</b></button>
+            <button id="edgeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete relationship</strong></span><b>›</b></button>
         </div>
 
         <div id="waypointContextMenu" class="contextCard addPalette hidden">

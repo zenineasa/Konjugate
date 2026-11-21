@@ -17,7 +17,7 @@ Draw a system as components connected by relationships, write each one's equatio
 
 ## What you can do with it
 
-- **Model a system as a graph.** Nodes hold states, edges carry the equations between them, written in ordinary LaTeX. Group repeated structure into subsystems and edge groups, and reuse it.
+- **Model a system as a graph.** Nodes hold states, relationships carry the equations between them, written in ordinary LaTeX. Group repeated structure into subsystems and relationship groups, and reuse it.
 - **Run it and steer it.** Watch a run as it happens, change a parameter mid-run, fork a scenario from any point, and replay the result. Larger models are partitioned and run in parallel.
 - **Build digital twins.** Connect a running model to live measurements from a data log, an MQTT broker, an OPC UA server or a script, keep it in step with the real system, refit it as it drifts, and forecast ahead. See [Connecting a data source](docs/connectingADataSource.md).
 - **Start from data.** Import a CSV of time series and Konjugate proposes which variables drive which, in what direction and with what equation, for you to review before anything is added. See [Causal inference](docs/causalInference.md).

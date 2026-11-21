@@ -37,7 +37,7 @@ const steps = Object.freeze([
     {
         id: 'bothWays',
         title: 'A relationship that acts both ways',
-        text: `Click the "${values.relationship}" relationship between the two bodies. Its Directionality is Bidirectional: one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made. A directed relationship changes only its target.`,
+        text: `Click the "${values.relationship}" relationship between the two bodies. Its Direction is Both ways: one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made. A one-way relationship changes only the node it runs to.`,
         target: (ui) => (ui.edgeEditorFor === values.relationship ? '#editEdgeDirectionality' : ui.relationshipRowOf(values.relationship)),
         skip: 'openRelationship', relationship: values.relationship,
         done: ({ document, ui }) => ui.edgeEditorFor === values.relationship || leaking(document)
@@ -53,7 +53,7 @@ const steps = Object.freeze([
     {
         id: 'addState',
         title: 'Add a state for degrees Celsius',
-        text: `In the ${values.hot}'s editor, press + Add a state and name the new one "${values.celsius.name}", with symbol ${values.celsius.symbol} and unit ${values.celsius.unit}.`,
+        text: `In the ${values.hot}'s editor, press + State and name the new one "${values.celsius.name}", with symbol ${values.celsius.symbol} and unit ${values.celsius.unit}.`,
         target: (ui) => (ui.nodeEditorFor === values.hot ? '#editAddState' : ui.labelOf(values.hot)),
         skip: 'addState', node: values.hot, name: values.celsius.name, symbol: values.celsius.symbol, unit: values.celsius.unit,
         done: ({ document }) => hasCelsius(document)
@@ -83,7 +83,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have written equations that do more',
-        text: 'A relationship into an update adds to its value, as a source term does, and one with several equations sets several values at once ("Equations that set values" under its Implementation). A value that settles much faster than everything around it is often better an update than stepped. A source term can have parameters of its own, and both kinds of term can be written as a program instead of an equation.',
+        text: 'A relationship into an update adds to its value, as a node\'s own equation does, and one with several equations sets several values at once. A value that settles much faster than everything around it is often better an update than stepped. A node\'s own equation can have parameters of its own, and both a node\'s own part and a relationship can be written as a program instead of an equation.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);
@@ -94,7 +94,7 @@ export const equationsThatDoMore = Object.freeze({
     summary: 'A relationship that acts both ways, a node\'s own equation, and a value set directly instead of stepped.',
     minutes: 4,
     area: 'modelling',
-    tags: ['source term', 'bidirectional', 'directed', 'directionality', 'sets value', 'algebraic', 'equation', 'state', 'node equation', 'thermal', 'conduction'],
+    tags: ['own equation', 'source term', 'both ways', 'one way', 'bidirectional', 'directed', 'direction', 'directionality', 'sets value', 'algebraic', 'equation', 'state', 'node equation', 'thermal', 'conduction'],
     start: { from: 'example', example: 'thermalEquilibrium.kjt' },
     editions: ['desktop', 'web'],
     steps

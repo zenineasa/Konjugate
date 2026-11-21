@@ -402,6 +402,25 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document);
 
 std::vector<std::size_t> planTaskSubmissionOrder(const std::vector<NodeExecutionPlan>& nodes);
 
+// The parts recorded with each result sample (docs/proposals/unifiedEntityEditors.md, decision 11): what each term written as an
+// equation -- a node's own source term, or a relationship's term at one end -- adds to a Rate state or gives an Update state.
+// A relationship's term at the far end of a bidirectional relationship is its own part, negated. A term written as a program
+// is not recorded: working it out again would run the program again, which may keep state of its own.
+struct RecordedPart {
+    EntityId sourceId = 0;
+    EntityId stateId = 0;
+    bool negated = false;
+};
+
+// Every recorded part, in the order evaluateRecordedParts gives their values: node by node, its Rate terms, then the
+// relationship terms into its Update states, then its own Update terms.
+std::vector<RecordedPart> recordedParts(const ExecutionPlan& plan);
+
+// Each recorded part's value from the states of one sample (plan order) and the parameters as they stand at its time. Pure:
+// it changes nothing the run reads, so recording never changes a run's numbers. A part that cannot be worked out is NaN.
+std::vector<double> evaluateRecordedParts(const ExecutionPlan& plan, const StateValues& states, const EntityValues& liveParameterValues,
+                                          const std::vector<ParameterSchedule>& activeSchedules, double simulationTime);
+
 // localStates is only ever read here -- but a nodeProvider output with setsValue needs to write its
 // target state directly (see NodeProviderOutputBinding::setsValue), exactly like
 // applyAlgebraicTasks does. Rather than taking localStates by mutable reference (which would force

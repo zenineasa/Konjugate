@@ -284,13 +284,37 @@ function decodedStateTable(buffer) {
 }
 
 function decodedSampleBatch(buffer) {
+    // Its recorded parts only when it has them, so a batch without (every streamed one, every one written before parts were
+    // recorded) decodes exactly as it always did.
     const batch = { times: [], stateCount: 0, values: [] };
     for (const item of fields(buffer)) {
         if (item.number === 1 && item.wireType === 2) batch.times = batch.times.concat(packedDoubles(item.value));
         else if (item.number === 2 && item.wireType === 0) batch.stateCount = item.value;
         else if (item.number === 3 && item.wireType === 2) batch.values = batch.values.concat(packedDoubles(item.value));
+        else if (item.number === 4 && item.wireType === 0) batch.partCount = item.value;
+        else if (item.number === 5 && item.wireType === 2) batch.partValues = (batch.partValues ?? []).concat(packedDoubles(item.value));
     }
     return batch;
+}
+
+// The parts a result recorded (ResultFile.part_table, docs/proposals/unifiedEntityEditors.md, decision 11): what each term written
+// as an equation added to, or gave, a state at each sample. None in a result written before parts were recorded.
+function decodedPartTable(buffer) {
+    return fields(buffer).filter((item) => item.number === 1 && item.wireType === 2).map((item) => {
+        const part = { sourceId: 0, stateId: 0, negated: false };
+        for (const value of fields(item.value)) {
+            if (value.number === 1 && value.wireType === 0) part.sourceId = value.value;
+            else if (value.number === 2 && value.wireType === 0) part.stateId = value.value;
+            else if (value.number === 3 && value.wireType === 0) part.negated = Boolean(value.value);
+        }
+        return part;
+    });
+}
+
+// A sample's recorded parts, in the part table's order, when its batch holds one value of each for every sample; else none.
+function sampleParts(batch, sampleIndex) {
+    if (!batch.partCount || batch.partValues?.length !== batch.times.length * batch.partCount) return null;
+    return batch.partValues.slice(sampleIndex * batch.partCount, (sampleIndex + 1) * batch.partCount);
 }
 
 export function decodeResultIndexPayload(buffer) {
@@ -317,6 +341,7 @@ export function decodeResultHeaderPayload(buffer) {
     const header = { resultVersion: 0, metadata: null, stateIds: [], checkpoints: [] };
     for (const field of fields(buffer)) {
         if (field.number === 1 && field.wireType === 0) header.resultVersion = field.value;
+        else if (field.number === 8 && field.wireType === 2) header.parts = decodedPartTable(field.value);
         else if (field.number === 2 && field.wireType === 2) header.metadata = JSON.parse(decodeUtf8(field.value));
         else if (field.number === 3 && field.wireType === 2) header.stateIds = decodedStateTable(field.value);
         else if (field.number === 5 && field.wireType === 2) {
@@ -352,13 +377,17 @@ export function decodeSampleBatchPayload(buffer, stateIds) {
     if (batch.stateCount !== stateIds.length || batch.values.length !== batch.times.length * stateIds.length) {
         throw new Error('A KJR sample batch has inconsistent dimensions.');
     }
-    return batch.times.map((time, sampleIndex) => ({
-        time,
-        states: stateIds.map((stateId, stateIndex) => ({
-            stateId,
-            value: batch.values[sampleIndex * stateIds.length + stateIndex]
-        }))
-    }));
+    return batch.times.map((time, sampleIndex) => {
+        const parts = sampleParts(batch, sampleIndex);
+        return {
+            time,
+            states: stateIds.map((stateId, stateIndex) => ({
+                stateId,
+                value: batch.values[sampleIndex * stateIds.length + stateIndex]
+            })),
+            ...(parts ? { parts } : {})
+        };
+    });
 }
 
 export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infinity, maximumSamples = Infinity, nearestTime = null } = {}) {
@@ -374,11 +403,13 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
     let resultVersion = 0;
     let metadata = null;
     let stateIds = [];
+    let parts = [];
     const checkpoints = [];
     const stabilityFindings = [];
     const interventions = [];
     for (const field of fields(buffer.subarray(8, headerEnd))) {
         if (field.number === 1 && field.wireType === 0) resultVersion = field.value;
+        else if (field.number === 8 && field.wireType === 2) parts = decodedPartTable(field.value);
         else if (field.number === 2 && field.wireType === 2) metadata = JSON.parse(decodeUtf8(field.value));
         else if (field.number === 3 && field.wireType === 2) stateIds = decodedStateTable(field.value);
         else if (field.number === 6 && field.wireType === 2) {
@@ -477,12 +508,14 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         batch.times.forEach((time, sampleIndex) => {
             const inRange = Number.isFinite(nearestTime) || (time >= startTime && time <= endTime);
             const retain = selectedIndex % stride === 0 || selectedIndex === selectedCount - 1;
+            const sampleValues = inRange && retain ? sampleParts(batch, sampleIndex) : null;
             if (inRange && retain) samples.push({
                 time,
                 states: stateIds.map((stateId, stateIndex) => ({
                     stateId,
                     value: batch.values[sampleIndex * stateIds.length + stateIndex]
-                }))
+                })),
+                ...(sampleValues ? { parts: sampleValues } : {})
             });
             selectedIndex += 1;
         });
@@ -492,6 +525,8 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
         ...metadata,
         sampleCount,
         samples,
+        // The recorded parts, in the order of each sample's `parts`; absent for a result written before they were recorded.
+        ...(parts.length ? { parts } : {}),
         stabilityFindings,
         interventions,
         checkpoints: checkpoints.map((checkpoint) => {

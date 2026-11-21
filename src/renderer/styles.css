@@ -2523,6 +2523,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* A part too long for the card's width scrolls inside its chip, and the parts before the field wrap, rather than run off the card. */
 #edgeLanding .equationLhs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; white-space: normal; }
 .partChip { max-width: 100%; overflow-x: auto; }
+/* A part's value at the timeline's point while results are open. */
+.partValue { color: #9fd3c9; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.partChip > .partValue { align-self: flex-end; }
+.partValue[hidden] { display: none; }
 /* The captions over a state's fields, so a new state's "x x 0" reads as its name, symbol, start and unit. */
 .stateFieldHead { color: #6e828e; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
 #edgeLanding [data-landing-lhs], #edgeLanding [data-landing-rhs] { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }

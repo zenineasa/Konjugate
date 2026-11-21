@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // "Organise a larger model" (docs/proposals/tutorials.md), from an empty canvas: one thermal mass from the library, copied and pasted into
-// three, one of them warmed, all three joined by one edge group (one shared relationship, meshed between every pair of members, both ways),
+// three, one of them warmed, all three joined by one relationship group (one shared relationship, meshed between every pair of members, both ways),
 // and the three put into a subsystem that is entered, run and left. With a coefficient of 0.1 per kelvin on each of a mass's two incoming
 // relationships, three masses starting at 400, 293.15 and 293.15 K settle together at about 329 K within the 20 s run.
 
@@ -64,8 +64,8 @@ const steps = Object.freeze([
     },
     {
         id: 'makeGroup',
-        title: 'Join them with an edge group',
-        text: 'Press "Create edge group" in the toolbar. It joins every pair of the selected nodes both ways, six relationships for three nodes, all sharing one definition: change it once and all six change.',
+        title: 'Join them with a relationship group',
+        text: 'Press "Create relationship group" in the toolbar. It joins every pair of the selected nodes both ways, six relationships for three nodes, all sharing one definition: change it once and all six change.',
         target: '#createEdgeGroup', skip: 'createGroup',
         done: ({ document }) => group(document) !== null
     },
@@ -125,7 +125,7 @@ export const organiseModel = Object.freeze({
     summary: 'Copy one part into three, join them all with one shared relationship, and fold them into a subsystem.',
     minutes: 6,
     area: 'modelling',
-    tags: ['subsystem', 'rename subsystem', 'dissolve', 'edge group', 'group', 'mesh', 'copy', 'paste', 'select all', 'rectangle select', 'multi-select', 'organise', 'organize', 'hierarchy', 'my library', 'thermal'],
+    tags: ['subsystem', 'rename subsystem', 'dissolve', 'relationship group', 'edge group', 'group', 'mesh', 'copy', 'paste', 'select all', 'rectangle select', 'multi-select', 'organise', 'organize', 'hierarchy', 'my library', 'thermal'],
     start: { from: 'empty', fileName: 'Three bodies.kjt' },
     editions: ['desktop', 'web'],
     steps

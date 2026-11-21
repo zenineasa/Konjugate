@@ -65,6 +65,8 @@ export async function openIndexedResult(path) {
                 ...header.metadata,
                 sampleCount: index.sampleCount,
                 samples: [],
+                // The recorded parts, in the order of each sample's `parts`; absent for a result written before they were recorded.
+                ...(header.parts?.length ? { parts: header.parts } : {}),
                 // providerStates was missing here until now -- decodeResultHeaderPayload already
                 // decodes it (see engineProtocol.mjs), this mapping just never copied it through.
                 // A checkpoint sourced from this reader (rather than a live completedEngineResults

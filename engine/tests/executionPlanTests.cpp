@@ -885,6 +885,66 @@ void partitionRuntimeHandsANodeProviderTheRemoteStatesItReads() {
     require(result.nodes.size() == 1 && result.nodes.front().states.at(0) == 1.0, "The partition lost the node provider's output.");
 }
 
+// The parts a result records (docs/proposals/unifiedEntityEditors.md, decision 11): a node's own term, and a relationship running both
+// ways at each end, the far end negated; each worked out from a sample's states and the parameters as they stand, live values too.
+void recordedPartsAreEachTermsValueAtASample() {
+    std::istringstream json(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {"id": 1, "name": "Heater", "states": [{"id": 11, "name": "Temperature", "symbol": "temperature", "initialValue": 350}],
+             "sourceTerms": [{
+                "id": 21, "state": "temperature", "expression": "\\mathrm{power}",
+                "parameters": [{"id": 22, "name": "Power", "symbol": "power", "value": 2, "mode": "constant"}],
+                "expressionModel": {
+                    "latex": "\\mathrm{power}", "output": {"stateId": 11},
+                    "bindings": [{"kind": "parameter", "parameterId": 22, "symbol": "power", "label": "power"}],
+                    "mathJson": "power"
+                }
+             }]},
+            {"id": 2, "name": "Block", "states": [{"id": 12, "name": "Temperature", "symbol": "temperature", "initialValue": 300}], "sourceTerms": []}
+        ],
+        "edges": [{
+            "id": 3, "name": "Conduction", "directionality": "bidirectional",
+            "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 2, "stateId": 12},
+            "parameters": [{"id": 13, "name": "Conductance", "symbol": "k", "value": 0.5, "mode": "live"}],
+            "equation": "k\\cdot(sourceTemperature-targetTemperature)",
+            "equationModel": {
+                "bindings": [
+                    {"symbol": "sourceTemperature", "kind": "state", "role": "source", "stateId": 11, "nodeId": 1},
+                    {"symbol": "targetTemperature", "kind": "state", "role": "target", "stateId": 12, "nodeId": 2},
+                    {"symbol": "k", "kind": "parameter", "parameterId": 13}
+                ],
+                "mathJson": ["Multiply", "k", ["Add", "sourceTemperature", ["Negate", "targetTemperature"]]],
+                "output": {"role": "target", "stateId": 12}
+            }
+        }]
+    })json");
+    boost::property_tree::ptree document;
+    boost::property_tree::read_json(json, document);
+    const auto plan = konjugate::compileExecutionPlan(document);
+    const auto parts = konjugate::recordedParts(plan);
+    const auto find = [&](konjugate::EntityId sourceId, konjugate::EntityId stateId, bool negated) {
+        for (std::size_t index = 0; index < parts.size(); ++index) {
+            if (parts[index].sourceId == sourceId && parts[index].stateId == stateId && parts[index].negated == negated) return index;
+        }
+        throw std::runtime_error("A part was not recorded.");
+    };
+    require(parts.size() == 3, "A node's own term and a two-way relationship's two ends are three parts.");
+    const auto own = find(21, 11, false);
+    const auto target = find(3, 12, false);
+    const auto farEnd = find(3, 11, true);
+    const auto states = plan.initialStates;
+    const auto values = konjugate::evaluateRecordedParts(plan, states, {}, {}, 0);
+    require(values.size() == parts.size(), "Every recorded part has a value.");
+    require(values[own] == 2, "A node's own term is its value.");
+    require(values[target] == 25, "A relationship's term is k times the difference, 0.5 * 50.");
+    require(values[farEnd] == -25, "At its far end a two-way relationship's term is negated.");
+    // A live value moved during a run is the value the part is worked out with.
+    const auto moved = konjugate::evaluateRecordedParts(plan, states, {{13, 1.0}}, {}, 0);
+    require(moved[target] == 50 && moved[farEnd] == -50, "A part is worked out with a parameter's live value.");
+    require(states == plan.initialStates, "Working out the parts changed the states.");
+}
+
 int main() {
     try {
         deterministicReductionUsesTaskSequence();
@@ -913,6 +973,7 @@ int main() {
         partitionRuntimeAppliesActiveParameterSchedules();
         partitionRuntimeHandsANodeProviderTheRemoteStatesItReads();
         automaticBackendSelectionAccountsForWorkAndCommunication();
+        recordedPartsAreEachTermsValueAtASample();
         std::cout << "Execution plan tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

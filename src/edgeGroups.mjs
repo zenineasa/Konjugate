@@ -110,25 +110,25 @@ export function hydrateEdgeGroups(document, registerId) {
     const nodeIds = new Set(document.nodes.map((node) => node.id));
     const groupIds = new Set();
     const groups = (document.edgeGroups ?? []).map((group) => {
-        registerId(group.id, 'Every edge group must have a unique positive integer id.');
+        registerId(group.id, 'Every relationship group must have a unique positive integer id.');
         groupIds.add(group.id);
         const memberNodeIds = Array.isArray(group.memberNodeIds) ? group.memberNodeIds.map(Number) : [];
         memberNodeIds.forEach((nodeId) => {
             if (!nodeIds.has(nodeId)) {
-                throw new Error(`Edge group “${group.name ?? group.id}” references a missing node.`);
+                throw new Error(`The relationship group “${group.name ?? group.id}” references a missing node.`);
             }
         });
         const parameters = Array.isArray(group.definition?.parameters)
             ? group.definition.parameters.map((parameter) => ({ ...parameter })) : [];
         parameters.forEach((parameter) => {
-            registerId(parameter.id, `Every parameter in edge group “${group.name ?? group.id}” must have a unique positive integer id.`);
+            registerId(parameter.id, `Every parameter in the relationship group “${group.name ?? group.id}” must have a unique positive integer id.`);
         });
         // Fields this module does not know (a component's `definitionKey` and `subsystemId`, or a newer Konjugate's) are kept.
         const { id: unusedId, name: unusedName, memberNodeIds: unusedMembers, color: unusedColor, definition: unusedDefinition, ...extraFields } = group;
         return {
             ...(Object.keys(extraFields).length ? { extraFields: structuredClone(extraFields) } : {}),
             id: group.id,
-            name: group.name || 'Untitled edge group',
+            name: group.name || 'Untitled relationship group',
             memberNodeIds,
             // Stored as a parsed integer, matching node/edge `color` fields (see
             // serializeProjectDocument's `#${color.toString(16)...}` round trip) -- not the hex
@@ -145,7 +145,7 @@ export function hydrateEdgeGroups(document, registerId) {
     });
     document.edges.forEach((edge) => {
         if (edge.groupId != null && !groupIds.has(edge.groupId)) {
-            throw new Error(`Edge “${edge.name ?? edge.id}” references a missing edge group.`);
+            throw new Error(`The relationship “${edge.name ?? edge.id}” references a missing relationship group.`);
         }
     });
     return groups;

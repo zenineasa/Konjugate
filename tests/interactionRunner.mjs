@@ -2537,9 +2537,9 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).closest('.node-label-container').classList.contains('disabled')`), true);
 
         // The edge cascades (renders as disabled) even though its own `enabled` field never
-        // changed -- only the node's did. Its own toggle button must still read "Disable edge".
+        // changed -- only the node's did. Its own toggle button must still read "Disable relationship".
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable relationship');
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
         // Undo restores the node (and, since nothing about the edge's own state changed, its
@@ -2554,17 +2554,17 @@ export async function runInteractionTests(driver) {
     await run('disabling an edge directly is independent of its endpoint nodes and is undoable', async () => {
         await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable relationship');
 
         await evaluate(window, `document.querySelector('#toggleEdgeEnabled').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Enable edge');
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Enable relationship');
         // Its endpoint nodes are untouched -- only the edge itself is disabled.
         assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable edge');
+        assert.equal(await evaluate(window, `document.querySelector('#toggleEdgeEnabled').textContent`), 'Disable relationship');
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
     });
 
@@ -2683,7 +2683,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `Boolean(${batteryBundleLabel})`, 'Battery module bundle label was not available.');
         await rightClickElement(window, batteryBundleLabel);
         await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking an edge did not open its context menu.');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeContextToggleLabel').textContent`), 'Disable edge');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextToggleLabel').textContent`), 'Disable relationship');
 
         await evaluate(window, `document.querySelector('#edgeContextToggle').click()`);
         assert.equal(await evaluate(window, `document.querySelector('.node-label-container.disabled') === null`), true);
@@ -6722,7 +6722,7 @@ export async function runInteractionTests(driver) {
 
         await evaluate(opened, `document.querySelector('[data-toggle-shared]').click()`);
         assert.equal(await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow')].map((row) => row.lastElementChild.textContent).join('|')`),
-            'Feed X (Source → Target X)|Feed Y (Source → Target Y)|Target X · source term', 'The expanded rows must name each owner.');
+            'Feed X (Source → Target X)|Feed Y (Source → Target Y)|Target X · own part', 'The expanded rows must name each owner.');
 
         // Inline edit of the shared value goes through the shared definition, undoably.
         const sharedValue = `document.querySelector('#parametersBody tr.sharedRow input[data-field="value"]')`;
@@ -6767,7 +6767,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `document.querySelector('#edgeEditorParameters [data-shared-select]').value`), '100');
 
         // A source-term parameter links the same way: its row shows the shared value and can unlink.
-        await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow .ownerLink')].find((link) => link.textContent.includes('source term')).click()`);
+        await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow .ownerLink')].find((link) => link.textContent.includes('own part')).click()`);
         await waitFor(opened, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#nodeEditor [data-editor-tab].active').dataset.editorTab === 'parameters'`, 'Clicking the source-term owner did not open its node\'s Parameters tab.');
         const termRow = `document.querySelector('#nodeEditorParameters .editorParameterRow')`;
         assert.equal(await evaluate(opened, `${termRow}.querySelector('[data-shared-select]').value`), '100');
@@ -6786,7 +6786,7 @@ export async function runInteractionTests(driver) {
         await waitFor(bundleWindow, `document.querySelector('.documentTitle')`, 'Bundle test window did not finish loading.');
         await evaluate(bundleWindow, `document.querySelector('#componentLibraryButton').click()`);
         await waitFor(bundleWindow, `document.querySelectorAll('.componentLibraryItem').length > 0`, 'Component library did not load any templates.');
-        assert.match(await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"] small').textContent`), /Bundle · 3 edges/);
+        assert.match(await evaluate(bundleWindow, `document.querySelector('[data-template-id="batteryMotorDrive"] small').textContent`), /Bundle · 3 relationships/);
         const edgeCount = `Number(document.querySelectorAll('.modelStatus span')[1].textContent.match(/\\d+/)[0])`;
 
         // Too few nodes selected: the bundle explains what it needs and changes nothing.
@@ -8779,7 +8779,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await activeTab('nodeEditor'), 'equations', 'A node first opens on Equations.');
         const cardWidth = await width('nodeEditor');
         await openRelationship(edges[0]);
-        assert.deepEqual(await tabs('edgeEditor'), ['equations', 'parameters', 'details', 'appearance']);
+        assert.deepEqual(await tabs('edgeEditor'), ['equations', 'parameters', 'details', 'results', 'appearance']);
         assert.equal(await width('edgeEditor'), cardWidth, 'A relationship\'s card is not as wide as a node\'s.');
 
         // The tab a person chose is the one the kind opens on next, on another node or relationship too; the footer stays.
@@ -8794,10 +8794,10 @@ export async function runInteractionTests(driver) {
         await openRelationship(edges[1]);
         assert.equal(await activeTab('edgeEditor'), 'parameters', 'Another relationship did not open on the tab last chosen.');
 
-        // A relationship group's card is a relationship's, tab for tab.
+        // A relationship group's card is a relationship's, tab for tab, but Results: each of its members has its own.
         await evaluate(window, `(() => { window.confirm = () => true; window.__debugTransform.selectExactly(window.__debugTransform.allNodeIds().slice(0, 2)); document.querySelector('#createEdgeGroup').click(); })()`);
         await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'The relationship group did not open.');
-        assert.deepEqual(await tabs('edgeGroupEditor'), await tabs('edgeEditor'));
+        assert.deepEqual(await tabs('edgeGroupEditor'), (await tabs('edgeEditor')).filter((tab) => tab !== 'results'));
         assert.equal(await width('edgeGroupEditor'), cardWidth);
         await evaluate(window, `(() => { document.activeElement?.blur(); document.querySelector('#undoButton').click(); })()`);
 
@@ -8827,11 +8827,11 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
     });
 
-    await run('+ Add a state adds a state, and a node\'s own part typed into a state\'s equation lands on that state, each undone and redone', async () => {
+    await run('+ State adds a state, and a node\'s own part typed into a state\'s equation lands on that state, each undone and redone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');
         await clickElement(window, `document.querySelector('#editAddState')`);
-        await waitFor(window, `window.__debugProject.serialize().nodes[0].states.length === 3`, '+ Add a state added no state.');
+        await waitFor(window, `window.__debugProject.serialize().nodes[0].states.length === 3`, '+ State added no state.');
         // Nothing changes it yet, so it is on a folded line, with the states beside it that start alike.
         const added = (await savedProject()).nodes[0].states[2].symbol;
         assert.equal(await evaluate(window, `Boolean(document.querySelector('#nodeEditorStates .stateFold[data-symbols~="${added}"]'))`), true, 'The new state is not on a line of the Equations tab.');
@@ -9232,6 +9232,37 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').disabled`), false);
         await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    });
+
+    await run('a run records each part: a relationship\'s Results tab plots what it adds, and chips give each part\'s value at the timeline\'s point', async () => {
+        await freshExample();
+        await waitFor(window, `!document.querySelector('#runButton').disabled`, 'Run was not available.', 15000);
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '5'; document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `!document.querySelector('#continueRun').hidden && document.querySelector('#continueRun').textContent === 'Extend simulation'`, 'The run did not complete.', 30000);
+
+        // A relationship's card opens on its Results: what it added to the air's temperature over the run.
+        await openRelationship('Air convection gain');
+        await waitFor(window, `document.querySelector('#edgeEditor [data-editor-tab].active')?.dataset.editorTab === 'results'`, 'The relationship\'s card did not open on Results while results are open.');
+        await waitFor(window, `document.querySelector('.edgeResultsPanel').classList.contains('hasResults')`, 'The relationship\'s Results tab drew nothing.', 10000)
+            .catch(async (error) => { throw new Error(`${error.message} It said: ${await evaluate(window, `document.querySelector('#edgeResultEmpty').textContent.trim()`)}`); });
+        assert.match(await evaluate(window, `document.querySelector('.edgeResultsPanel').textContent`), /Enclosed air/);
+
+        // On the air's Equations tab, the relationship's chip gives its value where the timeline stands, and another as it moves.
+        await openNode('Enclosed air');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="equations"]').click()`);
+        const badge = `document.querySelector('#nodeEditorStates .partChip[data-term-type="relationship"] .partValue')`;
+        await waitFor(window, `Boolean(${badge}) && !${badge}.hidden && /^= /.test(${badge}.textContent)`, 'A chip gave no value while results are open.');
+        const atEnd = await evaluate(window, `${badge}.textContent`);
+        await evaluate(window, `(() => { const slider = document.querySelector('#resultTimeline'); slider.value = slider.min; slider.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(window, `${badge}.textContent !== ${JSON.stringify(atEnd)}`, 'A chip\'s value did not follow the timeline.');
+
+        // Results closed: no values.
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open || document.querySelector('#resultTransport').hidden`, 'Closing the results neither asked nor closed them.');
+        await evaluate(window, `document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click()`);
+        await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('.partValue')].every((element) => element.hidden)`), true, 'A value stayed once results were closed.');
     });
 
     await run('a relationship a toolbox wrote with several equations opens readable, and editing one equation keeps the others exactly', async () => {

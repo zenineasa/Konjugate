@@ -115,7 +115,7 @@ test('hydrates edge groups and rejects a group referencing a missing node', () =
         edges: [{ id: 5, groupId: 999 }],
         edgeGroups: []
     };
-    assert.throws(() => hydrateEdgeGroups(badGroupReferenceDocument, () => {}), /missing edge group/);
+    assert.throws(() => hydrateEdgeGroups(badGroupReferenceDocument, () => {}), /missing relationship group/);
 });
 
 test('strips edge groups and member tags without mutating the input document', () => {

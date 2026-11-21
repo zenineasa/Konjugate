@@ -255,11 +255,13 @@ Per-part values (decisions 5 and 11) are additive fields, with the result versio
 
 | Change | Older results in this version | This version's results in older versions |
 | --- | --- | --- |
-| `ResultFile.part_table` (a new field): one entry per recorded part, `{ state_id, source }`, the source a node's own term (`node_id`, `term_id`), a node program's output (`node_id`, `output_key`), or a relationship's part (`edge_id`, `output_index`, and whether it is the other end of one running both ways) | no table: the run recorded no parts; chips show no value and a relationship's Results tab says to run again to see its part | the field is skipped: results open and play as before |
-| `SampleBatch.part_count` and `SampleBatch.part_values` (new fields): packed doubles, sample-major in the table's order, the value each part had in the step ending at the sample's time, as the engine used it | absent: as above | skipped: `values` and `state_count` are unchanged, so an older reader's dimension checks pass |
-| Live batches carry the same fields | — | an older app does not stream from a newer engine |
+| `ResultFile.part_table` (field 8, a new `PartTable`): one `PartDescriptor` per recorded part, `{ source_id, state_id, negated }`: the id of a node's own term or of a relationship (ids are unique in a model), the state it lands on, and, for a relationship running both ways, whether this is its negated term at the far end | no table: the run recorded no parts; chips show no value and a relationship's Results tab says the results were made before values were recorded and to run again | the field is skipped: results open and play as before |
+| `SampleBatch.part_count` and `SampleBatch.part_values` (fields 4 and 5): packed doubles, sample-major in the table's order, each part's value at the sample's time, worked out from that sample's states and the parameters as they stood then (NaN where it could not be worked out) | absent: as above | skipped: `values` and `state_count` are unchanged, so an older reader's dimension checks pass |
+| A run continued from a result (Extend, a fork) | the earlier samples' parts are taken from that result by what each part is; a part it did not record is NaN, unknown, never worked out again with parameters that may not be the ones it ran with | — |
 
-Recording parts does not change any state's arithmetic: the values are copied after they are used, so every number a run computes is the number it computed before. A results file grows by one double per part per sample.
+What is recorded, as built: every part written as an equation, a node's own term or a relationship's term at each end it lands on, into a Rate or an Update state. A part written as a program is not recorded, because working it out again would run the program again, and a program may keep state of its own; nor, yet, is each equation of a relationship with several. Streamed batches during a run carry no parts: the values are in the result, once it is open.
+
+Recording parts does not change any state's arithmetic: each part is worked out again from a sample's states once the sample is taken, reading them and changing nothing, so every number a run computes is the number it computed before (the example digests check this to the bit). A results file grows by one double per recorded part per sample.
 
 ## Compatibility tests
 

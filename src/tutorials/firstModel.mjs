@@ -56,7 +56,7 @@ const steps = Object.freeze([
     {
         id: 'addEdge',
         title: 'Connect them',
-        text: `Both nodes start in the same spot, so one hides the other: drag one of them aside on the canvas first. An edge is a relationship: an equation that says how one node changes another. Open the Add menu, choose Edge, then click ${firstModelValues.source.name} and then ${firstModelValues.target.name}.`,
+        text: `Both nodes start in the same spot, so one hides the other: drag one of them aside on the canvas first. A relationship is an equation that says how one node changes another. Open the Add menu, choose Relationship, then click ${firstModelValues.source.name} and then ${firstModelValues.target.name}.`,
         target: (ui) => {
             if (ui.endpointPick === 'source') return ui.labelOf(firstModelValues.source.name);
             if (ui.endpointPick === 'target') return ui.labelOf(firstModelValues.target.name);
@@ -97,9 +97,9 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have built and run a model',
-        text: 'Save it from the toolbar if you want to keep it. The Examples menu has finished models to open and study. Edges can also run C++ or Python programs, and results can be charted further.',
-        desktopText: ' Add-ons and plugins in the desktop app\'s Extensions dialog chart results, drive runs and add new kinds of nodes and edges: have a look there next.',
-        webText: ' The desktop app adds add-ons and plugins that chart results, drive runs and add new kinds of nodes and edges.',
+        text: 'Save it from the toolbar if you want to keep it. The Examples menu has finished models to open and study. Relationships can also run C++ or Python programs, and results can be charted further.',
+        desktopText: ' Add-ons and plugins in the desktop app\'s Extensions dialog chart results, drive runs and add new kinds of nodes and relationships: have a look there next.',
+        webText: ' The desktop app adds add-ons and plugins that chart results, drive runs and add new kinds of nodes and relationships.',
         advance: 'next', nextLabel: 'Finish', bonus: true, done: () => false
     }
 ]);
@@ -110,7 +110,7 @@ export const firstModel = Object.freeze({
     summary: 'Make two nodes, connect them with an equation that moves heat, run it and watch the result.',
     minutes: 3,
     area: 'start',
-    tags: ['tour', 'node', 'edge', 'relationship', 'equation', 'run', 'timeline', 'plot', 'beginner', 'first'],
+    tags: ['tour', 'node', 'relationship', 'edge', 'equation', 'run', 'timeline', 'plot', 'beginner', 'first'],
     start: { from: 'empty', fileName: 'First model.kjt' },
     editions: ['desktop', 'web'],
     steps

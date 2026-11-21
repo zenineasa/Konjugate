@@ -32,7 +32,7 @@ const steps = Object.freeze([
         id: 'stiffen',
         title: 'Make the spring stiffer',
         text: `Click the "${values.spring}" relationship (its row in the label between the mass and the support, or the line itself), open its Parameters tab and change Spring stiffness from ${values.stiffness.from} to ${values.stiffness.to}, then press Enter or click elsewhere so the change is kept. The mass will want to bounce ten times faster.`,
-        target: (ui) => (ui.edgeEditorFor === values.spring ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-edge-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.stiffness.parameterId}"] input[data-field="value"]` : ui.relationshipRowOf(values.spring)),
+        target: (ui) => (ui.edgeEditorFor === values.spring ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-editor-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.stiffness.parameterId}"] input[data-field="value"]` : ui.relationshipRowOf(values.spring)),
         skip: 'setParameter', relationship: values.spring, parameterId: values.stiffness.parameterId, value: values.stiffness.to,
         done: ({ document }) => stiffened(document)
     },
@@ -54,7 +54,7 @@ const steps = Object.freeze([
         id: 'raiseSubsteps',
         title: 'Give the mass more substeps',
         text: `The warning asked for at least ${values.mass.substepsTo} substeps on the ${values.mass.name}: it is stepped ${values.mass.substepsTo} times for every step of the whole model, so its fast bouncing can be followed while everything else keeps its own pace. Click the ${values.mass.name}, open its Numerics tab, and set "Substeps per global step" from ${values.mass.substepsFrom} to ${values.mass.substepsTo}. The warning goes away.`,
-        target: (ui) => (ui.nodeEditorFor === values.mass.name ? (ui.numericsTabShown ? '#editNodeSubsteps' : '#nodeEditor [data-node-tab="numerics"]') : ui.labelOf(values.mass.name)),
+        target: (ui) => (ui.nodeEditorFor === values.mass.name ? (ui.numericsTabShown ? '#editNodeSubsteps' : '#nodeEditor [data-editor-tab="numerics"]') : ui.labelOf(values.mass.name)),
         skip: 'setSubsteps', node: values.mass.name, substeps: values.mass.substepsTo,
         done: ({ document, ui }) => fixed(document) && !ui.validationCodes.includes(values.warning)
     },

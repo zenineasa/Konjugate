@@ -35,7 +35,7 @@ const steps = Object.freeze([
         id: 'shape',
         title: 'Give the tank its shape',
         text: `Click the ${values.tank}, open its Appearance tab and press "Shape library". Choose ${values.shape.domain}, then "${values.shape.name}", and press Apply shape.`,
-        target: (ui) => (ui.shapeLibraryOpen ? '#shapeLibraryApply' : ui.nodeEditorFor === values.tank ? (ui.appearanceTabShown ? '#editBrowseShapeLibrary' : '#nodeEditor [data-node-tab="appearance"]') : ui.labelOf(values.tank)),
+        target: (ui) => (ui.shapeLibraryOpen ? '#shapeLibraryApply' : ui.nodeEditorFor === values.tank ? (ui.appearanceTabShown ? '#editBrowseShapeLibrary' : '#nodeEditor [data-editor-tab="appearance"]') : ui.labelOf(values.tank)),
         skip: 'applyShape', node: values.tank, shapeId: values.shape.id,
         done: ({ document, start }) => shaped(document, start)
     },

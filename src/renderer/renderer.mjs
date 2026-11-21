@@ -8,6 +8,7 @@ import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { convertLatexToMarkup } from 'mathlive';
 import { DocumentController } from './documentController.mjs';
+import { EntityEditor, resultLockedControls, resultLockedMathFields } from './entityEditor.mjs';
 import { createTour } from './tour.mjs';
 import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEditor.mjs';
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
@@ -2511,6 +2512,8 @@ function stateTermRow(entry, node, equations, index = 0) {
     const row = document.createElement('button');
     row.type = 'button';
     row.className = 'stateTerm';
+    // It only goes to the term's editor, so it stays on while results are open (the editor it opens is locked itself).
+    row.dataset.navigation = '';
     const nodeTitle = (nodeId) => equations.nodes.find((candidate) => candidate.id === nodeId)?.title ?? 'a node';
     let title = '';
     let detail = '';
@@ -2638,7 +2641,7 @@ function addSourceTermFor(node, state) {
         });
     }
     const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === id);
-    if (term) openSourceTermEditor(node, term);
+    if (term) openSourceTermEditor(node, term, { tab: 'equations' });
 }
 
 function renderNodeEditorModel(node) {
@@ -3236,27 +3239,36 @@ function renderLanding(container, isThis, { writtenAsEquation = true } = {}) {
     }
 }
 
-// The editors with tabs for a term -- a source term's (Term, Parameters) and a relationship's (Term, Parameters, Details,
-// Appearance) -- and the parameter count shown on each one's Parameters tab.
-function selectTermEditorTab(tabName) {
-    $$('[data-term-tab]').forEach((button) => button.classList.toggle('active', button.dataset.termTab === tabName));
-    $$('[data-term-panel]').forEach((panel) => { panel.hidden = panel.dataset.termPanel !== tabName; });
-}
+// The count shown on an editor's Parameters tab.
 function showParameterCount(element, parameters) {
     element.textContent = parameters?.length ? String(parameters.length) : '';
 }
-// Shows the control a person is sent to -- a parameter's value, say -- on whichever tab of its editor it is, then focuses it.
+
+// ---- The editor cards (src/renderer/entityEditor.mjs): one shell for a node's, a source term's, a relationship's and a
+// relationship group's card, each keeping its own content.
+const editorCards = new Map();
+function editorCard(id) {
+    if (!editorCards.has(id)) {
+        editorCards.set(id, new EntityEditor($(`#${id}`), {
+            hideOthers: (card) => hideCards(card),
+            afterShow: () => {
+                applyInspectorReadOnly();
+                requestAnimationFrame(avoidAssistantInspectorOverlap);
+            },
+            resultsOpen: () => Boolean(activeResult),
+            onSelect: (tab) => {
+                if (id === 'nodeEditor' && tab === 'results' && selectedNode) requestAnimationFrame(() => renderNodeResults(selectedNode));
+            }
+        }));
+    }
+    return editorCards.get(id);
+}
+// Shows the control a person is sent to -- a parameter's value, say -- on whichever tab of its card it is, then focuses it.
 function revealEditorControl(selector, { focus = true } = {}) {
     const control = typeof selector === 'string' ? $(selector) : selector;
-    if (!control) return null;
-    const edgePanel = control.closest('[data-edge-panel]');
-    if (edgePanel?.hidden) selectEdgeEditorTab(edgePanel.dataset.edgePanel);
-    const termPanel = control.closest('[data-term-panel]');
-    if (termPanel?.hidden) selectTermEditorTab(termPanel.dataset.termPanel);
-    const nodePanel = control.closest('[data-node-panel]');
-    if (nodePanel?.hidden) selectNodeEditorTab(nodePanel.dataset.nodePanel);
-    if (focus) control.focus();
-    return control;
+    const card = control?.closest('[data-entity-editor]');
+    if (!card) return control ?? null;
+    return editorCard(card.id).reveal(control, { focus });
 }
 
 function renderSourceTermEditor(node, term) {
@@ -3298,19 +3310,13 @@ function renderSourceTermEditor(node, term) {
     }
 }
 
-function openSourceTermEditor(node, term) {
-    const editor = $('#sourceTermEditor');
+// `tab` opens it on a tab of its own; the same term opened again stays on the tab it is on.
+function openSourceTermEditor(node, term, { tab = null } = {}) {
+    const card = editorCard('sourceTermEditor');
+    const sameTerm = card.isOpen() && selectedSourceTermId === term.id;
     selectedSourceTermNodeId = node.userData.id;
-    const sameTerm = !editor.classList.contains('hidden') && selectedSourceTermId === term.id;
     selectedSourceTermId = term.id;
-    hideCards(editor);
-    if (!sameTerm) selectTermEditorTab('term');
-    renderSourceTermEditor(node, term);
-    editor.style.removeProperty('left');
-    editor.style.removeProperty('top');
-    editor.classList.remove('hidden');
-    applyInspectorReadOnly();
-    requestAnimationFrame(avoidAssistantInspectorOverlap);
+    card.open({ tab: tab ?? (sameTerm ? card.activeTab() : null), render: () => renderSourceTermEditor(node, term) });
 }
 
 function previewSourceTermExpression(latex, origin) {
@@ -3414,7 +3420,7 @@ async function renderNodeResults(node) {
 // (branchNodeSeries) every half second while it is on screen, and once more when the run ends; otherwise it stays as it was drawn when
 // its tab opened.
 let nodeResultsRefreshTimer = null;
-const nodeResultsShown = () => Boolean(selectedNode) && !$('#nodeEditor').classList.contains('hidden') && !$('[data-node-panel="results"]').hidden;
+const nodeResultsShown = () => Boolean(selectedNode) && !$('#nodeEditor').classList.contains('hidden') && !$('#nodeEditor [data-editor-panel="results"]').hidden;
 function refreshNodeResultsSoon() {
     if (nodeResultsRefreshTimer !== null || !nodeResultsShown()) return;
     nodeResultsRefreshTimer = setTimeout(async () => {
@@ -3429,25 +3435,21 @@ function refreshNodeResultsSoon() {
 }
 
 function selectNodeEditorTab(tabName) {
-    $$('[data-node-tab]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.nodeTab === tabName);
-    });
-    $$('[data-node-panel]').forEach((panel) => {
-        panel.hidden = panel.dataset.nodePanel !== tabName;
-    });
-    $('#nodeModelActions').hidden = Boolean(activeResult) || !['equations', 'details'].includes(tabName);
-    if (tabName === 'results' && selectedNode) requestAnimationFrame(() => renderNodeResults(selectedNode));
+    editorCard('nodeEditor').select(tabName);
 }
 
-function openNodeEditor(definition, clientX, clientY) {
-    const editor = $('#nodeEditor');
+// `tab` opens it on a tab of its own; otherwise it opens where the shell says (Results while results are open, else the tab
+// last chosen for a node).
+function openNodeEditor(definition, clientX, clientY, { tab = null } = {}) {
     // Read the installed FMUs again, in case one was installed since.
     installedFmus = null;
-    hideCards(editor);
     const node = nodeObjects.get(definition.id);
+    editorCard('nodeEditor').open({ tab, render: () => renderNodeEditorFields(node) });
+}
+
+function renderNodeEditorFields(node) {
+    const definition = node.userData.definition;
     renderNodeEditorModel(node);
-    const initialTab = activeResult ? 'results' : 'equations';
-    selectNodeEditorTab(initialTab);
     $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
     $('#editNodeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
     $('#editNodeGeometryFile').value = '';
@@ -3455,11 +3457,6 @@ function openNodeEditor(definition, clientX, clientY) {
     $('#editGeometryStatus').classList.remove('loading', 'error');
     refreshNodeTransformFields(node);
     $('#toggleNodeEnabled').textContent = definition.enabled === false ? 'Enable node' : 'Disable node';
-    editor.style.removeProperty('left');
-    editor.style.removeProperty('top');
-    editor.classList.remove('hidden');
-    applyInspectorReadOnly();
-    requestAnimationFrame(avoidAssistantInspectorOverlap);
 }
 
 function normalizeEdgeEquationModel(definition, equationModel = definition.equationModel) {
@@ -4261,28 +4258,13 @@ function renderProviderBindingRows(definition) {
 // A group-member edge is never edited on its own -- no override without detaching, per
 // docs/edgeGroups.md -- so every path that would otherwise open the single-edge editor
 // on one routes here to the group's own editor instead.
-// The relationship editor's tabs: its Term (where it lands, what it is written as, its parameters and equation), its
-// Details (name, description, ends, direction) and its Appearance.
-function selectEdgeEditorTab(tabName) {
-    $$('[data-edge-tab]').forEach((button) => button.classList.toggle('active', button.dataset.edgeTab === tabName));
-    $$('[data-edge-panel]').forEach((panel) => { panel.hidden = panel.dataset.edgePanel !== tabName; });
-}
-
-function openRelationshipEditor(definition, clientX, clientY) {
+function openRelationshipEditor(definition, clientX, clientY, { tab = null } = {}) {
     if (definition.groupId != null) {
         openEdgeGroupEditor(definition.groupId);
         return;
     }
-    const editor = $('#edgeEditor');
     selectRelationship(definition);
-    hideCards(editor);
-    selectEdgeEditorTab('term');
-    renderEdgeEditor(definition);
-    editor.style.removeProperty('left');
-    editor.style.removeProperty('top');
-    editor.classList.remove('hidden');
-    applyInspectorReadOnly();
-    requestAnimationFrame(avoidAssistantInspectorOverlap);
+    editorCard('edgeEditor').open({ tab, render: () => renderEdgeEditor(definition) });
 }
 
 function openAddPalette(clientX, clientY) {
@@ -5840,11 +5822,12 @@ function selectSuggestedPlaybackRate() {
 function applyInspectorReadOnly() {
     const locked = Boolean(activeResult);
     $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
-    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button:not(.landingOpen, .landingReciprocal)), #edgeEditor > footer button, #edgeGroupEditor section :is(input, select, textarea, button), #edgeGroupEditor > footer button').forEach((control) => {
+    // One rule for every editor card (src/renderer/entityEditor.mjs): its inputs and actions off, what only goes somewhere on.
+    $$(resultLockedControls).forEach((control) => {
         // A control that is off for a reason of its own (the first row cannot move up) stays off outside results too.
         control.disabled = locked || control.hasAttribute('data-unavailable');
     });
-    $$('#nodeEditor math-field, #edgeEditor math-field, #edgeGroupEditor math-field').forEach((field) => {
+    $$(resultLockedMathFields).forEach((field) => {
         field.readOnly = locked;
         field.toggleAttribute('read-only', locked);
     });
@@ -5874,7 +5857,6 @@ function setResultModeLocked(locked) {
         $$('.toolstrip [data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === restoredTool));
         setTool(restoredTool);
     }
-    $('#nodeModelActions').hidden = locked || !['equations', 'details'].includes($('[data-node-tab].active')?.dataset.nodeTab);
     applyInspectorReadOnly();
     updateHistoryControls();
     refreshAddonRailContributions();
@@ -9042,6 +9024,7 @@ async function loadProjectDocument(document, {
     // A new history, and no edit left half-made in the project before: an equation still being written there would otherwise
     // be finished by the next Undo, as a step of this project, and undone in place of what the person did here.
     equationEditSession = null;
+    EntityEditor.forgetChosenTabs();
     documentController.reset({ saved });
     updateDocumentTitle();
     updateEncryptionControls();
@@ -12952,11 +12935,8 @@ $$('[data-close-card]').forEach((button) => {
     });
 });
 
-$$('[data-edge-tab]').forEach((button) => button.addEventListener('click', () => selectEdgeEditorTab(button.dataset.edgeTab)));
-$$('[data-term-tab]').forEach((button) => button.addEventListener('click', () => selectTermEditorTab(button.dataset.termTab)));
-$$('[data-node-tab]').forEach((button) => {
-    button.addEventListener('click', () => selectNodeEditorTab(button.dataset.nodeTab));
-});
+// The editor cards' tabs answer clicks from the start.
+$$('[data-entity-editor]').forEach((card) => editorCard(card.id));
 
 $('#editNodeName').addEventListener('change', (event) => {
     if (!selectedNode) return;
@@ -13748,7 +13728,7 @@ const tour = createTour({
                 edgeSourceNodeId: edgeBuilderOpen ? $('#edgeSource').value : '',
                 edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
                 edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
-                edgeEditorTab: edgeEditorOpen ? $('[data-edge-tab].active')?.dataset.edgeTab ?? null : null,
+                edgeEditorTab: edgeEditorOpen ? editorCard('edgeEditor').activeTab() : null,
                 runDialogOpen: $('#runLaunchDialog').open,
                 runDialog: { online: $('#runOnlineMode').checked, pacing: $('#runPacingMode').value, targetTime: $('#runTargetTime').value },
                 closeResultsDialogOpen: $('#closeResultsDialog').open,
@@ -13775,7 +13755,7 @@ const tour = createTour({
                 validationCodes: (currentValidation.issues ?? []).map((issue) => issue.code),
                 followedIssue: tutorialFollowedIssue,
                 nodeEditorFor: $('#nodeEditor').classList.contains('hidden') ? null : selectedNode?.userData.definition.title ?? null,
-                numericsTabShown: !$('#nodeEditor [data-node-panel="numerics"]').hidden,
+                numericsTabShown: !$('#nodeEditor [data-editor-panel="numerics"]').hidden,
                 libraryOpen: !$('#componentLibraryPanel').hidden,
                 timelineTime: Number(activeResult?.samples[activeResultSampleIndex]?.time ?? NaN),
                 branchesPanelOpen: !$('#branchesPanel').hidden,
@@ -13842,7 +13822,7 @@ const tour = createTour({
                 parametersOpen: !$('#parametersPanel').hidden,
                 tool: currentTool,
                 shapeLibraryOpen: $('#shapeLibraryDialog').open,
-                appearanceTabShown: !$('#nodeEditor [data-node-panel="appearance"]').hidden,
+                appearanceTabShown: !$('#nodeEditor [data-editor-panel="appearance"]').hidden,
                 lockedTo2D: (() => {
                     if (is2DLocked) tutorialLockedTo2D = true;
                     return tutorialLockedTo2D;
@@ -14023,7 +14003,7 @@ const tour = createTour({
                 selectNode(node);
                 openNodeEditor(node.userData.definition);
             }
-            $('#nodeEditor [data-node-tab="numerics"]').click();
+            $('#nodeEditor [data-editor-tab="numerics"]').click();
             setField('#editNodeSubsteps', String(step.substeps), 'change');
             await waitUntil(() => !(currentValidation.issues ?? []).some((issue) => issue.code === 'numericsPotentiallyUnstable'), 10000);
         },
@@ -14281,7 +14261,7 @@ const tour = createTour({
             if (!$('#shapeLibraryDialog').open) {
                 selectNode(node);
                 openNodeEditor(node.userData.definition);
-                $('#nodeEditor [data-node-tab="appearance"]').click();
+                $('#nodeEditor [data-editor-tab="appearance"]').click();
                 $('#editBrowseShapeLibrary').click();
                 await waitUntil(() => $('#shapeLibraryDialog').open, 5000);
             }
@@ -14298,7 +14278,7 @@ const tour = createTour({
                 selectNode(node);
                 openNodeEditor(node.userData.definition);
             }
-            $('#nodeEditor [data-node-tab="appearance"]').click();
+            $('#nodeEditor [data-editor-tab="appearance"]').click();
             setField(`#editNodeScale${step.axis}`, String(step.value), 'change');
         },
         openLiveControls: async () => {
@@ -17593,19 +17573,12 @@ function changeGroupOutputSymbol(group) {
     });
 }
 
-function openEdgeGroupEditor(groupId) {
+function openEdgeGroupEditor(groupId, { tab = null } = {}) {
     const group = model.edgeGroups.find((item) => item.id === groupId && !item.deleted);
     if (!group) return;
     activeEdgeGroupId = groupId;
     selectedRelationship = null;
-    const editor = $('#edgeGroupEditor');
-    hideCards(editor);
-    renderEdgeGroupEditor(group);
-    editor.style.removeProperty('left');
-    editor.style.removeProperty('top');
-    editor.classList.remove('hidden');
-    applyInspectorReadOnly();
-    requestAnimationFrame(avoidAssistantInspectorOverlap);
+    editorCard('edgeGroupEditor').open({ tab, render: () => renderEdgeGroupEditor(group) });
 }
 
 // N member nodes expand to N(N-1) edges -- confirm before it grows large, and refuse outright

@@ -1042,8 +1042,8 @@ export async function runInteractionTests(driver) {
         const batteryLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`;
         await waitFor(window, `Boolean(${batteryLabel})`, 'The Battery module label was not on the canvas.');
         await evaluate(window, `${batteryLabel}.click()`);
-        await waitFor(window, `Boolean(document.querySelector('[data-node-tab="numerics"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
-        await evaluate(window, `document.querySelector('[data-node-tab="numerics"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-editor-tab="numerics"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
+        await evaluate(window, `document.querySelector('[data-editor-tab="numerics"]').click()`);
         await waitFor(window, `document.querySelector('#editNodeSubsteps').offsetParent !== null`, 'The numerics tab did not open.');
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeSubsteps'); input.value = '2'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeSubsteps').value`), '2');
@@ -1717,8 +1717,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `Number(document.querySelector('#resultTimeline').value) > 0`, 'Result playback did not advance the timeline.', 3000);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         await waitFor(window, `document.querySelector('.nodeResultsPanel').classList.contains('hasResults')`, 'Selected-node result plot did not render.', 5000);
-        assert.equal(await evaluate(window, `document.querySelector('[data-node-tab="results"]').classList.contains('active')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('[data-editor-tab="results"]').classList.contains('active')`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#nodeModelActions button')].every((button) => button.disabled)`), true, 'The node\'s actions are not off while results are open.');
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#addButton').disabled && document.querySelector('[data-tool="move"]').disabled && document.querySelector('[data-action="delete"]').disabled`), true);
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor [data-result-readonly]').hidden`), true);
@@ -1820,7 +1820,7 @@ export async function runInteractionTests(driver) {
     }, { skip: (!driver.capabilities.addons && 'the Results Analysis add-on has no web-edition equivalent') || addonMissing('konjugate.resultPlotViewer', 'konjugate-resultplotviewer') });
 
     await run('closing results clears the main window and any add-on it opened', async () => {
-        await evaluate(window, `document.querySelector('[data-node-tab="details"]').click()`);
+        await evaluate(window, `document.querySelector('[data-editor-tab="details"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled`), true);
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module'))`), true);
@@ -1836,7 +1836,7 @@ export async function runInteractionTests(driver) {
         }
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'Confirming did not close the results.');
         assert.equal(await evaluate(window, `document.querySelector('[data-detail="nodes"]').classList.contains('active')`), false);
-        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || document.querySelector('#nodeModelActions').hidden`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled || [...document.querySelectorAll('#nodeModelActions button')].some((button) => button.disabled)`), false);
         assert.equal(await evaluate(window, `document.querySelector('#canvas').classList.contains('resultModeLocked')`), false);
         assert.equal(await evaluate(window, `document.querySelector('.addonTool:not([hidden])') === null`), true);
     });
@@ -2327,11 +2327,11 @@ export async function runInteractionTests(driver) {
 
     await run('node appearance changes and participates in undo', async () => {
         await freshExample();
-        const reopenAppearanceTab = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`;
+        const reopenAppearanceTab = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-editor-tab="appearance"]').click()`;
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false);
-        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), true);
+        await evaluate(window, `document.querySelector('[data-editor-tab="appearance"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeModelActions').hidden`), false, 'The node\'s actions are on every tab.');
         const originalColor = await evaluate(window, `document.querySelector('#editNodeColor').value`);
 
         const consoleMessages = await captureConsoleMessages(window, async () => {
@@ -2367,7 +2367,7 @@ export async function runInteractionTests(driver) {
 
     await run('shape library searches, filters by domain and previews and applies a shape', async () => {
         await freshExample();
-        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-node-tab="appearance"]').click()`);
+        await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-editor-tab="appearance"]').click()`);
         const statusBeforeSelect = await evaluate(window, `document.querySelector('#editGeometryStatus').textContent`);
         await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
         await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open.');
@@ -3877,8 +3877,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelectorAll('.objectLabel').length > 0`, 'No node available to select for the upload test.');
         await evaluate(window, `document.querySelector('.objectLabel').click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Node editor did not open.');
-        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
-        await waitFor(window, `!document.querySelector('[data-node-panel="appearance"]').hidden`, 'Appearance tab did not open.');
+        await evaluate(window, `document.querySelector('[data-editor-tab="appearance"]').click()`);
+        await waitFor(window, `!document.querySelector('[data-editor-panel="appearance"]').hidden`, 'Appearance tab did not open.');
 
         const stlContent = 'solid uploadTest\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid uploadTest\n';
         await evaluate(window, `(() => {
@@ -3945,7 +3945,7 @@ export async function runInteractionTests(driver) {
         // clearSelection() behavior noted earlier), so the node needs reselecting before its
         // Appearance tab fields can be read or edited.
         await evaluate(window, `document.querySelector('.objectLabel').click()`);
-        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        await evaluate(window, `document.querySelector('[data-editor-tab="appearance"]').click()`);
         let rotationDegrees = await evaluate(window, `[document.querySelector('#editNodeRotationX').value, document.querySelector('#editNodeRotationY').value, document.querySelector('#editNodeRotationZ').value].map(Number)`);
         assert.deepEqual(rotationDegrees.map((v) => Math.round(v)), [17, 29, 40]);
         let scaleFields = await evaluate(window, `[document.querySelector('#editNodeScaleX').value, document.querySelector('#editNodeScaleY').value, document.querySelector('#editNodeScaleZ').value].map(Number)`);
@@ -8929,6 +8929,78 @@ export async function runInteractionTests(driver) {
         await search('');
     };
 
+    await run('every editor card has one order of tabs, one width, its actions on every tab, the tab last chosen for its kind, and nothing to change while results are open', async () => {
+        await freshExample();
+        const openNode = async (title) => {
+            await clickElement(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(title)}) && !label.textContent.includes('copy'))`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === ${JSON.stringify(title)}`, `${title} did not open.`);
+        };
+        const openRelationship = async (title) => {
+            await evaluate(window, `(() => { const edge = window.__debugProject.serialize().edges.find((item) => item.name === ${JSON.stringify(title)}); document.querySelector('.relationshipRow[data-relationship="' + edge.id + '"]').click(); })()`);
+            await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === ${JSON.stringify(title)}`, `${title} did not open.`);
+        };
+        const tabs = (card) => evaluate(window, `[...document.querySelectorAll('#${card} [data-editor-tab]')].map((tab) => tab.dataset.editorTab)`);
+        const activeTab = (card) => evaluate(window, `document.querySelector('#${card} [data-editor-tab].active').dataset.editorTab`);
+        const width = (card) => evaluate(window, `Math.round(document.querySelector('#${card}').getBoundingClientRect().width)`);
+        const edges = (await evaluate(window, `window.__debugProject.serialize().edges.map((edge) => edge.name)`)).filter((name, index, all) => all.indexOf(name) === index);
+
+        // One order of tabs, each kind leaving out what it has nothing for, and one width.
+        await openNode('Battery module');
+        assert.deepEqual(await tabs('nodeEditor'), ['equations', 'details', 'results', 'numerics', 'appearance']);
+        assert.equal(await activeTab('nodeEditor'), 'equations', 'A node first opens on Equations.');
+        const cardWidth = await width('nodeEditor');
+        await openRelationship(edges[0]);
+        assert.deepEqual(await tabs('edgeEditor'), ['equations', 'parameters', 'details', 'appearance']);
+        assert.equal(await width('edgeEditor'), cardWidth, 'A relationship\'s card is not as wide as a node\'s.');
+
+        // The tab a person chose is the one the kind opens on next, on another node or relationship too; the footer stays.
+        await openNode('Battery module');
+        await clickElement(window, `document.querySelector('#nodeEditor [data-editor-tab="appearance"]')`);
+        await waitFor(window, `!document.querySelector('#nodeEditor [data-editor-panel="appearance"]').hidden`, 'Appearance did not open.');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#nodeModelActions')).display !== 'none'`), true, 'The node\'s actions are not on its Appearance tab.');
+        await openNode('Enclosed air');
+        assert.equal(await activeTab('nodeEditor'), 'appearance', 'Another node did not open on the tab last chosen.');
+        await openRelationship(edges[0]);
+        await clickElement(window, `document.querySelector('#edgeEditor [data-editor-tab="parameters"]')`);
+        await openRelationship(edges[1]);
+        assert.equal(await activeTab('edgeEditor'), 'parameters', 'Another relationship did not open on the tab last chosen.');
+
+        // A relationship group's card is a relationship's, tab for tab.
+        await evaluate(window, `(() => { window.confirm = () => true; window.__debugTransform.selectExactly(window.__debugTransform.allNodeIds().slice(0, 2)); document.querySelector('#createEdgeGroup').click(); })()`);
+        await waitFor(window, `!document.querySelector('#edgeGroupEditor').classList.contains('hidden')`, 'The relationship group did not open.');
+        assert.deepEqual(await tabs('edgeGroupEditor'), await tabs('edgeEditor'));
+        assert.equal(await width('edgeGroupEditor'), cardWidth);
+        await evaluate(window, `(() => { document.activeElement?.blur(); document.querySelector('#undoButton').click(); })()`);
+
+        // Opening a project starts every kind on its first tab again.
+        await freshExample();
+        await openNode('Battery module');
+        assert.equal(await activeTab('nodeEditor'), 'equations', 'A new project kept the tab chosen in the one before.');
+
+        // A source term, then a run: while its results are open, every card's inputs are off, the source term's included, but
+        // what only goes somewhere (a term on a state's card) still goes there.
+        await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard .addStateTerm').click()`);
+        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term did not open.');
+        assert.equal(await width('sourceTermEditor'), cardWidth);
+        await evaluate(window, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await openRunDialog(window);
+        await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '0.5'; document.querySelector('#startRun').click(); })()`);
+        // The line under Results keeps its words after results close, so the transport showing says these are this run's.
+        await waitFor(window, `!document.querySelector('#resultTransport').hidden && document.querySelector('.resultMode small')?.textContent === 'Model locked'`, 'The run did not finish.', 30000);
+        await openNode('Battery module');
+        assert.equal(await activeTab('nodeEditor'), 'results', 'A node does not open on Results while results are open.');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled && [...document.querySelectorAll('#nodeModelActions button')].every((button) => button.disabled)`), true);
+        await clickElement(window, `document.querySelector('#nodeEditor [data-editor-tab="equations"]')`);
+        await clickElement(window, `document.querySelector('#nodeEditorStates .stateTerm[data-term-type="sourceTerm"]')`);
+        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'A source term could not be opened from its node while results are open.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#sourceTermEditor [data-editor-panel] :is(input, select, textarea, button):not([data-navigation]), #sourceTermEditor > footer button')].every((control) => control.disabled)`), true, 'A source term can be changed while results are open.');
+        assert.equal(await evaluate(window, `document.querySelector('#termMathField').readOnly`), true, 'A source term\'s equation can be typed in while results are open.');
+        await evaluate(window, `document.querySelector('#closeResults').click()`);
+        await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing the results did not ask.');
+        await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+        await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+    });
+
     await run('+ Add a state and + Add a term add to the node, the term to the state it is under, each undone and redone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');
@@ -8945,7 +9017,7 @@ export async function runInteractionTests(driver) {
         await openNode('Mass');
         await clickElement(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="speed"] .addStateTerm')`);
         await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, '+ Add a term did not open the new term.');
-        assert.equal(await evaluate(window, `document.querySelector('[data-term-tab].active').dataset.termTab`), 'term', 'The new term opened on another tab than Term.');
+        assert.equal(await evaluate(window, `document.querySelector('#sourceTermEditor [data-editor-tab].active').dataset.editorTab`), 'equations', 'The new term opened on another tab than Equations.');
         assert.equal(await evaluate(window, `document.querySelector('#termOutputState').value`), '3', 'The new term does not land on the state it was added under.');
         const terms = () => savedProject().then((project) => project.nodes[0].sourceTerms);
         assert.deepEqual((await terms()).map((term) => term.state), ['speed']);
@@ -9352,7 +9424,7 @@ export async function runInteractionTests(driver) {
     await run('a node is given body parts for result visualizers, each from a mesh file, named, coloured, replaced and removed', async () => {
         await loadAuthoringProject();
         await openNode('Mass');
-        await evaluate(window, `document.querySelector('[data-node-tab="appearance"]').click()`);
+        await evaluate(window, `document.querySelector('[data-editor-tab="appearance"]').click()`);
         const parts = async () => (await savedProject()).nodes[0].appearance.parts;
         // A one-triangle STL in millimetres, chosen as a person picks a file.
         const choose = (selector, size) => evaluate(window, `(() => {
@@ -9760,7 +9832,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Spring force', 'The warning led to the relationship it blames.');
         await clickLabel('Suspended mass');
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The mass did not open.');
-        await press('#nodeEditor [data-node-tab="numerics"]');
+        await press('#nodeEditor [data-editor-tab="numerics"]');
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeSubsteps'); input.value = '11'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitForStep('run', 15000);
         await press('.tourFloating .tourSkipStep');
@@ -10165,8 +10237,8 @@ export async function runInteractionTests(driver) {
             // The Bucket tip's plot, open while the run goes, draws the run so far and keeps up with it (a live run's window holds only its
             // latest sample, so the plot keeps its own).
             await evaluate(window, `[...document.querySelectorAll('.node-label-container')].find((label) => label.textContent.includes('Bucket tip')).click()`);
-            await waitFor(window, `Boolean(document.querySelector('[data-node-tab="results"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The Bucket tip\'s editor did not open.');
-            await evaluate(window, `document.querySelector('[data-node-tab="results"]').click()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-editor-tab="results"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The Bucket tip\'s editor did not open.');
+            await evaluate(window, `document.querySelector('[data-editor-tab="results"]').click()`);
             await waitFor(window, `(document.querySelector('#nodeResultPlot').data?.[0]?.x.length ?? 0) >= 3`, 'The Bucket tip\'s plot did not draw the run so far.');
             const plotted = await evaluate(window, `document.querySelector('#nodeResultPlot').data[0].x.at(-1)`);
             await waitFor(window, `document.querySelector('#nodeResultPlot').data[0].x.at(-1) > ${plotted} + 0.5`, 'The Bucket tip\'s plot did not keep up with the run.');

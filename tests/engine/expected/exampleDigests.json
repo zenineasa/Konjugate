@@ -1,0 +1,30 @@
+{
+    "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+    "recordedWith": "the v1.4.15 engine",
+    "configuration": {
+        "targetTime": 5,
+        "globalTimeStep": 0.01,
+        "outputInterval": 0.05
+    },
+    "digests": {
+        "articulatedRoboticArm.kjt": "f8942c863a15989b426f8c599164c281d59de3a7a639ee80afa02e6f13aacddc",
+        "batteryPoweredJoint.kjt": "50506529b8cfc04f79c3bc83320c2e8540a79e5fb4455ecd210a32000ddb8092",
+        "dataSources/dcMotor.kjt": "f874fd453f9081c6310b4870ac19285c00c258ae1e3e8eba978ca47ba95b6e4b",
+        "dataSources/labVessel.kjt": "35603e988c124af7085695d5fb715791316f686fc32ebdad9f123f72a4b92410",
+        "dataSources/simulatedTankRig.kjt": "1ecb227f9d5bbe66109510ca999a27ce45e96a80d3028b48afe36825cdca68d9",
+        "dataSources/smartHouse.kjt": "f27afda4a4e110f74497a53515c278eea0ae2dcdf198ca5b4d239d16a5b9c3d0",
+        "excavator.kjt": "f8f38e26f85b8f17b990b8becc37efedaba78ebe62de5a13370db072beb4c339",
+        "fourBarLinkage.kjt": "3c79049bf0422af39c99543988657050d24435a0b17a3e2e7de1751d16860e83",
+        "heatedWaterTank.kjt": "06ede4a50042916dcf8cdf0573f9ba33d6c21c8cd0a80b67e394c5c9f9c283a5",
+        "positionControlledJoint.kjt": "d7ef96230ecc0dda4f4738aa8a08c69d6d77d5de9027cf1bcc46d9b87f06e652",
+        "pumpSuctionHydraulics.kjt": "6eff01074064eb2a5f2929c09f4a7f62575bf7ef0bce8c52fcd797230011862a",
+        "singleJointActuator.kjt": "4f0b17ae6f8907ecf23411ca01e1ebb41aeac22d71a13f93581c982b53107e06",
+        "springMassDamper.kjt": "6ae5cb777b72d450706be8581c2063a51080ae272a9f5e623c746c357826e64d",
+        "tankCalibration.kjt": "8bfc20bd8f189dadf686cfcc00595b32654fafb8b965d0cb36cb05a69aa093e0",
+        "thermalEquilibrium.kjt": "c5751bd336831d26a27e1a724a0436a77a9c77131c8cefb6d277ee126fac28b5",
+        "thermalManagement.kjt": "f78fc43afe65ab2a7f81c8dffd9bcdd838ba7db13d71e6853f1c4a4816976651",
+        "twoLinkArm.kjt": "4b54d2deb9a5ddba96c4296b67db4b5d7a6313aaca75d0b9e506d4694e704a57",
+        "twoRoomBuilding.kjt": "23f815ee06bc9a50b4ec922050c8fd8b3af71db3d72882312ab18b59e4d65d2b",
+        "wheeledRobotDrivetrain.kjt": "a3dc7ec34ce2cb17f8aa7b5a59416e51153f9d9b6f7c86d56dbad9f7eca07181"
+    }
+}

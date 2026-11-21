@@ -57,7 +57,7 @@ const steps = Object.freeze([
         id: 'changeGain',
         title: 'Turn up the gain',
         text: `On the controller's Parameters tab, "Gain" says how hard the controller pushes for each radian the joint is away from its target. Change its initial value from ${values.gain.from} to ${values.gain.to}, then press Enter or click elsewhere so the change is kept.`,
-        target: (ui) => (ui.edgeEditorFor === values.controller ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-edge-tab="parameters"]' : gainInput : ui.relationshipRowOf(values.controller)), skip: 'setParameter', relationship: values.controller, parameterId: values.gain.parameterId, value: values.gain.to,
+        target: (ui) => (ui.edgeEditorFor === values.controller ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-editor-tab="parameters"]' : gainInput : ui.relationshipRowOf(values.controller)), skip: 'setParameter', relationship: values.controller, parameterId: values.gain.parameterId, value: values.gain.to,
         done: ({ document, start }) => gainChanged(document, start)
     },
     {

@@ -15,15 +15,16 @@ const context = {
     relationshipEquationModel: (definition) => definition.equationModel
 };
 
-// A node with every field the schema gives one, including a C++ program, a source term with its own program, and the
-// fields a newer Konjugate might add.
+// A node with every field the schema gives one, including a C++ program, a source term with its own program, a short name, a
+// state's kind, how its updates are worked out, a parameter's display symbol, and the fields a newer Konjugate might add.
 const node = {
-    id: 1, name: 'Motor', type: 'Actuator', description: 'Turns current into torque.', subsystemId: 20, enabled: false,
+    id: 1, name: 'Motor', shortName: 'M', type: 'Actuator', description: 'Turns current into torque.', subsystemId: 20, enabled: false,
+    updates: 'settle', updatesLimit: 50,
     numerics: { substepsPerGlobalStep: 4, integration: 'semiImplicit' },
     position: [1, 2, 3], rotation: [0.1, 0.2, 0.3], scale: [2, 2, 2],
-    states: [{ id: 2, name: 'Current', symbol: 'current', initialValue: 1.5, unit: 'A' }],
+    states: [{ id: 2, name: 'Current', symbol: 'current', initialValue: 1.5, unit: 'A', kind: 'update' }],
     sourceTerms: [{
-        id: 3, state: 'current', expression: 'gain', parameters: [{ id: 4, name: 'Gain', symbol: 'gain', value: 2, mode: 'live', control: { minimum: 0, maximum: 5, step: 0.1 } }],
+        id: 3, state: 'current', expression: 'gain', parameters: [{ id: 4, name: 'Gain', symbol: 'gain', displaySymbol: 'G', value: 2, mode: 'live', control: { minimum: 0, maximum: 5, step: 0.1 } }],
         expressionModel: { latex: 'gain', bindings: [], mathJson: 'gain' }
     }, {
         id: 5, state: 'current', expression: '', parameters: [],
@@ -40,7 +41,7 @@ const edge = {
     directionality: 'bidirectional', enabled: false,
     equation: 'k x', equationModel: { latex: 'k x', output: { role: 'target', stateId: 9 }, bindings: [], mathJson: ['Multiply', 'k', 'x'] },
     implementation: { kind: 'python', source: 'pass' },
-    parameters: [{ id: 10, name: 'k', symbol: 'k', value: 3, mode: 'constant' }],
+    parameters: [{ id: 10, name: 'Stiffness', symbol: 'k', displaySymbol: '\\kappa', value: 3, mode: 'constant' }],
     appearance: { color: '#abcdef', offset: 0.3, waypoints: [[0, 1, 2]] },
     futureEdgeField: [1, 2, 3]
 };

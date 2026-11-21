@@ -20,7 +20,7 @@
 // nothing by passing through an older one, and a field added to the schema survives load, undo, paste and save before
 // anyone has taught the canvas about it.
 const nodeDocumentKeys = new Set([
-    'id', 'name', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
+    'id', 'name', 'shortName', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
     'states', 'sourceTerms', 'implementation', 'appearance', 'updates', 'updatesLimit'
 ]);
 const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning', 'kind']);
@@ -44,6 +44,8 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
     return {
         id: node.id,
         title: node.name || 'Untitled node',
+        // The name it goes by in other nodes' equations (y_A), when a person gave it one; derived from its name otherwise.
+        ...(typeof node.shortName === 'string' && node.shortName ? { shortName: node.shortName } : {}),
         type: node.type || 'Custom node',
         description: node.description ?? '',
         shape: importedGeometry ? 'imported' : appearance.shape || 'box',
@@ -95,6 +97,7 @@ export function nodeToDocument(definition, context) {
         ...structuredClone(definition.extraFields ?? {}),
         id: definition.id,
         name: definition.title,
+        ...(definition.shortName ? { shortName: definition.shortName } : {}),
         type: definition.type,
         ...(definition.description ? { description: definition.description } : {}),
         ...(definition.subsystemId === null ? {} : { subsystemId: definition.subsystemId }),

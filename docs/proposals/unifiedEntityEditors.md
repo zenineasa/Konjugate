@@ -195,7 +195,7 @@ const relationshipEditor = new EntityEditor({
 `equationsTab` is the same for both, built on `StateEquation`; the node's passes `(part) => part.type === 'own'`. The cards keep their ids (`#nodeEditor`, `#edgeEditor`, `#edgeGroupEditor`) so tutorials and tests that address them keep working; `#sourceTermEditor` goes, and the tests that open it (16 places) write in the own field instead.
 
 - **The results lock** is one rule for every card: inputs off, navigation on (a chip still opens its entity, a folded line still opens), Results first on a node.
-- **The tab last used** is remembered per kind, for the session: a person reading one relationship's parameters and clicking another sees its parameters. A request naming a tab (a warning, a tutorial step) opens that one, and Results opens first while results are open.
+- **The tab last used** is remembered per kind, for the session: a person reading one relationship's parameters and clicking another sees its parameters. A request naming a tab (a warning, a tutorial step, "+ Add a term") opens that one, Results opens first while results are open, and opening a project starts every kind on its first tab again.
 
 ### One order of tabs
 

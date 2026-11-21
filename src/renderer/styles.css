@@ -820,6 +820,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .diagnosticsEntry-warning .diagnosticsEntryMessage { color: #d9b06b; }
 .editorCard { width: 390px; }
 .edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning { width: 440px; }
+/* Every editor card (a node's, a source term's, a relationship's, a relationship group's) is one width. */
+[data-entity-editor] { width: 440px; }
 .contextCard.nodeEditor,
 .contextCard.edgeEditor,
 .contextCard.edgeBuilder,
@@ -2489,3 +2491,4 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .editorCard [data-term-panel][hidden] { display: none; }
 .stateTermMath { scrollbar-width: none; }
 .stateTermMath::-webkit-scrollbar { display: none; }
+

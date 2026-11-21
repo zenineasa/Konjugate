@@ -925,11 +925,11 @@
             </div>
         </template>
 
-        <div id="nodeEditor" class="contextCard editorCard nodeEditor hidden">
+        <div id="nodeEditor" data-entity-editor="node" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-node-tab="equations" type="button">Equations</button><button data-node-tab="details" type="button">Details</button><button data-node-tab="results" type="button">Results</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="results" type="button">Results</button><button data-editor-tab="numerics" type="button">Numerics</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <div data-node-panel="equations">
+            <div data-editor-panel="equations">
             <section>
                 <div id="nodeEditorStates"></div>
                 <button id="editAddState" class="addLinkButton" type="button">＋ Add a state</button>
@@ -964,7 +964,7 @@
             </section>
             <div class="passwordError" id="editNodeError" role="alert"></div>
             </div>
-            <div data-node-panel="details" hidden>
+            <div data-editor-panel="details" hidden>
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
                 <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
@@ -972,7 +972,7 @@
                 <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>
             </section>
             </div>
-            <div data-node-panel="results" hidden>
+            <div data-editor-panel="results" hidden>
                 <section class="nodeResultsPanel">
                     <div id="nodeResultPlot" class="nodeResultPlot" role="img" aria-label="Selected node state history"></div>
                     <div id="nodeResultEmpty" class="nodeResultEmpty">
@@ -981,7 +981,7 @@
                     </div>
                 </section>
             </div>
-            <div data-node-panel="numerics" hidden>
+            <div data-editor-panel="numerics" hidden>
                 <section>
                     <label class="editorField"><span>Substeps per global step</span><input id="editNodeSubsteps" type="number" min="1" max="10000" step="1"></label>
                     <label class="editorField"><span>Integration</span><select id="editNodeIntegration">
@@ -1001,7 +1001,7 @@
                     <label class="editorField" id="editNodeUpdatesLimitField"><span>At most, sweeps of a ring</span><input id="editNodeUpdatesLimit" type="number" min="1" step="1" placeholder="1000"></label>
                 </section>
             </div>
-            <div data-node-panel="appearance" hidden>
+            <div data-editor-panel="appearance" hidden>
                 <section>
                     <label class="editorField"><span>Colour</span><input id="editNodeColor" type="color"></label>
                     <label class="editorField"><span>Primitive shape</span><select id="editNodeShape"><option value="" disabled>Select a primitive…</option><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option></select></label>
@@ -1038,11 +1038,11 @@
             <footer id="nodeModelActions"><button data-delete-node type="button">Delete node</button><button id="toggleNodeEnabled" type="button">Disable node</button><button id="connectFromNode" class="connectButton" type="button">Connect to…</button></footer>
         </div>
 
-        <div id="sourceTermEditor" class="contextCard editorCard edgeEditor hidden">
+        <div id="sourceTermEditor" data-entity-editor="sourceTerm" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Source term</span><strong id="sourceTermEditorTitle">Source term</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-term-tab="term" type="button">Term</button><button data-term-tab="parameters" type="button">Parameters <span class="tabCount" id="termParameterCount"></span></button></nav>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="termParameterCount"></span></button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <div data-term-panel="term">
+            <div data-editor-panel="equations">
             <section>
                 <label class="editorField"><span>Written as</span><select id="termImplementationKind">
                     <option value="equation">Equation</option>
@@ -1052,7 +1052,7 @@
                 </select></label>
                 <div id="termLanding" class="termLanding">
                     <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="termEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div></div>
-                    <div class="landingState"><select id="termOutputState"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="landingState"><select id="termOutputState"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
                     <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field><textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
                 </div>
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
@@ -1061,7 +1061,7 @@
                 <div id="termProviderSection" hidden></div>
             </section>
             </div>
-            <div data-term-panel="parameters" hidden>
+            <div data-editor-panel="parameters" hidden>
             <section>
                 <h3>Parameters <button id="termAddParameter" type="button" title="Add a parameter">＋</button></h3>
                 <p class="builderHint">Live parameters can be adjusted during an online simulation; constant parameters can be fitted against measured data.</p>
@@ -1072,11 +1072,11 @@
             <footer><button data-delete-source-term type="button">Delete source term</button></footer>
         </div>
 
-        <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
+        <div id="edgeEditor" data-entity-editor="relationship" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Relationship</span><strong id="edgeEditorTitle">Relationship</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-edge-tab="term" type="button">Term</button><button data-edge-tab="parameters" type="button">Parameters <span class="tabCount" id="edgeParameterCount"></span></button><button data-edge-tab="details" type="button">Details</button><button data-edge-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="edgeParameterCount"></span></button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <div data-edge-panel="term">
+            <div data-editor-panel="equations">
             <section>
                 <label class="editorField"><span>Written as</span><select id="editEdgeImplementationKind">
                     <option value="equation">Equation</option>
@@ -1087,9 +1087,9 @@
                 </select></label>
                 <div id="edgeLanding" class="termLanding">
                     <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
-                    <div class="landingState"><select id="editEquationOutput"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="landingState"><select id="editEquationOutput"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
                     <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field><textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
-                    <button class="landingReciprocal" data-landing-reciprocal type="button" hidden></button>
+                    <button class="landingReciprocal" data-landing-reciprocal data-navigation type="button" hidden></button>
                 </div>
                 <div id="editEdgeEquationsList" hidden></div>
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
@@ -1098,7 +1098,7 @@
                 <div id="editEdgeProviderSection" hidden></div>
             </section>
             </div>
-            <div data-edge-panel="parameters" hidden>
+            <div data-editor-panel="parameters" hidden>
             <section>
                 <h3>Parameters <button id="editAddEdgeParameter" type="button" title="Add a parameter">＋</button></h3>
                 <p class="builderHint">Live parameters can be adjusted while an online simulation is running; constant parameters can be fitted against measured data.</p>
@@ -1106,7 +1106,7 @@
                 <div id="edgeEditorParameters"></div>
             </section>
             </div>
-            <div data-edge-panel="details" hidden>
+            <div data-editor-panel="details" hidden>
             <section>
                 <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
                 <label class="editorField"><span>Description</span><textarea id="editEdgeDescription" rows="3" placeholder="Optional notes on what this relationship represents"></textarea></label>
@@ -1117,7 +1117,7 @@
                 <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
             </section>
             </div>
-            <div data-edge-panel="appearance" hidden>
+            <div data-editor-panel="appearance" hidden>
             <section>
                 <label class="editorField"><span>Colour</span><input id="editEdgeColor" type="color"></label>
             </section>
@@ -1159,17 +1159,11 @@
             </footer>
         </div>
 
-        <div id="edgeGroupEditor" class="contextCard editorCard edgeGroupEditor hidden">
+        <div id="edgeGroupEditor" data-entity-editor="relationshipGroup" class="contextCard editorCard edgeGroupEditor hidden">
             <header><div><span class="contextKicker">Edge Group</span><strong id="editGroupHeading">Edge group</strong></div><button data-close-card type="button">×</button></header>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters</button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <section>
-                <label class="editorField"><span>Name</span><input id="groupName" autocomplete="off"></label>
-                <label class="editorField"><span>Colour</span><input id="groupColor" type="color"></label>
-                <h3>Members <button id="groupAddMember" type="button" disabled>＋</button></h3>
-                <p class="builderHint">Select exactly one other node on the canvas to enable adding it here.</p>
-                <div id="groupMembersList"></div>
-                <label class="editorField checkboxField"><input id="groupAutoAddStates" type="checkbox" checked><span>Automatically add missing state variables</span></label>
-            </section>
+            <div data-editor-panel="equations">
             <section>
                 <label class="editorField"><span>Implementation</span><select id="groupImplementationKind">
                     <option value="equation">Equation</option>
@@ -1186,11 +1180,28 @@
                 <p id="groupReferenceHint" class="builderHint"></p>
                 <div id="groupProviderSection" hidden></div>
             </section>
+            </div>
+            <div data-editor-panel="parameters" hidden>
             <section>
                 <h3>Shared parameters <button id="groupAddParameter" type="button">＋</button></h3>
                 <p class="builderHint">Applied identically to every edge in the mesh -- a member can't override a parameter without detaching.</p>
                 <div id="groupParameterRows" class="builderRows"></div>
             </section>
+            </div>
+            <div data-editor-panel="details" hidden>
+            <section>
+                <label class="editorField"><span>Name</span><input id="groupName" autocomplete="off"></label>
+                <h3>Members <button id="groupAddMember" type="button" disabled>＋</button></h3>
+                <p class="builderHint">Select exactly one other node on the canvas to enable adding it here.</p>
+                <div id="groupMembersList"></div>
+                <label class="editorField checkboxField"><input id="groupAutoAddStates" type="checkbox" checked><span>Automatically add missing state variables</span></label>
+            </section>
+            </div>
+            <div data-editor-panel="appearance" hidden>
+            <section>
+                <label class="editorField"><span>Colour</span><input id="groupColor" type="color"></label>
+            </section>
+            </div>
             <div class="passwordError" id="editGroupError" role="alert"></div>
             <footer>
                 <button data-delete-edge-group type="button">Delete group</button>

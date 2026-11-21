@@ -8964,7 +8964,7 @@ export async function runInteractionTests(driver) {
         await setRowLatex('definition', 0, String.raw`2\cdot\mathrm{gain}`);
         await evaluate(window, `document.querySelector('[data-add-several="output"]').click()`);
         await waitFor(window, `Boolean(${rowSelector('output', 1)})`, 'The new equation row did not appear.');
-        assert.equal(await evaluate(window, `${rowSelector('output', 1)}.querySelector('select').selectedOptions[0].textContent`), 'target.angle', 'A new equation sets a state no other equation sets.');
+        assert.equal(await evaluate(window, `${rowSelector('output', 1)}.querySelector('select').selectedOptions[0].title`), 'target.angle', 'A new equation sets a state no other equation sets.');
         await setRowLatex('output', 1, String.raw`\mathrm{q1}\cdot\mathrm{sourceSpeed}`);
         await waitFor(window, `${rowSelector('output', 1)}.querySelector('.equationDiagnostics').classList.contains('valid')`, 'The equation reading the quantity was not valid.');
         await typeInto(`${rowSelector('definition', 0)}.querySelector('[data-field="symbol"]')`, 'twice');

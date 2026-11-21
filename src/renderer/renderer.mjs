@@ -3151,47 +3151,84 @@ function renderSourceTermParameters(node, term) {
     });
 }
 
-// Where a term lands: for each state it reaches, the state, its kind and its equation, this term in it highlighted and the
-// others counted. The same block opens a source term's and a relationship's term editor, and takes a person back to the
-// state's node. `isThis(entry)` says which of a state's terms is the one being edited.
-function renderLandsOn(container, isThis) {
+// Where a term lands, written as the left of the equation being edited: the state it reaches (chosen by name), its kind, the
+// terms beside it, and -- for a relationship running both ways -- the other end, which gets the same term with the opposite
+// sign. One block for a source term's editor and a relationship's; `isThis(entry)` says which of a state's terms is the one
+// being edited, and `writtenAsEquation` whether there is an equation to stand on the right.
+function renderLanding(container, isThis, { writtenAsEquation = true } = {}) {
     const equations = stateEquationContext();
-    container.replaceChildren();
+    const found = [];
     for (const [stateId, terms] of equations.reaching) {
         const index = terms.findIndex(isThis);
         if (index < 0) continue;
-        const entry = terms[index];
         const owner = equations.nodes.find((candidate) => candidate.states.some((state) => Number(state.id) === stateId));
         const state = owner?.states.find((candidate) => Number(candidate.id) === stateId);
-        if (!owner || !state) continue;
-        const kind = equations.kinds.get(stateId)?.kind ?? 'rate';
-        const others = terms.length - 1;
-        const latex = termLatex(entry, equations);
-        // Bracketed only where it stands among others or is negated.
-        const bracketed = entry.reciprocal || others > 0 ? `\\left(${latex}\\right)` : latex;
-        const term = latex.trim() ? `${entry.reciprocal ? '-' : ''}${bracketed}` : '\\square';
-        const right = [index > 0 ? '\\cdots+' : '', `\\textcolor{#62e1d5}{${term}}`, index < terms.length - 1 ? '+\\cdots' : ''].join('');
-        const block = document.createElement('button');
-        block.type = 'button';
-        block.className = 'landsOn';
-        block.title = `Open ${owner.title} at its equations`;
-        block.innerHTML = `
-            <span class="landsOnLabel">Lands on${entry.reciprocal ? ', with the opposite sign' : ''}</span>
-            <span class="landsOnState"><strong>${escapeHtml(owner.title)} · ${escapeHtml(state.label ?? state.symbol)}</strong>
-                <span class="kindBadge">${kind === 'update' ? 'Update' : 'Rate'}</span>
-                <small>${others ? `with ${others} other ${others === 1 ? 'term' : 'terms'}` : 'its only term'}</small></span>
-            <span class="landsOnMath">${latexMarkup(`${stateKindLatex(kind, state.symbol)}${right}`)}</span>
-        `;
-        block.addEventListener('click', () => {
-            const object = nodeObjects.get(owner.id);
-            if (!object) return;
-            selectNode(object);
-            openNodeEditor(owner);
-            requestAnimationFrame(() => $(`#nodeEditorStates .stateCard[data-state-id="${stateId}"]`)?.scrollIntoView({ block: 'nearest' }));
-        });
-        container.appendChild(block);
+        if (owner && state) found.push({ entry: terms[index], index, count: terms.length, owner, state, kind: equations.kinds.get(stateId)?.kind ?? 'rate' });
     }
-    container.hidden = !container.children.length;
+    const main = found.find((landing) => !landing.entry.reciprocal) ?? null;
+    const reciprocal = found.find((landing) => landing.entry.reciprocal) ?? null;
+    const badge = $('[data-landing-kind]', container);
+    const others = $('[data-landing-others]', container);
+    const open = $('[data-landing-open]', container);
+    badge.hidden = others.hidden = open.hidden = !main;
+    const openAt = (landing) => {
+        const object = nodeObjects.get(landing.owner.id);
+        if (!object) return;
+        selectNode(object);
+        openNodeEditor(landing.owner);
+        requestAnimationFrame(() => $(`#nodeEditorStates .stateCard[data-state-id="${landing.state.id}"]`)?.scrollIntoView({ block: 'nearest' }));
+    };
+    if (main) {
+        const otherCount = main.count - 1;
+        badge.textContent = main.kind === 'update' ? 'Update' : 'Rate';
+        badge.title = main.kind === 'update' ? 'Its terms add up to its value.' : 'Its terms add up to how fast it changes.';
+        others.textContent = otherCount ? `with ${otherCount} other ${otherCount === 1 ? 'term' : 'terms'}` : 'its only term';
+        open.title = `Open ${main.owner.title} at its equations, where its kind is chosen`;
+        open.onclick = () => openAt(main);
+    }
+    // The state's equation around the one being written: d(state)/dt or state, =, the terms before it and after it.
+    const lhs = $('[data-landing-lhs]', container);
+    const rhs = $('[data-landing-rhs]', container);
+    lhs.hidden = rhs.hidden = !main || !writtenAsEquation;
+    if (main && writtenAsEquation) {
+        lhs.innerHTML = latexMarkup(`${stateKindLatex(main.kind, main.state.symbol)}${main.index > 0 ? '\\cdots+' : ''}`);
+        rhs.innerHTML = main.index < main.count - 1 ? latexMarkup('+\\cdots') : '';
+        rhs.hidden = main.index >= main.count - 1;
+    }
+    const other = $('[data-landing-reciprocal]', container);
+    if (other) {
+        other.hidden = !reciprocal;
+        if (reciprocal) {
+            const otherCount = reciprocal.count - 1;
+            other.innerHTML = `<span>And the same term, negated, on</span> <strong>${escapeHtml(reciprocal.owner.title)} · ${escapeHtml(reciprocal.state.label ?? reciprocal.state.symbol)}</strong>
+                <span class="kindBadge">${reciprocal.kind === 'update' ? 'Update' : 'Rate'}</span><small>${otherCount ? `with ${otherCount} other ${otherCount === 1 ? 'term' : 'terms'}` : 'its only term'}</small><b>↗</b>`;
+            other.title = `The relationship runs both ways. Open ${reciprocal.owner.title} at its equations`;
+            other.onclick = () => openAt(reciprocal);
+        }
+    }
+}
+
+// The editors with tabs for a term -- a source term's (Term, Parameters) and a relationship's (Term, Parameters, Details,
+// Appearance) -- and the parameter count shown on each one's Parameters tab.
+function selectTermEditorTab(tabName) {
+    $$('[data-term-tab]').forEach((button) => button.classList.toggle('active', button.dataset.termTab === tabName));
+    $$('[data-term-panel]').forEach((panel) => { panel.hidden = panel.dataset.termPanel !== tabName; });
+}
+function showParameterCount(element, parameters) {
+    element.textContent = parameters?.length ? String(parameters.length) : '';
+}
+// Shows the control a person is sent to -- a parameter's value, say -- on whichever tab of its editor it is, then focuses it.
+function revealEditorControl(selector, { focus = true } = {}) {
+    const control = typeof selector === 'string' ? $(selector) : selector;
+    if (!control) return null;
+    const edgePanel = control.closest('[data-edge-panel]');
+    if (edgePanel?.hidden) selectEdgeEditorTab(edgePanel.dataset.edgePanel);
+    const termPanel = control.closest('[data-term-panel]');
+    if (termPanel?.hidden) selectTermEditorTab(termPanel.dataset.termPanel);
+    const nodePanel = control.closest('[data-node-panel]');
+    if (nodePanel?.hidden) selectNodeEditorTab(nodePanel.dataset.nodePanel);
+    if (focus) control.focus();
+    return control;
 }
 
 function renderSourceTermEditor(node, term) {
@@ -3202,7 +3239,8 @@ function renderSourceTermEditor(node, term) {
     $('#termImplementationKind').value = implementationKind;
     term.parameters ??= [];
     renderSourceTermParameters(node, term);
-    renderLandsOn($('#termLandsOn'), (entry) => entry.type === 'sourceTerm' && entry.nodeId === definition.id && entry.termId === term.id);
+    showParameterCount($('#termParameterCount'), term.parameters);
+    renderLanding($('#termLanding'), (entry) => entry.type === 'sourceTerm' && entry.nodeId === definition.id && entry.termId === term.id, { writtenAsEquation: isEquation });
     $('#termEquationHeading').hidden = !isEquation;
     $('#termEquationDiagnostics').hidden = !isEquation;
     $('#termFunctions').hidden = !isEquation;
@@ -3210,7 +3248,7 @@ function renderSourceTermEditor(node, term) {
     $('#termProviderSection').hidden = isEquation;
 
     const output = $('#termOutputState');
-    output.replaceChildren(...definition.states.map((state) => new Option(state.symbol, state.id)));
+    output.replaceChildren(...definition.states.map((state) => new Option(`${definition.title} · ${state.label ?? state.symbol}`, state.id)));
 
     if (isEquation) {
         term.expressionModel = normalizeSourceTermExpressionModel(definition, term);
@@ -3235,8 +3273,10 @@ function renderSourceTermEditor(node, term) {
 function openSourceTermEditor(node, term) {
     const editor = $('#sourceTermEditor');
     selectedSourceTermNodeId = node.userData.id;
+    const sameTerm = !editor.classList.contains('hidden') && selectedSourceTermId === term.id;
     selectedSourceTermId = term.id;
     hideCards(editor);
+    if (!sameTerm) selectTermEditorTab('term');
     renderSourceTermEditor(node, term);
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
@@ -3581,7 +3621,7 @@ function parameterControlError(value, control) {
 function renderEdgeEditor(definition) {
     $('#editEdgeError').textContent = '';
     $('#edgeEditorTitle').textContent = definition.title;
-    renderLandsOn($('#edgeLandsOn'), (entry) => entry.type === 'relationship' && entry.edgeId === definition.id);
+    showParameterCount($('#edgeParameterCount'), definition.parameters);
     $('#editEdgeName').value = definition.title;
     $('#editEdgeDescription').value = definition.description ?? '';
     $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
@@ -3731,14 +3771,19 @@ function renderEdgeEditor(definition) {
     // A relationship with several equations, each setting a state of one of the two nodes: edited row by row below.
     const several = isSeveralEquations(definition.equationModel);
     $('#editEdgeEquationsList').hidden = !several;
-    $('#editEquationOutput').closest('label').hidden = several;
-    if (several) $('#editEdgeImplementationKind').value = 'equations';
+    // Several equations each name the state they set, row by row; one equation or program lands where the block above says.
+    $('#edgeLanding .landingState').hidden = several;
+    $('#edgeLanding .landsOnLabel').textContent = several ? 'Equations' : 'Lands on';
+    renderLanding($('#edgeLanding'), (entry) => entry.type === 'relationship' && entry.edgeId === definition.id, { writtenAsEquation: isEquation && !several });
+    if (several) {
+        $('#editEdgeImplementationKind').value = 'equations';
+        $('[data-landing-reciprocal]', $('#edgeLanding')).hidden = true;
+    }
     // Such a relationship is directed: what it sets on each node is written out, one equation per state.
     const directionality = $('#editEdgeDirectionality');
     directionality.toggleAttribute('data-unavailable', several);
     directionality.disabled = several || Boolean(activeResult);
     directionality.title = several ? 'A relationship with several equations is directed: each equation names the state it sets.' : '';
-    $('#editEdgeEquationHeading h3').textContent = several ? 'Equations' : 'Equation';
     if (several) {
         for (const id of ['#equationDiagnostics', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
         for (const id of ['#editEdgeEquationHeading', '#edgeFunctions', '#editEdgeReferencePicker']) $(id).hidden = false;
@@ -3756,11 +3801,18 @@ function renderEdgeEditor(definition) {
 
     const output = $('#editEquationOutput');
     output.replaceChildren();
+    // The states of both ends, by name, each end its own group.
     [['source', definition.source], ['target', definition.target]].forEach(([role, nodeId]) => {
         const node = model.nodes.find((candidate) => candidate.id === nodeId);
-        node?.states.forEach((state) => {
-            output.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id)));
+        if (!node) return;
+        const group = document.createElement('optgroup');
+        group.label = `${role === 'source' ? 'Source' : 'Target'} · ${node.title}`;
+        node.states.forEach((state) => {
+            const option = new Option(`${node.title} · ${state.label ?? state.symbol}`, equationOutputValue(role, state.id));
+            option.title = `${role}.${state.symbol}`;
+            group.appendChild(option);
         });
+        output.appendChild(group);
     });
 
     if (isEquation) {
@@ -3879,8 +3931,13 @@ function severalRow(definition, kind, item, index, count, check, sourceNode, tar
         const sets = document.createElement('select');
         sets.dataset.field = 'sets';
         sets.setAttribute('aria-label', 'State this equation sets');
+        // By name, as where a single equation lands is chosen; the symbol path the equation reads is the option's title.
         [['source', sourceNode], ['target', targetNode]].forEach(([role, node]) => {
-            node?.states.forEach((state) => sets.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id))));
+            node?.states.forEach((state) => {
+                const option = new Option(`${node.title} · ${state.label ?? state.symbol}`, equationOutputValue(role, state.id));
+                option.title = `${role}.${state.symbol}`;
+                sets.add(option);
+            });
         });
         sets.value = equationOutputValue(item.role, item.stateId);
         sets.addEventListener('change', () => {
@@ -5483,7 +5540,7 @@ function navigateToValidationIssue(item) {
         const relationship = model.relationships.find((candidate) => candidate.id === Number(item.attributedParameter.ownerId));
         if (relationship) {
             openRelationshipEditor(relationship);
-            requestAnimationFrame(() => $(`#edgeEditorParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`)?.focus());
+            requestAnimationFrame(() => revealEditorControl(`#edgeEditorParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`));
             return;
         }
     } else if (item.attributedParameter?.kind === 'sourceTerm') {
@@ -5496,7 +5553,7 @@ function navigateToValidationIssue(item) {
             selectNode(owningNode);
             openNodeEditor(owningNode.userData.definition);
             openSourceTermEditor(owningNode, term);
-            requestAnimationFrame(() => $(`#termParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`)?.focus());
+            requestAnimationFrame(() => revealEditorControl(`#termParameters [data-parameter-id="${item.attributedParameter.parameterId}"] input[data-field="value"]`));
             return;
         }
     }
@@ -5515,7 +5572,7 @@ function navigateToValidationIssue(item) {
         if (!relationship) return;
         openRelationshipEditor(relationship);
         const field = { source: '#editEdgeSource', target: '#editEdgeTarget', equation: '#editEdgeMathField', output: '#editEquationOutput', parameters: '#edgeEditorParameters input' }[item.location.field];
-        if (field) requestAnimationFrame(() => $(field)?.focus());
+        if (field) requestAnimationFrame(() => revealEditorControl(field));
     }
 }
 
@@ -5745,7 +5802,7 @@ function selectSuggestedPlaybackRate() {
 function applyInspectorReadOnly() {
     const locked = Boolean(activeResult);
     $$('[data-result-readonly]').forEach((notice) => { notice.hidden = !locked; });
-    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button), #edgeEditor > footer button, #edgeGroupEditor section :is(input, select, textarea, button), #edgeGroupEditor > footer button').forEach((control) => {
+    $$('#nodeEditor [data-node-panel]:not([data-node-panel="results"]) :is(input, select, textarea, button), #nodeEditor > footer button, #edgeEditor section :is(input, select, textarea, button:not(.landingOpen, .landingReciprocal)), #edgeEditor > footer button, #edgeGroupEditor section :is(input, select, textarea, button), #edgeGroupEditor > footer button').forEach((control) => {
         // A control that is off for a reason of its own (the first row cannot move up) stays off outside results too.
         control.disabled = locked || control.hasAttribute('data-unavailable');
     });
@@ -6631,7 +6688,7 @@ function jumpToParameterOwner(entry) {
     const parameterId = entry.parameter.id;
     if (entry.kind === 'edge') {
         openRelationshipEditor(entry.relationship);
-        requestAnimationFrame(() => $(`#edgeEditorParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`)?.focus());
+        requestAnimationFrame(() => revealEditorControl(`#edgeEditorParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`));
     } else if (entry.kind === 'nodeProvider') {
         const node = nodeObjects.get(entry.node.id);
         if (!node) return;
@@ -6643,7 +6700,7 @@ function jumpToParameterOwner(entry) {
         selectNode(node);
         openNodeEditor(node.userData.definition);
         openSourceTermEditor(node, entry.term);
-        requestAnimationFrame(() => $(`#termParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`)?.focus());
+        requestAnimationFrame(() => revealEditorControl(`#termParameters [data-parameter-id="${parameterId}"] input[data-field="value"]`));
     }
 }
 
@@ -12850,6 +12907,7 @@ $$('[data-close-card]').forEach((button) => {
 });
 
 $$('[data-edge-tab]').forEach((button) => button.addEventListener('click', () => selectEdgeEditorTab(button.dataset.edgeTab)));
+$$('[data-term-tab]').forEach((button) => button.addEventListener('click', () => selectTermEditorTab(button.dataset.termTab)));
 $$('[data-node-tab]').forEach((button) => {
     button.addEventListener('click', () => selectNodeEditorTab(button.dataset.nodeTab));
 });
@@ -13644,6 +13702,7 @@ const tour = createTour({
                 edgeSourceNodeId: edgeBuilderOpen ? $('#edgeSource').value : '',
                 edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
                 edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
+                edgeEditorTab: edgeEditorOpen ? $('[data-edge-tab].active')?.dataset.edgeTab ?? null : null,
                 runDialogOpen: $('#runLaunchDialog').open,
                 runDialog: { online: $('#runOnlineMode').checked, pacing: $('#runPacingMode').value, targetTime: $('#runTargetTime').value },
                 closeResultsDialogOpen: $('#closeResultsDialog').open,
@@ -14458,7 +14517,7 @@ const tour = createTour({
         // A relationship's parameter linked as its row's Shared choice links it: to a new shared parameter, or to the one with a symbol.
         shareParameter: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
-            const select = document.querySelector(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] [data-shared-select]`);
+            const select = revealEditorControl(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] [data-shared-select]`, { focus: false });
             if (!select) return;
             const value = step.choice === 'new' ? 'new' : String(model.sharedParameters.find((shared) => shared.symbol === step.choice)?.id ?? '');
             if (!value) return;
@@ -14642,7 +14701,7 @@ const tour = createTour({
         openRelationship: async (step) => { openTutorialRelationship(step.relationship); },
         setParameter: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
-            const input = document.querySelector(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] input[data-field="value"]`);
+            const input = revealEditorControl(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] input[data-field="value"]`, { focus: false });
             if (!input || input.disabled) return;
             input.value = String(step.value);
             input.dispatchEvent(new Event('input', { bubbles: true }));

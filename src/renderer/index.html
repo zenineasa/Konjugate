@@ -1040,58 +1040,70 @@
 
         <div id="sourceTermEditor" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Source term</span><strong id="sourceTermEditorTitle">Source term</strong></div><button data-close-card type="button">×</button></header>
+            <nav class="cardTabs"><button class="active" data-term-tab="term" type="button">Term</button><button data-term-tab="parameters" type="button">Parameters <span class="tabCount" id="termParameterCount"></span></button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <div data-term-panel="term">
             <section>
-                <div id="termLandsOn" class="landsOnList"></div>
-                <label class="editorField"><span>Implementation</span><select id="termImplementationKind">
+                <label class="editorField"><span>Written as</span><select id="termImplementationKind">
                     <option value="equation">Equation</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
-                <label class="editorField"><span>Lands on</span><select id="termOutputState"></select></label>
-                <h3>Parameters <button id="termAddParameter" type="button">＋</button></h3>
-                <p class="builderHint">Live parameters can be adjusted during an online simulation; constant parameters can be fitted against measured data.</p>
-                <div id="termParameters"></div>
-                <div class="passwordError" id="termParameterError" role="alert"></div>
-                <div id="termEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div>
-                <math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field>
-                <textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
+                <div id="termLanding" class="termLanding">
+                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="termEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div></div>
+                    <div class="landingState"><select id="termOutputState"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="termMathField" class="equationMathField" aria-label="Source term expression"></math-field><textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
+                </div>
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
-                 <p id="termFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
-                <div id="termReferencePicker" class="referencePicker"><span>Available references</span><div id="termStateReferenceChips"></div></div>
+                <details id="termFunctions" class="equationFunctions"><summary>Functions</summary><p class="builderHint">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p></details>
+                <div id="termReferencePicker" class="referencePicker"><span>References</span><div id="termStateReferenceChips"></div></div>
                 <div id="termProviderSection" hidden></div>
             </section>
+            </div>
+            <div data-term-panel="parameters" hidden>
+            <section>
+                <h3>Parameters <button id="termAddParameter" type="button" title="Add a parameter">＋</button></h3>
+                <p class="builderHint">Live parameters can be adjusted during an online simulation; constant parameters can be fitted against measured data.</p>
+                <div class="passwordError" id="termParameterError" role="alert"></div>
+                <div id="termParameters"></div>
+            </section>
+            </div>
             <footer><button data-delete-source-term type="button">Delete source term</button></footer>
         </div>
 
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
             <header><div><span class="contextKicker">Relationship</span><strong id="edgeEditorTitle">Relationship</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-edge-tab="term" type="button">Term</button><button data-edge-tab="details" type="button">Details</button><button data-edge-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-edge-tab="term" type="button">Term</button><button data-edge-tab="parameters" type="button">Parameters <span class="tabCount" id="edgeParameterCount"></span></button><button data-edge-tab="details" type="button">Details</button><button data-edge-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-edge-panel="term">
             <section>
-                <div id="edgeLandsOn" class="landsOnList"></div>
-                <label class="editorField"><span>Implementation</span><select id="editEdgeImplementationKind">
+                <label class="editorField"><span>Written as</span><select id="editEdgeImplementationKind">
                     <option value="equation">Equation</option>
                     <option value="equations">Equations that set values</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
-                <label class="editorField"><span>Lands on</span><select id="editEquationOutput"></select></label>
-                <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
-                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
-                <div id="edgeEditorParameters"></div>
-                <div class="passwordError" id="editEdgeError" role="alert"></div>
-                <div id="editEdgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
+                <div id="edgeLanding" class="termLanding">
+                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
+                    <div class="landingState"><select id="editEquationOutput"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field><textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
+                    <button class="landingReciprocal" data-landing-reciprocal type="button" hidden></button>
+                </div>
                 <div id="editEdgeEquationsList" hidden></div>
-                <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
-                <textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea>
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>
-                 <p id="edgeFunctions" class="builderHint equationFunctions">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p>
-                <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
+                <details id="edgeFunctions" class="equationFunctions"><summary>Functions</summary><p class="builderHint">Functions: \sin, \cos, \tan, \arcsin, \arccos, \arctan, atan2(y, x), \tanh, \exp, \ln, \log, \sqrt, |x|, \min, \max, and cases for a piecewise value.</p></details>
+                <div id="editEdgeReferencePicker" class="referencePicker"><span>References</span><div id="editStateReferenceChips"></div></div>
                 <div id="editEdgeProviderSection" hidden></div>
+            </section>
+            </div>
+            <div data-edge-panel="parameters" hidden>
+            <section>
+                <h3>Parameters <button id="editAddEdgeParameter" type="button" title="Add a parameter">＋</button></h3>
+                <p class="builderHint">Live parameters can be adjusted while an online simulation is running; constant parameters can be fitted against measured data.</p>
+                <div class="passwordError" id="editEdgeError" role="alert"></div>
+                <div id="edgeEditorParameters"></div>
             </section>
             </div>
             <div data-edge-panel="details" hidden>

@@ -40,16 +40,16 @@ const steps = Object.freeze([
     {
         id: 'share',
         title: 'Make the mass a shared parameter',
-        text: `Click "${values.spring.relationship}" in the table's "Belongs to" column to open it. In its Mass row, set Shared to "New shared parameter from this row…". The mass is now one parameter the relationship uses.`,
-        target: (ui) => (ui.edgeEditorFor === values.spring.relationship ? `#edgeEditorParameters [data-parameter-id="${values.spring.parameterId}"] [data-shared-select]` : '#parametersPanel'),
+        text: `Click "${values.spring.relationship}" in the table's "Belongs to" column to open it. On its Parameters tab, in the Mass row, set Shared to "New shared parameter from this row…". The mass is now one parameter the relationship uses.`,
+        target: (ui) => (ui.edgeEditorFor === values.spring.relationship ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-edge-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.spring.parameterId}"] [data-shared-select]` : '#parametersPanel'),
         skip: 'shareParameter', relationship: values.spring.relationship, parameterId: values.spring.parameterId, choice: 'new',
         done: ({ document }) => linked(document, values.spring.relationship)
     },
     {
         id: 'linkSecond',
         title: 'Use it in the damper too',
-        text: `Open "${values.damper.relationship}" and set its Mass row's Shared to the new "Mass (mass)". Both relationships now read the same mass.`,
-        target: (ui) => (ui.edgeEditorFor === values.damper.relationship ? `#edgeEditorParameters [data-parameter-id="${values.damper.parameterId}"] [data-shared-select]` : ui.relationshipRowOf(values.damper.relationship)),
+        text: `Open "${values.damper.relationship}" and, on its Parameters tab, set its Mass row's Shared to the new "Mass (mass)". Both relationships now read the same mass.`,
+        target: (ui) => (ui.edgeEditorFor === values.damper.relationship ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-edge-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.damper.parameterId}"] [data-shared-select]` : ui.relationshipRowOf(values.damper.relationship)),
         skip: 'shareParameter', relationship: values.damper.relationship, parameterId: values.damper.parameterId, choice: 'mass',
         done: ({ document }) => bothLinked(document)
     },

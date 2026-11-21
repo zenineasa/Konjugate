@@ -31,8 +31,8 @@ const steps = Object.freeze([
     {
         id: 'stiffen',
         title: 'Make the spring stiffer',
-        text: `Click the "${values.spring}" relationship (its row in the label between the mass and the support, or the line itself) and change Spring stiffness from ${values.stiffness.from} to ${values.stiffness.to}, then press Enter or click elsewhere so the change is kept. The mass will want to bounce ten times faster.`,
-        target: (ui) => (ui.edgeEditorFor === values.spring ? `#edgeEditorParameters [data-parameter-id="${values.stiffness.parameterId}"] input[data-field="value"]` : ui.relationshipRowOf(values.spring)),
+        text: `Click the "${values.spring}" relationship (its row in the label between the mass and the support, or the line itself), open its Parameters tab and change Spring stiffness from ${values.stiffness.from} to ${values.stiffness.to}, then press Enter or click elsewhere so the change is kept. The mass will want to bounce ten times faster.`,
+        target: (ui) => (ui.edgeEditorFor === values.spring ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-edge-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.stiffness.parameterId}"] input[data-field="value"]` : ui.relationshipRowOf(values.spring)),
         skip: 'setParameter', relationship: values.spring, parameterId: values.stiffness.parameterId, value: values.stiffness.to,
         done: ({ document }) => stiffened(document)
     },

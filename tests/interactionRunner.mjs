@@ -8906,6 +8906,190 @@ export async function runInteractionTests(driver) {
         assert.equal(await visible('#controlHistoryButton'), false);
     }, { skip: !(driver.capabilities.startPausedRuns && driver.capabilities.heldCommands) && 'needs a web engine that records the changes it applies and holds commands; the engine in the web shell predates it (npm run build:web:threads, then build:webShell:threads)' });
 
+    // ---- Making nodes, states, terms and relationships, each undone and redone ----------------------------------------
+    // Each through the button a person presses, with a real click: the scenarios further on use these as steps. A real click
+    // lands a moment after it is sent, so each step waits for what it does.
+    const nodeLabel = (title) => `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes(${JSON.stringify(title)}))`;
+    const undoRedo = async (which) => {
+        await evaluate(window, `document.activeElement?.blur()`);
+        const before = await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`);
+        await clickElement(window, `document.querySelector('#${which}Button')`);
+        await waitFor(window, `JSON.stringify(window.__debugProject.serialize()) !== ${JSON.stringify(before)}`, `${which === 'undo' ? 'Undo' : 'Redo'} changed nothing.`);
+    };
+    // Found as a person finds one in a long list, by searching for its name; the search is cleared once it is placed (`placed`,
+    // an expression), not before the click lands, which would redraw the list under it.
+    const placeFromLibrary = async (id, name, placed) => {
+        if (await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`)) await clickElement(window, `document.querySelector('#componentLibraryButton')`);
+        const search = (text) => evaluate(window, `(() => { const input = document.querySelector('#componentLibrarySearch'); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await waitFor(window, `!document.querySelector('#componentLibraryPanel').hidden`, 'The library did not open.');
+        await search(name);
+        await waitFor(window, `Boolean(document.querySelector('[data-template-id="${id}"]'))`, `Searching the library for ${name} did not find it.`);
+        await clickElement(window, `document.querySelector('[data-template-id="${id}"]')`);
+        await waitFor(window, placed, `${name} was not placed.`);
+        await search('');
+    };
+
+    await run('+ Add a state and + Add a term add to the node, the term to the state it is under, each undone and redone', async () => {
+        await loadAuthoringProject();
+        await openNode('Mass');
+        await clickElement(window, `document.querySelector('#editAddState')`);
+        await waitFor(window, `document.querySelectorAll('#nodeEditorStates .stateCard').length === 3`, '+ Add a state added no state card.');
+        assert.equal((await savedProject()).nodes[0].states.length, 3, 'The new state is not in the model.');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).nodes[0].states.length, 2, 'Undo left the new state behind.');
+        await undoRedo('redo');
+        assert.equal((await savedProject()).nodes[0].states.length, 3, 'Redo did not bring the state back.');
+        await undoRedo('undo');
+
+        // Under the second state, not the first: the term lands where it was added, and its editor opens on it.
+        await openNode('Mass');
+        await clickElement(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="speed"] .addStateTerm')`);
+        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, '+ Add a term did not open the new term.');
+        assert.equal(await evaluate(window, `document.querySelector('[data-term-tab].active').dataset.termTab`), 'term', 'The new term opened on another tab than Term.');
+        assert.equal(await evaluate(window, `document.querySelector('#termOutputState').value`), '3', 'The new term does not land on the state it was added under.');
+        const terms = () => savedProject().then((project) => project.nodes[0].sourceTerms);
+        assert.deepEqual((await terms()).map((term) => term.state), ['speed']);
+        await undoRedo('undo');
+        assert.equal((await terms()).length, 0, 'Undo left the new term behind.');
+        await undoRedo('redo');
+        assert.deepEqual((await terms()).map((term) => term.state), ['speed'], 'Redo did not bring the term back on its state.');
+    });
+
+    await run('the edge builder\'s Pick buttons choose each end on the canvas, and a new edge lands on its target unless its state is chosen', async () => {
+        await loadAuthoringProject();
+        await clickElement(window, `document.querySelector('#addButton')`);
+        await clickElement(window, `document.querySelector('[data-add-kind="edge"]')`);
+        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Add edge did not open the builder.');
+        const pick = async (end, title) => {
+            await clickElement(window, `document.querySelector('[data-pick-endpoint="${end}"]')`);
+            await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, `⌖ Pick did not arm picking the ${end}.`);
+            await clickElement(window, nodeLabel(title));
+            await waitFor(window, `document.querySelector('#endpointPickBanner').hidden`, `Clicking ${title} did not pick the ${end}.`);
+        };
+        // The source first: while only it is known, the list holds its states, which must not become the new edge's output.
+        await pick('source', 'Probe');
+        await pick('target', 'Mass');
+        assert.deepEqual(await evaluate(window, `[document.querySelector('#edgeSource').value, document.querySelector('#edgeTarget').value]`), ['4', '1']);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').value`), 'target:2', 'A directed edge made source first lands on its source.');
+        // A state the person chooses stays chosen when an end is picked again.
+        await evaluate(window, `(() => { const select = document.querySelector('#edgeEquationOutput'); select.value = 'source:6'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await pick('target', 'Mass');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').value`), 'source:6', 'Picking an end again dropped the state chosen.');
+        await evaluate(window, `(() => { const field = document.querySelector('#edgeMathField'); field.setValue('0'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await clickElement(window, `document.querySelector('#createEdge')`);
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Create edge did not open the new relationship.');
+        const made = (await savedProject()).edges.find((edge) => edge.id !== 7);
+        assert.deepEqual([made.source.nodeId, made.target.nodeId, made.equationModel.output], [4, 1, { role: 'source', stateId: 6 }]);
+        await undoRedo('undo');
+        assert.equal((await savedProject()).edges.length, 1, 'Undo left the new edge behind.');
+        await undoRedo('redo');
+        assert.equal((await savedProject()).edges.length, 2, 'Redo did not bring the edge back.');
+    });
+
+    // A model that says no kind of any state (every node settling) and one that says them: the engine reads each by its own rules,
+    // and one state saying its kind anywhere is enough to read the whole file by the second.
+    const kindsBox = { type: 'primitive', shape: 'box', color: '#888888' };
+    const kindsTerm = (id, state, stateId, latex, mathJson, bindings, setsValue) => ({ id, state, expression: latex, expressionModel: { latex, mathJson, bindings, output: { stateId } }, ...(setsValue ? { setsValue: true } : {}) });
+    // x rises at 1/s; y = 2x and z = y + 1 are set directly, which in a file saying no kinds settles within the step.
+    const chainNode = (overrides = {}) => ({
+        id: 1, name: 'Chain', position: [-2, 0, 0], appearance: kindsBox,
+        states: [{ id: 2, name: 'X', symbol: 'x', initialValue: 0 }, { id: 3, name: 'Y', symbol: 'y', initialValue: 0 }, { id: 4, name: 'Z', symbol: 'z', initialValue: 0 }],
+        sourceTerms: [
+            kindsTerm(5, 'x', 2, '1', 1, [], false),
+            kindsTerm(6, 'y', 3, '2\\cdot x', ['Multiply', 2, 'x'], [{ symbol: 'x', kind: 'state', nodeId: 1, stateId: 2 }], true),
+            kindsTerm(7, 'z', 4, 'y+1', ['Add', 'y', 1], [{ symbol: 'y', kind: 'state', nodeId: 1, stateId: 3 }], true)
+        ],
+        ...overrides
+    });
+    const kindsProject = (nodes) => ({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes, edges: [] });
+    const loadKinds = async (nodes) => {
+        await evaluate(window, `(async () => { document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden')); await window.__debugProject.load(${JSON.stringify(kindsProject(nodes))}); })()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === ${nodes.length}`, 'The model did not load.');
+    };
+    const kindsOf = (node) => [node.updates ?? null, ...node.states.map((state) => state.kind ?? null), ...node.sourceTerms.map((term) => term.setsValue ?? null)];
+
+    await run('a node pasted or a part placed into a model saying its states\' kinds otherwise keeps the numbers of both, as one undoable step', async () => {
+        const saying = { id: 30, name: 'Other', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Q', symbol: 'q', initialValue: 0, kind: 'rate' }], sourceTerms: [] };
+        const copyNode = async (id, name) => {
+            await evaluate(window, `window.__debugTransform.selectExactly([${id}])`);
+            await clickElement(window, `document.querySelector('#copySelection')`);
+            await waitFor(window, `window.modelClipboard.read()?.nodes?.[0]?.name === ${JSON.stringify(name)}`, `${name} was not copied.`);
+        };
+        const paste = async (count) => {
+            await evaluate(window, `window.__debugTransform.selectExactly([])`);
+            await clickElement(window, `document.querySelector('#pasteSelection')`);
+            await waitFor(window, `window.__debugProject.serialize().nodes.length === ${count}`, 'Paste put nothing in.');
+        };
+        const chain = async () => (await savedProject()).nodes.find((node) => node.name.startsWith('Chain'));
+
+        // Into a model that says no kinds, a node that says its kind: the model says them too, as it is read now, so Chain's
+        // values still settle (z = 2x + 1 in the step, not a step late). Undo puts Chain back as it was.
+        await loadKinds([saying]);
+        await copyNode(30, 'Other');
+        await loadKinds([chainNode()]);
+        const asLoaded = kindsOf(await chain());
+        await paste(2);
+        assert.deepEqual(kindsOf(await chain()), ['settle', 'rate', 'update', 'update', null, null, null], 'Chain\'s values no longer settle in the step.');
+        await undoRedo('undo');
+        assert.deepEqual(kindsOf(await chain()), asLoaded, 'Undo left Chain saying its kinds.');
+        assert.equal((await savedProject()).nodes.length, 1);
+        await undoRedo('redo');
+        assert.deepEqual(kindsOf(await chain()), ['settle', 'rate', 'update', 'update', null, null, null], 'Redo did not say Chain\'s kinds again.');
+
+        // The other way: Chain, saying none, pasted into a model that says its kinds, says them before it goes in.
+        await loadKinds([chainNode()]);
+        await copyNode(1, 'Chain');
+        await loadKinds([saying]);
+        await paste(2);
+        assert.deepEqual(kindsOf(await chain()), ['settle', 'rate', 'update', 'update', null, null, null], 'Pasted Chain\'s values no longer settle in the step.');
+        assert.equal((await savedProject()).nodes.find((node) => node.name === 'Other').states[0].kind, 'rate');
+
+        // A library assembly, which says no kinds, placed into a model that says them: its program's outputs are Updates that settle.
+        // The bundled assemblies carry a C++ program, which the web edition's library leaves out.
+        if (!driver.capabilities.cppProviders) return;
+        await loadKinds([saying]);
+        await placeFromLibrary('pidIsa', 'PID controller (ISA', `window.__debugProject.serialize().nodes.length === 2`);
+        const pid = (await savedProject()).nodes.find((node) => node.name !== 'Other');
+        assert.ok(pid.states.every((state) => state.kind), 'The placed PID controller says no kinds in a model that says them.');
+        assert.equal(pid.updates, 'settle', 'The placed PID controller\'s updates no longer settle.');
+        await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+    });
+
+    await run('a node switched off keeps its values set directly, and shows its own equations, when adding a term makes the model say its kinds', async () => {
+        const gauge = { id: 30, name: 'Gauge', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Reading', symbol: 'reading', initialValue: 0 }], sourceTerms: [kindsTerm(32, 'reading', 31, '5', 5, [], true)] };
+        await loadKinds([chainNode({ enabled: false }), gauge]);
+        // A term added to an Update in a model that says no kinds makes it say them all, the switched-off Chain included.
+        await openNode('Gauge');
+        await clickElement(window, `document.querySelector('#nodeEditorStates .stateCard .addStateTerm')`);
+        await waitFor(window, `window.__debugProject.serialize().nodes[1].sourceTerms.length === 2`, '+ Add a term added no term.');
+        assert.deepEqual(kindsOf((await savedProject()).nodes[0]), ['settle', 'rate', 'update', 'update', null, null, null],
+            'Switched off, Chain\'s values set directly became rates, which it would integrate once switched back on.');
+        // Its Equations tab shows each of its terms on its state, marked off, not as terms reaching no state.
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+        await openNode('Chain');
+        assert.deepEqual(await evaluate(window, `['x', 'y', 'z'].map((symbol) => document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="' + symbol + '"] .stateTerm.off').length)`), [1, 1, 1]);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStrayTerms').hidden`), true, 'Its own terms are listed as reaching no state.');
+    });
+
+    await run('Undo after opening a project undoes what was done in it, not an equation left half-written in the project before', async () => {
+        const gauge = { id: 30, name: 'Gauge', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Reading', symbol: 'reading', initialValue: 0 }], sourceTerms: [kindsTerm(32, 'reading', 31, '5', 5, [], false)] };
+        await loadKinds([gauge]);
+        await openNode('Gauge');
+        await clickElement(window, `document.querySelector('#nodeEditorStates .sourceTermOpen')`);
+        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term did not open.');
+        await evaluate(window, `(() => { const field = document.querySelector('#termMathField'); field.setValue('7'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        // Another project opened while the equation is still being written; there, a Thermal link is placed and undone.
+        const body = (id, name, x) => ({ id, name, position: [x, 0, 0], appearance: kindsBox, states: [{ id: id + 1, name: 'Temperature', symbol: 'temperature', initialValue: 300, unit: 'K' }], sourceTerms: [] });
+        await loadKinds([body(1, 'Pack', -2), body(10, 'Housing', 2)]);
+        await evaluate(window, `window.__debugTransform.selectExactly([1, 10])`);
+        await placeFromLibrary('thermalLink', 'Thermal link', `window.__debugProject.serialize().edges.length === 2`);
+        await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
+        await undoRedo('undo');
+        assert.equal((await savedProject()).edges.length, 0, 'Undo did not take the Thermal link away.');
+        await undoRedo('redo');
+        assert.equal((await savedProject()).edges.length, 2, 'Redo did not bring the Thermal link back.');
+    });
+
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');

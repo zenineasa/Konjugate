@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nodeUpdates, sayKinds, saysKinds, stateKinds, termsReachingStates, withoutKinds } from '../src/ratesAndUpdates.mjs';
+import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates, withoutKinds } from '../src/ratesAndUpdates.mjs';
 import { nodeFromDocument, nodeToDocument } from '../src/modelCodec.mjs';
 
 // A tank whose level is a rate (an inflow term, and a bidirectional pipe to a second tank), a level gauge whose reading is set
@@ -72,6 +72,45 @@ test('a state placed into a file that says its kinds, saying none, is what its t
     assert.deepEqual(kinds.get(11), { kind: 'rate', said: true });
     assert.deepEqual(kinds.get(21), { kind: 'update', said: false }, 'A setsValue term still makes its state an Update.');
     assert.deepEqual(kinds.get(31), { kind: 'rate', said: false });
+});
+
+test('a disabled node or relationship keeps its states\' kinds when the file is made to say them', () => {
+    const { nodes, edges } = model();
+    nodes[1].enabled = false;
+    edges[1].enabled = false;
+    // Off, they reach nothing in the run...
+    assert.equal(termsReachingStates(nodes, edges).get(21), undefined);
+    // ...but the gauge's reading is still set by its term and the pressure by the joint, as they are once switched back on.
+    assert.deepEqual([21, 32].map((id) => stateKinds(nodes, edges).get(id).kind), ['update', 'update']);
+    sayKinds(nodes, edges);
+    assert.equal(nodes[1].states[0].kind, 'update', 'A disabled node\'s value set directly stays an Update.');
+    assert.equal(nodes[1].updates, 'settle', 'And its node settles, as it did.');
+    assert.equal(nodes[2].states[1].kind, 'update', 'A state a disabled relationship\'s equations set stays an Update.');
+});
+
+test('content put into a model says its kinds as the model does, whichever side said none being made to say them', () => {
+    // A model that says none, and a node pasted into it that says its kind: the model is made to say them, as it is read now.
+    const existing = model();
+    const pasted = [{ id: 40, name: 'Pasted', states: [{ id: 41, name: 'Q', symbol: 'q', kind: 'rate' }], sourceTerms: [] }];
+    assert.equal(sayKindsAlike(existing.nodes, pasted, existing.edges), 'existing');
+    assert.deepEqual(existing.nodes.flatMap((node) => node.states.map((state) => state.kind)), ['rate', 'update', 'rate', 'update']);
+    assert.deepEqual(existing.nodes.map((node) => node.updates), [undefined, 'settle', 'settle'], 'Its nodes holding an Update still settle.');
+    assert.equal(pasted[0].states[0].kind, 'rate', 'What is pasted is left as it says.');
+
+    // A model that says its kinds, and content that says none placed into it: the content is made to say them.
+    const target = model();
+    sayKinds(target.nodes, target.edges);
+    const placed = model();
+    assert.equal(sayKindsAlike(target.nodes, placed.nodes, [...target.edges, ...placed.edges]), 'incoming');
+    assert.deepEqual(placed.nodes.flatMap((node) => node.states.map((state) => state.kind)), ['rate', 'update', 'rate', 'update']);
+    assert.deepEqual(placed.nodes.map((node) => node.updates), [undefined, 'settle', 'settle']);
+
+    // Alike already, or nothing there yet: nothing changes.
+    const legacy = model();
+    const before = structuredClone(legacy);
+    assert.equal(sayKindsAlike(legacy.nodes, model().nodes, legacy.edges), null);
+    assert.deepEqual(legacy, before);
+    assert.equal(sayKindsAlike([], pasted, []), null);
 });
 
 test('a file that means something a file without kinds cannot say is refused, saying why', () => {

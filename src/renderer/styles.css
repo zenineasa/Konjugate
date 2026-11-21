@@ -2448,6 +2448,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .stateTerms { display: grid; gap: 4px; }
 .stateTerm { display: grid; grid-template-columns: 10px 1fr 10px; align-items: center; gap: 6px; width: 100%; padding: 6px 7px; color: inherit; background: #111f28; border: 1px solid #243640; border-radius: 5px; text-align: left; cursor: pointer; }
 .stateTerm:hover { border-color: #3c6670; }
+.stateTerm.off { opacity: 0.55; border-style: dashed; }
 .stateTermSign { color: #7ea3ad; font-size: 11px; text-align: center; }
 .stateTermBody { display: grid; gap: 3px; min-width: 0; }
 .stateTermTitle { display: flex; align-items: baseline; gap: 6px; min-width: 0; }

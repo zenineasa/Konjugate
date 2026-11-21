@@ -88,7 +88,7 @@ import { remapIds, createGraphFragment, remapGraphFragment, validateGraphFragmen
 import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
 import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
-import { nodeUpdates, sayKinds, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
+import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
@@ -2424,13 +2424,14 @@ function moveNodeState(node, stateId, offset, focusField = null) {
 // each step). The node editor shows each state's equation, built from every term reaching it, and lets a person choose
 // the kind by its equation.
 
-// What the editor needs from the whole model: the nodes and relationships as they are, every term reaching each state,
-// each state's kind, and whether the model says its kinds.
+// What the editor needs from the whole model: the nodes and relationships as they are, every term reaching each state
+// (a disabled node's or relationship's too, marked off, so a node switched off still shows its own equations), each state's
+// kind, and whether the model says its kinds.
 function stateEquationContext() {
     const nodes = [...nodeObjects.values()].map((object) => object.userData.definition).filter((definition) => !definition.deleted);
     const edges = model.relationships.filter((edge) => !edge.deleted);
-    const reaching = termsReachingStates(nodes, edges);
-    return { nodes, edges, reaching, kinds: stateKinds(nodes, edges, reaching), explicit: saysKinds(nodes) };
+    const reaching = termsReachingStates(nodes, edges, { includeDisabled: true });
+    return { nodes, edges, reaching, kinds: stateKinds(nodes, edges), explicit: saysKinds(nodes) };
 }
 
 // LaTeX as typeset markup, or the text itself if it cannot be typeset.
@@ -2540,6 +2541,11 @@ function stateTermRow(entry, node, equations, index = 0) {
     }
     const sign = entry.reciprocal ? '−' : index ? '+' : '';
     row.dataset.termType = entry.type;
+    // Switched off, it is kept but does nothing in a run.
+    if (entry.off) {
+        row.classList.add('off');
+        detail = `${detail ? `${detail} · ` : ''}off`;
+    }
     row.innerHTML = `
         <span class="stateTermSign">${sign}</span>
         <span class="stateTermBody">
@@ -2552,20 +2558,42 @@ function stateTermRow(entry, node, equations, index = 0) {
     return row;
 }
 
-// Changes several nodes as one undoable step: `mutate` gets a copy of every node's model, each with its `id` and
-// `enabled`, and changes them in place; the nodes whose model changed take it.
-function changeModelNodes(mutate) {
-    if (activeResult) return;
+// A change to several nodes, worked out but not yet made: `mutate` gets a copy of every node's model, each with its `id`
+// and `enabled`, and changes them in place. Returns { undo, redo } for the nodes whose model changed, or null when none did;
+// the caller makes it with redo() and records it, alone or as part of a larger step.
+function nodeModelsChange(mutate) {
     const objects = [...nodeObjects.values()].filter((object) => !object.userData.definition.deleted);
     const before = objects.map((object) => captureNodeModel(object));
     const after = structuredClone(before);
     after.forEach((snapshot, index) => Object.assign(snapshot, { id: objects[index].userData.id, enabled: objects[index].userData.definition.enabled }));
     mutate(after);
     const changed = objects.map((_, index) => JSON.stringify(before[index]) !== JSON.stringify({ ...after[index], id: undefined, enabled: undefined }));
+    if (!changed.some(Boolean)) return null;
     const apply = (snapshots) => objects.forEach((object, index) => { if (changed[index]) applyNodeModel(object, snapshots[index]); });
-    if (!changed.some(Boolean)) return;
-    apply(after);
-    recordHistory({ undo: () => apply(before), redo: () => apply(after) });
+    return { undo: () => apply(before), redo: () => apply(after) };
+}
+
+// Changes several nodes as one undoable step (nodeModelsChange).
+function changeModelNodes(mutate) {
+    if (activeResult) return;
+    const change = nodeModelsChange(mutate);
+    if (!change) return;
+    change.redo();
+    recordHistory(change);
+}
+
+// Content put into the model -- a node made or placed, a pasted graph, a library assembly -- says its states' kinds as the
+// model does (sayKindsAlike): content that says none is made to say them before it goes in, by mutating `incomingNodes`;
+// a model that says none is made to say them as the content goes in. Returns the model's own nodes' change as { undo,
+// redo }, already made, for the caller to fold into the step that puts the content in; null when they keep what they say.
+function sayKindsAsTheModel(incomingNodes, incomingEdges = []) {
+    // Most content says them as the model does already: nothing to work out, and no snapshot of every node taken.
+    const existing = [...nodeObjects.values()].map((object) => object.userData.definition).filter((definition) => !definition.deleted);
+    if (saysKinds(existing) === saysKinds(incomingNodes)) return null;
+    const edges = [...model.relationships.filter((edge) => !edge.deleted), ...incomingEdges];
+    const change = nodeModelsChange((nodes) => sayKindsAlike(nodes, incomingNodes, edges));
+    change?.redo();
+    return change;
 }
 
 // Makes a state a Rate or an Update. A model that says no kinds first says them all, as the engine reads it now (every
@@ -4919,6 +4947,7 @@ function closeComponentLibraryPanel() {
 // reproduce the actual commit sequence.
 // `history` adds to this insertion's undo step whatever else the caller changed alongside it.
 function insertNodeDefinition(definition, { attachCurrentTransform = false, openInspector = true, history = null } = {}) {
+    const kinds = sayKindsAsTheModel([definition]);
     model.nodes.push(definition);
     createNode(definition);
     updateModelStatus();
@@ -4926,8 +4955,8 @@ function insertNodeDefinition(definition, { attachCurrentTransform = false, open
     selectNode(object);
     if (attachCurrentTransform && currentTool in transformPropertyForTool) transformControls.attach(object);
     recordHistory({
-        undo: () => { history?.undo(); setNodeVisibility(definition.id, false); },
-        redo: () => { history?.redo(); setNodeVisibility(definition.id, true); }
+        undo: () => { history?.undo(); setNodeVisibility(definition.id, false); kinds?.undo(); },
+        redo: () => { kinds?.redo(); history?.redo(); setNodeVisibility(definition.id, true); }
     });
     if (openInspector) openNodeEditor(definition);
     return object;
@@ -5046,7 +5075,10 @@ function applyEdgeTemplate(template) {
             const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
             const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
             const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === equationOutputValue(template.output.role, state.id));
-            if (option) $('#edgeEquationOutput').value = option.value;
+            if (option) {
+                $('#edgeEquationOutput').value = option.value;
+                builderOutputChosen = true;
+            }
             pendingEdgeTemplate = template;
         };
     };
@@ -5450,6 +5482,10 @@ function startEndpointPick(endpoint) {
     $('#endpointPickBanner').hidden = false;
 }
 
+// Whether the edge builder's output state was chosen, by the person or a template, rather than defaulted.
+let builderOutputChosen = false;
+$('#edgeEquationOutput').addEventListener('change', () => { builderOutputChosen = true; });
+
 function refreshStateReferences() {
     const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
     const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
@@ -5465,7 +5501,9 @@ function refreshStateReferences() {
     for (const [role, node] of [['source', sourceNode], ['target', targetNode]]) {
         node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id))));
     }
-    if ([...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
+    // A state the person (or a template) chose stays chosen; otherwise the new edge lands on its target's first state, not on
+    // whatever the list held while only the source was known.
+    if (builderOutputChosen && [...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
     else if (targetNode?.states[0]) output.value = equationOutputValue('target', targetNode.states[0].id);
     renderBuilderEquationDiagnostics(bindings);
     refreshProviderBindingRowOptions(bindings);
@@ -9001,6 +9039,9 @@ async function loadProjectDocument(document, {
     window.projectFiles.pathChanged(currentProjectPath);
     currentProjectFilename = fileName;
     currentProjectPassword = password;
+    // A new history, and no edit left half-made in the project before: an equation still being written there would otherwise
+    // be finished by the next Undo, as a step of this project, and undone in place of what the person did here.
+    equationEditSession = null;
     documentController.reset({ saved });
     updateDocumentTitle();
     updateEncryptionControls();
@@ -12418,6 +12459,8 @@ function openNodeBuilder(clientX, clientY) {
     addStateVariableRow();
     $('#addNodeError').textContent = '';
     positionCard(builder, clientX, clientY);
+    // A new form opens at its top, not scrolled as the last one was left.
+    builder.scrollTop = 0;
     $('#newNodeName').select();
 }
 
@@ -12425,6 +12468,7 @@ function openEdgeBuilder(clientX, clientY) {
     const builder = $('#edgeBuilder');
     hideCards(builder);
     pendingEdgeTemplate = null;
+    builderOutputChosen = false;
     $('#newEdgeName').value = 'New relationship';
     $('#newEdgeDirectionality').value = 'directed';
     $('#newEdgeColor').value = '#9c83c4';
@@ -12449,6 +12493,8 @@ function openEdgeBuilder(clientX, clientY) {
     builder.style.removeProperty('left');
     builder.style.removeProperty('top');
     builder.classList.remove('hidden');
+    // A new form opens at its top, where its ends are chosen, not scrolled as the last one was left.
+    builder.scrollTop = 0;
 }
 
 // Reuses the edge builder's own endpoint-pick flow: pre-fills the source with the node that was
@@ -17120,6 +17166,7 @@ function pasteOffsetForCurrentView() {
 // graph and placing a library assembly both insert this way, so what one can carry the other can.
 function insertGraphFragment(remapped, { sharedParameters = [] } = {}) {
     nextModelEntityId = remapped.nextId;
+    const kinds = sayKindsAsTheModel(remapped.nodes, remapped.edges);
     const sharedBefore = structuredClone(model.sharedParameters);
     model.sharedParameters = [...model.sharedParameters, ...sharedParameters];
     const sharedAfter = structuredClone(model.sharedParameters);
@@ -17141,8 +17188,8 @@ function insertGraphFragment(remapped, { sharedParameters = [] } = {}) {
     nodeIds.forEach((id) => selectNode(nodeObjects.get(id), { additive: selectedNodeIds.size > 0 }));
     if (currentTool in transformPropertyForTool && selectedNode) transformControls.attach(selectedNode);
     recordHistory({
-        undo: () => { applyVisible(false); model.sharedParameters = structuredClone(sharedBefore); },
-        redo: () => { applyVisible(true); model.sharedParameters = structuredClone(sharedAfter); }
+        undo: () => { applyVisible(false); kinds?.undo(); model.sharedParameters = structuredClone(sharedBefore); },
+        redo: () => { kinds?.redo(); applyVisible(true); model.sharedParameters = structuredClone(sharedAfter); }
     });
     updateRelationships();
     updateModelStatus();
@@ -18101,7 +18148,11 @@ function applyDocumentChange(transform, message) {
         $('#statusText').textContent = error.message;
         return false;
     }
-    if (!after || sameJson(before, after)) return false;
+    if (!after) return false;
+    // Nodes the change brings in -- a component placed or pasted -- say their states' kinds as the model does.
+    const known = new Set(before.nodes.map((node) => node.id));
+    sayKindsAlike(after.nodes.filter((node) => known.has(node.id)), after.nodes.filter((node) => !known.has(node.id)), after.edges);
+    if (sameJson(before, after)) return false;
     reconcileModel(before, after);
     recordHistory({
         undo: () => reconcileModel(serializeProjectDocument(), before),

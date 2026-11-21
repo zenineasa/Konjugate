@@ -15,6 +15,7 @@ const endpoint = (edge, role) => {
     return { nodeId: value, stateId: edge[`${role}StateId`] || null };
 };
 const enabled = (item) => item.enabled !== false && !item.deleted;
+const present = (item) => !item.deleted;
 // The state a node's source term reaches: a program's output, or the equation's, or the state its `state` symbol names.
 export function sourceTermStateId(node, term) {
     const programmable = term.implementation && ['cpp', 'python', 'plugin'].includes(term.implementation.kind);
@@ -31,19 +32,24 @@ export function saysKinds(nodes) {
 // Every term that reaches a state, by state id, in the order a person reads them: the node's own source terms, then its
 // program's outputs, then relationships. Each is { type: 'sourceTerm' | 'program' | 'relationship', nodeId, termId?,
 // edgeId?, outputKey?, outputIndex?, role?, setsValue, reciprocal? } -- `setsValue` as the file says it, `reciprocal` for the
-// other end of a bidirectional relationship, which adds the same rate with the opposite sign.
-export function termsReachingStates(nodes, edges) {
+// other end of a bidirectional relationship, which adds the same rate with the opposite sign. A disabled node's or
+// relationship's terms reach nothing, unless `includeDisabled` asks for every term as it would be with them on; each of
+// those then says `off`.
+export function termsReachingStates(nodes, edges, { includeDisabled = false } = {}) {
+    const counts = includeDisabled ? present : enabled;
     const reaching = new Map();
+    let off = false;
     const add = (stateId, term) => {
         if (stateId == null || stateId === '') return;
         const key = Number(stateId);
         if (!reaching.has(key)) reaching.set(key, []);
-        reaching.get(key).push(term);
+        reaching.get(key).push(off ? { ...term, off: true } : term);
     };
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
     const firstStateId = (nodeId) => nodesById.get(nodeId)?.states?.[0]?.id ?? null;
     for (const node of nodes) {
-        if (!enabled(node)) continue;
+        if (!counts(node)) continue;
+        off = !enabled(node);
         for (const term of node.sourceTerms ?? []) {
             add(sourceTermStateId(node, term), { type: 'sourceTerm', nodeId: node.id, termId: term.id, setsValue: term.setsValue === true });
         }
@@ -52,10 +58,11 @@ export function termsReachingStates(nodes, edges) {
         }
     }
     for (const edge of edges) {
-        if (!enabled(edge)) continue;
+        if (!counts(edge)) continue;
         const source = endpoint(edge, 'source');
         const target = endpoint(edge, 'target');
-        if (!enabled(nodesById.get(source.nodeId) ?? {}) || !enabled(nodesById.get(target.nodeId) ?? {})) continue;
+        if (!counts(nodesById.get(source.nodeId) ?? {}) || !counts(nodesById.get(target.nodeId) ?? {})) continue;
+        off = !enabled(edge) || !enabled(nodesById.get(source.nodeId) ?? {}) || !enabled(nodesById.get(target.nodeId) ?? {});
         const nodeIdOf = (role) => (role === 'source' ? source.nodeId : target.nodeId);
         const outputs = edge.equationModel?.outputs;
         if (Array.isArray(outputs)) {
@@ -80,8 +87,10 @@ export function termsReachingStates(nodes, edges) {
 // What each state is, by state id: { kind: 'rate' | 'update', said } -- `said` when the file says it. A state that says
 // no kind is an Update when a setsValue source term, a program's setsValue output or a relationship's several equations
 // set it, and a Rate otherwise, as the engine reads it -- in a file that says no kind at all, and for a state placed or
-// pasted into one that does.
-export function stateKinds(nodes, edges, reaching = termsReachingStates(nodes, edges)) {
+// pasted into one that does. A state's kind is the same whether its node is on or off, so a disabled node's own terms, and a
+// disabled relationship's, count.
+export function stateKinds(nodes, edges) {
+    const reaching = termsReachingStates(nodes, edges, { includeDisabled: true });
     const kinds = new Map();
     for (const node of nodes) {
         for (const state of node.states ?? []) {
@@ -124,13 +133,31 @@ export function sayKinds(nodes, edges) {
     return nodes;
 }
 
+// Content put into a model -- pasted, placed from the library, a component, a new node -- and the model must say their
+// states' kinds alike, since the engine reads a file that says no kind (every node settling) by different rules from one that
+// says any: one state saying its kind anywhere would change the numbers of everything that says none. The side that says
+// none is made to say them, as it is read now, so neither side's numbers change: `incomingNodes` before it goes in, or
+// `existingNodes` as it does. Mutates that side; returns 'incoming', 'existing', or null when both already say alike (or
+// the model is empty). `edges` is every relationship of both.
+export function sayKindsAlike(existingNodes, incomingNodes, edges) {
+    const existingSays = saysKinds(existingNodes);
+    if (existingSays === saysKinds(incomingNodes) || !incomingNodes.length) return null;
+    if (existingSays) {
+        sayKinds(incomingNodes, edges);
+        return 'incoming';
+    }
+    if (!existingNodes.length) return null;
+    sayKinds(existingNodes, edges);
+    return 'existing';
+}
+
 // The same model as a file that says no kind, which is what code export writes: `{ nodes, edges }`, or `{ reason }` when it
 // cannot be said that way -- an Update worked out once per step, a relationship's single equation setting a value, or an
 // Update that reads itself.
 export function withoutKinds(nodes, edges) {
     if (!saysKinds(nodes)) return { nodes, edges };
     const reaching = termsReachingStates(nodes, edges);
-    const kinds = stateKinds(nodes, edges, reaching);
+    const kinds = stateKinds(nodes, edges);
     const copies = structuredClone(nodes);
     const stateName = new Map();
     for (const node of nodes) for (const state of node.states ?? []) stateName.set(Number(state.id), `${nodeName(node)} · ${state.name ?? state.label ?? state.symbol}`);

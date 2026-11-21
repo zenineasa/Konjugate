@@ -1820,7 +1820,7 @@ export async function runInteractionTests(driver) {
     }, { skip: (!driver.capabilities.addons && 'the Results Analysis add-on has no web-edition equivalent') || addonMissing('konjugate.resultPlotViewer', 'konjugate-resultplotviewer') });
 
     await run('closing results clears the main window and any add-on it opened', async () => {
-        await evaluate(window, `document.querySelector('[data-node-tab="model"]').click()`);
+        await evaluate(window, `document.querySelector('[data-node-tab="details"]').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled`), true);
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeName'); input.value = 'Changed during results'; input.dispatchEvent(new Event('change', { bubbles: true })); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.textContent.includes('Battery module'))`), true);
@@ -2282,8 +2282,8 @@ export async function runInteractionTests(driver) {
     await run('node editor authors a source term with a programmable C++ implementation', async () => {
         await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
-        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
-        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
+        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         assert.equal(await isRenderedVisible(window, '#sourceTermEditor'), true);
 
         await evaluate(window, `(() => {
@@ -3499,7 +3499,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((l) => l.textContent.includes('Rotational link'))`, 'The rotational link node template was not placed.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Rotational link'))?.click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The placed rotational link node did not open its editor.');
-        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorSourceTerms .sourceTermPreview')?.textContent`), 'Updates angle', "The template's self-referencing source term was not applied to the placed node.");
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="angle"] .stateTerm[data-term-type="sourceTerm"]') ? 'Updates angle' : ''`), 'Updates angle', "The template's self-referencing source term was not applied to the placed node.");
         await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         const clickLabelContaining = async (text) => {
@@ -4749,9 +4749,9 @@ export async function runInteractionTests(driver) {
             'The "Enclosed air" label did not settle back into the DOM after the previous test\'s undo.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Enclosed air node editor did not open.');
-        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
         await waitFor(window, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
         await evaluate(window, `document.querySelector('#termAddParameter').click()`);
         await evaluate(window, `(() => {
@@ -5109,8 +5109,8 @@ export async function runInteractionTests(driver) {
         await freshExample();
         await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`, 'The "Enclosed air" label was not in the DOM.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
-        await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
-        await evaluate(window, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
+        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         await evaluate(window, `document.querySelector('#termAddParameter').click()`);
         await evaluate(window, `(() => {
             const row = document.querySelector('#termParameters .editorParameterRow');
@@ -5158,9 +5158,9 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
         await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
         // A freshly created source term's math field defaults to the literal "0", not empty --
         // inserting a state reference without clearing it first produces malformed LaTeX like
@@ -5255,9 +5255,9 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Decay node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
         await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
 
         await evaluate(diagnosticWindow, `document.querySelector('#termAddParameter').click()`);
@@ -5379,9 +5379,9 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#editAddSourceTerm').click()`);
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
         await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('.sourceTermOpen')].pop().click()`);
+        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
         await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue(''); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await evaluate(diagnosticWindow, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'level').click()`);
@@ -9225,10 +9225,10 @@ export async function runInteractionTests(driver) {
 
             // A source term of the Mass node.
             await openNode('Mass');
-            await evaluate(window, `document.querySelector('#editAddSourceTerm').click()`);
+            await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
             if (await evaluate(window, `document.querySelector('#sourceTermEditor').classList.contains('hidden')`)) {
-                await waitFor(window, `Boolean(document.querySelector('#nodeEditorSourceTerms .sourceTermOpen'))`, 'The source term was not added.');
-                await evaluate(window, `[...document.querySelectorAll('#nodeEditorSourceTerms .sourceTermOpen')].at(-1).click()`);
+                await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .sourceTermOpen'))`, 'The source term was not added.');
+                await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .sourceTermOpen')].at(-1).click()`);
             }
             await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term editor did not open.');
             await select(`document.querySelector('#termImplementationKind')`, 'plugin');
@@ -10066,7 +10066,7 @@ export async function runInteractionTests(driver) {
             } else if (id === 'equationsThatDoMore') {
                 const hotBody = saved.nodes.find((node) => node.name === 'Hot body');
                 assert.ok(hotBody.states.some((state) => state.symbol === 'temperatureCelsius'));
-                assert.ok(hotBody.sourceTerms.some((term) => term.setsValue === true), 'The Celsius state is set directly.');
+                assert.equal(hotBody.states.find((state) => state.symbol === 'temperatureCelsius').kind, 'update', 'The Celsius state is an update.');
             } else if (id === 'programRelationship') {
                 assert.equal(saved.edges.find((edge) => edge.name === 'Conduction').implementation.kind, 'python');
             } else if (id === 'askAssistant') {

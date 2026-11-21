@@ -22,6 +22,7 @@
 
 import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
+import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -193,6 +194,14 @@ export function emitExpression(node, symbols, operators) {
 export function buildModel(sourceDocument) {
     // Standalone programs have no runtime notion of sharing: bake each link to its shared value.
     const document = resolveSharedParameters(sourceDocument);
+    // Rates and Updates (docs/proposals/ratesAndUpdates.md): the exported loop works values out as a file that says no kind
+    // runs, settling every node, so a file that says its kinds is written as that file, and refused when it means something
+    // else (an Update worked out once per step, a relationship's single equation setting a value, an Update reading itself).
+    if (saysKinds(document.nodes ?? [])) {
+        const legacy = withoutKinds(document.nodes ?? [], document.edges ?? []);
+        if (legacy.reason) throw new Error(`${legacy.reason}, which code export cannot write yet.`);
+        document.nodes = legacy.nodes;
+    }
     const enabledNodes = (document.nodes ?? []).filter((node) => node.enabled !== false);
     const disabledNodeIds = new Set((document.nodes ?? []).filter((node) => node.enabled === false).map((node) => node.id));
     const stateOwnerNodeId = new Map();
@@ -242,13 +251,6 @@ export function buildModel(sourceDocument) {
     for (const node of enabledNodes) {
         if (node.numerics?.integration === 'semiImplicit') {
             throw new Error(`Node "${node.name}" is integrated semi-implicitly, which code export cannot write yet.`);
-        }
-        // Rates and Updates (docs/proposals/ratesAndUpdates.md): the exported loop still works values out at the same instant,
-        // so a model that says its states' kinds, or how a node's Updates are worked out, is refused until it writes them.
-        const kinded = (node.states ?? []).find((state) => state.kind !== undefined);
-        if (kinded) throw new Error(`State "${node.name} · ${kinded.name}" says its kind (rate or update), which code export cannot write yet.`);
-        if (node.updates !== undefined || node.updatesLimit !== undefined) {
-            throw new Error(`Node "${node.name}" says how its Updates are worked out, which code export cannot write yet.`);
         }
     }
     for (const edge of document.edges ?? []) {

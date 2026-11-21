@@ -6,7 +6,7 @@ import { DragControls } from 'three/addons/controls/DragControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import 'mathlive';
+import { convertLatexToMarkup } from 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { createTour } from './tour.mjs';
 import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEditor.mjs';
@@ -54,7 +54,8 @@ import {
     nextFreeOutput,
     renameDefinition,
     severalFromSingle,
-    singleFromSeveral
+    singleFromSeveral,
+    equationLatex
 } from '../relationshipEquations.mjs';
 import {
     causalMappingCreateValue,
@@ -87,6 +88,7 @@ import { remapIds, createGraphFragment, remapGraphFragment, validateGraphFragmen
 import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
 import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
+import { nodeUpdates, sayKinds, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
@@ -2350,6 +2352,8 @@ function applyNodeModel(node, snapshot) {
     // Where an absent or empty value means the default, not "keep what was there".
     definition.integration = snapshot.integration ?? 'explicit';
     definition.implementation = definition.implementation ?? null;
+    if (snapshot.updates === undefined) delete definition.updates;
+    if (snapshot.updatesLimit === undefined) delete definition.updatesLimit;
     definition.appearanceParts = snapshot.appearanceParts?.length ? definition.appearanceParts : null;
     snapshot.bindings.forEach((binding) => {
         const edge = model.relationships.find((candidate) => candidate.id === binding.id);
@@ -2415,6 +2419,200 @@ function moveNodeState(node, stateId, offset, focusField = null) {
     (focusField ? $(`[data-field="${focusField}"]`, row) : $(`.moveState[data-move="${offset}"]:not(:disabled)`, row) ?? $('input', row))?.focus();
 }
 
+// ---- A node's states and their equations (docs/proposals/ratesAndUpdates.md) ---------------------------------------
+// Every state is a Rate (its terms add up to how fast it changes) or an Update (its terms add up to its value, set after
+// each step). The node editor shows each state's equation, built from every term reaching it, and lets a person choose
+// the kind by its equation.
+
+// What the editor needs from the whole model: the nodes and relationships as they are, every term reaching each state,
+// each state's kind, and whether the model says its kinds.
+function stateEquationContext() {
+    const nodes = [...nodeObjects.values()].map((object) => object.userData.definition).filter((definition) => !definition.deleted);
+    const edges = model.relationships.filter((edge) => !edge.deleted);
+    const reaching = termsReachingStates(nodes, edges);
+    return { nodes, edges, reaching, kinds: stateKinds(nodes, edges, reaching), explicit: saysKinds(nodes) };
+}
+
+// LaTeX as typeset markup, or the text itself if it cannot be typeset.
+function latexMarkup(latex) {
+    if (!latex?.trim()) return '<span class="emptyMath">—</span>';
+    try {
+        return convertLatexToMarkup(latex);
+    } catch {
+        return escapeHtml(latex);
+    }
+}
+
+// A term's LaTeX, as written or worked out from its MathJSON when a toolbox wrote only that; '' for a program.
+function termLatex(entry, equations) {
+    if (entry.type === 'sourceTerm') {
+        const owner = equations.nodes.find((candidate) => candidate.id === entry.nodeId);
+        const term = owner?.sourceTerms.find((candidate) => candidate.id === entry.termId);
+        if (!term || (term.implementation && term.implementation.kind !== 'equation')) return '';
+        return equationLatex({ latex: term.expressionModel?.latex ?? term.expression, mathJson: term.expressionModel?.mathJson });
+    }
+    if (entry.type === 'relationship') {
+        const edge = equations.edges.find((candidate) => candidate.id === entry.edgeId);
+        if (!edge || (edge.implementation && edge.implementation.kind !== 'equation')) return '';
+        return equationLatex(entry.outputIndex !== undefined ? edge.equationModel?.outputs?.[entry.outputIndex] : edge.equationModel);
+    }
+    return '';
+}
+
+const symbolLatex = (symbol) => `\\mathrm{${String(symbol).replace(/[^A-Za-z0-9]/g, '')}}`;
+const stateKindLatex = (kind, symbol) => (kind === 'update' ? `${symbolLatex(symbol)}=` : `\\frac{d\\,${symbolLatex(symbol)}}{dt}=`);
+
+function renderStateEquation(node, state, equations) {
+    const definition = node.userData.definition;
+    const kind = equations.kinds.get(Number(state.id))?.kind ?? 'rate';
+    const settles = nodeUpdates(definition, equations.explicit).updates === 'settle';
+    const element = document.createElement('div');
+    element.className = 'stateEquation';
+    const updateCaption = settles ? 'Its terms add up to its value, settled within the step.' : 'Its terms add up to its value, set after each step.';
+    element.innerHTML = `
+        <button type="button" class="stateKind" data-kind="${kind}" aria-expanded="false" title="${kind === 'update' ? updateCaption : 'Its terms add up to how fast it changes.'} Click to choose by its equation.">
+            <span class="stateKindMath">${latexMarkup(stateKindLatex(kind, state.symbol))}</span>
+            <span class="kindBadge">${kind === 'update' ? 'Update' : 'Rate'}</span>
+        </button>
+        <div class="kindChooser" role="radiogroup" aria-label="Rate or update" hidden>
+            <button type="button" class="kindOption" role="radio" data-kind="rate" aria-checked="${kind === 'rate'}">
+                <span class="kindOptionMath">${latexMarkup(`${stateKindLatex('rate', state.symbol)}\\sum`)}</span>
+                <strong>Rate</strong><small>Its terms add up to how fast it changes.</small>
+            </button>
+            <button type="button" class="kindOption" role="radio" data-kind="update" aria-checked="${kind === 'update'}">
+                <span class="kindOptionMath">${latexMarkup(`${stateKindLatex('update', state.symbol)}\\sum`)}</span>
+                <strong>Update</strong><small>${updateCaption}</small>
+            </button>
+        </div>
+        <div class="stateTerms"></div>
+        <button type="button" class="addStateTerm addLinkButton">＋ Add a term</button>
+    `;
+    const chooser = $('.kindChooser', element);
+    $('.stateKind', element).addEventListener('click', (event) => {
+        chooser.hidden = !chooser.hidden;
+        event.currentTarget.setAttribute('aria-expanded', String(!chooser.hidden));
+    });
+    $$('.kindOption', element).forEach((option) => option.addEventListener('click', () => setStateKind(node, state.id, option.dataset.kind)));
+    const terms = equations.reaching.get(Number(state.id)) ?? [];
+    const list = $('.stateTerms', element);
+    if (!terms.length) {
+        list.innerHTML = `<p class="emptyEditorState">No terms: ${kind === 'update' ? 'it keeps its initial value' : 'it holds still'}.</p>`;
+    }
+    terms.forEach((entry, index) => list.appendChild(stateTermRow(entry, node, equations, index)));
+    $('.addStateTerm', element).addEventListener('click', () => addSourceTermFor(node, state));
+    return element;
+}
+
+// One term in a state's equation, opening the editor it is written in: a source term's, a relationship's, or the node's
+// program. `index` puts the sign in front of every term but the first; the other end of a bidirectional relationship
+// takes the same term with the opposite sign.
+function stateTermRow(entry, node, equations, index = 0) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'stateTerm';
+    const nodeTitle = (nodeId) => equations.nodes.find((candidate) => candidate.id === nodeId)?.title ?? 'a node';
+    let title = '';
+    let detail = '';
+    let math = '';
+    let open = () => {};
+    if (entry.type === 'sourceTerm') {
+        const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === entry.termId);
+        const kind = term?.implementation?.kind ?? 'equation';
+        row.classList.add('sourceTermOpen');
+        title = kind === 'cpp' ? 'C++ program' : kind === 'python' ? 'Python program' : kind === 'plugin' ? 'Plugin provider' : 'Source term';
+        detail = 'its own';
+        math = kind === 'equation' ? latexMarkup(termLatex(entry, equations)) : '';
+        open = () => term && openSourceTermEditor(node, term);
+    } else if (entry.type === 'relationship') {
+        const edge = equations.edges.find((candidate) => candidate.id === entry.edgeId);
+        const otherNodeId = entry.role === 'target' ? edge?.source : edge?.target;
+        title = edge?.title ?? 'Relationship';
+        detail = otherNodeId === node.userData.id ? '' : `from ${nodeTitle(otherNodeId)}`;
+        if (entry.reciprocal) detail = `${detail ? `${detail}, ` : ''}its other end`;
+        const program = edge?.implementation?.kind;
+        math = program && program !== 'equation' ? '' : latexMarkup(termLatex(entry, equations));
+        if (program && program !== 'equation') detail = `${detail ? `${detail} · ` : ''}${program === 'cpp' ? 'C++' : program === 'python' ? 'Python' : 'plugin'} program`;
+        open = () => edge && openRelationshipEditor(edge);
+    } else {
+        title = 'Program';
+        detail = `its output ${entry.outputKey}`;
+        open = () => $('#nodeProgramSection').scrollIntoView({ block: 'nearest' });
+    }
+    const sign = entry.reciprocal ? '−' : index ? '+' : '';
+    row.dataset.termType = entry.type;
+    row.innerHTML = `
+        <span class="stateTermSign">${sign}</span>
+        <span class="stateTermBody">
+            <span class="stateTermTitle"><strong>${escapeHtml(title)}</strong>${detail ? `<small>${escapeHtml(detail)}</small>` : ''}</span>
+            ${math ? `<span class="stateTermMath">${math}</span>` : ''}
+        </span>
+        <span class="stateTermOpen" aria-hidden="true">›</span>
+    `;
+    row.addEventListener('click', open);
+    return row;
+}
+
+// Changes several nodes as one undoable step: `mutate` gets a copy of every node's model, each with its `id` and
+// `enabled`, and changes them in place; the nodes whose model changed take it.
+function changeModelNodes(mutate) {
+    if (activeResult) return;
+    const objects = [...nodeObjects.values()].filter((object) => !object.userData.definition.deleted);
+    const before = objects.map((object) => captureNodeModel(object));
+    const after = structuredClone(before);
+    after.forEach((snapshot, index) => Object.assign(snapshot, { id: objects[index].userData.id, enabled: objects[index].userData.definition.enabled }));
+    mutate(after);
+    const changed = objects.map((_, index) => JSON.stringify(before[index]) !== JSON.stringify({ ...after[index], id: undefined, enabled: undefined }));
+    const apply = (snapshots) => objects.forEach((object, index) => { if (changed[index]) applyNodeModel(object, snapshots[index]); });
+    if (!changed.some(Boolean)) return;
+    apply(after);
+    recordHistory({ undo: () => apply(before), redo: () => apply(after) });
+}
+
+// Makes a state a Rate or an Update. A model that says no kinds first says them all, as the engine reads it now (every
+// node holding an Update settling), so choosing changes only the state chosen.
+function setStateKind(node, stateId, kind) {
+    const equations = stateEquationContext();
+    if (equations.kinds.get(Number(stateId))?.kind === kind && equations.explicit) return;
+    changeModelNodes((nodes) => {
+        sayKinds(nodes, equations.edges);
+        const state = nodes.find((candidate) => candidate.id === node.userData.id)?.states.find((candidate) => candidate.id === stateId);
+        if (state) state.kind = kind;
+    });
+}
+
+// The node's Updates setting, on its Numerics tab.
+function renderNodeUpdatesSetting(definition, equations) {
+    const { updates } = nodeUpdates(definition, equations.explicit);
+    $('#editNodeUpdates').value = updates;
+    $('#editNodeUpdatesLimit').value = definition.updatesLimit ?? '';
+    $('#editNodeUpdatesLimitField').hidden = updates !== 'settle';
+    $('#editNodeUpdatesHint').textContent = !equations.explicit
+        ? 'This model does not say which states are rates and which are updates, so every node\'s updates settle within the step, as before. Choosing once per step here makes it say them, without changing its numbers.'
+        : updates === 'settle'
+            ? 'Its updates read each other as worked out in the same step: a chain of them settles in one pass, and a ring is worked out again and again until it settles, up to the number of sweeps below.'
+            : 'Each update is worked out once, after the step, from the values at its start: an update reading another reads it a step back, so their order never matters and a ring goes round once a step.';
+}
+
+// Adds a source term to `state` and opens it.
+function addSourceTermFor(node, state) {
+    const id = allocateModelEntityId();
+    const equations = stateEquationContext();
+    if (!equations.explicit && equations.kinds.get(Number(state.id))?.kind === 'update') {
+        // In a file that says no kinds an Update is one because a term sets it: the file says its kinds first, so the new
+        // term sets it too rather than adding a rate to it.
+        changeModelNodes((nodes) => {
+            sayKinds(nodes, equations.edges);
+            nodes.find((candidate) => candidate.id === node.userData.id).sourceTerms.push({ id, state: state.symbol, expression: '0' });
+        });
+    } else {
+        changeNodeModel(node, (snapshot) => {
+            snapshot.sourceTerms.push({ id, state: state.symbol, expression: '0' });
+        });
+    }
+    const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === id);
+    if (term) openSourceTermEditor(node, term);
+}
+
 function renderNodeEditorModel(node) {
     const definition = node.userData.definition;
     $('#editNodeError').textContent = '';
@@ -2430,7 +2628,13 @@ function renderNodeEditorModel(node) {
     const stateContainer = $('#nodeEditorStates');
     stateContainer.replaceChildren();
     if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
+    const equations = stateEquationContext();
+    renderNodeUpdatesSetting(definition, equations);
     definition.states.forEach((state, index) => {
+        const card = document.createElement('div');
+        card.className = 'stateCard';
+        card.dataset.stateId = String(state.id);
+        card.dataset.symbol = state.symbol;
         const row = document.createElement('div');
         row.className = 'editorStateRow';
         row.dataset.stateId = String(state.id);
@@ -2491,35 +2695,25 @@ function renderNodeEditorModel(node) {
             snapshot.states = snapshot.states.filter((candidate) => candidate.id !== state.id);
             snapshot.sourceTerms = snapshot.sourceTerms.filter((term) => term.state !== state.symbol);
         }));
-        stateContainer.appendChild(row);
+        card.appendChild(row);
+        card.appendChild(renderStateEquation(node, state, equations));
+        stateContainer.appendChild(card);
     });
 
     renderNodeProgram(node);
     renderNodeParts(node);
 
-    const sourceTermContainer = $('#nodeEditorSourceTerms');
-    sourceTermContainer.replaceChildren();
-    if (!definition.sourceTerms.length) sourceTermContainer.innerHTML = '<p class="emptyEditorState">No source terms defined</p>';
-    definition.sourceTerms.forEach((term) => {
-        const kind = term.implementation?.kind ?? 'equation';
-        const stateSymbol = kind === 'equation'
-            ? term.state
-            : definition.states.find((state) => state.id === term.implementation?.output?.stateId)?.symbol;
-        const row = document.createElement('div');
-        row.className = 'sourceTermSummaryRow';
-        row.innerHTML = `
-            <button type="button" class="sourceTermOpen">
-                <span class="kindBadge">${kind === 'equation' ? 'Equation' : kind === 'cpp' ? 'C++' : 'Python'}</span>
-                <span class="sourceTermPreview">${escapeHtml(stateSymbol ? `Updates ${stateSymbol}` : 'No output state chosen')}</span>
-            </button>
-            <button type="button" class="removeSourceTerm" title="Remove source term">×</button>
-        `;
-        $('.sourceTermOpen', row).addEventListener('click', () => openSourceTermEditor(node, term));
-        $('.removeSourceTerm', row).addEventListener('click', () => changeNodeModel(node, (snapshot) => {
-            snapshot.sourceTerms = snapshot.sourceTerms.filter((candidate) => candidate.id !== term.id);
-        }));
-        sourceTermContainer.appendChild(row);
-    });
+    // Source terms that reach none of the node's states (a program with no output chosen, an output since removed).
+    const stray = definition.sourceTerms.filter((term) => !definition.states.some((state) => equations.reaching.get(Number(state.id))?.some((entry) => entry.type === 'sourceTerm' && entry.termId === term.id && entry.nodeId === definition.id)));
+    const strayContainer = $('#nodeEditorStrayTerms');
+    strayContainer.hidden = !stray.length;
+    strayContainer.replaceChildren();
+    if (stray.length) {
+        const heading = document.createElement('h3');
+        heading.textContent = 'Terms reaching no state';
+        strayContainer.appendChild(heading);
+        stray.forEach((term) => strayContainer.appendChild(stateTermRow({ type: 'sourceTerm', nodeId: definition.id, termId: term.id }, node, equations)));
+    }
 }
 
 // ---- A node's own program: a Python or C++ computational-node provider, or an installed FMU ------------------------
@@ -2957,17 +3151,58 @@ function renderSourceTermParameters(node, term) {
     });
 }
 
+// Where a term lands: for each state it reaches, the state, its kind and its equation, this term in it highlighted and the
+// others counted. The same block opens a source term's and a relationship's term editor, and takes a person back to the
+// state's node. `isThis(entry)` says which of a state's terms is the one being edited.
+function renderLandsOn(container, isThis) {
+    const equations = stateEquationContext();
+    container.replaceChildren();
+    for (const [stateId, terms] of equations.reaching) {
+        const index = terms.findIndex(isThis);
+        if (index < 0) continue;
+        const entry = terms[index];
+        const owner = equations.nodes.find((candidate) => candidate.states.some((state) => Number(state.id) === stateId));
+        const state = owner?.states.find((candidate) => Number(candidate.id) === stateId);
+        if (!owner || !state) continue;
+        const kind = equations.kinds.get(stateId)?.kind ?? 'rate';
+        const others = terms.length - 1;
+        const latex = termLatex(entry, equations);
+        // Bracketed only where it stands among others or is negated.
+        const bracketed = entry.reciprocal || others > 0 ? `\\left(${latex}\\right)` : latex;
+        const term = latex.trim() ? `${entry.reciprocal ? '-' : ''}${bracketed}` : '\\square';
+        const right = [index > 0 ? '\\cdots+' : '', `\\textcolor{#62e1d5}{${term}}`, index < terms.length - 1 ? '+\\cdots' : ''].join('');
+        const block = document.createElement('button');
+        block.type = 'button';
+        block.className = 'landsOn';
+        block.title = `Open ${owner.title} at its equations`;
+        block.innerHTML = `
+            <span class="landsOnLabel">Lands on${entry.reciprocal ? ', with the opposite sign' : ''}</span>
+            <span class="landsOnState"><strong>${escapeHtml(owner.title)} · ${escapeHtml(state.label ?? state.symbol)}</strong>
+                <span class="kindBadge">${kind === 'update' ? 'Update' : 'Rate'}</span>
+                <small>${others ? `with ${others} other ${others === 1 ? 'term' : 'terms'}` : 'its only term'}</small></span>
+            <span class="landsOnMath">${latexMarkup(`${stateKindLatex(kind, state.symbol)}${right}`)}</span>
+        `;
+        block.addEventListener('click', () => {
+            const object = nodeObjects.get(owner.id);
+            if (!object) return;
+            selectNode(object);
+            openNodeEditor(owner);
+            requestAnimationFrame(() => $(`#nodeEditorStates .stateCard[data-state-id="${stateId}"]`)?.scrollIntoView({ block: 'nearest' }));
+        });
+        container.appendChild(block);
+    }
+    container.hidden = !container.children.length;
+}
+
 function renderSourceTermEditor(node, term) {
     const definition = node.userData.definition;
     $('#sourceTermEditorTitle').textContent = `${definition.title} · Source term`;
     const implementationKind = term.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
     $('#termImplementationKind').value = implementationKind;
-    $('#termSetsValue').value = term.setsValue ? 'true' : 'false';
-    $('#termSetsValueHint').hidden = !term.setsValue;
     term.parameters ??= [];
     renderSourceTermParameters(node, term);
-    $('h3', $('#termEquationHeading')).textContent = term.setsValue ? 'Value' : 'Equation';
+    renderLandsOn($('#termLandsOn'), (entry) => entry.type === 'sourceTerm' && entry.nodeId === definition.id && entry.termId === term.id);
     $('#termEquationHeading').hidden = !isEquation;
     $('#termEquationDiagnostics').hidden = !isEquation;
     $('#termFunctions').hidden = !isEquation;
@@ -3132,7 +3367,7 @@ function selectNodeEditorTab(tabName) {
     $$('[data-node-panel]').forEach((panel) => {
         panel.hidden = panel.dataset.nodePanel !== tabName;
     });
-    $('#nodeModelActions').hidden = Boolean(activeResult) || tabName !== 'model';
+    $('#nodeModelActions').hidden = Boolean(activeResult) || !['equations', 'details'].includes(tabName);
     if (tabName === 'results' && selectedNode) requestAnimationFrame(() => renderNodeResults(selectedNode));
 }
 
@@ -3143,7 +3378,7 @@ function openNodeEditor(definition, clientX, clientY) {
     hideCards(editor);
     const node = nodeObjects.get(definition.id);
     renderNodeEditorModel(node);
-    const initialTab = activeResult ? 'results' : 'model';
+    const initialTab = activeResult ? 'results' : 'equations';
     selectNodeEditorTab(initialTab);
     $('#editNodeShape').value = definition.shape === 'imported' ? '' : definition.shape;
     $('#editNodeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
@@ -3345,7 +3580,8 @@ function parameterControlError(value, control) {
 
 function renderEdgeEditor(definition) {
     $('#editEdgeError').textContent = '';
-    $('.edgeEditor > header strong').textContent = definition.title;
+    $('#edgeEditorTitle').textContent = definition.title;
+    renderLandsOn($('#edgeLandsOn'), (entry) => entry.type === 'relationship' && entry.edgeId === definition.id);
     $('#editEdgeName').value = definition.title;
     $('#editEdgeDescription').value = definition.description ?? '';
     $('#toggleEdgeEnabled').textContent = definition.enabled === false ? 'Enable edge' : 'Disable edge';
@@ -3940,6 +4176,13 @@ function renderProviderBindingRows(definition) {
 // A group-member edge is never edited on its own -- no override without detaching, per
 // docs/edgeGroups.md -- so every path that would otherwise open the single-edge editor
 // on one routes here to the group's own editor instead.
+// The relationship editor's tabs: its Term (where it lands, what it is written as, its parameters and equation), its
+// Details (name, description, ends, direction) and its Appearance.
+function selectEdgeEditorTab(tabName) {
+    $$('[data-edge-tab]').forEach((button) => button.classList.toggle('active', button.dataset.edgeTab === tabName));
+    $$('[data-edge-panel]').forEach((panel) => { panel.hidden = panel.dataset.edgePanel !== tabName; });
+}
+
 function openRelationshipEditor(definition, clientX, clientY) {
     if (definition.groupId != null) {
         openEdgeGroupEditor(definition.groupId);
@@ -3948,6 +4191,7 @@ function openRelationshipEditor(definition, clientX, clientY) {
     const editor = $('#edgeEditor');
     selectRelationship(definition);
     hideCards(editor);
+    selectEdgeEditorTab('term');
     renderEdgeEditor(definition);
     editor.style.removeProperty('left');
     editor.style.removeProperty('top');
@@ -5261,7 +5505,10 @@ function navigateToValidationIssue(item) {
         if (!node) return;
         selectNode(node);
         openNodeEditor(node.userData.definition);
-        const field = { name: '#editNodeName', states: '#nodeEditorStates input', sourceTerms: '#nodeEditorSourceTerms input' }[item.location.field];
+        // A node's own fields are on its Details tab, its updates setting on Numerics; its states and terms on Equations.
+        const tab = { name: 'details', numerics: 'numerics' }[item.location.field] ?? 'equations';
+        selectNodeEditorTab(tab);
+        const field = { name: '#editNodeName', numerics: '#editNodeUpdates', states: '#nodeEditorStates input', sourceTerms: '#nodeEditorStates .stateTerm' }[item.location.field];
         if (field) requestAnimationFrame(() => $(field)?.focus());
     } else if (item.location.kind === 'edge') {
         const relationship = model.relationships.find((candidate) => candidate.id === Number(item.location.entityId));
@@ -5532,7 +5779,7 @@ function setResultModeLocked(locked) {
         $$('.toolstrip [data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === restoredTool));
         setTool(restoredTool);
     }
-    $('#nodeModelActions').hidden = locked || !$('[data-node-tab="model"]').classList.contains('active');
+    $('#nodeModelActions').hidden = locked || !['equations', 'details'].includes($('[data-node-tab].active')?.dataset.nodeTab);
     applyInspectorReadOnly();
     updateHistoryControls();
     refreshAddonRailContributions();
@@ -12602,6 +12849,7 @@ $$('[data-close-card]').forEach((button) => {
     });
 });
 
+$$('[data-edge-tab]').forEach((button) => button.addEventListener('click', () => selectEdgeEditorTab(button.dataset.edgeTab)));
 $$('[data-node-tab]').forEach((button) => {
     button.addEventListener('click', () => selectNodeEditorTab(button.dataset.nodeTab));
 });
@@ -12724,14 +12972,24 @@ $('#editAddState').addEventListener('click', () => {
         });
     });
 });
-$('#editAddSourceTerm').addEventListener('click', () => {
-    if (!selectedNode?.userData.definition.states.length) return;
+$('#editNodeUpdates').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    const equations = stateEquationContext();
+    const settle = event.target.value === 'settle';
+    // A model that says no kinds settles every node already; saying once per step for one makes it say its kinds.
+    changeModelNodes((nodes) => {
+        sayKinds(nodes, equations.edges);
+        const target = nodes.find((candidate) => candidate.id === selectedNode.userData.id);
+        if (settle) target.updates = 'settle';
+        else delete target.updates;
+    });
+});
+$('#editNodeUpdatesLimit').addEventListener('change', (event) => {
+    if (!selectedNode) return;
+    const limit = Number(event.target.value);
     changeNodeModel(selectedNode, (snapshot) => {
-        snapshot.sourceTerms.push({
-            id: allocateModelEntityId(),
-            state: snapshot.states[0].symbol,
-            expression: '0'
-        });
+        if (Number.isSafeInteger(limit) && limit > 0) snapshot.updatesLimit = limit;
+        else delete snapshot.updatesLimit;
     });
 });
 
@@ -13006,16 +13264,6 @@ $('#termImplementationKind').addEventListener('change', (event) => {
         const bindings = term.implementation?.bindings ?? [];
         const output = term.implementation?.output ?? { key: 'output', stateId };
         term.implementation = pluginOrProgram(kind, term.implementation, bindings, output, node.userData.definition.title);
-    });
-});
-$('#termSetsValue').addEventListener('change', (event) => {
-    if (!selectedSourceTermNodeId) return;
-    const node = nodeObjects.get(selectedSourceTermNodeId);
-    const setsValue = event.target.value === 'true';
-    $('#termSetsValueHint').hidden = !setsValue;
-    changeSourceTermModel(node, selectedSourceTermId, (term) => {
-        if (setsValue) term.setsValue = true;
-        else delete term.setsValue;
     });
 });
 termProgramSection.onReset(() => {
@@ -14235,15 +14483,16 @@ const tour = createTour({
             if (!node) return;
             selectNode(node);
             openNodeEditor(node.userData.definition);
+            const state = node.userData.definition.states.find((candidate) => candidate.symbol === step.state);
+            if (!state) return;
+            // A value set directly is an Update: chosen at its state, as a person does it, before its term is added.
+            if (step.setsValue) setStateKind(node, state.id, 'update');
             const before = node.userData.definition.sourceTerms.length;
-            $('#editAddSourceTerm').click();
+            $(`#nodeEditorStates .stateCard[data-state-id="${state.id}"] .addStateTerm`)?.click();
             await waitUntil(() => node.userData.definition.sourceTerms.length > before, 3000);
             const term = node.userData.definition.sourceTerms.at(-1);
             if (!term) return;
-            openSourceTermEditor(node, term);
-            const state = node.userData.definition.states.find((candidate) => candidate.symbol === step.state);
-            if (state) setField('#termOutputState', String(state.id), 'change');
-            setField('#termSetsValue', step.setsValue ? 'true' : 'false', 'change');
+            if ($('#sourceTermEditor').classList.contains('hidden') || selectedSourceTermId !== term.id) openSourceTermEditor(node, term);
             $('#termMathField').setValue(step.latex);
             $('#termMathField').dispatchEvent(new Event('input', { bubbles: true }));
             await waitUntil(() => $('#termEquationDiagnostics').classList.contains('valid'), 10000);

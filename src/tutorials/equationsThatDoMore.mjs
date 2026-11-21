@@ -2,8 +2,8 @@
 
 // "Equations that do more" (docs/proposals/tutorials.md), starting from the Thermal Equilibrium example: its one relationship acting both
 // ways (one equation, applied equal and opposite to both bodies); a node's own equation, a source term, letting the hot body leak heat to
-// a 290 K room; and an equation that sets a value directly rather than its rate, a Celsius reading of the hot body worked out afresh each
-// step instead of integrated. Without the leak the pair meets at 320 K (the example's own result); with it, both drift down towards 290 K.
+// a 290 K room; and a state that is an Update rather than a Rate, a Celsius reading of the hot body whose term is its value, worked out
+// afresh after each step instead of integrated (docs/proposals/ratesAndUpdates.md). Without the leak the pair meets at 320 K (the example's own result); with it, both drift down towards 290 K.
 
 export const equationsThatDoMoreValues = Object.freeze({
     relationship: 'Conduction',
@@ -22,7 +22,10 @@ const termsFor = (document, symbol, mark) => (hot(document)?.sourceTerms ?? []).
 });
 const leaking = (document) => termsFor(document, 'temperature', '290').some((term) => !term.setsValue);
 const hasCelsius = (document) => (hot(document)?.states ?? []).some((state) => state.symbol === values.celsius.symbol);
-const setsCelsius = (document) => termsFor(document, values.celsius.symbol, '273.15').some((term) => term.setsValue === true);
+// The Celsius reading is an Update: its state says so, or, in a file that says no kinds, its term sets its value.
+const celsiusIsUpdate = (document) => (hot(document)?.states ?? []).some((state) => state.symbol === values.celsius.symbol && state.kind === 'update');
+const setsCelsius = (document) => termsFor(document, values.celsius.symbol, '273.15').some((term) => term.setsValue === true || celsiusIsUpdate(document));
+const card = (symbol) => `#nodeEditorStates .stateCard[data-symbol="${symbol}"]`;
 
 const steps = Object.freeze([
     {
@@ -42,24 +45,24 @@ const steps = Object.freeze([
     {
         id: 'sourceTerm',
         title: 'Give a body its own equation',
-        text: `Click the ${values.hot}, press + beside Source terms, and open the new term. A source term is a node's own equation, with nothing on the other end. Keep Updates at temperature and enter −0.01·(temperature − 290), choosing temperature from the buttons below: the body leaks heat to a room at 290 K.`,
-        target: (ui) => (ui.sourceTermEditorOpen ? '#termMathField' : ui.nodeEditorFor === values.hot ? '#editAddSourceTerm' : ui.labelOf(values.hot)),
+        text: `Click the ${values.hot}. Its Equations tab shows each state's equation, built from every term reaching it: temperature's has the ${values.relationship} relationship. Press + Add a term under temperature: a source term is a node's own term, with nothing on the other end. Enter −0.01·(temperature − 290), choosing temperature from the buttons below: the body leaks heat to a room at 290 K.`,
+        target: (ui) => (ui.sourceTermEditorOpen ? '#termMathField' : ui.nodeEditorFor === values.hot ? `${card('temperature')} .addStateTerm` : ui.labelOf(values.hot)),
         skip: 'addSourceTerm', node: values.hot, state: 'temperature', latex: values.lossLatex, setsValue: false,
         done: ({ document }) => leaking(document)
     },
     {
         id: 'addState',
         title: 'Add a state for degrees Celsius',
-        text: `In the ${values.hot}'s editor, press + beside States and name the new one "${values.celsius.name}", with symbol ${values.celsius.symbol} and unit ${values.celsius.unit}.`,
+        text: `In the ${values.hot}'s editor, press + Add a state and name the new one "${values.celsius.name}", with symbol ${values.celsius.symbol} and unit ${values.celsius.unit}.`,
         target: (ui) => (ui.nodeEditorFor === values.hot ? '#editAddState' : ui.labelOf(values.hot)),
         skip: 'addState', node: values.hot, name: values.celsius.name, symbol: values.celsius.symbol, unit: values.celsius.unit,
         done: ({ document }) => hasCelsius(document)
     },
     {
         id: 'setValue',
-        title: 'Set it directly',
-        text: `Add another source term, set Updates to ${values.celsius.symbol} and Sets to "The value directly", and enter temperature − 273.15. This state is not moved forward in time: it is worked out afresh at every step from the temperature, so it can never drift from it.`,
-        target: (ui) => (ui.sourceTermEditorOpen ? '#termSetsValue' : ui.nodeEditorFor === values.hot ? '#editAddSourceTerm' : ui.labelOf(values.hot)),
+        title: 'Make it an update',
+        text: `Under ${values.celsius.symbol}, click the left-hand side of its equation and choose Update: its terms add up to its value, not to how fast it changes. Then press + Add a term under it and enter temperature − 273.15. It is not moved forward in time: it is worked out afresh after every step from the temperature the step reached, so it can never drift from it.`,
+        target: (ui) => (ui.sourceTermEditorOpen ? '#termMathField' : ui.nodeEditorFor === values.hot ? card(values.celsius.symbol) : ui.labelOf(values.hot)),
         skip: 'addSourceTerm', node: values.hot, state: values.celsius.symbol, latex: values.celsius.latex, setsValue: true,
         done: ({ document }) => setsCelsius(document)
     },
@@ -80,7 +83,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have written equations that do more',
-        text: 'A relationship can set values directly too ("Equations that set values" under its Implementation), and a value that settles much faster than everything around it is often better set directly than stepped. A source term can have parameters of its own, and both kinds can be written as a program instead of an equation.',
+        text: 'A relationship into an update adds to its value, as a source term does, and one with several equations sets several values at once ("Equations that set values" under its Implementation). A value that settles much faster than everything around it is often better an update than stepped. A source term can have parameters of its own, and both kinds of term can be written as a program instead of an equation.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

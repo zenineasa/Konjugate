@@ -858,7 +858,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .resultReadOnlyNotice span { color: #627a82; }
 .resultModeLocked .editorCard :is(input, select, textarea, math-field, .geometrySourceButton):disabled,
 .resultModeLocked .editorCard math-field[read-only] { opacity: .55; cursor: not-allowed; }
-.editorCard [data-node-panel][hidden] { display: none; }
+.editorCard [data-node-panel][hidden], .editorCard [data-edge-panel][hidden] { display: none; }
 .nodeResultsPanel { position: relative; min-height: 285px; padding: 8px !important; }
 .nodeResultPlot { width: 100%; height: 270px; }
 .plotChips { display: flex; flex-wrap: wrap; gap: 2px 12px; padding: 4px 6px 2px; }
@@ -2428,3 +2428,45 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .passwordDialog.settingsSheet .settingsPage .settingsFieldRows > label > span:first-child { flex-basis: 100%; }
     .passwordDialog.settingsSheet .settingsPage :is(.connectionsNetwork, .settingsFieldRows .runModeSwitch) { flex-wrap: nowrap; }
 }
+
+/* A node's states and their equations (docs/proposals/ratesAndUpdates.md): each state a card, its equation built from every
+   term reaching it, its kind chosen by its equation; and, in a term's editor, where the term lands. */
+.stateCard { margin-bottom: 9px; padding: 8px 8px 6px; background: #0f1c24; border: 1px solid #243640; border-radius: 6px; }
+.stateCard .editorStateRow { margin-bottom: 6px; }
+.stateEquation { display: grid; gap: 4px; }
+.stateKind { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 32px; padding: 3px 8px; color: #cfe0e6; background: transparent; border: 1px dashed #36515c; border-radius: 5px; cursor: pointer; text-align: left; }
+.stateKind:hover, .stateKind[aria-expanded="true"] { border-color: var(--accent); }
+.stateKindMath, .kindOptionMath, .stateTermMath, .landsOnMath { color: #d5e1e6; font-size: 11px; }
+.stateKind[data-kind="update"] .kindBadge { color: #e3c27a; background: rgb(227 194 122 / 10%); border-color: #4f4630; }
+.kindChooser { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.kindChooser[hidden] { display: none; }
+.kindOption { display: grid; justify-items: center; gap: 3px; padding: 8px 6px; color: #9fb4bd; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; cursor: pointer; }
+.kindOption[aria-checked="true"] { border-color: var(--accent); background: rgb(66 201 188 / 6%); }
+.kindOption strong { color: #d5e1e6; font-size: 8px; }
+.kindOption small { color: #6e828e; font-size: 7px; text-align: center; line-height: 1.35; }
+.stateTerms { display: grid; gap: 4px; }
+.stateTerm { display: grid; grid-template-columns: 10px 1fr 10px; align-items: center; gap: 6px; width: 100%; padding: 6px 7px; color: inherit; background: #111f28; border: 1px solid #243640; border-radius: 5px; text-align: left; cursor: pointer; }
+.stateTerm:hover { border-color: #3c6670; }
+.stateTermSign { color: #7ea3ad; font-size: 11px; text-align: center; }
+.stateTermBody { display: grid; gap: 3px; min-width: 0; }
+.stateTermTitle { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.stateTermTitle strong { overflow: hidden; color: #c6d5db; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.stateTermTitle small { overflow: hidden; color: #627782; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.stateTermMath { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.stateTermOpen { color: #5d7a85; font-size: 12px; }
+.emptyMath { color: #566b76; }
+.addLinkButton { justify-self: start; margin-top: 2px; padding: 2px 0; color: var(--accent); background: none; border: 0; font-size: 8px; cursor: pointer; }
+.addLinkButton:hover { color: #a1e8e2; }
+#nodeEditorStrayTerms { display: grid; gap: 4px; margin-top: 10px; }
+#nodeEditorStrayTerms[hidden] { display: none; }
+.landsOnList { display: grid; gap: 6px; margin-bottom: 10px; }
+.landsOnList[hidden] { display: none; }
+.landsOn { display: grid; gap: 4px; width: 100%; padding: 8px 9px; color: inherit; background: #0f1c24; border: 1px solid #243640; border-radius: 6px; text-align: left; cursor: pointer; }
+.landsOn:hover { border-color: #3c6670; }
+.landsOnLabel { color: #6e828e; font-size: 6px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.landsOnState { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.landsOnState strong { color: #c6d5db; font-size: 8px; }
+.landsOnState small { color: #627782; font-size: 7px; }
+.landsOnMath { overflow-x: auto; overflow-y: hidden; white-space: nowrap; }
+.stateTermMath, .landsOnMath { scrollbar-width: none; }
+.stateTermMath::-webkit-scrollbar, .landsOnMath::-webkit-scrollbar { display: none; }

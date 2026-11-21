@@ -21,9 +21,9 @@
 // anyone has taught the canvas about it.
 const nodeDocumentKeys = new Set([
     'id', 'name', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
-    'states', 'sourceTerms', 'implementation', 'appearance'
+    'states', 'sourceTerms', 'implementation', 'appearance', 'updates', 'updatesLimit'
 ]);
-const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning']);
+const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning', 'kind']);
 const relationshipDocumentKeys = new Set([
     'id', 'groupId', 'name', 'description', 'source', 'target', 'directionality', 'enabled', 'equation', 'equationModel',
     'implementation', 'parameters', 'appearance'
@@ -59,6 +59,10 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
         enabled: node.enabled !== false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
         integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
+        // How its Updates are worked out (docs/proposals/ratesAndUpdates.md), as the file says it: absent means once per step
+        // in a file that says its states' kinds, and settling in one that does not.
+        ...(node.updates !== undefined ? { updates: node.updates } : {}),
+        ...(node.updatesLimit !== undefined ? { updatesLimit: node.updatesLimit } : {}),
         sourceTerms: (node.sourceTerms ?? []).map((term) => ({ ...term, parameters: term.parameters ?? [] })),
         // The node's own program: a computational-node provider, or an installed FMU's reference (edited under
         // Program in the node editor).
@@ -76,6 +80,8 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
             exactValue: context.stateValueText(state.initialValue, state.unit).exact,
             className: '',
             ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
+            // Rate or Update, when the file says it.
+            ...(state.kind !== undefined ? { kind: state.kind } : {}),
             // A state's other fields (its `definitionKey` in a component, a field from a newer Konjugate) are kept too.
             ...unknownFields(state, stateDocumentKeys)
         })),
@@ -101,6 +107,8 @@ export function nodeToDocument(definition, context) {
         // zeros and ones.
         ...(rotation.every((angle) => angle === 0) ? {} : { rotation }),
         ...(scale.every((factor) => factor === 1) ? {} : { scale }),
+        ...(definition.updates !== undefined ? { updates: definition.updates } : {}),
+        ...(definition.updatesLimit !== undefined ? { updatesLimit: definition.updatesLimit } : {}),
         states: definition.states.map((state) => ({
             ...structuredClone(state.extraFields ?? {}),
             id: state.id ?? context.newId(),
@@ -109,7 +117,8 @@ export function nodeToDocument(definition, context) {
             initialValue: (state.initialValue ?? Number.parseFloat(state.value)) || 0,
             unit: state.unit ?? '',
             // A tunable initial value: a fitting target with bounds, as for a parameter.
-            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {})
+            ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
+            ...(state.kind !== undefined ? { kind: state.kind } : {})
         })),
         sourceTerms: (definition.sourceTerms ?? []).map((term) => ({
             ...term,

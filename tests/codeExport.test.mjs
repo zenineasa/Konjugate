@@ -498,10 +498,25 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     several.edges.push({ id: id(), name: 'Joint', source: { nodeId: several.nodes[0].id }, target: { nodeId: several.nodes[0].id }, parameters: [],
         equationModel: { bindings: [], outputs: [] } });
     assert.throws(() => generateStandaloneProgram(several, 'python'), /sets several states with its equations, which code export cannot write yet/);
-    const kinded = singleNodeSourceTermModel();
-    kinded.nodes[0].states[0].kind = 'update';
-    assert.throws(() => generateStandaloneProgram(kinded, 'python'), /"Tank · Pressure" says its kind \(rate or update\), which code export cannot write yet/);
-    const settling = singleNodeSourceTermModel();
+    // A file that says its kinds is written as the file that says none and means the same; one that means something else is
+    // refused, saying what.
+    const plain = generateStandaloneProgram(singleNodeSourceTermModel(), 'python');
+    const rated = singleNodeSourceTermModel();
+    rated.nodes[0].states[0].kind = 'rate';
+    assert.equal(generateStandaloneProgram(rated, 'python'), plain, 'A Rate said as a rate exports as it did unsaid.');
+    const oncePerStep = singleNodeSourceTermModel();
+    oncePerStep.nodes[0].states[0].kind = 'update';
+    assert.throws(() => generateStandaloneProgram(oncePerStep, 'python'), /Node "Tank" works its updates out once per step, which code export cannot write yet/);
+    const settling = structuredClone(oncePerStep);
     settling.nodes[0].updates = 'settle';
-    assert.throws(() => generateStandaloneProgram(settling, 'python'), /Node "Tank" says how its Updates are worked out, which code export cannot write yet/);
+    assert.throws(() => generateStandaloneProgram(settling, 'python'), /"Tank · Pressure" reads itself, which code export cannot write yet/);
+    // An Update set from a constant, settling, exports as the setsValue term it was before.
+    const constant = (document) => {
+        Object.assign(document.nodes[0].sourceTerms[0].expressionModel, { latex: '5', bindings: [], mathJson: 5 });
+        return document;
+    };
+    const settledConstant = constant(structuredClone(settling));
+    const legacy = constant(singleNodeSourceTermModel());
+    legacy.nodes[0].sourceTerms[0].setsValue = true;
+    assert.equal(generateStandaloneProgram(settledConstant, 'python'), generateStandaloneProgram(legacy, 'python'), 'A settling Update exports as a setsValue term does.');
 });

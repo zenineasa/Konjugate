@@ -12,6 +12,8 @@
          grant that satisfies this specific (upstream, prebuilt) library. -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-IwmIp3J6ml9TVrsUHr5Z1p6wiBifhHlZqIFPhblWPHI='; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self'">
     <title>Konjugate</title>
+    <link rel="stylesheet" href="../../node_modules/mathlive/mathlive-fonts.css">
+    <link rel="stylesheet" href="../../node_modules/mathlive/mathlive-static.css">
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
         {
@@ -925,22 +927,13 @@
 
         <div id="nodeEditor" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-node-tab="model" type="button">Model</button><button data-node-tab="results" type="button">Results</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-node-tab="equations" type="button">Equations</button><button data-node-tab="details" type="button">Details</button><button data-node-tab="results" type="button">Results</button><button data-node-tab="numerics" type="button">Numerics</button><button data-node-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
-            <div data-node-panel="model">
+            <div data-node-panel="equations">
             <section>
-                <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
-                <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
-                <label class="editorField" id="editNodeSubsystemField"><span>Subsystem</span><select id="editNodeSubsystem" aria-label="The subsystem this node is in"></select></label>
-                <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>
-            </section>
-            <section>
-                <h3>States <button id="editAddState" type="button">＋</button></h3>
                 <div id="nodeEditorStates"></div>
-            </section>
-            <section>
-                <h3>Source terms <button id="editAddSourceTerm" type="button">＋</button></h3>
-                <div id="nodeEditorSourceTerms"></div>
+                <button id="editAddState" class="addLinkButton" type="button">＋ Add a state</button>
+                <div id="nodeEditorStrayTerms" hidden></div>
             </section>
             <section id="nodeProgramSection">
                 <label class="editorField"><span>Program</span><select id="editNodeProgramKind">
@@ -971,6 +964,14 @@
             </section>
             <div class="passwordError" id="editNodeError" role="alert"></div>
             </div>
+            <div data-node-panel="details" hidden>
+            <section>
+                <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
+                <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
+                <label class="editorField" id="editNodeSubsystemField"><span>Subsystem</span><select id="editNodeSubsystem" aria-label="The subsystem this node is in"></select></label>
+                <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>
+            </section>
+            </div>
             <div data-node-panel="results" hidden>
                 <section class="nodeResultsPanel">
                     <div id="nodeResultPlot" class="nodeResultPlot" role="img" aria-label="Selected node state history"></div>
@@ -987,9 +988,17 @@
                         <option value="explicit">Explicit Euler</option>
                         <option value="semiImplicit">Semi-implicit Euler (states in order)</option>
                     </select></label>
-                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy. Reorder the states on the Model tab with their ↑ and ↓ buttons, or Alt (⌥ on a Mac) with the arrow keys.</p>
+                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy. Reorder the states on the Equations tab with their ↑ and ↓ buttons, or Alt (⌥ on a Mac) with the arrow keys.</p>
                     <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
                     <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
+                </section>
+                <section id="nodeUpdatesSection">
+                    <label class="editorField"><span>Updates</span><select id="editNodeUpdates">
+                        <option value="oncePerStep">Once per step</option>
+                        <option value="settle">Settle within the step</option>
+                    </select></label>
+                    <p id="editNodeUpdatesHint" class="builderHint"></p>
+                    <label class="editorField" id="editNodeUpdatesLimitField"><span>At most, sweeps of a ring</span><input id="editNodeUpdatesLimit" type="number" min="1" step="1" placeholder="1000"></label>
                 </section>
             </div>
             <div data-node-panel="appearance" hidden>
@@ -1033,18 +1042,14 @@
             <header><div><span class="contextKicker">Source term</span><strong id="sourceTermEditorTitle">Source term</strong></div><button data-close-card type="button">×</button></header>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <section>
+                <div id="termLandsOn" class="landsOnList"></div>
                 <label class="editorField"><span>Implementation</span><select id="termImplementationKind">
                     <option value="equation">Equation</option>
                     <option value="cpp">C++ program</option>
                     <option value="python">Python program</option>
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
-                <label class="editorField"><span>Sets</span><select id="termSetsValue">
-                    <option value="false">The derivative (default)</option>
-                    <option value="true">The value directly</option>
-                </select></label>
-                <p id="termSetsValueHint" class="builderHint" hidden>The computed value replaces the state's value each substep instead of contributing a rate. This state must have no other source term or edge contributing to it.</p>
-                <label class="editorField"><span>Updates</span><select id="termOutputState"></select></label>
+                <label class="editorField"><span>Lands on</span><select id="termOutputState"></select></label>
                 <h3>Parameters <button id="termAddParameter" type="button">＋</button></h3>
                 <p class="builderHint">Live parameters can be adjusted during an online simulation; constant parameters can be fitted against measured data.</p>
                 <div id="termParameters"></div>
@@ -1061,23 +1066,12 @@
         </div>
 
         <div id="edgeEditor" class="contextCard editorCard edgeEditor hidden">
-            <header><div><span class="contextKicker">Edge</span><strong>Relationship</strong></div><button data-close-card type="button">×</button></header>
+            <header><div><span class="contextKicker">Relationship</span><strong id="edgeEditorTitle">Relationship</strong></div><button data-close-card type="button">×</button></header>
+            <nav class="cardTabs"><button class="active" data-edge-tab="term" type="button">Term</button><button data-edge-tab="details" type="button">Details</button><button data-edge-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
+            <div data-edge-panel="term">
             <section>
-                <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
-                <label class="editorField"><span>Description</span><textarea id="editEdgeDescription" rows="3" placeholder="Optional notes on what this relationship represents"></textarea></label>
-                <div class="endpointGrid">
-                    <label class="editorField"><span>Source</span><select id="editEdgeSource"></select></label>
-                    <label class="editorField"><span>Target</span><select id="editEdgeTarget"></select></label>
-                </div>
-                <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
-                <label class="editorField"><span>Colour</span><input id="editEdgeColor" type="color"></label>
-                <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
-                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
-                <div id="edgeEditorParameters"></div>
-                <div class="passwordError" id="editEdgeError" role="alert"></div>
-            </section>
-            <section>
+                <div id="edgeLandsOn" class="landsOnList"></div>
                 <label class="editorField"><span>Implementation</span><select id="editEdgeImplementationKind">
                     <option value="equation">Equation</option>
                     <option value="equations">Equations that set values</option>
@@ -1085,7 +1079,11 @@
                     <option value="python">Python program</option>
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
-                <label class="editorField"><span>Updates</span><select id="editEquationOutput"></select></label>
+                <label class="editorField"><span>Lands on</span><select id="editEquationOutput"></select></label>
+                <h3>Parameters <button id="editAddEdgeParameter" type="button">＋</button></h3>
+                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
+                <div id="edgeEditorParameters"></div>
+                <div class="passwordError" id="editEdgeError" role="alert"></div>
                 <div id="editEdgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div>
                 <div id="editEdgeEquationsList" hidden></div>
                 <math-field id="editEdgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
@@ -1095,6 +1093,23 @@
                 <div id="editEdgeReferencePicker" class="referencePicker"><span>Available references</span><div id="editStateReferenceChips"></div></div>
                 <div id="editEdgeProviderSection" hidden></div>
             </section>
+            </div>
+            <div data-edge-panel="details" hidden>
+            <section>
+                <label class="editorField"><span>Name</span><input id="editEdgeName" autocomplete="off"></label>
+                <label class="editorField"><span>Description</span><textarea id="editEdgeDescription" rows="3" placeholder="Optional notes on what this relationship represents"></textarea></label>
+                <div class="endpointGrid">
+                    <label class="editorField"><span>Source</span><select id="editEdgeSource"></select></label>
+                    <label class="editorField"><span>Target</span><select id="editEdgeTarget"></select></label>
+                </div>
+                <label class="editorField"><span>Directionality</span><select id="editEdgeDirectionality"><option value="bidirectional">Bidirectional</option><option value="directed">Directed source → target</option></select></label>
+            </section>
+            </div>
+            <div data-edge-panel="appearance" hidden>
+            <section>
+                <label class="editorField"><span>Colour</span><input id="editEdgeColor" type="color"></label>
+            </section>
+            </div>
             <footer><button data-delete-edge type="button">Delete edge</button><button id="toggleEdgeEnabled" type="button">Disable edge</button></footer>
         </div>
 

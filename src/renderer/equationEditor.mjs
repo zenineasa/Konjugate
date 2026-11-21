@@ -41,10 +41,12 @@ export class ReferenceChips {
 //   onCommit()               an edit ended (the field lost focus or Enter), for owners that group edits into one undo step
 //   canEdit()                false while the formula must not change (results are open); inserting then does nothing
 //   onModeChange(mode)       return true to say the owner handled showing and hiding the fields itself
+//   hint(latex)              guidance for a valid formula not yet written (a new relationship's 0), shown as a hint
 export class EquationEditor {
     #visible = true;
 
-    constructor({ mathField, source, diagnostics = null, modeButtons = [], modeKey = null, references = null, onInput = null, onCommit = null, canEdit = () => true, onModeChange = null }) {
+    constructor({ mathField, source, diagnostics = null, modeButtons = [], modeKey = null, references = null, onInput = null, onCommit = null, canEdit = () => true, onModeChange = null, hint = null }) {
+        this.hint = hint;
         this.mathField = mathField;
         this.source = source;
         this.diagnostics = diagnostics;
@@ -133,15 +135,22 @@ export class EquationEditor {
     }
 
     // Writes the verdict on the line under the formula.
-    showVerdict(valid, message) {
+    showVerdict(valid, message, { hint = false } = {}) {
         if (!this.diagnostics) return;
         this.diagnostics.classList.toggle('valid', valid);
+        this.diagnostics.classList.toggle('hint', hint);
         this.diagnostics.textContent = message;
     }
 
-    // Checks the formula and says so; returns the validation for owners that act on it.
+    // Checks the formula and says so; returns the validation for owners that act on it. A valid formula the owner has guidance
+    // for (`hint`, given the LaTeX) shows that guidance instead, as a hint, never as an error.
     diagnose(bindings, latex = this.latex) {
         const validation = this.validate(latex, bindings);
+        const hint = validation.valid ? this.hint?.(latex) : null;
+        if (hint) {
+            this.showVerdict(true, hint, { hint: true });
+            return validation;
+        }
         this.showVerdict(validation.valid, validation.valid ? this.validMessage : validation.errors.join(' '));
         return validation;
     }

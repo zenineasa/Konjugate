@@ -966,6 +966,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .equationSource[hidden], .equationMathField[hidden] { display: none; }
 .equationDiagnostics { min-height: 19px; padding: 5px 2px 0; color: #d08187; font-size: 7px; line-height: 1.4; }
 .equationDiagnostics.valid { color: #69b9b2; }
+/* Guidance for a formula that is valid but not yet written (a new relationship's 0): plain, neither an error nor a pass. */
+.equationDiagnostics.valid.hint { color: #8fa3ac; }
 .unitInput { display: grid; grid-template-columns: 1fr 38px; }
 .unitInput input { border-radius: 4px 0 0 4px; }
 .unitInput b { display: grid; place-items: center; color: #647985; background: #172630; border: 1px solid #2b3d48; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; font-weight: 500; }

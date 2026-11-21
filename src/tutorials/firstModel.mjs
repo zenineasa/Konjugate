@@ -68,9 +68,10 @@ const steps = Object.freeze([
     {
         id: 'equation',
         title: 'Write the equation',
-        text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. k is the Coefficient on the Parameters tab, set to 1; change it to make the heat flow faster or slower.`,
+        text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it, empty: until it is written, the relationship adds 0. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. k is the Coefficient on the Parameters tab, set to 1; change it to make the heat flow faster or slower.`,
         target: '#edgeEditor', fill: 'edgeEquation', skip: 'edgeEquation',
-        done: ({ document }) => edgesBetweenNodes(document).some((edge) => String(edge.equation ?? '').trim() !== '' && edge.equationModel?.output?.role === 'target')
+        // Its part reads both ends (a new relationship starts as k times its source's state alone) and lands on the block.
+        done: ({ document }) => edgesBetweenNodes(document).some((edge) => /source/.test(edge.equation ?? '') && /target/.test(edge.equation ?? '') && edge.equationModel?.output?.role === 'target')
     },
     {
         id: 'run',

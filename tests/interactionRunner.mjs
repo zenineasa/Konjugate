@@ -2830,13 +2830,21 @@ export async function runInteractionTests(driver) {
         // The other end is not offered as its own target.
         const made = async () => (await savedProject()).edges.find((edge) => edge.name === 'New relationship');
         assert.equal((await made()).equationModel.output.role, 'target');
-        assert.equal((await made()).equation ?? '', '');
+        // Its part 0 until written: valid, nothing red, the model still valid; the field empty to type in, a hint under it.
+        assert.equal((await made()).equation, '0');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeMathField').value`), '');
+        assert.deepEqual(await evaluate(window, `[...document.querySelector('#equationDiagnostics').classList]`), ['equationDiagnostics', 'valid', 'hint'], 'A new relationship\'s part is flagged before anything is typed.');
+        assert.match(await evaluate(window, `document.querySelector('#equationDiagnostics').textContent`), /Write this relationship's equation/);
+        await settle(window, 'validation');
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The new relationship did not reach native validation.');
+        assert.match(await evaluate(window, `document.querySelector('#validationSummary').textContent`), /Model valid/, 'A new relationship made the model invalid.');
         // One undo takes it away.
         await undoRedo('undo');
         assert.equal(await relationshipCount(), '3 relationships', 'One undo did not take the new relationship away.');
 
         // Its part written with a reference button, in the names the card reads it by, and stored in its own.
         await newRelationship('Electrical losses', 'Enclosed air');
+        await evaluate(window, `(() => { const field = document.querySelector('#editEdgeMathField'); field.focus(); field.setValue(''); })()`);
         await evaluate(window, `[...document.querySelectorAll('#editStateReferenceChips button')].find((button) => /_EL$/.test(button.textContent)).click()`);
         await waitFor(window, `document.querySelector('#editEdgeMathField').value.trim() !== ''`, 'The reference button wrote nothing.');
         await evaluate(window, `document.querySelector('#editEdgeMathField').dispatchEvent(new Event('change', { bubbles: true }))`);

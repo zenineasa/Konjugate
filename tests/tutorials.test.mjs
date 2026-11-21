@@ -72,6 +72,7 @@ test('steps are done by what the model holds, and by the interface where only it
     assert.equal(step('addEdge').done({ document: { ...two, edges: [edge(1, 10, '')] }, ui: ui() }), true, 'A relationship made between the two, with its part still empty, is the step done.');
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, '')] }, ui: ui() }), false);
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10)] }, ui: ui() }), true);
+    assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, '0')] }, ui: ui() }), false, 'The 0 a new relationship starts with is not the equation asked for.');
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, undefined, 'source')] }, ui: ui() }), false, 'An equation that changes the heater is not the one asked for.');
     assert.equal(step('run').done({ document: two, ui: ui({ hasResult: true }) }), true);
     assert.equal(step('plotBlock').done({ document: two, ui: ui() }), false);

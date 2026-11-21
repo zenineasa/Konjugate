@@ -164,7 +164,9 @@ const edgeEquation = new EquationEditor({
     canEdit: () => !activeResult,
     onInput: (latex, origin) => previewEdgeEquation(latex, origin),
     onCommit: () => finishEquationEdit(),
-    onModeChange: (mode) => switchSeveralEquationsMode(mode)
+    onModeChange: (mode) => switchSeveralEquationsMode(mode),
+    // A relationship whose part is 0 (a new one, until written) adds nothing: said as guidance, not as a pass or an error.
+    hint: (latex) => (String(latex ?? '').trim() === '0' ? 'Write this relationship\'s equation here. Until you do, it is 0 and changes nothing.' : null)
 });
 const sourceTermEquation = new EquationEditor({
     mathField: $('#termMathField'), source: $('#termEquation'), diagnostics: $('#termEquationDiagnostics'),
@@ -4208,7 +4210,10 @@ function renderEdgeEditor(definition) {
         definition.equation = definition.equationModel.latex;
         edgeEquation.show(true);
         const context = relationshipEquationContext(definition);
-        edgeEquation.load(relationshipLatexInReaderNames(definition.equationModel.latex, definition.equationModel.bindings, definition, context.equations.nodes, null, context.names, definition.parameters));
+        // A part of 0 (a new relationship's, until written) opens as an empty field, so what is typed is not written after the 0;
+        // the line under it says it is 0 until then.
+        const stored = String(definition.equationModel.latex ?? '').trim() === '0' ? '' : definition.equationModel.latex;
+        edgeEquation.load(relationshipLatexInReaderNames(stored, definition.equationModel.bindings, definition, context.equations.nodes, null, context.names, definition.parameters));
         output.value = equationOutputValue(definition.equationModel.output.role, definition.equationModel.output.stateId);
         edgeEquation.diagnose(definition.equationModel.bindings, definition.equationModel.latex);
         renderRelationshipReferences(definition, definition.equationModel.bindings);
@@ -12712,7 +12717,9 @@ function createPickedRelationship() {
         directionality: template?.bidirectional ? 'bidirectional' : 'directed',
         color: Number.parseInt((template?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: 0, enabled: true,
-        equation: template?.latex ?? '',
+        // Not from a template: 0, valid from the start and adding nothing, so nothing is flagged and the model runs unchanged
+        // until the person writes it (its card says so, as a hint); k = 1 is there to write it with.
+        equation: template?.latex ?? '0',
         parameters
     };
     definition.equationModel = normalizeEdgeEquationModel(definition);

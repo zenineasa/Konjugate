@@ -8,12 +8,16 @@ export const firstModelValues = Object.freeze({
     source: { name: 'Heater', temperature: 350 },
     target: { name: 'Block', temperature: 300 },
     state: { name: 'Temperature', symbol: 'temperature', unit: 'K' },
-    // The relationship's own coefficient, `k`, is added by the edge builder, so the equation is the only thing to enter.
-    equationLatex: String.raw`k\cdot(\mathrm{sourceTemperature}-\mathrm{targetTemperature})`,
+    // A new relationship comes with a coefficient, `k`, so its part is the only thing to type. Its card writes each end's
+    // state with that node's short name (Heater → H, Block → B), and what is typed in those names is stored in its own.
+    typedEquation: String.raw`k\cdot(\mathrm{temperature}_{\mathrm{H}}-\mathrm{temperature}_{\mathrm{B}})`,
     runSeconds: 10
 });
 
 const nodesWithState = (document) => (document?.nodes ?? []).filter((node) => (node.states ?? []).length > 0);
+// A node defined as asked: its name, and a state with the asked symbol starting at the asked value.
+const defined = (document, { name, temperature }) => (document?.nodes ?? []).some((node) => node.name?.trim().toLowerCase() === name.toLowerCase()
+    && (node.states ?? []).some((state) => state.symbol === firstModelValues.state.symbol && Number(state.initialValue) === temperature));
 const edgesBetweenNodes = (document) => {
     const ids = new Set((document?.nodes ?? []).map((node) => node.id));
     return (document?.edges ?? []).filter((edge) => edge.source?.nodeId !== edge.target?.nodeId && ids.has(edge.source?.nodeId) && ids.has(edge.target?.nodeId));
@@ -31,36 +35,41 @@ const steps = Object.freeze([
     {
         id: 'addNode',
         title: 'Add a node',
-        text: 'A node is a thing in your model that has numbers which change over time. Open the Add menu and choose Node.',
-        target: '#addButton', skip: 'openNodeBuilder',
-        done: ({ document, ui }) => ui.nodeBuilderOpen || nodesWithState(document).length >= 1
+        text: 'A node is a thing in your model that has numbers which change over time. Open the Add menu and choose Node: it is made with one state, and its card opens.',
+        target: '#addButton', skip: 'newNode',
+        done: ({ document }) => nodesWithState(document).length >= 1
     },
     {
         id: 'firstNode',
         title: `Define the ${firstModelValues.source.name.toLowerCase()}`,
-        text: `Name it "${firstModelValues.source.name}" and give it one state: ${firstModelValues.state.name} (symbol ${firstModelValues.state.symbol}), starting at ${firstModelValues.source.temperature} ${firstModelValues.state.unit}. A state is a number the simulation moves forward in time. Then press Create node.`,
-        target: '#nodeBuilder', fill: 'sourceNode', skip: 'createSourceNode',
-        done: ({ document }) => nodesWithState(document).length >= 1
+        text: `On the card's Details tab, name it "${firstModelValues.source.name}". Back on Equations, its state's line is open: name the state ${firstModelValues.state.name}, symbol ${firstModelValues.state.symbol}, starting at ${firstModelValues.source.temperature}, unit ${firstModelValues.state.unit}. A state is a number the simulation moves forward in time.`,
+        target: '#nodeEditor', fill: 'sourceNode', skip: 'sourceNode',
+        done: ({ document }) => defined(document, firstModelValues.source)
     },
     {
         id: 'secondNode',
         title: 'Add a second node',
-        text: `Add another the same way: "${firstModelValues.target.name}", with ${firstModelValues.state.name} starting at ${firstModelValues.target.temperature} ${firstModelValues.state.unit}. This is what the heater will warm.`,
-        target: (ui) => (ui.nodeBuilderOpen ? '#nodeBuilder' : '#addButton'), fill: 'targetNode', skip: 'createTargetNode',
-        done: ({ document }) => nodesWithState(document).length >= 2
+        text: `Add another the same way: "${firstModelValues.target.name}", with ${firstModelValues.state.name} (${firstModelValues.state.symbol}) starting at ${firstModelValues.target.temperature} ${firstModelValues.state.unit}. This is what the heater will warm.`,
+        target: (ui) => (ui.nodeEditorFor && ui.nodeEditorFor !== firstModelValues.source.name ? '#nodeEditor' : '#addButton'), fill: 'targetNode', skip: 'targetNode',
+        done: ({ document }) => defined(document, firstModelValues.target)
     },
     {
         id: 'addEdge',
         title: 'Connect them',
-        text: `Both nodes start in the same spot, so one hides the other: drag one of them aside on the canvas first. An edge is a relationship: an equation that says how one node changes another. Open the Add menu, choose Edge, and make it go from ${firstModelValues.source.name} to ${firstModelValues.target.name}.`,
-        target: (ui) => (ui.edgeBuilderOpen ? '#edgeBuilder' : '#addButton'), fill: 'edgeEndpoints', skip: 'chooseEdgeEndpoints',
-        done: ({ document, ui }) => (ui.edgeBuilderOpen && ui.edgeSourceNodeId && ui.edgeTargetNodeId && ui.edgeSourceNodeId !== ui.edgeTargetNodeId) || edgesBetweenNodes(document).length >= 1
+        text: `Both nodes start in the same spot, so one hides the other: drag one of them aside on the canvas first. An edge is a relationship: an equation that says how one node changes another. Open the Add menu, choose Edge, then click ${firstModelValues.source.name} and then ${firstModelValues.target.name}.`,
+        target: (ui) => {
+            if (ui.endpointPick === 'source') return ui.labelOf(firstModelValues.source.name);
+            if (ui.endpointPick === 'target') return ui.labelOf(firstModelValues.target.name);
+            return '#addButton';
+        },
+        fill: 'connectNodes', skip: 'connectNodes',
+        done: ({ document }) => edgesBetweenNodes(document).length >= 1
     },
     {
         id: 'equation',
         title: 'Write the equation',
-        text: `Enter k·(sourceTemperature − targetTemperature): the block warms at a rate proportional to how much hotter the heater is. k is the "Coefficient" parameter the edge builder adds for you under Custom parameters, set to 1; change its value to make the heat flow faster or slower. Choose the reference buttons under the equation instead of typing the names. Check that "Updates" says target.${firstModelValues.state.symbol}, so the equation changes the block and not the heater, and press Create edge.`,
-        target: '#edgeBuilder', fill: 'edgeEquation', skip: 'createEdge',
+        text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. k is the Coefficient on the Parameters tab, set to 1; change it to make the heat flow faster or slower.`,
+        target: '#edgeEditor', fill: 'edgeEquation', skip: 'edgeEquation',
         done: ({ document }) => edgesBetweenNodes(document).some((edge) => String(edge.equation ?? '').trim() !== '' && edge.equationModel?.output?.role === 'target')
     },
     {

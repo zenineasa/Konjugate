@@ -25,11 +25,11 @@ A heater and a block joined by one relationship, which is the smallest model tha
 
 | # | The person… | Highlighted | Done when |
 | --- | --- | --- | --- |
-| 1 | Opens the Add menu and chooses Node | Add button, then the Node entry | The node builder is open |
-| 2 | Names it "Heater" and gives it a state "Temperature" (symbol `temperature`, initial value 350, unit K) | The name field, the state row | The node exists with that state |
-| 3 | Adds a second node, "Block", with the same state starting at 300 | As above | Two nodes exist |
-| 4 | Opens Add, chooses Edge, picks Heater as source and Block as target | The edge builder's From and To | The edge builder holds those two nodes |
-| 5 | Enters the equation that moves heat, `k·(sourceTemperature − targetTemperature)`, with `k` the coefficient the edge builder already adds | The Updates field, the equation field, the reference chips | The relationship exists and its equation is valid |
+| 1 | Opens the Add menu and chooses Node, which makes a node with one state and opens its card | Add button, then the Node entry | A node exists |
+| 2 | Names it "Heater" on its card's Details tab and, on Equations, makes its state "Temperature" (symbol `temperature`, initial value 350, unit K) | The node's card | A node named Heater has that state |
+| 3 | Adds a second node, "Block", with the same state starting at 300 | As above | A node named Block has that state |
+| 4 | Opens Add, chooses Edge, and clicks Heater then Block on the canvas, which makes the relationship and opens its card | Add button, then each node's label in turn | A relationship joins the two |
+| 5 | Enters the equation that moves heat, `k·(temperature_H − temperature_B)` in the card's names for the two ends, with `k` the coefficient every new relationship comes with | The relationship's card: its field and the reference chips | Its equation is written and lands on the Block |
 | 6 | Presses Run, with the suggested 20 s run | Run button | A run has completed |
 | 7 | Clicks the Block, which opens its editor on the plot of its temperature over the run | The Block's label, then the plot | The Block's plot has been on screen |
 | 8 | Drags the timeline and watches the two temperatures converge | The timeline | The timeline has been moved |
@@ -64,7 +64,7 @@ A tour that dead-ends is worse than none. Each step states what must be true to 
 
 ## Desktop and web
 
-The tour uses only what both editions have: the canvas, the node and edge builders, the equation editor, the run, the timeline, saving and the Examples menu. Steps that mention a button the web edition lacks do not exist. The finish step adds one sentence on desktop only, pointing to the Extensions dialog ("Add-ons chart results and drive runs; plugins add providers"), and a sentence in the web edition pointing at the desktop app for them.
+The tour uses only what both editions have: the canvas, the node and relationship cards, the equation editor, the run, the timeline, saving and the Examples menu. Steps that mention a button the web edition lacks do not exist. The finish step adds one sentence on desktop only, pointing to the Extensions dialog ("Add-ons chart results and drive runs; plugins add providers"), and a sentence in the web edition pointing at the desktop app for them.
 
 ## Decisions (settled)
 

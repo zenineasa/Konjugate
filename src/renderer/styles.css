@@ -682,8 +682,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .css2dContainer { position: absolute; inset: 0; transition: right .18s ease; }
 .webglContainer { z-index: 1; }
 .css2dContainer { z-index: 4; overflow: hidden; pointer-events: none; }
-.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .webglContainer,
-.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .css2dContainer { right: 460px; }
+.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .webglContainer,
+.canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .css2dContainer { right: 460px; }
 .webglSurface,
 .css2dSurface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .webglSurface:focus { outline: none; }
@@ -824,7 +824,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 [data-entity-editor] { width: 440px; }
 .contextCard.nodeEditor,
 .contextCard.edgeEditor,
-.contextCard.edgeBuilder,
 .contextCard.edgeGroupEditor,
 .contextCard.causalInference,
 .contextCard.parameterTuning {
@@ -834,13 +833,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 }
 .contextCard.nodeEditor > header,
 .contextCard.edgeEditor > header,
-.contextCard.edgeBuilder > header,
 .contextCard.edgeGroupEditor > header,
 .contextCard.causalInference > header,
 .contextCard.parameterTuning > header { position: sticky; z-index: 2; top: 0; background: rgb(14 25 34 / 98%); }
 .contextCard.nodeEditor > footer,
 .contextCard.edgeEditor > footer,
-.contextCard.edgeBuilder > footer,
 .contextCard.edgeGroupEditor > footer,
 .contextCard.causalInference > footer,
 .contextCard.parameterTuning > footer { position: sticky; z-index: 2; bottom: 0; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
@@ -988,15 +985,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .primitiveIcon.dangerIcon { color: #e08a8a; background: rgb(224 138 138 / 10%); border-color: rgb(224 138 138 / 22%); }
 .addPalette > button[hidden] { display: none; }
 .addPalette > button > b { color: #58707c; font-size: 15px; font-weight: 400; }
-.builderCard { width: 390px; max-height: calc(100% - 24px); overflow: auto; }
-.builderCard > header { display: flex; align-items: center; justify-content: space-between; padding: 13px 14px 11px; border-bottom: 1px solid #293a45; }
-.builderCard > header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 12px; }
-.builderCard > header button { color: #60747f; background: transparent; border: 0; font-size: 16px; }
-.builderCard section { padding: 12px 13px; border-bottom: 1px solid #263742; }
-.builderCard section h3 { display: flex; align-items: center; justify-content: space-between; margin: 0 0 9px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
-.builderCard section h3 button { padding: 0; color: var(--accent); background: none; border: 0; font-size: 13px; }
-.builderCard footer { display: flex; justify-content: flex-end; gap: 7px; padding: 10px 12px; }
-.builderCard footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid transparent; border-radius: 4px; font-size: 8px; }
 .endpointGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 .vectorGrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
 .endpointField > div { display: grid; grid-template-columns: 1fr auto; }
@@ -1036,6 +1024,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .endpointPickBanner strong { color: #d7e7eb; font-size: 9px; }
 .endpointPickBanner small { margin-top: 2px; color: #6f858f; font-size: 7px; }
 .endpointPickBanner button { height: 27px; padding: 0 8px; color: #89a1aa; background: #152630; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
+.endpointPickBanner select { height: 27px; max-width: 180px; padding: 0 6px; color: #aab9c1; background: #0f1d26; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
 .endpointPickBanner kbd { margin-left: 5px; color: #607781; font-family: inherit; font-size: 7px; }
 .validationPanel { position: absolute; z-index: 33; top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow: auto; color: #aebfc7; background: rgb(13 24 32 / 96%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 45%); backdrop-filter: blur(12px); }
 .validationPanel[hidden] { display: none; }
@@ -1058,9 +1047,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .canvas.pickingEndpoint .node-label-container.endpointEligible { opacity: 1; }
 .canvas.pickingEndpoint .node-label-container.endpointEligible .objectLabel { border-color: #58a69f; box-shadow: 0 0 0 1px rgb(66 201 188 / 20%), 0 8px 22px rgb(0 0 0 / 30%); }
 @media (max-width: 820px) {
-    .contextCard.nodeEditor, .contextCard.edgeEditor, .contextCard.edgeBuilder { width: calc(100vw - 20px); }
-    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .webglContainer,
-    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden), > .edgeBuilder:not(.hidden)) .css2dContainer { right: 0; }
+    .contextCard.nodeEditor, .contextCard.edgeEditor { width: calc(100vw - 20px); }
+    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .webglContainer,
+    .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .css2dContainer { right: 0; }
 }
 .referencePicker { margin: 9px 0; color: #607581; font-size: 7px; }
 .referencePicker button { padding: 4px 6px; color: #7dbab5; background: rgb(66 201 188 / 7%); border: 1px solid #29454a; border-radius: 9px; font-size: 7px; }
@@ -1076,8 +1065,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .sourceTermProviderFields { display: grid; grid-column: 1 / -1; gap: 6px; padding: 9px; background: rgb(66 201 188 / 4%); border: 1px solid #263d45; border-radius: 5px; }
 .sourceTermProviderFields[hidden] { display: none; }
 .sourceTermProviderFields .providerBindingRow { grid-template-columns: 1fr 1fr 18px; }
-.builderRow input, .builderRow select, .builderCard textarea { width: 100%; min-width: 0; height: 27px; padding: 0 6px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
-.builderCard textarea { height: auto; padding: 7px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.4; }
+.builderRow input, .builderRow select { width: 100%; min-width: 0; height: 27px; padding: 0 6px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; }
 .geometrySourceRow { display: flex; gap: 6px; }
 .geometrySourceButton { display: flex; flex: 1; min-width: 0; height: 29px; align-items: center; justify-content: center; padding: 0 8px; color: #7ec8c2; background: #0b171f; border: 1px dashed #31515a; border-radius: 5px; cursor: pointer; font-size: 8px; white-space: nowrap; }
 .geometrySourceButton:hover { background: rgb(66 201 188 / 6%); border-color: #47736f; }
@@ -1893,10 +1881,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* The list above the detail, as the Examples window's: the two columns of the desktop's rule are more than a phone is wide. */
     .extensionsDialog .examplesExplorerBody { grid-template-columns: minmax(0, 1fr); }
     .webProviderEditorDialog { width: calc(100% - 16px); }
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
     /* A card placed by script (a position from where the person last put it, or from the button that opened it) has no use for that here:
        on a phone it is docked, so the inline left and top are overridden. */
-    .contextCard.builderCard { left: 10px !important; top: auto !important; max-height: calc(100% - var(--title-height) - var(--tools-height) - 20px); }
     .assistantPanel { left: 10px !important; top: calc(var(--title-height) + var(--tools-height) + 10px) !important; width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
     .contextCard.diagnosticsPanel { inset: auto 0 var(--sheet-floor, 0px) 0 !important; width: auto !important; max-height: calc(62% - var(--sheet-floor, 0px)); }
     /* The two cards over the results bar take the width they have, not 285 or 310 pixels pinned to a corner. */
@@ -1905,7 +1892,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .cardTabs { overflow-x: auto; scrollbar-width: none; }
     .cardTabs button { flex: 1 0 auto; padding: 0 7px; }
     /* The trial notice sits where a docked card begins, so it steps aside while one is open. */
-    body:has(#canvas > :is(.contextCard.editorCard, .builderCard, .assistantPanel):not(.hidden):not([hidden])) .webEditionBanner { display: none; }
+    body:has(#canvas > :is(.contextCard.editorCard, .assistantPanel):not(.hidden):not([hidden])) .webEditionBanner { display: none; }
     .examplesExplorerBody { grid-template-columns: 1fr; }
     .examplesExplorerResults { height: 300px; }
     .examplesExplorerDetail { height: auto; min-height: 120px; }
@@ -2001,7 +1988,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     body:has(#canvas > :is(.componentLibraryPanel, .validationPanel, .liveParameterPanel, .assistantPanel):not([hidden])) .selectionActions,
     /* Not over an editor, which covers the canvas and has its own Delete. */
     .selectionActions:not(:has(button:not(:disabled))),
-    body:has(#canvas > :is(.nodeEditor, .edgeEditor, .edgeBuilder):not(.hidden)) .selectionActions { display: none; }
+    body:has(#canvas > :is(.nodeEditor, .edgeEditor):not(.hidden)) .selectionActions { display: none; }
 
     /* More controls than a phone is wide: the strip scrolls sideways, and Run stays in reach at its end. */
     .toolstrip { overflow-x: auto; scrollbar-width: none; }
@@ -2032,8 +2019,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     [data-web-edition] .webEditionBanner { right: calc(var(--dock-width) + 8px); }
     .tourFloating { right: calc(var(--dock-width) + 12px) !important; }
     /* The cards that cover the canvas leave the rail in sight. */
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { right: calc(var(--dock-width) + 8px); width: calc(100% - var(--dock-width) - 16px); }
-    .contextCard.builderCard { left: 8px !important; }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning) { right: calc(var(--dock-width) + 8px); width: calc(100% - var(--dock-width) - 16px); }
     .assistantPanel { left: 8px !important; width: calc(100% - var(--dock-width) - 16px); }
     .contextCard.diagnosticsPanel { right: var(--dock-width) !important; }
     :is(.executionSummaryCard, .stabilityFindingsCard) { right: 8px; left: 8px; }
@@ -2063,8 +2049,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
         inset: auto 8px 8px auto !important; width: min(340px, 60%) !important; max-height: calc(100% - var(--tools-height) - 16px); border: 1px solid #3a4d58; border-radius: 12px;
     }
     :is(#nodeContextMenu, #edgeContextMenu, #waypointContextMenu, #addPalette)::before { display: none; }
-    .contextCard:is(.nodeEditor, .edgeEditor, .edgeBuilder, .edgeGroupEditor, .causalInference, .parameterTuning, .builderCard) { width: min(440px, calc(100% - 20px)); }
-    .contextCard.builderCard { left: auto !important; right: 10px; }
+    .contextCard:is(.nodeEditor, .edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning) { width: min(440px, calc(100% - 20px)); }
     .assistantPanel { left: auto !important; right: 10px; top: calc(var(--tools-height) + 10px) !important; width: min(420px, calc(100% - 20px)); height: calc(100% - var(--tools-height) - 20px); }
     .contextCard.diagnosticsPanel { inset: var(--tools-height) 0 var(--sheet-floor, 0px) auto !important; width: min(50%, 400px) !important; }
     :is(.executionSummaryCard, .stabilityFindingsCard) { left: auto; right: 10px; width: min(320px, calc(100% - 20px)); max-height: calc(100% - 120px); }
@@ -2533,6 +2518,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
 /* A relationship's Equations tab, drawn from its side: each state it lands on as a row of that state's equation. */
 #edgeLanding .equationLine { flex-wrap: wrap; align-items: center; gap: 4px; }
+/* A part too long for the card's width scrolls inside its chip, and the parts before the field wrap, rather than run off the card. */
+#edgeLanding .equationLhs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; white-space: normal; }
+.partChip { max-width: 100%; overflow-x: auto; }
+/* The captions over a state's fields, so a new state's "x x 0" reads as its name, symbol, start and unit. */
+.stateFieldHead { color: #6e828e; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
 #edgeLanding [data-landing-lhs], #edgeLanding [data-landing-rhs] { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 #edgeLanding [data-landing-lhs][hidden], #edgeLanding [data-landing-rhs][hidden] { display: none; }
 .rowLeftSide { color: #d5e1e6; font-size: 11px; }
@@ -2542,3 +2532,5 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .relationshipRow[hidden] { display: none; }
 .relationshipRowHead { display: block; margin-bottom: 4px; color: #7d939c; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .relationshipRowLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* A parameter's display symbol sits on a line of its own, after the rest of its row. */
+.editorParameterRow .parameterField:has([data-field="displaySymbol"]), #groupParameterRows .parameterField:has([data-field="displaySymbol"]) { order: 1; grid-column: 1 / 3; }

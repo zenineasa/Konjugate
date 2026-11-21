@@ -76,3 +76,17 @@ test('a part typed in a reader\'s names is stored in the relationship\'s own, ho
     // A command, a parameter and a state of no end are left as written.
     assert.equal(readerLatexToStored(String.raw`\cdot k\sqrt{y_C}`, bindings, edge, nodes, null, names), String.raw`\cdot k\sqrt{y_C}`);
 });
+
+test('a parameter shown by its display symbol is written back by its symbol, and one without stays as it is', async () => {
+    const { displaySymbolsToStored, relationshipLatexInReaderNames: inReader, readerLatexToStored } = await import('../src/stateEquations.mjs');
+    const parameters = [{ symbol: 'angularVelocity', displaySymbol: '\\omega' }, { symbol: 'k' }, { symbol: 'gain', displaySymbol: 'K' }];
+    assert.equal(displaySymbolsToStored(String.raw`-\omega\cdot\omegaX+K\cdot k`, parameters), String.raw`-\mathrm{angularVelocity}\cdot\omegaX+\mathrm{gain}\cdot k`);
+    const nodes = [{ id: 1, name: 'Ground pivot A', states: [{ id: 3, symbol: 'y' }] }, { id: 27, name: 'Crank pin B', states: [{ id: 29, symbol: 'y' }] }];
+    const edge = { source: { nodeId: 1 }, target: { nodeId: 27 } };
+    const bindings = [{ symbol: 'sourceY', kind: 'state', role: 'source', stateId: 3 }, { symbol: 'targetY', kind: 'state', role: 'target', stateId: 29 }];
+    const names = shortNames(nodes);
+    const stored = String.raw`-\mathrm{angularVelocity}\cdot\left(\mathrm{targetY}-\mathrm{sourceY}\right)`;
+    const shown = inReader(stored, bindings, edge, nodes, null, names, parameters);
+    assert.equal(shown, String.raw`-\omega\cdot\left(y_{\mathrm{B}}-y_{\mathrm{A}}\right)`);
+    assert.equal(readerLatexToStored(shown, bindings, edge, nodes, null, names, parameters), stored);
+});

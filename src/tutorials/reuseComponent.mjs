@@ -90,8 +90,8 @@ const steps = Object.freeze([
     {
         id: 'connect',
         title: 'Connect the two',
-        text: `Open Add edge (the + button, then Edge). From and To list the nodes inside the boxes by where they are: choose the first box's ${values.link.from} and the second box's ${values.link.to}, write an equation, and press Create edge. Heat now flows from one component to the other.`,
-        target: (ui) => (ui.edgeBuilderOpen ? '#edgeSource' : '#addButton'), skip: 'connectInstances', ...values.link,
+        text: `Open the Add menu and choose Edge. The boxes hide the nodes inside them, so choose its ends from the list in the bar at the top, which names each by where it is: the first box's ${values.link.from}, then the second box's ${values.link.to}. Its card opens: write its equation there. Heat now flows from one component to the other.`,
+        target: (ui) => (ui.endpointPick ? '#endpointPickList' : '#addButton'), skip: 'connectInstances', ...values.link,
         done: ({ document }) => connected(document)
     },
     {

@@ -60,7 +60,7 @@ export function stateInReaderNames(symbol, nodeId, reader, names) {
 
 // A relationship's stored LaTeX (`latex`, with `bindings` naming source.x as sourceX) written in its reader's names. `edge`
 // gives the two ends (`source`, `target` as node ids, or `{ nodeId }`), `nodes` their states.
-export function relationshipLatexInReaderNames(latex, bindings, edge, nodes, reader, names) {
+export function relationshipLatexInReaderNames(latex, bindings, edge, nodes, reader, names, parameters = []) {
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
     const endId = (role) => (typeof edge[role] === 'object' && edge[role] !== null ? edge[role].nodeId : edge[role]);
     const replacements = new Map();
@@ -71,7 +71,25 @@ export function relationshipLatexInReaderNames(latex, bindings, edge, nodes, rea
         if (!state) continue;
         replacements.set(binding.symbol, stateInReaderNames(state.symbol, nodeId, reader, names));
     }
+    for (const [symbol, shown] of displaySymbols(parameters)) replacements.set(symbol, shown);
     return renameSymbols(latex, replacements);
+}
+
+// A parameter's display symbol, by its symbol, for each parameter that has one (ω for angularVelocity).
+export function displaySymbols(parameters) {
+    return new Map((parameters ?? []).filter((parameter) => typeof parameter.displaySymbol === 'string' && parameter.displaySymbol.trim()).map((parameter) => [parameter.symbol, parameter.displaySymbol.trim()]));
+}
+
+// LaTeX with each parameter's display symbol written back as its symbol (\omega → \mathrm{angularVelocity}): a command
+// not followed by a letter, or the display symbol exactly as written, wherever it stands on its own.
+export function displaySymbolsToStored(latex, parameters) {
+    let stored = String(latex ?? '');
+    for (const [symbol, shown] of displaySymbols(parameters)) {
+        const escaped = shown.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(/^\\[A-Za-z]+$/.test(shown) ? `${escaped}(?![A-Za-z])` : `(?<![A-Za-z\\\\])${escaped}(?![A-Za-z])`, 'g');
+        stored = stored.replace(pattern, symbol.length === 1 ? symbol : `\\mathrm{${symbol}}`);
+    }
+    return stored;
 }
 
 // The lines a node's Equations tab shows, in the node's order: each state on its own, except states nothing changes
@@ -139,7 +157,7 @@ export function mergeOwnParts(terms) {
 // The other way: LaTeX a person typed in a reader's names (y_B − y_A on a relationship's card) written back in the stored
 // names its bindings give (targetY − sourceY), so what is stored never changes form. Each state reference is matched however
 // it is written -- y_B, y_{B}, \mathrm{y}_{\mathrm{B}} -- and a bare one only when it is the reader node's own (reader not null).
-export function readerLatexToStored(latex, bindings, edge, nodes, reader, names) {
+export function readerLatexToStored(latex, bindings, edge, nodes, reader, names, parameters = []) {
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
     const endId = (role) => (typeof edge[role] === 'object' && edge[role] !== null ? edge[role].nodeId : edge[role]);
     const stored = new Map();
@@ -153,7 +171,7 @@ export function readerLatexToStored(latex, bindings, edge, nodes, reader, names)
     const symbol = String.raw`(?:\\(?:mathrm|operatorname|text)\{([A-Za-z][A-Za-z0-9]*)\}|([A-Za-z]))`;
     const subscript = String.raw`(?:\{\s*(?:\\(?:mathrm|text)\{([A-Za-z0-9]+)\}|([A-Za-z0-9]+))\s*\}|([A-Za-z0-9]))`;
     const pattern = new RegExp(String.raw`(\\[A-Za-z]+(?![A-Za-z]))(?<!\\(?:mathrm|operatorname|text))|${symbol}(?:\s*_\s*${subscript})?`, 'g');
-    return String(latex ?? '').replace(pattern, (whole, command, named, letter, braced, bracedPlain, single) => {
+    return displaySymbolsToStored(latex, parameters).replace(pattern, (whole, command, named, letter, braced, bracedPlain, single) => {
         if (command) return whole;
         const name = named ?? letter;
         const short = braced ?? bracedPlain ?? single ?? '';

@@ -48,8 +48,7 @@ export function providerReferenceValue(reference) {
 }
 
 // A parameter's id comes back as a number when it is canonical digits (a real parameter), and as
-// the text itself otherwise -- the relationship builder uses placeholder ids such as
-// "builderParameter0" for parameters that don't exist yet, which its caller maps to real ones.
+// the text itself otherwise (a placeholder for a parameter that does not exist yet), for its caller to map.
 export function parseProviderReference(value) {
     if (typeof value !== 'string') return null;
     const parts = value.split(':');

@@ -90,7 +90,7 @@ import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '..
 import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
-import { foldedName, foldStates, mergeOwnParts, readerLatexToStored, relationshipLatexInReaderNames, renameSymbols, shortNames, stateInReaderNames } from '../stateEquations.mjs';
+import { displaySymbols, displaySymbolsToStored, foldedName, foldStates, mergeOwnParts, readerLatexToStored, relationshipLatexInReaderNames, renameSymbols, shortNames, stateInReaderNames } from '../stateEquations.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
@@ -124,7 +124,7 @@ import {
 } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // The program sections of the four editors that can write a relationship as a program (src/renderer/programSourceSection.mjs), drawn
-// before anything looks for their parts by id. Each source-term row of the node builder makes its own (addSourceTermRow).
+// before anything looks for their parts by id.
 const relationshipPluginHint = 'A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.';
 const termProgramSection = new ProgramSourceSection({
     container: document.querySelector('#termProviderSection'),
@@ -140,11 +140,6 @@ const groupProgramSection = new ProgramSourceSection({
     container: document.querySelector('#groupProviderSection'), rows: 10, bindingsClass: 'builderRows',
     ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', reset: 'groupInsertProviderTemplate', source: 'groupProviderSource', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
     bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used on every edge of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
-});
-const builderProgramSection = new ProgramSourceSection({
-    container: document.querySelector('#edgeProviderSection'), rows: 10, bindingsClass: 'builderRows',
-    ids: { open: 'openProviderEditor', reset: 'insertProviderTemplate', source: 'edgeProviderSource', addBinding: 'addProviderBinding', bindings: 'providerBindingRows', outputKey: 'providerOutputKey' },
-    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
 
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -163,11 +158,6 @@ const altKeyLabel = isMac ? '⌥' : 'Alt+';
 
 // The four places a relationship or source-term formula is written, each one EquationEditor (equationEditor.mjs); what a change does
 // to the model is each one's own. They are made here, before anything runs, so every function below can use them.
-const builderEquation = new EquationEditor({
-    mathField: $('#edgeMathField'), source: $('#edgeEquation'), diagnostics: $('#builderEquationDiagnostics'),
-    modeButtons: $$('[data-builder-equation-mode]'), modeKey: 'builderEquationMode', references: $('#stateReferenceChips'),
-    onInput: () => renderBuilderEquationDiagnostics()
-});
 const edgeEquation = new EquationEditor({
     mathField: $('#editEdgeMathField'), source: $('#editEdgeEquation'), diagnostics: $('#equationDiagnostics'),
     modeButtons: $$('[data-equation-mode]'), modeKey: 'equationMode', references: $('#editStateReferenceChips'),
@@ -626,14 +616,11 @@ const faceDirections = {
     bottom: new THREE.Vector3(0, -1, 0)
 };
 let activeEndpointPick = null;
-let endpointPickRestoreCard = null;
 let endpointPickMaterialState = new Map();
 // Set by applyEdgeTemplate to pick both endpoints from scratch (no node pre-selected) by chaining
 // two single-endpoint picks -- the endpoint-pick mechanism itself is otherwise untouched.
 let endpointPickContinuation = null;
 let cameraAnimation = null;
-let pendingImportedGeometry = null;
-let pendingGeometryFileName = '';
 let currentValidation = { valid: false, issues: [], executableModel: null };
 let validationRevision = 0;
 let engineValidationTimer = null;
@@ -2305,7 +2292,7 @@ function updateRelationshipSelection() {
 }
 
 function hideCards(except) {
-    if (activeEndpointPick && except !== $('#edgeBuilder')) finishEndpointPick();
+    if (activeEndpointPick) finishEndpointPick();
     $$('.contextCard').forEach((card) => {
         if (card !== except) card.classList.add('hidden');
     });
@@ -2547,7 +2534,7 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
             body = escapeHtml(`${programLanguage(program)} program`);
         } else {
             const model = entry.outputIndex !== undefined ? edge?.equationModel?.outputs?.[entry.outputIndex] : edge?.equationModel;
-            const latex = relationshipLatexInReaderNames(termLatex(entry, equations), edge?.equationModel?.bindings, edge ?? {}, equations.nodes, reader, names);
+            const latex = relationshipLatexInReaderNames(termLatex(entry, equations), edge?.equationModel?.bindings, edge ?? {}, equations.nodes, reader, names, edge?.parameters);
             // A part that starts with a minus takes it as its sign: "− ω(y − y_A)", not "+ −ω(y − y_A)".
             let shown = entry.reciprocal ? `-\\left(${latex}\\right)` : latex;
             if (!first && /^\s*-/.test(shown)) {
@@ -2568,7 +2555,7 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
             chip.classList.add('program');
             body = escapeHtml(`its own ${programLanguage(term.implementation.kind)} program`);
         } else {
-            const renames = new Map(definition.states.map((state) => [state.symbol, stateInReaderNames(state.symbol, definition.id, reader, names)]));
+            const renames = new Map([...definition.states.map((state) => [state.symbol, stateInReaderNames(state.symbol, definition.id, reader, names)]), ...displaySymbols(term?.parameters)]);
             const latex = renameSymbols(termLatex(entry, equations), renames);
             body = latexMarkup(latex);
             chip.dataset.latex = latex;
@@ -2647,7 +2634,8 @@ function ownPartField(node, state, ownEquations, help) {
         onCommit: () => commitOwnPart(node, state.id),
         canEdit: () => !activeResult
     });
-    mathField.value = latex === '0' && !ownEquations.length ? '' : latex;
+    const parameters = ownEquations.flatMap((term) => term.parameters ?? []);
+    mathField.value = latex === '0' && !ownEquations.length ? '' : renameSymbols(latex, displaySymbols(parameters));
     source.value = mathField.value;
     const definition = node.userData.definition;
     editor.renderReferences(sourceTermExpressionBindingCandidates(definition, ownEquations[0] ?? { parameters: [] }));
@@ -2682,6 +2670,8 @@ function previewOwnPart(node, stateId, latex, editor) {
         const others = new Set(own.slice(1).map((candidate) => candidate.id));
         definition.sourceTerms = definition.sourceTerms.filter((candidate) => !others.has(candidate.id));
     }
+    // Typed with a parameter's display symbol (\\omega), stored by its symbol.
+    latex = displaySymbolsToStored(latex, term.parameters);
     term.expressionModel = normalizeSourceTermExpressionModel(definition, term, { ...(term.expressionModel ?? {}), latex, output: { stateId } });
     term.expression = latex;
     editor?.diagnose(term.expressionModel.bindings, latex);
@@ -2999,6 +2989,7 @@ function stateFieldsRow(node, state, index) {
     row.className = 'editorStateRow';
     row.dataset.stateId = String(state.id);
     row.innerHTML = `
+        <span class="stateFieldHead" aria-hidden="true">Name</span><span class="stateFieldHead" aria-hidden="true">Symbol</span><span class="stateFieldHead" aria-hidden="true">Starts at</span><span class="stateFieldHead" aria-hidden="true">Unit</span><span></span><span></span><span></span><span></span>
         <input data-field="name" value="${escapeHtml(state.label)}" aria-label="State name">
         <input data-field="symbol" value="${escapeHtml(state.symbol)}" aria-label="State symbol">
         <input data-field="value" type="number" value="${escapeHtml(state.initialValue ?? 0)}" aria-label="Initial value">
@@ -3081,7 +3072,9 @@ function renderNodeEditorModel(node) {
     const unchanged = (state) => !(equations.reaching.get(Number(state.id)) ?? []).length;
     let index = 0;
     for (const line of foldStates(definition.states, unchanged)) {
-        stateContainer.appendChild(line.folded
+        // A fold of one state, once opened, is that state's own line: its name said once, not on the fold and again on the line.
+        const openSingle = line.states.length === 1 && openFoldedLines.has(`${definition.id}:${line.states[0].id}`);
+        stateContainer.appendChild(line.folded && !openSingle
             ? renderFoldedLine(node, line.states, index, equations, names)
             : renderStateLine(node, line.states[0], index, equations, names));
         index += line.states.length;
@@ -3478,6 +3471,7 @@ function renderSourceTermParameters(node, term, container = $('#termParameters')
                 ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
+            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
@@ -3516,6 +3510,9 @@ function renderSourceTermParameters(node, term, container = $('#termParameters')
                 const target = snapshotTerm.parameters.find((candidate) => candidate.id === parameter.id);
                 target.name = $('[data-field="name"]', row).value.trim();
                 target.symbol = symbol;
+                const displaySymbol = $('[data-field="displaySymbol"]', row)?.value.trim();
+                if (displaySymbol) target.displaySymbol = displaySymbol;
+                else delete target.displaySymbol;
                 // Value, unit and mode belong to the shared definition when linked.
                 const owner = target.sharedParameterId !== undefined
                     ? snapshot.sharedParameters.find((shared) => shared.id === target.sharedParameterId) : target;
@@ -4051,6 +4048,7 @@ function renderEdgeEditor(definition) {
                 ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
+            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
@@ -4118,6 +4116,7 @@ function renderEdgeEditor(definition) {
                 edited[input.dataset.field] = input.dataset.field === 'value'
                     ? Number(input.value) || 0
                     : input.value.trim();
+                if (input.dataset.field === 'displaySymbol' && !edited.displaySymbol) delete edited.displaySymbol;
                 if (edited.mode === 'live') {
                     edited.control = readControl();
                     delete edited.tuning;
@@ -4209,7 +4208,7 @@ function renderEdgeEditor(definition) {
         definition.equation = definition.equationModel.latex;
         edgeEquation.show(true);
         const context = relationshipEquationContext(definition);
-        edgeEquation.load(relationshipLatexInReaderNames(definition.equationModel.latex, definition.equationModel.bindings, definition, context.equations.nodes, null, context.names));
+        edgeEquation.load(relationshipLatexInReaderNames(definition.equationModel.latex, definition.equationModel.bindings, definition, context.equations.nodes, null, context.names, definition.parameters));
         output.value = equationOutputValue(definition.equationModel.output.role, definition.equationModel.output.stateId);
         edgeEquation.diagnose(definition.equationModel.bindings, definition.equationModel.latex);
         renderRelationshipReferences(definition, definition.equationModel.bindings);
@@ -4715,7 +4714,7 @@ function renderRelationshipRows(definition) {
         line.className = 'relationshipRowLine';
         line.insertAdjacentHTML('beforeend', `<span class="rowLeftSide">${relationshipLeftSide(context.other, context)}</span>`);
         line.append(...relationshipRowChips(context.other, context, { before: true }));
-        const shown = isProgram ? '' : relationshipLatexInReaderNames(definition.equationModel?.latex ?? '', definition.equationModel?.bindings, definition, context.equations.nodes, null, context.names);
+        const shown = isProgram ? '' : relationshipLatexInReaderNames(definition.equationModel?.latex ?? '', definition.equationModel?.bindings, definition, context.equations.nodes, null, context.names, definition.parameters);
         line.appendChild(relationshipLiveChip(definition, { negated: true, latex: shown }));
         line.append(...relationshipRowChips(context.other, context, { before: false }));
         otherRow.appendChild(line);
@@ -4796,24 +4795,6 @@ function openWaypointContextMenu(clientX, clientY) {
     positionCard(menu, clientX, clientY);
 }
 
-function addStateVariableRow(values = {}) {
-    const row = document.createElement('div');
-    row.className = 'builderRow stateVariableRow';
-    row.innerHTML = `
-        <input data-field="name" placeholder="Name" value="${values.name ?? ''}">
-        <input data-field="symbol" placeholder="Symbol" value="${values.symbol ?? ''}">
-        <input data-field="value" type="number" placeholder="Initial" value="${values.value ?? ''}">
-        <input data-field="unit" placeholder="Unit" value="${values.unit ?? ''}">
-        <button class="removeBuilderRow" type="button" title="Remove">×</button>
-    `;
-    $('#stateVariableRows').appendChild(row);
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => {
-        row.remove();
-        refreshSourceStateOptions();
-    });
-    row.querySelectorAll('input').forEach((input) => input.addEventListener('input', refreshSourceStateOptions));
-    refreshSourceStateOptions();
-}
 
 function normalizeImportedGeometry(geometry) {
     if (!geometry.attributes.normal) geometry.computeVertexNormals();
@@ -4998,12 +4979,6 @@ async function applyLibraryShape(id) {
         });
         $('#editNodeShape').value = '';
         $('#editGeometryStatus').textContent = `${name} applied`;
-    } else if (shapeLibraryTarget === 'builder') {
-        pendingImportedGeometry?.dispose();
-        pendingImportedGeometry = geometry;
-        pendingGeometryFileName = name;
-        $('#newNodeShape').value = 'imported';
-        $('#geometryImportStatus').textContent = `${name} ready`;
     }
     geometry.dispose();
     $('#shapeLibraryDialog').close();
@@ -5232,7 +5207,6 @@ let componentLibraryEntries = null;
 let componentLibraryDomains = new Set();
 let componentLibraryType = 'all';
 let componentLibraryPlacementCount = 0;
-let pendingEdgeTemplate = null;
 
 function componentLibraryKindLabel(template) {
     if (template.kind === 'bundle') return `Bundle · ${template.edges.length} edges`;
@@ -5406,7 +5380,7 @@ function closeComponentLibraryPanel() {
 // concerns such as placement, endpoint picking and imported-geometry cleanup, but must not
 // reproduce the actual commit sequence.
 // `history` adds to this insertion's undo step whatever else the caller changed alongside it.
-function insertNodeDefinition(definition, { attachCurrentTransform = false, openInspector = true, history = null } = {}) {
+function insertNodeDefinition(definition, { attachCurrentTransform = false, openInspector = true, history = null, tab = null } = {}) {
     const kinds = sayKindsAsTheModel([definition]);
     model.nodes.push(definition);
     createNode(definition);
@@ -5418,11 +5392,11 @@ function insertNodeDefinition(definition, { attachCurrentTransform = false, open
         undo: () => { history?.undo(); setNodeVisibility(definition.id, false); kinds?.undo(); },
         redo: () => { kinds?.redo(); history?.redo(); setNodeVisibility(definition.id, true); }
     });
-    if (openInspector) openNodeEditor(definition);
+    if (openInspector) openNodeEditor(definition, undefined, undefined, { tab });
     return object;
 }
 
-function insertRelationshipDefinition(definition, { openInspector = true } = {}) {
+function insertRelationshipDefinition(definition, { openInspector = true, tab = null } = {}) {
     model.relationships.push(definition);
     createRelationship(definition);
     updateRelationships();
@@ -5432,7 +5406,7 @@ function insertRelationshipDefinition(definition, { openInspector = true } = {})
         undo: () => setRelationshipVisibility(definition.id, false),
         redo: () => setRelationshipVisibility(definition.id, true)
     });
-    if (openInspector) openRelationshipEditor(definition);
+    if (openInspector) openRelationshipEditor(definition, undefined, undefined, { tab });
     return definition;
 }
 
@@ -5509,40 +5483,13 @@ function applyNodeTemplate(template) {
 // equation would -- a state named differently just leaves that symbol unresolved, which the builder's
 // own live diagnostics and the model validator already surface, with no separate binding step to build.
 function applyEdgeTemplate(template) {
-    openEdgeBuilder();
-    $('#newEdgeName').value = template.name;
-    $('#newEdgeDirectionality').value = template.bidirectional ? 'bidirectional' : 'directed';
-    if (template.color) $('#newEdgeColor').value = template.color;
-    $('#edgeParameterRows').replaceChildren();
-    (template.parameters ?? []).forEach((parameter) => addEdgeParameterRow(parameter));
-    $('#edgeEquation').value = template.latex;
-    $('#edgeMathField').setValue(template.latex, { silenceNotifications: true });
-    renderBuilderEquationDiagnostics();
+    startNewRelationship({ template });
     const hint = $('#componentLibraryHint');
     const portList = (port) => [port].flat().map((symbol) => `"${symbol}"`).join('/');
     hint.textContent = `Pick a source and target node for "${template.name}". States named ${portList(template.ports.source)} (source) and ${portList(template.ports.target)} (target) bind automatically; anything else is left for you to fix afterward.`;
     hint.hidden = false;
-    startEndpointPick('source');
-    endpointPickContinuation = () => {
-        startEndpointPick('target');
-        endpointPickContinuation = () => {
-            hint.hidden = true;
-            // Most templates are happy with the builder's own default output (the target's first
-            // state), but one whose relevant state isn't the target's first -- e.g. a rod's
-            // correction lands on velocity while position is declared first -- names it explicitly
-            // instead. Required on every template (see validateComponentTemplate), since that
-            // default is not reliable across a chained two-endpoint pick to begin with.
-            const roleNode = model.nodes.find((node) => node.id === Number($(`#edge${template.output.role[0].toUpperCase()}${template.output.role.slice(1)}`).value));
-            const state = roleNode?.states.find((candidate) => candidate.symbol === template.output.state);
-            const option = state && [...$('#edgeEquationOutput').options].find((candidate) => candidate.value === equationOutputValue(template.output.role, state.id));
-            if (option) {
-                $('#edgeEquationOutput').value = option.value;
-                builderOutputChosen = true;
-            }
-            pendingEdgeTemplate = template;
-        };
-    };
 }
+
 
 // Assigns the selected nodes to a bundle's endpoints. A node fits an endpoint when it has every
 // state symbol that endpoint's edge ports name, so the assignment is normally forced by the nodes
@@ -5704,146 +5651,15 @@ $('#componentLibraryButton').addEventListener('click', () => {
 $('#closeComponentLibraryPanel').addEventListener('click', closeComponentLibraryPanel);
 $('#componentLibrarySearch').addEventListener('input', renderComponentLibraryResults);
 
-function stateVariablesFromBuilder() {
-    return $$('.stateVariableRow').map((row) => ({
-        name: $('[data-field="name"]', row).value.trim(),
-        symbol: $('[data-field="symbol"]', row).value.trim(),
-        value: $('[data-field="value"]', row).value,
-        unit: $('[data-field="unit"]', row).value.trim()
-    })).filter((state) => state.name && state.symbol);
-}
 
-function refreshSourceStateOptions() {
-    const states = stateVariablesFromBuilder();
-    $$('.sourceState').forEach((select) => {
-        const selected = select.value;
-        select.replaceChildren(...states.map((state) => new Option(`${state.name} (${state.symbol})`, state.symbol)));
-        if ([...select.options].some((option) => option.value === selected)) select.value = selected;
-    });
-    $$('#sourceTermRows .providerBindingRow [data-field="reference"]').forEach((select) => {
-        const selected = select.value;
-        select.replaceChildren(...states.map((state) => new Option(state.symbol, `state:${state.symbol}`)));
-        if ([...select.options].some((option) => option.value === selected)) select.value = selected;
-    });
-}
 
-function addSourceTermRow() {
-    const row = document.createElement('div');
-    row.className = 'builderRow sourceTermRow';
-    row.innerHTML = `
-        <select class="sourceState" aria-label="Updated state"></select>
-        <select class="sourceTermKind" aria-label="Implementation">
-            <option value="equation">Equation</option>
-            <option value="cpp">C++ program</option>
-            <option value="python">Python program</option>
-        </select>
-        <input class="sourceExpression" placeholder="Source expression, e.g. qDot / heatCapacity">
-        <button class="removeBuilderRow" type="button" title="Remove">×</button>
-        <div class="sourceTermProviderFields" hidden></div>
-    `;
-    $('#sourceTermRows').appendChild(row);
-    refreshSourceStateOptions();
 
-    const kindSelect = $('.sourceTermKind', row);
-    const expressionInput = $('.sourceExpression', row);
-    const providerFields = $('.sourceTermProviderFields', row);
-    // The same program section as the source-term editor's (src/renderer/programSourceSection.mjs), one for each row, its parts named
-    // by class since a builder has as many as it has rows.
-    const section = new ProgramSourceSection({
-        container: providerFields, rows: 8,
-        classes: { open: 'openSourceTermProviderEditor', reset: 'insertSourceTermTemplate', source: 'sourceTermProviderSource', addBinding: 'addSourceTermBinding', bindings: 'sourceTermProviderBindingRows', outputKey: 'sourceTermProviderOutputKey' },
-        bindingHint: 'Each binding exposes one state of this node to the provider under a stable key.', outputPlaceholder: 'e.g. rateGradient'
-    });
-
-    const bindingCandidates = () => stateVariablesFromBuilder().map((state) => ({ symbol: state.symbol, label: state.symbol }));
-    const refreshBindingRowOptions = () => {
-        const candidates = bindingCandidates();
-        $$('.providerBindingRow', providerFields).forEach((bindingRow) => {
-            const select = $('[data-field="reference"]', bindingRow);
-            const previous = select.value;
-            select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, `state:${candidate.symbol}`)));
-            if ([...select.options].some((option) => option.value === previous)) select.value = previous;
-        });
-    };
-    const currentBindingKeys = () => $$('.providerBindingRow [data-field="key"]', providerFields).map((input) => ({ key: input.value }));
-    const regenerateTemplate = () => {
-        section.source = defaultProviderSource(kindSelect.value, currentBindingKeys(), section.outputKey, $('#newNodeName').value);
-    };
-    const addBindingRow = () => {
-        const bindingRow = document.createElement('div');
-        bindingRow.className = 'providerBindingRow';
-        bindingRow.innerHTML = `
-            <label class="parameterField"><span>Key</span><input data-field="key"></label>
-            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
-            <button type="button" title="Remove binding">×</button>
-        `;
-        section.bindings.appendChild(bindingRow);
-        refreshBindingRowOptions();
-        bindingRow.querySelector('button').addEventListener('click', () => bindingRow.remove());
-    };
-
-    kindSelect.addEventListener('change', () => {
-        const isEquation = kindSelect.value === 'equation';
-        expressionInput.hidden = !isEquation;
-        providerFields.hidden = isEquation;
-        if (!isEquation && !section.source.trim()) regenerateTemplate();
-    });
-    section.onReset(() => {
-        if (section.source.trim() && !window.confirm('Replace the current provider source with a freshly generated template?')) return;
-        regenerateTemplate();
-    });
-    section.onAddBinding(addBindingRow);
-    section.onOpenEditor(() => {
-        providerEditTarget = { type: 'builderSourceTerm', sourceElement: section.sourceField };
-        window.providerEditor.openWindow({ source: section.source, kind: kindSelect.value, title: $('#newNodeName').value });
-    });
-
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => { row.remove(); refreshSourceStateOptions(); });
-}
-
-function addEdgeParameterRow(values = {}) {
-    const control = normalizedParameterControl({ value: Number(values.value) || 0, control: values.control });
-    const row = document.createElement('div');
-    row.className = 'builderRow parameterRow';
-    row.innerHTML = `
-        <label class="parameterField"><span>Name</span><input data-field="name" value="${values.name ?? ''}"></label>
-        <label class="parameterField"><span>Symbol</span><input data-field="symbol" value="${values.symbol ?? ''}"></label>
-        <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${values.value ?? ''}"></label>
-        <label class="parameterField"><span>Unit</span><input data-field="unit" value="${values.unit ?? ''}"></label>
-        <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
-        <button class="removeBuilderRow" type="button" title="Remove">×</button>
-        <div class="parameterControlFields" ${values.mode === 'live' ? '' : 'hidden'}>
-            ${liveRangeFields(control)}
-            <span class="parameterControlError" role="status"></span>
-        </div>
-    `;
-    $('[data-field="mode"]', row).value = values.mode ?? 'constant';
-    $('#edgeParameterRows').appendChild(row);
-    const validateControl = () => {
-        $('.parameterControlFields', row).hidden = $('[data-field="mode"]', row).value !== 'live';
-        const controlValues = Object.fromEntries($$('[data-control-field]', row)
-            .map((input) => [input.dataset.controlField, Number(input.value)]));
-        const error = $('[data-field="mode"]', row).value === 'live'
-            ? parameterControlError(Number($('[data-field="value"]', row).value), controlValues) : '';
-        $('.parameterControlError', row).textContent = error;
-        return error;
-    };
-    $$('input, select', row).forEach((input) => input.addEventListener('input', () => {
-        validateControl();
-        refreshStateReferences();
-    }));
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => {
-        row.remove();
-        refreshStateReferences();
-    });
-    refreshStateReferences();
-}
 
 // The nodes a relationship's end can be: those shown in the view first, then, inside a subsystem, every other node in the
 // model, named with where it is ("Heater · Model", "Sensor · Model / Controls"), so a relationship can be drawn out of a
-// subsystem from inside it (it then ends at a terminal). Used by Add edge and by the relationship editor alike.
-function endpointNodeChoices() {
-    const live = model.nodes.filter((node) => !node.deleted);
+// subsystem from inside it (it then ends at a terminal). Used by a new relationship's pick and by the relationship editor alike.
+function endpointNodeChoices(except = null) {
+    const live = model.nodes.filter((node) => !node.deleted && node.id !== except);
     const shown = live.filter((node) => nodeObjects.get(node.id)?.visible === true);
     const elsewhere = live.filter((node) => nodeObjects.get(node.id)?.visible !== true);
     const choices = shown.map((node) => new Option(node.title, node.id));
@@ -5856,25 +5672,12 @@ function endpointNodeChoices() {
     return choices;
 }
 
-function refreshEndpointOptions() {
-    const source = $('#edgeSource');
-    const target = $('#edgeTarget');
-    const previousSource = source.value;
-    const previousTarget = target.value;
-    source.replaceChildren(new Option('Choose a node…', ''), ...endpointNodeChoices());
-    target.replaceChildren(new Option('Choose a node…', ''), ...endpointNodeChoices());
-    if (model.nodes.some((node) => node.id === Number(previousSource))) source.value = previousSource;
-    if (model.nodes.some((node) => node.id === Number(previousTarget))) target.value = previousTarget;
-    refreshStateReferences();
-}
-
 function finishEndpointPick() {
     activeEndpointPick = null;
     endpointPickContinuation = null;
     $('#componentLibraryHint').hidden = true;
     canvas.classList.remove('pickingEndpoint');
     $('#endpointPickBanner').hidden = true;
-    $$('[data-pick-endpoint]').forEach((button) => button.classList.remove('active'));
     $$('.node-label-container').forEach((label) => label.classList.remove('endpointEligible'));
     endpointPickMaterialState.forEach((state, nodeId) => {
         const material = nodeObjects.get(nodeId)?.material;
@@ -5887,17 +5690,13 @@ function finishEndpointPick() {
     });
     endpointPickMaterialState = new Map();
     dragControls.enabled = !activeResult && currentTool === 'select';
-    $('.edgeBuilder > header strong').textContent = 'Connect stateful nodes';
-    if (endpointPickRestoreCard?.isConnected) endpointPickRestoreCard.classList.remove('hidden');
-    endpointPickRestoreCard = null;
 }
 
 function chooseEndpointNode(nodeId) {
     if (!activeEndpointPick) return;
-    const otherEndpoint = Number(activeEndpointPick === 'source' ? $('#edgeTarget').value : $('#edgeSource').value);
+    const otherEndpoint = relationshipPick[activeEndpointPick === 'source' ? 'target' : 'source'];
     if (nodeId === otherEndpoint) return;
-    $(`#edge${activeEndpointPick[0].toUpperCase()}${activeEndpointPick.slice(1)}`).value = nodeId;
-    refreshStateReferences();
+    relationshipPick[activeEndpointPick] = nodeId;
     const continuation = endpointPickContinuation;
     endpointPickContinuation = null;
     finishEndpointPick();
@@ -5909,9 +5708,7 @@ function startEndpointPick(endpoint) {
     activeEndpointPick = endpoint;
     dragControls.enabled = false;
     canvas.classList.add('pickingEndpoint');
-    const button = $(`[data-pick-endpoint="${endpoint}"]`);
-    button.classList.add('active');
-    const otherEndpoint = Number(endpoint === 'source' ? $('#edgeTarget').value : $('#edgeSource').value);
+    const otherEndpoint = relationshipPick[endpoint === 'source' ? 'target' : 'source'];
     const eligibleIds = new Set(eligibleEndpointIds(
         model.nodes,
         otherEndpoint,
@@ -5932,84 +5729,13 @@ function startEndpointPick(endpoint) {
         node.material.needsUpdate = true;
         node.children.find((child) => child.isCSS2DObject)?.element.classList.toggle('endpointEligible', eligible);
     });
-    endpointPickRestoreCard = $('#edgeBuilder').classList.contains('hidden') ? null : $('#edgeBuilder');
-    endpointPickRestoreCard?.classList.add('hidden');
     const endpointLabel = endpoint === 'source' ? 'source' : 'target';
     $('#endpointPickTitle').textContent = `Choose the ${endpointLabel} node`;
     $('#endpointPickHint').textContent = eligibleIds.size
-        ? 'Select a highlighted node on the canvas'
-        : 'No eligible nodes are available';
+        ? 'Select a highlighted node on the canvas, or choose it from the list'
+        : 'Choose it from the list';
+    $('#endpointPickList').replaceChildren(new Option('Choose from the list…', ''), ...endpointNodeChoices(otherEndpoint));
     $('#endpointPickBanner').hidden = false;
-}
-
-// Whether the edge builder's output state was chosen, by the person or a template, rather than defaulted.
-let builderOutputChosen = false;
-$('#edgeEquationOutput').addEventListener('change', () => { builderOutputChosen = true; });
-
-function refreshStateReferences() {
-    const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
-    const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
-    const parameters = $$('.parameterRow').map((row, index) => ({
-        id: `builderParameter${index}`,
-        symbol: $('[data-field="symbol"]', row).value.trim()
-    })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
-    const bindings = reconcileEquationBindings([], sourceNode, targetNode, parameters);
-    builderEquation.renderReferences(bindings);
-    const output = $('#edgeEquationOutput');
-    const selectedOutput = output.value;
-    output.replaceChildren();
-    for (const [role, node] of [['source', sourceNode], ['target', targetNode]]) {
-        node?.states.forEach((state) => output.add(new Option(`${role}.${state.symbol}`, equationOutputValue(role, state.id))));
-    }
-    // A state the person (or a template) chose stays chosen; otherwise the new edge lands on its target's first state, not on
-    // whatever the list held while only the source was known.
-    if (builderOutputChosen && [...output.options].some((option) => option.value === selectedOutput)) output.value = selectedOutput;
-    else if (targetNode?.states[0]) output.value = equationOutputValue('target', targetNode.states[0].id);
-    renderBuilderEquationDiagnostics(bindings);
-    refreshProviderBindingRowOptions(bindings);
-}
-
-function refreshProviderBindingRowOptions(candidates) {
-    $$('#providerBindingRows .providerBindingRow').forEach((row) => {
-        const select = $('[data-field="reference"]', row);
-        const previous = select.value;
-        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
-        if ([...select.options].some((option) => option.value === previous)) select.value = previous;
-    });
-}
-
-function addProviderBindingRow(values = {}) {
-    const row = document.createElement('div');
-    row.className = 'builderRow providerBindingRow';
-    row.innerHTML = `
-        <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(values.key ?? '')}"></label>
-        <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
-        <button class="removeBuilderRow" type="button" title="Remove binding">×</button>
-    `;
-    $('#providerBindingRows').appendChild(row);
-    const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
-    const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
-    const parameters = $$('.parameterRow').map((parameterRow, index) => ({
-        id: `builderParameter${index}`,
-        symbol: $('[data-field="symbol"]', parameterRow).value.trim()
-    })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
-    const candidates = reconcileEquationBindings([], sourceNode, targetNode, parameters).filter((binding) => binding.kind !== 'time');
-    refreshProviderBindingRowOptions(candidates);
-    if (values.referenceValue) $('[data-field="reference"]', row).value = values.referenceValue;
-    row.querySelector('.removeBuilderRow').addEventListener('click', () => row.remove());
-}
-
-function renderBuilderEquationDiagnostics(bindings = null) {
-    const availableBindings = bindings ?? (() => {
-        const sourceNode = model.nodes.find((node) => node.id === Number($('#edgeSource').value));
-        const targetNode = model.nodes.find((node) => node.id === Number($('#edgeTarget').value));
-        const parameters = $$('.parameterRow').map((row, index) => ({
-            id: `builderParameter${index}`,
-            symbol: $('[data-field="symbol"]', row).value.trim()
-        })).filter((parameter) => modelSymbolPattern.test(parameter.symbol));
-        return reconcileEquationBindings([], sourceNode, targetNode, parameters);
-    })();
-    builderEquation.diagnose(availableBindings);
 }
 
 function updateModelStatus() {
@@ -12912,69 +12638,98 @@ window.konjugateAssistant = Object.freeze({
     resetConversation: resetAssistantConversation
 });
 
-function openNodeBuilder(clientX, clientY) {
-    const builder = $('#nodeBuilder');
-    hideCards(builder);
-    $('#newNodeName').value = 'New node';
-    $('#newNodeShape').value = 'box';
-    $('#newNodeColor').value = '#34727a';
-    $('#nodeGeometryFile').value = '';
-    $('#geometryImportStatus').classList.remove('loading', 'error');
-    $('#geometryImportStatus').textContent = 'No geometry selected';
-    pendingImportedGeometry?.dispose();
-    pendingImportedGeometry = null;
-    pendingGeometryFileName = '';
-    $('#stateVariableRows').replaceChildren();
-    $('#sourceTermRows').replaceChildren();
-    addStateVariableRow();
-    $('#addNodeError').textContent = '';
-    positionCard(builder, clientX, clientY);
-    // A new form opens at its top, not scrolled as the last one was left.
-    builder.scrollTop = 0;
-    $('#newNodeName').select();
-}
 
-function openEdgeBuilder(clientX, clientY) {
-    const builder = $('#edgeBuilder');
-    hideCards(builder);
-    pendingEdgeTemplate = null;
-    builderOutputChosen = false;
-    $('#newEdgeName').value = 'New relationship';
-    $('#newEdgeDirectionality').value = 'directed';
-    $('#newEdgeColor').value = '#9c83c4';
-    $('#edgeImplementationKind').value = 'equation';
-    builderEquation.load('');
-    builderEquation.show(true);
-    $('#edgeEquationHeading').hidden = false;
-    $('#builderEquationDiagnostics').hidden = false;
-    $('#edgeReferencePicker').hidden = false;
-    $('#edgeProviderSection').hidden = true;
-    builderProgramSection.source = '';
-    builderProgramSection.outputKey = '';
-    $('#providerBindingRows').replaceChildren();
-    builderEquation.setMode('visual');
-    $('#edgeParameterRows').replaceChildren();
-    finishEndpointPick();
-    $('#edgeSource').replaceChildren();
-    $('#edgeTarget').replaceChildren();
-    refreshEndpointOptions();
-    addEdgeParameterRow({ name: 'Coefficient', symbol: 'k', value: '1' });
-    $('#addEdgeError').textContent = '';
-    builder.style.removeProperty('left');
-    builder.style.removeProperty('top');
-    builder.classList.remove('hidden');
-    // A new form opens at its top, where its ends are chosen, not scrolled as the last one was left.
-    builder.scrollTop = 0;
-}
 
 // Reuses the edge builder's own endpoint-pick flow: pre-fills the source with the node that was
 // right-clicked, then immediately starts picking the target on the canvas, same as clicking the
 // builder's own "pick target" control would.
 function connectFromNode(node) {
-    openEdgeBuilder();
-    $('#edgeSource').value = String(node.userData.definition.id);
-    refreshStateReferences();
-    startEndpointPick('target');
+    startNewRelationship({ source: node.userData.definition.id });
+}
+
+// ---- Making a node or a relationship (docs/proposals/unifiedEntityEditors.md, decision 4): no separate form; what is made
+// opens in its own card, one undo taking it away.
+
+// A new node: one state, its card open on Equations with that state's line open, ready to be named.
+function newNodeFromMenu() {
+    if (activeResult) return;
+    const id = allocateModelEntityId();
+    const stateId = allocateModelEntityId();
+    const shown = stateValueText(0, '');
+    const definition = {
+        id, title: 'New node', type: 'Custom node', description: '', shape: 'box', importedGeometry: null, geometryFileName: null,
+        position: [sharedVisibleNodeAxisValue(0) ?? 0, sharedVisibleNodeAxisValue(1) ?? -0.7, sharedVisibleNodeAxisValue(2) ?? 0],
+        subsystemId: activeSubsystemId, deleted: false, enabled: true, color: 0x34727a,
+        states: [{ id: stateId, label: 'X', symbol: 'x', initialValue: 0, unit: '', value: shown.text, exactValue: shown.exact }],
+        sourceTerms: [], substepsPerGlobalStep: 1
+    };
+    openStateFields.add(`${id}:${stateId}`);
+    openFoldedLines.add(`${id}:${stateId}`);
+    hideCards();
+    insertNodeDefinition(definition, { attachCurrentTransform: true, tab: 'equations' });
+    $(`#nodeEditorStates .editorStateRow[data-state-id="${stateId}"] [data-field="name"]`)?.focus();
+}
+
+// A new relationship: its two ends picked on the canvas (the source already known when it starts from a node), then made and
+// opened on its card. From a library template, it takes the template's name, parameters, equation, direction and the state
+// it lands on; otherwise it is directed, lands on its target's first state and has one coefficient, k = 1, to write with.
+const relationshipPick = { source: null, target: null, template: null };
+function startNewRelationship({ source = null, template = null } = {}) {
+    if (activeResult) return;
+    hideCards();
+    finishEndpointPick();
+    Object.assign(relationshipPick, { source, target: null, template });
+    const pickTarget = () => {
+        startEndpointPick('target');
+        endpointPickContinuation = () => createPickedRelationship();
+    };
+    if (source == null) {
+        startEndpointPick('source');
+        endpointPickContinuation = pickTarget;
+    } else {
+        pickTarget();
+    }
+}
+
+function createPickedRelationship() {
+    const { source, target, template } = relationshipPick;
+    relationshipPick.template = null;
+    $('#componentLibraryHint').hidden = true;
+    if (!source || !target || source === target || activeResult) return;
+    const sourceNode = model.nodes.find((node) => node.id === source);
+    const targetNode = model.nodes.find((node) => node.id === target);
+    const parameters = (template ? template.parameters ?? [] : [{ name: 'Coefficient', symbol: 'k', value: 1, unit: '', mode: 'constant' }]).map((parameter) => ({
+        id: allocateModelEntityId(), name: parameter.name, symbol: parameter.symbol, value: Number(parameter.value) || 0, unit: parameter.unit ?? '',
+        mode: parameter.mode ?? 'constant', ...(parameter.mode === 'live' && parameter.control ? { control: structuredClone(parameter.control) } : {})
+    }));
+    const definition = {
+        id: allocateModelEntityId(),
+        title: template?.name ?? 'New relationship',
+        description: template?.description ?? '',
+        source, target,
+        sourceStateId: sourceNode?.states[0]?.id ?? null,
+        targetStateId: targetNode?.states[0]?.id ?? null,
+        directionality: template?.bidirectional ? 'bidirectional' : 'directed',
+        color: Number.parseInt((template?.color ?? '#9c83c4').replace('#', ''), 16),
+        offset: 0, enabled: true,
+        equation: template?.latex ?? '',
+        parameters
+    };
+    definition.equationModel = normalizeEdgeEquationModel(definition);
+    // Where its part lands: the template's state, by its symbol, at the end the template names; else the target's first.
+    const role = template?.output?.role ?? 'target';
+    const roleNode = role === 'source' ? sourceNode : targetNode;
+    const landing = template ? roleNode?.states.find((state) => state.symbol === template.output.state) : null;
+    const stateId = landing?.id ?? roleNode?.states[0]?.id ?? null;
+    if (stateId !== null) definition.equationModel.output = { role, stateId };
+    if (template?.bidirectional) {
+        const otherRole = role === 'source' ? 'target' : 'source';
+        const otherNode = otherRole === 'source' ? sourceNode : targetNode;
+        const otherState = otherNode?.states.find((candidate) => candidate.symbol === template.output.state);
+        if (otherState) definition[otherRole === 'source' ? 'sourceStateId' : 'targetStateId'] = otherState.id;
+    }
+    insertRelationshipDefinition(definition, { tab: 'equations' });
+    requestAnimationFrame(() => edgeEquation.focus());
 }
 
 let nodePointerDown = null;
@@ -13408,7 +13163,6 @@ $$('[data-close-card]').forEach((button) => {
     button.addEventListener('click', () => {
         if (button.closest('#edgeEditor')) finishEquationEdit();
         if (button.closest('#edgeGroupEditor')) finishEquationEdit();
-        if (button.closest('#edgeBuilder')) finishEndpointPick();
         if (button.closest('#sourceTermEditor')) {
             finishEquationEdit();
             const node = selectedSourceTermNodeId ? nodeObjects.get(selectedSourceTermNodeId) : null;
@@ -13660,7 +13414,7 @@ function previewEdgeEquation(typed, origin) {
     // Typed in both ends' names (y_B − y_A), stored in the relationship's own (targetY − sourceY); stored names typed as they are
     // stay as they are.
     const context = relationshipEquationContext(definition);
-    const latex = readerLatexToStored(typed, normalizeEdgeEquationModel(definition).bindings, definition, context.equations.nodes, null, context.names);
+    const latex = readerLatexToStored(typed, normalizeEdgeEquationModel(definition).bindings, definition, context.equations.nodes, null, context.names, definition.parameters);
     const equationModel = normalizeEdgeEquationModel(definition, {
         ...definition.equationModel,
         latex
@@ -13758,11 +13512,6 @@ window.providerEditor.onApplied(({ source }) => {
         refreshParameterTuningRunnable();
         return succeed();
     }
-    if (providerEditTarget.type === 'builder') {
-        if ($('#edgeBuilder').classList.contains('hidden')) return fail('The relationship builder was closed.');
-        builderProgramSection.source = source;
-        return succeed();
-    }
     if (providerEditTarget.type === 'sourceTerm') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
         const node = nodeObjects.get(providerEditTarget.nodeId);
@@ -13771,12 +13520,6 @@ window.providerEditor.onApplied(({ source }) => {
         changeSourceTermModel(node, providerEditTarget.termId, (snapshotTerm) => {
             snapshotTerm.implementation.source = source;
         });
-        return succeed();
-    }
-    if (providerEditTarget.type === 'builderSourceTerm') {
-        if (!document.body.contains(providerEditTarget.sourceElement)) return fail('The source term builder was closed.');
-        providerEditTarget.sourceElement.value = source;
-        providerEditTarget.sourceElement.dispatchEvent(new Event('input', { bubbles: true }));
         return succeed();
     }
     if (providerEditTarget.type === 'node') {
@@ -14157,40 +13900,74 @@ const chooseOption = (selector, text) => {
     const option = [...field.options].find((candidate) => candidate.textContent === text);
     if (option) setField(selector, option.value, 'change');
 };
-const openAddBuilder = (kind) => {
+const chooseFromAddMenu = (kind) => {
     $('#addButton').click();
     $(`[data-add-kind="${kind}"]`).click();
 };
-function fillNodeBuilder({ name, temperature }) {
-    if ($('#nodeBuilder').classList.contains('hidden')) openAddBuilder('node');
-    setField('#newNodeName', name);
-    const row = $('#stateVariableRows .stateVariableRow');
-    const values = { name: firstModelValues.state.name, symbol: firstModelValues.state.symbol, value: String(temperature), unit: firstModelValues.state.unit };
-    for (const [field, value] of Object.entries(values)) {
-        const input = row.querySelector(`[data-field="${field}"]`);
-        input.value = value;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
+// A tour's node defined as a person defines it in its card: the one of that name, else the one just made, else a new one;
+// named on Details, then its first state's fields on Equations, each committed as typed.
+async function defineTourNode({ name, temperature }, { state }) {
+    const live = () => model.nodes.filter((node) => !node.deleted);
+    let definition = live().find((node) => node.title === name)
+        ?? (!$('#nodeEditor').classList.contains('hidden') && selectedNode?.userData.definition.title === 'New node' ? selectedNode.userData.definition : null);
+    if (!definition) {
+        const count = live().length;
+        chooseFromAddMenu('node');
+        await waitUntil(() => live().length > count, 3000);
+        definition = live().at(-1);
+    }
+    if (!definition) return;
+    const node = nodeObjects.get(definition.id);
+    if ($('#nodeEditor').classList.contains('hidden') || selectedNode !== node) {
+        selectNode(node);
+        openNodeEditor(definition);
+    }
+    if (definition.title !== name) {
+        $('#nodeEditor [data-editor-tab="details"]').click();
+        setField('#editNodeName', name, 'change');
+    }
+    $('#nodeEditor [data-editor-tab="equations"]').click();
+    const stateId = definition.states[0]?.id;
+    if (stateId === undefined) return;
+    openStateFields.add(`${definition.id}:${stateId}`);
+    openFoldedLines.add(`${definition.id}:${stateId}`);
+    renderNodeEditorModel(node);
+    for (const [field, value] of [['name', state.name], ['symbol', state.symbol], ['value', temperature], ['unit', state.unit]]) {
+        const selector = `#nodeEditorStates .editorStateRow[data-state-id="${stateId}"] input[data-field="${field}"]`;
+        if ($(selector) && $(selector).value !== String(value)) setField(selector, String(value), 'change');
     }
 }
-function fillEdgeEndpoints() {
-    if ($('#edgeBuilder').classList.contains('hidden')) openAddBuilder('edge');
-    chooseOption('#edgeSource', firstModelValues.source.name);
-    chooseOption('#edgeTarget', firstModelValues.target.name);
-    setField('#newEdgeName', 'Heat flow');
+// A relationship made as a person makes one: New relationship from the Add menu, then its two ends by their labels.
+async function connectTourNodes(from, to) {
+    await waitUntil(() => tourNodeLabel(from) && tourNodeLabel(to), 5000);
+    if ($('#endpointPickBanner').hidden) chooseFromAddMenu('edge');
+    await waitUntil(() => !$('#endpointPickBanner').hidden, 3000);
+    if (!$('#endpointPickTitle').textContent.toLowerCase().includes('target')) {
+        tourNodeLabel(from)?.click();
+        await waitUntil(() => $('#endpointPickTitle').textContent.toLowerCase().includes('target'), 5000);
+    }
+    const count = model.relationships.filter((relationship) => !relationship.deleted).length;
+    tourNodeLabel(to)?.click();
+    await waitUntil(() => model.relationships.filter((relationship) => !relationship.deleted).length > count, 5000);
+}
+// The part of the relationship between two nodes typed in its card, in the names the card reads it by.
+async function writeTourRelationshipPart(from, to, typed) {
+    const ends = new Map(model.nodes.filter((node) => !node.deleted).map((node) => [node.title, node.id]));
+    const relationship = model.relationships.find((candidate) => !candidate.deleted && candidate.source === ends.get(from) && candidate.target === ends.get(to));
+    if (!relationship) return;
+    if ($('#edgeEditor').classList.contains('hidden') || selectedRelationship?.id !== relationship.id) openRelationshipEditor(relationship);
+    $('#edgeEditor [data-editor-tab="equations"]').click();
+    const field = $('#editEdgeMathField');
+    field.focus();
+    field.setValue(typed);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+    await waitUntil(() => String(relationship.equationModel?.latex ?? relationship.equation ?? '').trim() !== '', 3000);
 }
 // Resolves once `ready()` is true, or after `timeout` milliseconds whatever it says (a skip then does what it can).
 async function waitUntil(ready, timeout = 5000) {
     const until = Date.now() + timeout;
     while (!ready() && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 100));
-}
-async function fillEdgeEquation() {
-    if ($('#edgeBuilder').classList.contains('hidden') || !$('#edgeSource').value || $('#edgeSource').value === $('#edgeTarget').value) fillEdgeEndpoints();
-    // The builder's references follow the endpoints a moment after they are chosen; the equation is entered once they have.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    const target = [...$('#edgeEquationOutput').options].find((option) => option.textContent.startsWith('target.'));
-    if (target) setField('#edgeEquationOutput', target.value, 'change');
-    $('#edgeMathField').setValue(firstModelValues.equationLatex);
-    $('#edgeMathField').dispatchEvent(new Event('input', { bubbles: true }));
 }
 function fillRunDialog(seconds) {
     if (!$('#runLaunchDialog').open) $('#runButton').click();
@@ -14211,7 +13988,6 @@ function openTutorialRelationship(name) {
 const tour = createTour({
     edition: tutorialEdition,
     getFacts: () => {
-        const edgeBuilderOpen = !$('#edgeBuilder').classList.contains('hidden');
         const plotRect = $('#nodeResultPlot').getBoundingClientRect();
         const nodePlotVisible = Boolean(activeResult) && plotRect.width > 0 && plotRect.height > 0;
         if (tutorialRunModel && activeResult && !simulationRunning && tutorialRunModel.jobId === activeEngineJobId) tutorialRunModel.finished = true;
@@ -14222,10 +13998,6 @@ const tour = createTour({
         return {
             document: documentNow,
             ui: {
-                nodeBuilderOpen: !$('#nodeBuilder').classList.contains('hidden'),
-                edgeBuilderOpen,
-                edgeSourceNodeId: edgeBuilderOpen ? $('#edgeSource').value : '',
-                edgeTargetNodeId: edgeBuilderOpen ? $('#edgeTarget').value : '',
                 edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
                 edgeEditorTab: edgeEditorOpen ? editorCard('edgeEditor').activeTab() : null,
                 runDialogOpen: $('#runLaunchDialog').open,
@@ -14307,7 +14079,6 @@ const tour = createTour({
                 subsystemDialogOpen: $('#subsystemDialog').open,
                 // The subsystem whose card is open, by name; the dialogs and lists the components tutorial points at.
                 subsystemCardFor: currentSubsystemCardId() === null ? null : subsystemById(currentSubsystemCardId())?.name ?? null,
-                edgeBuilderOpen: !$('#edgeBuilder').classList.contains('hidden'),
                 templateDialogOpen: $('#templateDialog').open,
                 componentPlaceOpen: $('#componentPlaceDialog').open,
                 libraryTemplateOf: (name) => [...document.querySelectorAll('#componentLibraryResults [data-template-id]')].find((entry) => entry.textContent.includes(name)) ?? null,
@@ -14403,20 +14174,12 @@ const tour = createTour({
     // What a step's fill button, its "Skip this step" and a link in its text do (each step names the ones it uses). A skip does the step
     // through the page's own fields and buttons, as the person would, so the steps after it find what they expect.
     actions: {
-        sourceNode: async () => fillNodeBuilder(firstModelValues.source),
-        targetNode: async () => fillNodeBuilder(firstModelValues.target),
-        edgeEndpoints: async () => fillEdgeEndpoints(),
-        edgeEquation: async () => fillEdgeEquation(),
+        newNode: async () => { if (!model.nodes.some((node) => !node.deleted && node.title === 'New node')) chooseFromAddMenu('node'); },
+        sourceNode: async () => defineTourNode(firstModelValues.source, firstModelValues),
+        targetNode: async () => defineTourNode(firstModelValues.target, firstModelValues),
+        connectNodes: async () => connectTourNodes(firstModelValues.source.name, firstModelValues.target.name),
+        edgeEquation: async () => writeTourRelationshipPart(firstModelValues.source.name, firstModelValues.target.name, firstModelValues.typedEquation),
         runTime: async (step) => fillRunDialog(step.runSeconds),
-        openNodeBuilder: async () => { if ($('#nodeBuilder').classList.contains('hidden')) openAddBuilder('node'); },
-        createSourceNode: async () => { fillNodeBuilder(firstModelValues.source); $('#createNode').click(); },
-        createTargetNode: async () => { fillNodeBuilder(firstModelValues.target); $('#createNode').click(); },
-        chooseEdgeEndpoints: async () => fillEdgeEndpoints(),
-        createEdge: async () => {
-            await fillEdgeEquation();
-            await waitUntil(() => $('#builderEquationDiagnostics').classList.contains('valid'), 15000);
-            $('#createEdge').click();
-        },
         runModel: async (step) => {
             await waitUntil(() => !simulationRunning, 60000);
             // The model is locked while results are on screen; a new run needs them closed.
@@ -14529,12 +14292,13 @@ const tour = createTour({
                 await waitUntil(() => model.nodes.filter((node) => !node.deleted).length > count, 5000);
             }
         },
-        // A relationship template applied as a person applies it: the template, then each end's label, then Create edge.
+        // A relationship template applied as a person applies it: the template, then each end's label, which makes it.
         connectTemplate: async (step) => {
             const { template, from, to } = step.connection;
             // Parts just placed get their labels a frame later; the ends are clicked by their labels.
             await waitUntil(() => tourNodeLabel(from) && tourNodeLabel(to), 5000);
-            if ($('#edgeBuilder').classList.contains('hidden') && $('#endpointPickBanner').hidden) {
+            const count = model.relationships.filter((relationship) => !relationship.deleted).length;
+            if ($('#endpointPickBanner').hidden) {
                 if ($('#componentLibraryPanel').hidden) $('#componentLibraryButton').click();
                 await waitUntil(() => Boolean(document.querySelector(`[data-template-id="${template}"]`)), 10000);
                 document.querySelector(`[data-template-id="${template}"]`)?.click();
@@ -14545,9 +14309,7 @@ const tour = createTour({
                 await waitUntil(() => $('#endpointPickTitle').textContent.toLowerCase().includes('target'), 5000);
             }
             if (!$('#endpointPickBanner').hidden) tourNodeLabel(to)?.click();
-            await waitUntil(() => !$('#edgeBuilder').classList.contains('hidden') && $('#builderEquationDiagnostics').classList.contains('valid'), 10000);
-            $('#createEdge').click();
-            await waitUntil(() => $('#edgeBuilder').classList.contains('hidden'), 5000);
+            await waitUntil(() => model.relationships.filter((relationship) => !relationship.deleted).length > count, 5000);
         },
         moveTimelineTo: async (step) => {
             await waitUntil(() => activeResult && !simulationRunning, 60000);
@@ -16786,79 +16548,13 @@ $('#examplesExplorerCancel').addEventListener('click', () => $('#examplesExplore
 $$('[data-add-kind]').forEach((button) => {
     button.addEventListener('click', () => {
         const rect = $('#addPalette').getBoundingClientRect();
-        if (button.dataset.addKind === 'node') openNodeBuilder(rect.left, rect.top);
-        else openEdgeBuilder(rect.left, rect.top);
+        if (button.dataset.addKind === 'node') newNodeFromMenu();
+        else startNewRelationship();
     });
 });
 
-$('#addStateVariable').addEventListener('click', () => addStateVariableRow());
-$('#addSourceTerm').addEventListener('click', addSourceTermRow);
-$('#addEdgeParameter').addEventListener('click', () => addEdgeParameterRow());
-$('#edgeSource').addEventListener('change', refreshStateReferences);
-$('#edgeTarget').addEventListener('change', refreshStateReferences);
-function builderProviderBindingKeys() {
-    return $$('#providerBindingRows .providerBindingRow [data-field="key"]').map((input) => ({ key: input.value }));
-}
-
-$('#edgeImplementationKind').addEventListener('change', (event) => {
-    const kind = event.target.value;
-    const isEquation = kind === 'equation';
-    $('#edgeEquationHeading').hidden = !isEquation;
-    $('#builderEquationDiagnostics').hidden = !isEquation;
-    $('#edgeReferencePicker').hidden = !isEquation;
-    $('#edgeProviderSection').hidden = isEquation;
-    // The math-field/latex-textarea toggle their own `hidden` directly (matching the existing
-    // Visual/LaTeX mode toggle) rather than through a hidden ancestor: MathLive's custom element
-    // does not reliably accept focus again once an ancestor of it has been display:none'd.
-    builderEquation.show(isEquation);
-    if (!isEquation && !builderProgramSection.source.trim()) {
-        builderProgramSection.source = defaultProviderSource(kind, builderProviderBindingKeys(), builderProgramSection.outputKey, $('#newEdgeName').value);
-    }
-});
-builderProgramSection.onReset(() => {
-    if (builderProgramSection.source.trim() &&
-        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
-    builderProgramSection.source = defaultProviderSource($('#edgeImplementationKind').value, builderProviderBindingKeys(), builderProgramSection.outputKey, $('#newEdgeName').value);
-});
-builderProgramSection.onOpenEditor(() => {
-    providerEditTarget = { type: 'builder' };
-    window.providerEditor.openWindow({
-        source: builderProgramSection.source,
-        kind: $('#edgeImplementationKind').value,
-        title: $('#newEdgeName').value
-    });
-});
-builderProgramSection.onAddBinding(() => addProviderBindingRow());
-$('#builderBrowseShapeLibrary').addEventListener('click', () => openShapeLibrary('builder'));
-$('#nodeGeometryFile').addEventListener('change', async (event) => {
-    const [file] = event.target.files;
-    if (!file) return;
-    const status = $('#geometryImportStatus');
-    status.classList.remove('error');
-    status.classList.add('loading');
-    status.textContent = `Loading ${file.name}…`;
-    $('#createNode').disabled = true;
-    try {
-        const geometry = await importNodeGeometry(file);
-        pendingImportedGeometry?.dispose();
-        pendingImportedGeometry = geometry;
-        pendingGeometryFileName = file.name;
-        $('#newNodeShape').value = 'imported';
-        status.textContent = `${file.name} ready`;
-        await saveUploadToShapeLibrary(file, status);
-    } catch (error) {
-        pendingImportedGeometry?.dispose();
-        pendingImportedGeometry = null;
-        pendingGeometryFileName = '';
-        status.classList.add('error');
-        status.textContent = error.message;
-    } finally {
-        status.classList.remove('loading');
-        $('#createNode').disabled = false;
-    }
-});
-$$('[data-pick-endpoint]').forEach((button) => {
-    button.addEventListener('click', () => startEndpointPick(button.dataset.pickEndpoint));
+$('#endpointPickList').addEventListener('change', (event) => {
+    if (event.target.value) chooseEndpointNode(Number(event.target.value));
 });
 $('#cancelEndpointPick').addEventListener('click', finishEndpointPick);
 $('#connectFromNode').addEventListener('click', () => {
@@ -16879,199 +16575,6 @@ function sharedVisibleNodeAxisValue(axisIndex) {
         .map((node) => nodeObjects.get(node.id).position.getComponent(axisIndex));
     return values.length > 1 && values.every((value) => value === values[0]) ? values[0] : null;
 }
-
-$('#createNode').addEventListener('click', () => {
-    if (activeResult) return;
-    $('#addNodeError').textContent = '';
-    const states = stateVariablesFromBuilder();
-    if (!states.length) {
-        $('#addNodeError').textContent = 'Add at least one state variable before creating the node.';
-        $('#stateVariableRows input')?.focus();
-        return;
-    }
-    const invalidSymbol = states.find((state) => !modelSymbolPattern.test(state.symbol));
-    if (invalidSymbol) {
-        $('#addNodeError').textContent =
-            `"${invalidSymbol.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`;
-        $('.stateVariableRow [data-field="symbol"]')?.focus();
-        return;
-    }
-    if (new Set(states.map((state) => state.symbol)).size !== states.length) {
-        $('#addNodeError').textContent = 'Each state variable needs its own unique symbol.';
-        $('.stateVariableRow [data-field="symbol"]')?.focus();
-        return;
-    }
-    if ($('#newNodeShape').value === 'imported' && !pendingImportedGeometry) {
-        $('#nodeGeometryFile').click();
-        return;
-    }
-
-    const id = allocateModelEntityId();
-    const resolvedStates = states.map((state) => ({
-        id: allocateModelEntityId(),
-        label: state.name,
-        symbol: state.symbol,
-        initialValue: Number(state.value) || 0,
-        unit: state.unit,
-        value: stateValueText(Number(state.value) || 0, state.unit).text, exactValue: stateValueText(Number(state.value) || 0, state.unit).exact
-    }));
-    const symbolToStateId = new Map(resolvedStates.map((state) => [state.symbol, state.id]));
-    const definition = {
-        id,
-        title: $('#newNodeName').value.trim() || 'Untitled node',
-        type: 'Custom node',
-        description: '',
-        shape: $('#newNodeShape').value,
-        importedGeometry: pendingImportedGeometry?.clone() ?? null,
-        geometryFileName: pendingGeometryFileName || null,
-        position: [
-            sharedVisibleNodeAxisValue(0) ?? 0,
-            sharedVisibleNodeAxisValue(1) ?? -0.7,
-            sharedVisibleNodeAxisValue(2) ?? 0
-        ],
-        subsystemId: activeSubsystemId,
-        deleted: false,
-        enabled: true,
-        color: Number.parseInt($('#newNodeColor').value.replace('#', ''), 16),
-        states: resolvedStates,
-        sourceTerms: $$('.sourceTermRow').map((row) => {
-            const stateSymbol = $('.sourceState', row).value;
-            const kind = $('.sourceTermKind', row)?.value ?? 'equation';
-            const termId = allocateModelEntityId();
-            if (kind === 'equation') {
-                return { id: termId, state: stateSymbol, expression: $('.sourceExpression', row).value.trim(), parameters: [] };
-            }
-            const bindings = $$('.providerBindingRow', row).map((bindingRow) => ({
-                key: $('[data-field="key"]', bindingRow).value.trim(),
-                kind: 'state',
-                stateId: symbolToStateId.get($('[data-field="reference"]', bindingRow).value.replace('state:', ''))
-            })).filter((binding) => binding.stateId);
-            return {
-                id: termId,
-                state: stateSymbol,
-                expression: '',
-                parameters: [],
-                implementation: {
-                    kind,
-                    providerApiVersion: 1,
-                    source: $('.sourceTermProviderSource', row).value,
-                    bindings,
-                    output: { key: $('.sourceTermProviderOutputKey', row).value.trim(), stateId: symbolToStateId.get(stateSymbol) }
-                }
-            };
-        }).filter((term) => term.state && (term.expression || term.implementation)),
-        substepsPerGlobalStep: 1
-    };
-
-    hideCards();
-    insertNodeDefinition(definition, { attachCurrentTransform: true });
-    pendingImportedGeometry?.dispose();
-    pendingImportedGeometry = null;
-    pendingGeometryFileName = '';
-});
-
-$('#createEdge').addEventListener('click', () => {
-    if (activeResult) return;
-    $('#addEdgeError').textContent = '';
-    const source = Number($('#edgeSource').value);
-    const target = Number($('#edgeTarget').value);
-    if (!source || !target) {
-        $('#addEdgeError').textContent = 'Choose both a source and target node.';
-        (source ? $('#edgeTarget') : $('#edgeSource')).focus();
-        return;
-    }
-    if (source === target) {
-        $('#addEdgeError').textContent = 'An edge must connect two different nodes.';
-        $('#edgeTarget').focus();
-        return;
-    }
-
-    const parameters = $$('.parameterRow').map((row) => ({
-        id: allocateModelEntityId(),
-        name: $('[data-field="name"]', row).value.trim(),
-        symbol: $('[data-field="symbol"]', row).value.trim(),
-        value: Number($('[data-field="value"]', row).value) || 0,
-        unit: $('[data-field="unit"]', row).value.trim(),
-        mode: $('[data-field="mode"]', row).value,
-        ...($('[data-field="mode"]', row).value === 'live' ? {
-            control: Object.fromEntries($$('[data-control-field]', row)
-                .map((input) => [input.dataset.controlField, Number(input.value)]))
-        } : {})
-    })).filter((parameter) => parameter.name && parameter.symbol);
-    const invalidParameter = parameters.find((parameter) => !modelSymbolPattern.test(parameter.symbol));
-    if (invalidParameter || new Set(parameters.map((parameter) => parameter.symbol)).size !== parameters.length) {
-        $('#addEdgeError').textContent = invalidParameter
-            ? `"${invalidParameter.symbol}" is not a valid symbol -- symbols must start with a lowercase letter and contain only letters and digits (e.g. "temperature", not "Temperature").`
-            : 'Each parameter needs its own unique symbol.';
-        $('.parameterRow [data-field="symbol"]')?.focus();
-        return;
-    }
-    const invalidLiveParameter = parameters.find((parameter) => parameter.mode === 'live' && parameterControlError(parameter.value, parameter.control));
-    if (invalidLiveParameter) {
-        const row = $$('.parameterRow').find((candidate) => $('[data-field="symbol"]', candidate).value.trim() === invalidLiveParameter.symbol);
-        $('.parameterControlError', row).textContent = parameterControlError(invalidLiveParameter.value, invalidLiveParameter.control);
-        $('[data-control-field="minimum"]', row).focus();
-        return;
-    }
-    const implementationKind = $('#edgeImplementationKind').value;
-    const sourceNode = model.nodes.find((node) => node.id === source);
-    const targetNode = model.nodes.find((node) => node.id === target);
-    const definition = {
-        id: allocateModelEntityId(),
-        title: $('#newEdgeName').value.trim() || 'Untitled relationship',
-        description: pendingEdgeTemplate?.description ?? '',
-        source,
-        target,
-        sourceStateId: sourceNode?.states[0]?.id ?? null,
-        targetStateId: targetNode?.states[0]?.id ?? null,
-        directionality: $('#newEdgeDirectionality').value,
-        color: Number.parseInt($('#newEdgeColor').value.replace('#', ''), 16),
-        offset: 0,
-        enabled: true,
-        equation: implementationKind === 'equation' ? $('#edgeEquation').value.trim() : '',
-        parameters
-    };
-    definition.equationModel = normalizeEdgeEquationModel(definition);
-    const pickedOutput = parseEquationOutput($('#edgeEquationOutput').value);
-    if (pickedOutput) definition.equationModel.output = pickedOutput;
-    if (implementationKind === 'equation') {
-        if (definition.equation && definition.equationModel.mathJson === null) {
-            renderBuilderEquationDiagnostics(definition.equationModel.bindings);
-            builderEquation.focus();
-            return;
-        }
-    } else {
-        const fakeParameterIdToReal = Object.fromEntries(parameters.map((parameter, index) => [`builderParameter${index}`, parameter.id]));
-        const bindings = $$('#providerBindingRows .providerBindingRow').map((row) => {
-            const key = $('[data-field="key"]', row).value.trim();
-            const reference = parseProviderReference($('[data-field="reference"]', row).value);
-            if (reference?.kind === 'parameter') return { key, kind: 'parameter', parameterId: fakeParameterIdToReal[reference.parameterId] };
-            if (reference) return { key, ...reference };
-            // No usable reference selected (e.g. nothing to reference yet): left unresolved for the
-            // validation that follows to report, as a missing state was before.
-            return { key, kind: 'state', role: undefined, nodeId: null, stateId: null };
-        });
-        definition.implementation = {
-            kind: implementationKind,
-            providerApiVersion: 1,
-            source: builderProgramSection.source,
-            bindings,
-            output: { key: builderProgramSection.outputKey.trim(), role: pickedOutput?.role, stateId: pickedOutput?.stateId }
-        };
-    }
-
-    if (pendingEdgeTemplate?.bidirectional) {
-        const otherRole = pendingEdgeTemplate.output.role === 'source' ? 'target' : 'source';
-        const otherNode = model.nodes.find((node) => node.id === definition[otherRole]);
-        const otherState = otherNode?.states.find((candidate) => candidate.symbol === pendingEdgeTemplate.output.state);
-        if (otherState) definition[otherRole === 'source' ? 'sourceStateId' : 'targetStateId'] = otherState.id;
-    }
-    pendingEdgeTemplate = null;
-
-    finishEndpointPick();
-    $('#edgeBuilder').classList.add('hidden');
-    insertRelationshipDefinition(definition);
-});
 
 const labelModeOrder = ['compact', 'expanded', 'hidden'];
 const labelModeText = { compact: 'compact', expanded: 'expanded', hidden: 'hidden' };
@@ -17755,7 +17258,7 @@ function applyFragmentTemplate(template) {
 // Edge groups: one shared relationship definition (docs/edgeGroups.md) expanded into a
 // complete mesh -- one directed edge per ordered member pair, both directions independently
 // evaluated (docs/edgeDirectionality.md), each an ordinary edge carrying groupId.
-// The card at #edgeGroupEditor is a batch/"Save changes" form (like #edgeBuilder), not the
+// The card at #edgeGroupEditor is a batch/"Save changes" form, not the
 // #edgeEditor's live-per-field-undo pattern -- a group's shared definition has no single concrete
 // node pair to bind against while editing, so live diagnostics/candidates are driven off the
 // group's first two resolvable members as a representative preview pair.
@@ -17794,6 +17297,7 @@ function addGroupParameterRow(container, parameter, group) {
         <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value ?? '')}"></label>
         <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
         <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
+        <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
         <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
             ${liveRangeFields(control)}
@@ -17817,6 +17321,7 @@ function addGroupParameterRow(container, parameter, group) {
         changeEdgeGroupModel(group, (snapshot) => {
             const target = snapshot.definition.parameters.find((candidate) => candidate.id === parameter.id);
             target[input.dataset.field] = input.dataset.field === 'value' ? Number(input.value) || 0 : input.value.trim();
+            if (input.dataset.field === 'displaySymbol' && !target.displaySymbol) delete target.displaySymbol;
             if (target.mode === 'live') target.control = readControl();
             else delete target.control;
         });

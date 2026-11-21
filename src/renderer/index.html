@@ -842,6 +842,7 @@
         <div id="componentLinkBar" class="endpointPickBanner componentBar" role="status" hidden><span>Linked component</span><strong id="componentLinkBarText"></strong><small id="componentLinkBarHint"></small><div class="componentBarButtons"><button id="componentLinkEdit" type="button">Edit component</button><button id="componentLinkUpdate" type="button">Update from file…</button><button id="componentLinkLocate" type="button">Locate…</button><button id="componentLinkKeep" type="button">Keep using the saved copy</button><button id="componentLinkRemove" type="button">Update and remove</button><button id="componentLinkOld" type="button">Keep the old version</button><button id="componentLinkSave" type="button">Save to my library</button><button id="componentLinkDiscard" type="button">Discard changes</button><button id="componentLinkDetach" type="button">Detach</button></div></div>
         <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
+            <select id="endpointPickList" aria-label="Choose the node from a list"></select>
             <button id="cancelEndpointPick" type="button">Cancel <kbd>Esc</kbd></button>
         </div>
         <aside id="componentLibraryPanel" class="componentLibraryPanel" aria-label="Component library" hidden>
@@ -1475,66 +1476,6 @@
         <div id="waypointContextMenu" class="contextCard addPalette hidden">
             <span class="contextKicker">Waypoint</span>
             <button id="waypointContextRemove" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Remove waypoint</strong></span><b>›</b></button>
-        </div>
-
-        <div id="nodeBuilder" class="contextCard builderCard hidden">
-            <header><div><span class="contextKicker">Add node</span><strong>Define its state</strong></div><button data-close-card type="button">×</button></header>
-            <section>
-                <label class="editorField"><span>Name</span><input id="newNodeName" value="New node" autocomplete="off"></label>
-                <label class="editorField"><span>Appearance</span><select id="newNodeShape"><option value="box">Cuboid</option><option value="cylinder">Cylinder</option><option value="sphere">Sphere</option><option value="imported">Imported geometry</option></select></label>
-                <label class="editorField"><span>Colour</span><input id="newNodeColor" type="color" value="#34727a"></label>
-                <div class="geometrySourceRow">
-                    <label class="geometrySourceButton">
-                        <input id="nodeGeometryFile" type="file" accept=".stl,.step,.stp">
-                        <span>↥ Import file</span>
-                    </label>
-                    <button id="builderBrowseShapeLibrary" class="geometrySourceButton" type="button">⌕ Shape library</button>
-                </div>
-                <small id="geometryImportStatus" class="geometrySourceStatus">No geometry selected</small>
-            </section>
-            <section>
-                <h3>State variables <button id="addStateVariable" type="button">＋</button></h3>
-                <div id="stateVariableRows" class="builderRows"></div>
-            </section>
-            <section>
-                <h3>Source terms <button id="addSourceTerm" type="button">＋</button></h3>
-                <p class="builderHint">Contributions are summed into a selected state's time derivative.</p>
-                <div id="sourceTermRows" class="builderRows"></div>
-            </section>
-            <div class="passwordError" id="addNodeError" role="alert"></div>
-            <footer><button data-close-card type="button">Cancel</button><button id="createNode" class="doneButton" type="button">Create node</button></footer>
-        </div>
-
-        <div id="edgeBuilder" class="contextCard builderCard edgeBuilder hidden">
-            <header><div><span class="contextKicker">Add edge</span><strong>Connect stateful nodes</strong></div><button data-close-card type="button">×</button></header>
-            <section class="endpointGrid">
-                <label class="editorField endpointField"><span>From node</span><div><select id="edgeSource"></select><button data-pick-endpoint="source" type="button">⌖ Pick</button></div></label>
-                <label class="editorField endpointField"><span>To node</span><div><select id="edgeTarget"></select><button data-pick-endpoint="target" type="button">⌖ Pick</button></div></label>
-            </section>
-            <section>
-                <label class="editorField"><span>Edge name</span><input id="newEdgeName" value="New relationship" autocomplete="off"></label>
-                <label class="editorField"><span>Directionality</span><select id="newEdgeDirectionality"><option value="directed">Directed source → target</option><option value="bidirectional">Bidirectional</option></select></label>
-                <label class="editorField"><span>Colour</span><input id="newEdgeColor" type="color" value="#9c83c4"></label>
-                <label class="editorField"><span>Implementation</span><select id="edgeImplementationKind">
-                    <option value="equation">Equation</option>
-                    <option value="cpp">C++ program</option>
-                    <option value="python">Python program</option>
-                </select></label>
-                <label class="editorField"><span>Updates</span><select id="edgeEquationOutput"></select></label>
-                <div id="edgeEquationHeading" class="equationHeading"><h3>Equation</h3><div class="equationModes"><button class="active" data-builder-equation-mode="visual" type="button">Visual</button><button data-builder-equation-mode="latex" type="button">LaTeX</button></div></div>
-                <math-field id="edgeMathField" class="equationMathField" aria-label="Equation expression"></math-field>
-                <textarea id="edgeEquation" class="equationSource" rows="3" placeholder="Choose references below, or enter LaTeX" hidden></textarea>
-                <div id="builderEquationDiagnostics" class="equationDiagnostics" role="status"></div>
-                <div id="edgeReferencePicker" class="referencePicker"><span>Available references</span><div id="stateReferenceChips"></div></div>
-                <div id="edgeProviderSection" hidden></div>
-            </section>
-            <section>
-                <h3>Custom parameters <button id="addEdgeParameter" type="button">＋</button></h3>
-                <p class="builderHint">Live parameters can be adjusted while an online simulation is running.</p>
-                <div id="edgeParameterRows" class="builderRows"></div>
-            </section>
-            <div class="passwordError" id="addEdgeError" role="alert"></div>
-            <footer><button data-close-card type="button">Cancel</button><button id="createEdge" class="doneButton" type="button">Create edge</button></footer>
         </div>
 
         <section id="liveParameterPanel" class="liveParameterPanel" aria-label="Live simulation parameters" hidden>

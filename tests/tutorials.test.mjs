@@ -36,10 +36,10 @@ const currentStepIndex = (facts, reached = 0) => currentStep(facts, reached, tou
 const brokenStepBefore = (facts, index) => brokenStep(facts, index, tourSteps);
 const stepLabel = (index) => labelOf(index, tourSteps);
 
-const node = (id) => ({ id, states: [{ id: id + 1, symbol: 'T' }] });
+const node = (id, name = id === 1 ? 'Heater' : 'Block', initialValue = id === 1 ? 350 : 300) => ({ id, name, states: [{ id: id + 1, symbol: 'temperature', initialValue }] });
 const edge = (from, to, equation = 'k * (sourceT - targetT)', role = 'target') => ({ id: 30, equation, equationModel: { output: { role } }, source: { nodeId: from }, target: { nodeId: to } });
 const ui = (extra = {}) => ({
-    nodeBuilderOpen: false, edgeBuilderOpen: false, edgeEditorFor: null, runDialogOpen: false, hasResult: false, runModel: null, timelineMoved: false,
+    nodeEditorFor: null, endpointPick: null, edgeEditorFor: null, runDialogOpen: false, hasResult: false, runModel: null, timelineMoved: false,
     nodePlotVisible: false, plotsSeen: [], plotsSeenSinceRun: [], tuningOpen: false, tuningDataLoaded: false, tuningFitted: false,
     labelOf: () => null, relationshipRowOf: () => null, ...extra
 });
@@ -60,14 +60,16 @@ test('every step has the pieces the controller needs, and ids are unique', () =>
 test('steps are done by what the model holds, and by the interface where only it knows', () => {
     const empty = { nodes: [], edges: [] };
     assert.equal(step('addNode').done({ document: empty, ui: ui() }), false);
-    assert.equal(step('addNode').done({ document: empty, ui: ui({ nodeBuilderOpen: true }) }), true);
+    assert.equal(step('addNode').done({ document: { nodes: [node(1, 'New node', 0)], edges: [] }, ui: ui() }), true, 'A node made from the Add menu is the step done.');
+    assert.equal(step('firstNode').done({ document: { nodes: [node(1, 'New node', 0)], edges: [] }, ui: ui() }), false, 'A node not yet defined is not the one asked for.');
     assert.equal(step('firstNode').done({ document: { nodes: [node(1)], edges: [] }, ui: ui() }), true);
-    assert.equal(step('firstNode').done({ document: { nodes: [{ id: 1, states: [] }], edges: [] }, ui: ui() }), false, 'A node with no state is not the one asked for.');
+    assert.equal(step('firstNode').done({ document: { nodes: [{ id: 1, name: 'Heater', states: [] }], edges: [] }, ui: ui() }), false, 'A node with no state is not the one asked for.');
     assert.equal(step('secondNode').done({ document: { nodes: [node(1)], edges: [] }, ui: ui() }), false);
     assert.equal(step('secondNode').done({ document: { nodes: [node(1), node(10)], edges: [] }, ui: ui() }), true);
     const two = { nodes: [node(1), node(10)], edges: [] };
-    assert.equal(step('addEdge').done({ document: two, ui: ui({ edgeBuilderOpen: true, edgeSourceNodeId: '1', edgeTargetNodeId: '1' }) }), false, 'An edge from a node to itself is not a connection.');
-    assert.equal(step('addEdge').done({ document: two, ui: ui({ edgeBuilderOpen: true, edgeSourceNodeId: '1', edgeTargetNodeId: '10' }) }), true);
+    assert.equal(step('addEdge').done({ document: two, ui: ui({ endpointPick: 'target' }) }), false, 'Ends being picked are not yet a relationship.');
+    assert.equal(step('addEdge').done({ document: { ...two, edges: [edge(1, 1)] }, ui: ui() }), false, 'An edge from a node to itself is not a connection.');
+    assert.equal(step('addEdge').done({ document: { ...two, edges: [edge(1, 10, '')] }, ui: ui() }), true, 'A relationship made between the two, with its part still empty, is the step done.');
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, '')] }, ui: ui() }), false);
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10)] }, ui: ui() }), true);
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, undefined, 'source')] }, ui: ui() }), false, 'An equation that changes the heater is not the one asked for.');

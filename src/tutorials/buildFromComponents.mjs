@@ -22,11 +22,10 @@ const partsPlaced = (document) => values.parts.every((part) => nodeId(document, 
 const connected = (document, { name, from, to }) => (document?.edges ?? []).some((edge) => edge.name === name
     && edge.source?.nodeId === nodeId(document, from) && edge.target?.nodeId === nodeId(document, to));
 
-// Where a step that applies a relationship template points: the template, then each end in turn, then the builder's Create button.
+// Where a step that applies a relationship template points: the template, then each end in turn, the second of which makes it.
 const connectTarget = (connection) => (ui) => {
     if (ui.endpointPick === 'source') return ui.labelOf(connection.from);
     if (ui.endpointPick === 'target') return ui.labelOf(connection.to);
-    if (ui.edgeBuilderOpen) return '#createEdge';
     return ui.libraryOpen ? `[data-template-id="${connection.template}"]` : '#componentLibraryButton';
 };
 
@@ -54,14 +53,14 @@ const steps = Object.freeze([
     {
         id: 'armature',
         title: 'Connect the supply to the motor',
-        text: `Click "${values.armature.name}" in the library, then click the ${values.armature.from} on the canvas and then the ${values.armature.to}: from the part that drives to the part that is driven. Its equation binds itself to the two parts' states by their names; check the builder's equation reads, and press Create edge.`,
+        text: `Click "${values.armature.name}" in the library, then click the ${values.armature.from} on the canvas and then the ${values.armature.to}: from the part that drives to the part that is driven. Its equation binds itself to the two parts' states by their names, and its card opens on it to check.`,
         target: connectTarget(values.armature), skip: 'connectTemplate', connection: values.armature,
         done: ({ document }) => connected(document, values.armature)
     },
     {
         id: 'shaft',
         title: 'Connect the load to the motor',
-        text: `The same with "${values.shaft.name}": click it, then the ${values.shaft.from}, then the ${values.shaft.to}, and press Create edge. This is the mechanical side: the motor's torque against the load and friction.`,
+        text: `The same with "${values.shaft.name}": click it, then the ${values.shaft.from}, then the ${values.shaft.to}. This is the mechanical side: the motor's torque against the load and friction.`,
         target: connectTarget(values.shaft), skip: 'connectTemplate', connection: values.shaft,
         done: ({ document }) => connected(document, values.shaft)
     },

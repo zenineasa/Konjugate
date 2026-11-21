@@ -2409,6 +2409,26 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editNodeColor').value`), originalColor);
     });
 
+    // A node made as a person makes one: Add, then Node, then named and its one state filled in, in the card that opens.
+    const makeNode = async (win, name, state) => {
+        await evaluate(win, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await waitFor(win, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'New node'`, 'New node did not open its card.');
+        await evaluate(win, `(() => {
+            const set = (selector, value) => { const input = document.querySelector(selector); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); };
+            set('#editNodeName', ${JSON.stringify(name)});
+            for (const [field, value] of Object.entries(${JSON.stringify(state)})) set('#nodeEditorStates .editorStateRow [data-field="' + field + '"]', value);
+        })()`);
+        await waitFor(win, `document.querySelector('#editNodeName').value === ${JSON.stringify(name)} && Boolean(document.querySelector('#nodeEditorStates .stateCard[data-symbol=${JSON.stringify(state.symbol)}]'))`, `${name} was not made as asked.`);
+    };
+    const savedProject = async () => JSON.parse(await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`));
+    const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
+    const undoRedo = async (which) => {
+        await evaluate(window, `document.activeElement?.blur()`);
+        const before = await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`);
+        await clickElement(window, `document.querySelector('#${which}Button')`);
+        await waitFor(window, `JSON.stringify(window.__debugProject.serialize()) !== ${JSON.stringify(before)}`, `${which === 'undo' ? 'Undo' : 'Redo'} changed nothing.`);
+    };
+
     await run('shape library searches, filters by domain and previews and applies a shape', async () => {
         await freshExample();
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click(); document.querySelector('[data-editor-tab="appearance"]').click()`);
@@ -2488,18 +2508,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editGeometryStatus').textContent`), 'L-Bracket applied');
         assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), '');
 
-        // Apply an STL-format shape via the "Add node" builder path.
+        // Apply an STL-format shape to a node just made, from its card, as to any node.
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `document.querySelector('#builderBrowseShapeLibrary').click()`);
-        await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open from the node builder.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="appearance"]').click()`);
+        await evaluate(window, `document.querySelector('#editBrowseShapeLibrary').click()`);
+        await waitFor(window, `document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not open from a new node\'s card.');
         await evaluate(window, `document.querySelector('.shapeLibraryItem[data-shape-id="fluid/valveBody"]').click()`);
         await waitFor(window, `document.querySelector('#shapeLibraryDetailTitle').textContent === 'Valve Body'`, 'The shape preview did not populate.');
         await evaluate(window, `document.querySelector('#shapeLibraryApply').click()`);
         await waitFor(window, `!document.querySelector('#shapeLibraryDialog').open`, 'Shape library did not close after applying a shape.');
-        assert.equal(await evaluate(window, `document.querySelector('#geometryImportStatus').textContent`), 'Valve Body ready');
-        assert.equal(await evaluate(window, `document.querySelector('#newNodeShape').value`), 'imported');
-        await evaluate(window, `document.querySelector('#nodeBuilder [data-close-card]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editGeometryStatus').textContent`), 'Valve Body applied');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeShape').value`), '');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
     });
 
@@ -2545,23 +2568,28 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
     });
 
-    await run('Connect to chooses a canvas endpoint and creates through the shared relationship inspector', async () => {
+    await run('Connect to chooses a canvas endpoint and makes the relationship, opening its card on its new part', async () => {
         await freshExample();
         const relationshipCountBefore = await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Electrical losses')).click()`);
         await evaluate(window, `document.querySelector('#connectFromNode').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#endpointPickBanner').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        assert.match(await evaluate(window, `document.querySelector('#endpointPickTitle').textContent`), /target/, 'Connect to did not start with the source chosen.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#endpointPickBanner').hidden`), true);
-        assert.equal(await evaluate(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        assert.notEqual(await evaluate(window, `document.querySelector('#edgeTarget').value`), '');
-        await evaluate(window, `document.querySelector('#newEdgeName').value = 'Connect to regression'; document.querySelector('#createEdge').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
+        // Made at once, its card open on Equations with its part's field, and k = 1 to write with.
         assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Connect to regression');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipCountBefore);
+        const made = (await savedProject()).edges.find((edge) => edge.name === 'New relationship');
+        const nodes = (await savedProject()).nodes;
+        assert.equal(nodes.find((node) => node.id === made.source.nodeId).name, 'Electrical losses');
+        assert.equal(nodes.find((node) => node.id === made.target.nodeId).name, 'Battery module');
+        assert.deepEqual(made.parameters.map((parameter) => [parameter.symbol, parameter.value]), [['k', 1]]);
+        assert.equal(made.equationModel.output.role, 'target');
+        // One undo takes it away.
         await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipCountBefore);
     });
 
     // Excludes "... copy" matches: a soft-deleted "... copy" node from an earlier paste test can
@@ -2586,10 +2614,10 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#nodeContextConnect').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#nodeContextMenu').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `!document.querySelector('#endpointPickBanner').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeSource').value`), await evaluate(window, `${electricalLossesLabel}.closest('.node-label-container').dataset.node`));
+        assert.match(await evaluate(window, `document.querySelector('#endpointPickTitle').textContent`), /target/, 'Connect from here did not take this node as the source.');
         await evaluate(window, `${batteryModuleLabel}.click()`);
-        assert.equal(await evaluate(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
 
         // Disable via the context menu toggle, then delete via the context menu, both undoable.
         await rightClickElement(window, electricalLossesLabel);
@@ -2710,235 +2738,115 @@ export async function runInteractionTests(driver) {
         await window.mouseUp(start, { button: 'left', clickCount: 1 });
     });
 
-    await run('node creation closes its dialog and supports undo and redo', async () => {
+    // A relationship made as a person makes one with ends the canvas may not show: Add, then Edge, then each end chosen from
+    // the pick's list by name. Its card opens on it.
+    const newRelationship = async (from, to) => {
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
+        for (const name of [from, to]) {
+            await evaluate(window, `(() => {
+                const list = document.querySelector('#endpointPickList');
+                const option = [...list.querySelectorAll('option')].find((candidate) => candidate.textContent === ${JSON.stringify(name)});
+                list.value = option.value;
+                list.dispatchEvent(new Event('change', { bubbles: true }));
+            })()`);
+        }
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'The new relationship\'s card did not open.');
+    };
+    const typeRelationshipPart = (latex) => evaluate(window, `(() => {
+        const field = document.querySelector('#editEdgeMathField');
+        field.focus();
+        field.setValue(${JSON.stringify(latex)});
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        field.dispatchEvent(new Event('change', { bubbles: true }));
+    })()`);
+    const relationshipCount = () => evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`);
+    // Made between Electrical losses and Enclosed air, then named on its card's Details tab (two undoable steps), its card closed.
+    const newNamedRelationship = async (name) => {
+        await newRelationship('Electrical losses', 'Enclosed air');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab="details"]').click()`);
+        await typeInto(`document.querySelector('#editEdgeName')`, name);
+        await waitFor(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === ${JSON.stringify(name)})`, `The new relationship was not named ${name}.`);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
+    };
+    const nodeCount = () => evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`);
+
+    await run('New node makes a node with one state, its card open on that state\'s line, and one undo takes it away', async () => {
         await freshExample();
+        assert.equal(await nodeCount(), '3 nodes');
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `(() => {
-            document.querySelector('#newNodeName').value = 'Interaction node';
-            const values = { name: 'Pressure', symbol: 'pressure', value: '101325', unit: 'Pa' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), true);
+        assert.equal(await nodeCount(), '4 nodes');
         assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Interaction node');
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
-        await evaluate(window, `document.querySelector('#redoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorTitle').textContent`), 'New node');
+        // Its one state's line is open, its name the field a person types in first.
+        assert.equal(await evaluate(window, `document.querySelectorAll('#nodeEditorStates .editorStateRow:not([hidden])').length`), 1);
+        assert.equal(await evaluate(window, `document.activeElement?.matches('#nodeEditorStates .editorStateRow [data-field="name"]')`), true, 'The new state\'s name is not the field focused.');
+        const made = (await savedProject()).nodes.find((node) => node.name === 'New node');
+        assert.deepEqual(made.states.map((state) => [state.symbol, state.initialValue]), [['x', 0]]);
+        // Named on Details, as any node is.
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="details"]').click()`);
+        await typeInto(`document.querySelector('#editNodeName')`, 'Interaction node');
+        assert.ok((await savedProject()).nodes.some((node) => node.name === 'Interaction node'));
+        await undoRedo('undo');
+        await undoRedo('undo');
+        assert.equal(await nodeCount(), '3 nodes', 'Undo did not take the new node away.');
+        await undoRedo('redo');
+        assert.equal(await nodeCount(), '4 nodes');
+        await undoRedo('undo');
+        assert.equal(await nodeCount(), '3 nodes');
     });
 
-    await run('an invalid state symbol shows a visible error instead of silently failing to create the node', async () => {
+    await run('an invalid state symbol in a node\'s line shows a visible error and keeps the symbol it had', async () => {
         await freshExample();
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `(() => {
-            document.querySelector('#newNodeName').value = 'Interaction temperature node';
-            const values = { name: 'Temperature', symbol: 'T', value: '263', unit: 'K' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), false);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
-        assert.match(await evaluate(window, `document.querySelector('#addNodeError').textContent`), /lowercase/);
-        await evaluate(window, `(() => {
-            const input = document.querySelector('.stateVariableRow [data-field="symbol"]');
-            input.value = 'temperature';
-            input.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createNode').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#nodeBuilder').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
-        assert.equal(await evaluate(window, `document.querySelector('#addNodeError').textContent`), '');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        const symbol = async () => (await savedProject()).nodes.find((node) => node.name === 'New node').states[0].symbol;
+        await typeInto(`document.querySelector('#nodeEditorStates .editorStateRow [data-field="symbol"]')`, 'T');
+        assert.match(await evaluate(window, `document.querySelector('#editNodeError').textContent`), /lowercase/);
+        assert.equal(await symbol(), 'x');
+        await typeInto(`document.querySelector('#nodeEditorStates .editorStateRow [data-field="symbol"]')`, 'temperature');
+        assert.equal(await symbol(), 'temperature');
+        await undoRedo('undo');
+        await undoRedo('undo');
+        assert.equal(await nodeCount(), '3 nodes');
     });
 
-    await run('node builder creates a node with an inline Python source term', async () => {
+    await run('New relationship picks its ends on the canvas or from a list, opens its card on its new part, and Esc makes nothing', async () => {
         await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `(() => {
-            document.querySelector('#newNodeName').value = 'Interaction source node';
-            const values = { name: 'Level', symbol: 'level', value: '10', unit: 'm' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#addSourceTerm').click();
-        })()`);
-        await evaluate(window, `(() => {
-            const kind = document.querySelector('.sourceTermRow .sourceTermKind');
-            kind.value = 'python';
-            kind.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderFields').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceExpression').hidden`), true);
-        assert.match(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderSource').value`), /from konjugate import/);
-        // The row draws the shared program section (src/renderer/programSourceSection.mjs): a template in offers to reset it.
-        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .insertSourceTermTemplate').hidden`), false);
-        assert.equal(await evaluate(window, `document.querySelector('.sourceTermRow .sourceTermProviderFields h3').textContent.trim().startsWith('Provider source')`), true);
-
-        await evaluate(window, `(() => {
-            document.querySelector('.sourceTermRow .addSourceTermBinding').click();
-            const key = document.querySelector('.sourceTermRow .providerBindingRow [data-field="key"]');
-            key.value = 'level';
-            document.querySelector('.sourceTermRow .sourceTermProviderOutputKey').value = 'levelRate';
-            document.querySelector('#createNode').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '4 nodes');
-        await settle(window, 'validation');
-        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
-            'The new node with a programmable source term did not reach native validation.');
-        assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
-
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[0].textContent`), '3 nodes');
-    });
-
-    await run('edge creation explains why missing endpoints prevent creation', async () => {
+        assert.equal(await relationshipCount(), '3 relationships');
+        // Esc during the pick: nothing made.
         await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), false);
-        assert.match(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), /source and target/);
-        assert.equal(await evaluate(window, `document.activeElement.id`), 'edgeSource');
-        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
-    });
+        assert.equal(await evaluate(window, `!document.querySelector('#endpointPickBanner').hidden`), true);
+        assert.match(await evaluate(window, `document.querySelector('#endpointPickTitle').textContent`), /source/);
+        assert.ok((await evaluate(window, `[...document.querySelectorAll('#endpointPickList option')].map((option) => option.textContent)`)).includes('Enclosed air'));
+        await evaluate(window, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+        await waitFor(window, `document.querySelector('#endpointPickBanner').hidden`, 'Esc did not end the pick.');
+        assert.equal(await relationshipCount(), '3 relationships');
 
-    await run('edge creation composes state references and supports undo', async () => {
-        await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = 'Interaction relationship';
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('\\\\mathrm{sourceQDot}');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Interaction relationship');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-    });
+        // From the list: made at once, directed, landing on its target, with k = 1; its card open on Equations.
+        await newRelationship('Electrical losses', 'Enclosed air');
+        assert.equal(await relationshipCount(), '4 relationships');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'directed');
+        // The other end is not offered as its own target.
+        const made = async () => (await savedProject()).edges.find((edge) => edge.name === 'New relationship');
+        assert.equal((await made()).equationModel.output.role, 'target');
+        assert.equal((await made()).equation ?? '', '');
+        // One undo takes it away.
+        await undoRedo('undo');
+        assert.equal(await relationshipCount(), '3 relationships', 'One undo did not take the new relationship away.');
 
-    await run('edge creation accepts a constant zero equation', async () => {
-        await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = 'Zero relationship';
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('0');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Zero relationship');
-        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-    });
-
-    await run('edge creation offers a directionality choice, defaulting to directed', async () => {
-        await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        assert.equal(await evaluate(window, `document.querySelector('#newEdgeDirectionality').value`), 'directed');
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = 'Interaction bidirectional relationship';
-            document.querySelector('#newEdgeDirectionality').value = 'bidirectional';
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('\\\\mathrm{sourceQDot}');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Interaction bidirectional relationship');
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional',
-            'The directionality chosen at creation time should have been saved onto the new edge.');
-        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
-
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-    });
-
-    await run('an invalid edge parameter symbol shows a visible error instead of silently failing to create the edge', async () => {
-        await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = 'Interaction invalid symbol relationship';
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('\\\\mathrm{sourceQDot}');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            const symbolInput = document.querySelector('.parameterRow [data-field="symbol"]');
-            symbolInput.value = 'K';
-            symbolInput.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), false);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-        assert.match(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), /lowercase/);
-        await evaluate(window, `(() => {
-            const symbolInput = document.querySelector('.parameterRow [data-field="symbol"]');
-            symbolInput.value = 'k';
-            symbolInput.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
-        assert.equal(await evaluate(window, `document.querySelector('#addEdgeError').textContent`), '');
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
-    });
-
-    await run('edge builder creates a new relationship with an inline Python provider', async () => {
-        await freshExample();
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = 'Interaction provider relationship';
-            const kind = document.querySelector('#edgeImplementationKind');
-            kind.value = 'python';
-            kind.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        assert.equal(await isRenderedVisible(window, '#edgeProviderSection'), true);
-        assert.equal(await isRenderedVisible(window, '#edgeEquationHeading'), false);
-        assert.match(await evaluate(window, `document.querySelector('#edgeProviderSource').value`), /from konjugate import/);
-        await evaluate(window, `(() => {
-            document.querySelector('#addProviderBinding').click();
-            const key = document.querySelector('#providerBindingRows .providerBindingRow [data-field="key"]');
-            key.value = 'sourceQDot';
-            key.dispatchEvent(new Event('change', { bubbles: true }));
-            document.querySelector('#providerOutputKey').value = 'targetHeatGradient';
-            window.confirm = () => true;
-            document.querySelector('#insertProviderTemplate').click();
-        })()`);
-        const builderSource = await evaluate(window, `document.querySelector('#edgeProviderSource').value`);
-        assert.match(builderSource, /ScalarPort\("sourceQDot", "sourceQDot", ""\)/);
-        assert.match(builderSource, /ScalarPort\("targetHeatGradient", "targetHeatGradient", ""\)/);
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        await settle(window, 'validation');
-        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The new provider relationship did not reach native validation.');
-        // The edge builder leaves source/target stateId null for every new relationship
-        // regardless of implementation kind, which the native validator separately flags
-        // (a pre-existing gap unrelated to provider support); only assert that the new
-        // implementation fields themselves did not produce a provider-specific diagnostic.
-        assert.doesNotMatch(await evaluate(window, `document.querySelector('#validationIssues')?.textContent ?? ''`), /provider|programmable/i);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
+        // Its part written with a reference button, in the names the card reads it by, and stored in its own.
+        await newRelationship('Electrical losses', 'Enclosed air');
+        await evaluate(window, `[...document.querySelectorAll('#editStateReferenceChips button')].find((button) => /_EL$/.test(button.textContent)).click()`);
+        await waitFor(window, `document.querySelector('#editEdgeMathField').value.trim() !== ''`, 'The reference button wrote nothing.');
+        await evaluate(window, `document.querySelector('#editEdgeMathField').dispatchEvent(new Event('change', { bubbles: true }))`);
+        await waitFor(window, `/^\\\\mathrm\\{source/.test(window.__debugProject.serialize().edges.find((edge) => edge.name === 'New relationship').equationModel.latex)`, 'The part typed with a reference was not stored in the relationship\'s own names.');
+        // A constant zero is a part too.
+        await typeRelationshipPart('0');
+        await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'New relationship').equationModel.latex === '0'`, 'A constant zero was not kept.');
+        // Back through the edits to its part (one edit session, while its field was being typed in) to its making.
+        for (let step = 0; step < 4 && await relationshipCount() !== '3 relationships'; step += 1) await undoRedo('undo');
+        assert.equal(await relationshipCount(), '3 relationships');
     });
 
     await run('a point read once the canvas stops sliding is where a click lands', async () => {
@@ -2969,20 +2877,7 @@ export async function runInteractionTests(driver) {
         // resolve the tie to the invisible, deleted original instead of the new one. Fixed by
         // having firstIntersection() skip non-visible hits (Three.js's Raycaster does not check
         // .visible itself -- confirmed in node_modules/three/src/core/Raycaster.js).
-        const createEdge = async (name) => {
-            await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-            await evaluate(window, `(() => {
-                const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-                choose('#edgeSource', 'Electrical losses');
-                choose('#edgeTarget', 'Enclosed air');
-                document.querySelector('#newEdgeName').value = ${JSON.stringify(name)};
-                const field = document.querySelector('#edgeMathField');
-                field.setValue('\\\\mathrm{sourceQDot}');
-                field.dispatchEvent(new Event('input', { bubbles: true }));
-                document.querySelector('#createEdge').click();
-            })()`);
-            assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true);
-        };
+        const createEdge = (name) => newNamedRelationship(name);
 
         await createEdge('First relationship');
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '4 relationships');
@@ -3021,9 +2916,8 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeName').value`), 'Second relationship');
 
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        // Each was made, then named: two steps apiece, and the delete between them.
+        for (let step = 0; step < 5; step += 1) await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), '3 relationships');
     });
 
@@ -3035,21 +2929,7 @@ export async function runInteractionTests(driver) {
     const selectWaypointTestTool = () => evaluate(window, `document.querySelector('[data-tool="select"]').click()`);
 
     const createWaypointTestEdge = async (name) => {
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const choose = (selector, text) => { const field = document.querySelector(selector); field.value = [...field.options].find((option) => option.textContent === text).value; field.dispatchEvent(new Event('change', { bubbles: true })); };
-            choose('#edgeSource', 'Electrical losses');
-            choose('#edgeTarget', 'Enclosed air');
-            document.querySelector('#newEdgeName').value = ${JSON.stringify(name)};
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('\\\\mathrm{sourceQDot}');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-            document.querySelector('#createEdge').click();
-        })()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, `Edge builder did not close after creating ${name}.`);
-        if (await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`)) {
-            await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
-        }
+        await newNamedRelationship(name);
         assert.deepEqual(await evaluate(window, `window.__relationshipWaypoints(${JSON.stringify(name)})`), []);
     };
 
@@ -3410,13 +3290,7 @@ export async function runInteractionTests(driver) {
         const describe = async (selector, text) => evaluate(window, `(() => { const input = document.querySelector(${JSON.stringify(selector)}); input.value = ${JSON.stringify(text)}; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         const savedNode = () => evaluate(window, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Described node')`);
 
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `(() => {
-            document.querySelector('#newNodeName').value = 'Described node';
-            const values = { name: 'Pressure', symbol: 'pressure', value: '101325', unit: 'Pa' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
+        await makeNode(window, 'Described node', { name: 'Pressure', symbol: 'pressure', value: '101325', unit: 'Pa' });
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Described node'`, 'The new node did not open its editor.');
         assert.equal(await evaluate(window, `document.querySelector('#editNodeDescription').value`), '');
         assert.equal((await savedNode()).description, undefined, 'An empty description was saved instead of omitted.');
@@ -3437,9 +3311,8 @@ export async function runInteractionTests(driver) {
         await describe('#editNodeDescription', '');
         assert.equal((await savedNode()).description, undefined, 'Clearing the description did not omit it from the saved document.');
 
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
-        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        // Back through the description, the node's name and its state's fields, to its making.
+        for (let step = 0; step < 12 && await savedNode() !== undefined; step += 1) await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.equal(await savedNode(), undefined, 'Undoing back through the creation did not remove the node.');
     });
 
@@ -3476,7 +3349,16 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('[data-template-id="conduction"]').click()`);
         await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'Applying the edge template did not arm endpoint picking.');
         assert.match(await evaluate(window, `document.querySelector('#componentLibraryHint').textContent`), /Conduction/);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`), true, 'The edge builder should stay out of the way during the chained endpoint pick.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor').classList.contains('hidden')`), true, 'No relationship card should open before both ends are picked.');
+        // Where a relationship made from a template lands, read from the document: "target.temperature".
+        const landsOn = (name) => evaluate(window, `(() => {
+            const project = window.__debugProject.serialize();
+            const edge = project.edges.filter((item) => item.name === ${JSON.stringify(name)}).at(-1);
+            const { role, stateId } = edge.equationModel.output;
+            return role + '.' + project.nodes.find((node) => node.id === edge[role].nodeId).states.find((state) => state.id === stateId).symbol;
+        })()`);
+        const templateMade = (name, message) => waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === ${JSON.stringify(name)}`, message);
+        const equationValid = () => evaluate(window, `document.querySelector('#equationDiagnostics').classList.contains('valid')`);
 
         // Endpoint picking is wired to the CSS2D label's own click listener (not 3D raycasting),
         // so a plain .click() reaches it directly -- the same approach every other test in this
@@ -3489,19 +3371,14 @@ export async function runInteractionTests(driver) {
         await clickThermalMass(0);
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain from the source to the target endpoint after the first click.');
         await clickThermalMass(1);
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked.');
+        // Made once both ends are picked, its card open on it.
+        await templateMade('Conduction', 'The Conduction relationship was not made and opened once both endpoints were picked.');
         assert.equal(await evaluate(window, `document.querySelector('#componentLibraryHint').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#newEdgeName').value`), 'Conduction');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeParameterRows .parameterRow [data-field="symbol"]').value`), 'conductance');
-        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true, 'The name-matched ports did not auto-bind to a valid equation.');
-        // Regression check: the builder's own default output (target's first state) is not
-        // reliable across a chained two-endpoint pick -- see the explicit `output` field on every
-        // bundled edge template -- so this specifically verifies the override actually lands on
-        // target.temperature rather than getting stuck on an implicit source-side selection.
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`), 'target.temperature');
-
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the templated edge did not close the builder.');
+        assert.ok((await evaluate(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Conduction').parameters.map((parameter) => parameter.symbol)`)).includes('conductance'), 'The template\'s parameters did not come with it.');
+        assert.equal(await equationValid(), true, 'The name-matched ports did not auto-bind to a valid equation.');
+        // Each bundled template names the state it lands on; this one lands on target.temperature, not a source-side state.
+        assert.equal(await landsOn('Conduction'), 'target.temperature');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
         // Conduction is bidirectional -- confirms the post-creation setRelationshipDirectionality
         // hook actually ran, not just that some edge got created. Opens the edge editor (same
@@ -3555,13 +3432,10 @@ export async function runInteractionTests(driver) {
         await clickLabelContaining('Motor');
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for rotational drive.');
         await clickLabelContaining('Rotational link');
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for rotational drive.');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`),
-            'target.angularVelocity', "The explicit output override did not select angularVelocity over the target's default first state, angle.");
-        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
-
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the rotational drive edge did not close the builder.');
+        await templateMade('Rotational drive', 'The rotational drive relationship was not made once both endpoints were picked.');
+        assert.equal(await landsOn('Rotational drive'), 'target.angularVelocity', "The template's own output did not land on angularVelocity over the target's first state, angle.");
+        assert.equal(await equationValid(), true);
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipsBefore);
 
         // Undo the edge and both placed nodes so this scenario leaves the baseline model unchanged
@@ -3600,12 +3474,10 @@ export async function runInteractionTests(driver) {
         await clickLabelContaining('Voltage source');
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for armature dynamics.');
         await evaluate(window, `${visibleLabelsWith('Motor')}[0]?.click()`);
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for armature dynamics.');
-        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true,
-            'A latex expression referencing two states on the same side did not auto-bind to a valid equation.');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`), 'target.current');
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the armature dynamics edge did not close the builder.');
+        await templateMade('Armature dynamics', 'The armature dynamics relationship was not made once both endpoints were picked.');
+        assert.equal(await equationValid(), true, 'A latex expression referencing two states on the same side did not auto-bind to a valid equation.');
+        assert.equal(await landsOn('Armature dynamics'), 'target.current');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
         assert.equal(await evaluate(window, `Number.parseInt(document.querySelectorAll('.modelStatus span')[0].textContent, 10)`),
             Number.parseInt(nodesBefore, 10) + 3, 'Creating the armature dynamics edge unexpectedly changed the node count.');
 
@@ -3614,12 +3486,10 @@ export async function runInteractionTests(driver) {
         await clickLabelContaining('Torque load');
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not chain to the target endpoint for shaft dynamics.');
         await evaluate(window, `${visibleLabelsWith('Motor')}[0]?.click()`);
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not reappear once both endpoints were picked for shaft dynamics.');
-        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').selectedOptions[0].textContent`),
-            'target.angularVelocity', 'Shaft dynamics did not override the default output to angularVelocity.');
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the shaft dynamics edge did not close the builder.');
+        await templateMade('Shaft dynamics', 'The shaft dynamics relationship was not made once both endpoints were picked.');
+        assert.equal(await equationValid(), true);
+        assert.equal(await landsOn('Shaft dynamics'), 'target.angularVelocity', 'Shaft dynamics did not land on angularVelocity.');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
         await evaluate(window, `document.querySelector('#closeComponentLibraryPanel').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#componentLibraryPanel').hidden`), true);
@@ -3721,23 +3591,12 @@ export async function runInteractionTests(driver) {
         // none of which connect two freeBody nodes) so the add-on's edge-line/label feature has
         // a real connection to render -- the equation's content is irrelevant here, only that
         // sourceNodeId/targetNodeId land on two detected 6-DOF bodies.
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="edge"]').click()`);
-        await evaluate(window, `(() => {
-            const options = (selector) => [...document.querySelector(selector).options].filter((option) => option.textContent === 'Free body');
-            const source = document.querySelector('#edgeSource');
-            source.value = options('#edgeSource')[0].value;
-            source.dispatchEvent(new Event('change', { bubbles: true }));
-            const target = document.querySelector('#edgeTarget');
-            target.value = options('#edgeTarget')[1].value;
-            target.dispatchEvent(new Event('change', { bubbles: true }));
-            document.querySelector('#newEdgeName').value = 'Pose link';
-            const field = document.querySelector('#edgeMathField');
-            field.setValue('\\\\mathrm{sourceX}');
-            field.dispatchEvent(new Event('input', { bubbles: true }));
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`), true);
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Creating the Pose link edge did not close the builder.');
+        await newRelationship('Free body', 'Free body');
+        await typeRelationshipPart('0');
+        await waitFor(window, `document.querySelector('#equationDiagnostics').classList.contains('valid')`, 'The Pose link part did not become valid.');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab="details"]').click()`);
+        await typeInto(`document.querySelector('#editEdgeName')`, 'Pose link');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
         await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '1'; document.querySelector('#startRun').click(); })()`);
@@ -4219,24 +4078,14 @@ export async function runInteractionTests(driver) {
     await run('edge group meshes a selection, edits its shared definition (parameters, a program, bindings), and supports detach, add, delete and undo', async () => {
         const nodeLabel = (name) => `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes(${JSON.stringify(name)}) && !label.textContent.includes('copy'))`;
         const nodeIdFor = (name) => `Number(${nodeLabel(name)}.closest('.node-label-container').dataset.node)`;
-        // The move tool is active so #createNode's own "attach the gizmo to whatever was just
+        // The move tool is active so New node's own "attach the gizmo to whatever was just
         // created" behavior lets simulateDragTo spread each node to a distinct position --
-        // #createNode always spawns at the same [0, -0.7, 0], and three nodes left coincident
+        // a new node always spawns at the same [0, -0.7, 0], and three nodes left coincident
         // would leave every one of their CSS2D labels (and, in turn, every mesh edge's midpoint
         // bundle label) stacked at the same screen point, making click targeting ambiguous.
         await evaluate(window, `document.querySelector('[data-tool="move"]').click()`);
         const addNode = async (name, x) => {
-            await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-            await evaluate(window, `(() => {
-                document.querySelector('#newNodeName').value = ${JSON.stringify(name)};
-                const values = { name: 'Temperature', symbol: 'temperature', value: '300', unit: 'K' };
-                Object.entries(values).forEach(([field, value]) => {
-                    const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]');
-                    input.value = value;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                });
-                document.querySelector('#createNode').click();
-            })()`);
+            await makeNode(window, name, { name: 'Temperature', symbol: 'temperature', value: '300', unit: 'K' });
             // A newly created node's CSS2D label isn't inserted into the DOM synchronously with
             // model.nodes.push() -- CSS2DRenderer only appends it on the next throttled render
             // tick (~30fps). Three nodes created back to back with little work between them can
@@ -4476,17 +4325,7 @@ export async function runInteractionTests(driver) {
         // exercising the "match an existing state, don't create a new node" mapping path.
         // "columnB" has no existing match, exercising "create a new node" instead.
         await evaluate(window, `document.querySelector('[data-tool="move"]').click()`);
-        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(window, `(() => {
-            document.querySelector('#newNodeName').value = 'Import test A';
-            const values = { name: 'Column A', symbol: 'columnA', value: '0', unit: '' };
-            Object.entries(values).forEach(([field, value]) => {
-                const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]');
-                input.value = value;
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-            document.querySelector('#createNode').click();
-        })()`);
+        await makeNode(window, 'Import test A', { name: 'Column A', symbol: 'columnA', value: '0', unit: '' });
         await waitFor(window, `Boolean(${nodeLabel('Import test A')})`, 'The label for "Import test A" did not render.');
         await evaluate(window, `window.__debugTransform.simulateDragTo(0, 0, 0)`);
 
@@ -5175,13 +5014,7 @@ export async function runInteractionTests(driver) {
         // MathLive/ComputeEngine parsing quirk specific to single-letter symbols ("Unknown symbol:
         // x_upright", confirmed by hand while writing this test) that a multi-character symbol
         // like "level" (or the existing suite's own "sourceBias"/"sourceGain") does not.
-        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#newNodeName').value = 'Growth';
-            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
+        await makeNode(diagnosticWindow, 'Growth', { name: 'Level', symbol: 'level', value: '1', unit: '' });
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
         // Written by its reference button, as a person picks it: the growth rate is the level itself.
@@ -5267,13 +5100,7 @@ export async function runInteractionTests(driver) {
         const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#newNodeName').value = 'Decay';
-            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
+        await makeNode(diagnosticWindow, 'Decay', { name: 'Level', symbol: 'level', value: '1', unit: '' });
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Decay node editor did not open after creation.');
 
         await writeOwnPart(diagnosticWindow, 'level', '0');
@@ -5379,13 +5206,7 @@ export async function runInteractionTests(driver) {
         const diagnosticWindow = await driver.waitForNewHandle(before);
         await waitFor(diagnosticWindow, `document.querySelector('.documentTitle')`, 'Diagnostic window did not finish loading.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
-        await evaluate(diagnosticWindow, `(() => {
-            document.querySelector('#newNodeName').value = 'Growth';
-            const values = { name: 'Level', symbol: 'level', value: '1', unit: '' };
-            Object.entries(values).forEach(([field, value]) => { const input = document.querySelector('.stateVariableRow [data-field="' + field + '"]'); input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
-            document.querySelector('#createNode').click();
-        })()`);
+        await makeNode(diagnosticWindow, 'Growth', { name: 'Level', symbol: 'level', value: '1', unit: '' });
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
         // Written by its reference button, as a person picks it: the growth rate is the level itself.
@@ -7516,7 +7337,6 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)})`);
         await waitFor(window, `document.querySelectorAll('.node-label-container').length === 2`, 'The authoring project did not load.');
     };
-    const savedProject = async () => JSON.parse(await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`));
     const openNode = async (title) => {
         const label = `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes(${JSON.stringify(title)}))`;
         await waitFor(window, `Boolean(${label})`, `The ${title} label was not on the canvas.`);
@@ -7531,7 +7351,6 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `${row}.click()`);
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === ${JSON.stringify(title)}`, `The ${title} edge editor did not open.`);
     };
-    const typeInto = (selector, value, event = 'change') => evaluate(window, `(() => { const input = ${selector}; input.value = ${JSON.stringify(value)}; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event(${JSON.stringify(event)}, { bubbles: true })); })()`);
 
     // A model of subsystems for the scenarios below, each loading it afresh, as the scenarios after them load models of their own. Model: Heater and Ambient at the top level; Plant holds Tank and the nested Pump (holding Pump motor); Controls,
     // beside Plant, holds Sensor. Ambient and Tank are an edge group, one member edge each way.
@@ -7895,12 +7714,12 @@ export async function runInteractionTests(driver) {
         await clickElement(window, open('Plant'));
         await waitFor(window, `!document.querySelector('#subsystemBreadcrumb').hidden && window.__terminalPosition(11)`, 'Plant was not entered.');
 
-        // Add edge offers the nodes elsewhere, by where they are.
+        // A new relationship's pick lists the nodes elsewhere too, by where they are.
         await evaluate(window, `document.querySelector('[data-add-kind="edge"]').click()`);
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Add edge did not open.');
-        const choices = await evaluate(window, `[...document.querySelector('#edgeSource').querySelectorAll('option, optgroup')].map((item) => item.tagName === 'OPTGROUP' ? '[' + item.label + ']' : item.textContent)`);
-        assert.deepEqual(choices, ['Choose a node…', 'Tank', '[Elsewhere in the model]', 'Pump motor · Model / Plant / Pump', 'Heater · Model', 'Sensor · Model / Controls', 'Ambient · Model']);
-        await evaluate(window, `document.querySelector('#edgeBuilder [data-close-card]').click()`);
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, 'New relationship did not start its pick.');
+        const choices = await evaluate(window, `[...document.querySelector('#endpointPickList').querySelectorAll('option, optgroup')].map((item) => item.tagName === 'OPTGROUP' ? '[' + item.label + ']' : item.textContent)`);
+        assert.deepEqual(choices, ['Choose from the list…', 'Tank', '[Elsewhere in the model]', 'Pump motor · Model / Plant / Pump', 'Heater · Model', 'Sensor · Model / Controls', 'Ambient · Model']);
+        await evaluate(window, `document.querySelector('#cancelEndpointPick').click()`);
 
         // The relationship of a terminal shows both its ends, the outside one included.
         await waitFor(window, `Boolean(document.querySelector('.subsystemTerminal[data-terminal-edge="11"] .subsystemTerminalEdge'))`, 'The terminal\'s label was not drawn.');
@@ -8770,10 +8589,9 @@ export async function runInteractionTests(driver) {
         await pick('Boundary');
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'Picking did not move on to the target.');
         await pick('Mass');
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'The edge builder did not appear once both bodies were picked.');
-        assert.equal(await evaluate(window, `document.querySelector('#newEdgeDirectionality').value`), 'directed');
-        await evaluate(window, `document.querySelector('#createEdge').click()`);
-        await waitFor(window, `window.__debugProject.serialize().edges.length === 1`, 'One-way conduction did not create its edge.');
+        await waitFor(window, `window.__debugProject.serialize().edges.length === 1`, 'One-way conduction was not made once both bodies were picked.');
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'One-way conduction did not open its card.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'directed');
         const [edge] = (await saved()).edges;
         assert.equal(edge.directionality, 'directed');
         assert.deepEqual([edge.source.nodeId, edge.target.nodeId], [1, 10], 'The heat does not flow from the boundary to the mass.');
@@ -8919,12 +8737,6 @@ export async function runInteractionTests(driver) {
     // Each through the button a person presses, with a real click: the scenarios further on use these as steps. A real click
     // lands a moment after it is sent, so each step waits for what it does.
     const nodeLabel = (title) => `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes(${JSON.stringify(title)}))`;
-    const undoRedo = async (which) => {
-        await evaluate(window, `document.activeElement?.blur()`);
-        const before = await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`);
-        await clickElement(window, `document.querySelector('#${which}Button')`);
-        await waitFor(window, `JSON.stringify(window.__debugProject.serialize()) !== ${JSON.stringify(before)}`, `${which === 'undo' ? 'Undo' : 'Redo'} changed nothing.`);
-    };
     // Found as a person finds one in a long list, by searching for its name; the search is cleared once it is placed (`placed`,
     // an expression), not before the click lands, which would redraw the list under it.
     const placeFromLibrary = async (id, name, placed) => {
@@ -9032,35 +8844,23 @@ export async function runInteractionTests(driver) {
         assert.deepEqual((await terms()).map((term) => term.state), ['speed'], 'Redo did not bring the term back on its state.');
     });
 
-    await run('the edge builder\'s Pick buttons choose each end on the canvas, and a new edge lands on its target unless its state is chosen', async () => {
+    await run('New relationship picks each end on the canvas, lands on its target\'s first state, and one undo takes it away', async () => {
         await loadAuthoringProject();
         await clickElement(window, `document.querySelector('#addButton')`);
         await clickElement(window, `document.querySelector('[data-add-kind="edge"]')`);
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden')`, 'Add edge did not open the builder.');
-        const pick = async (end, title) => {
-            await clickElement(window, `document.querySelector('[data-pick-endpoint="${end}"]')`);
-            await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden`, `⌖ Pick did not arm picking the ${end}.`);
-            await clickElement(window, nodeLabel(title));
-            await waitFor(window, `document.querySelector('#endpointPickBanner').hidden`, `Clicking ${title} did not pick the ${end}.`);
-        };
-        // The source first: while only it is known, the list holds its states, which must not become the new edge's output.
-        await pick('source', 'Probe');
-        await pick('target', 'Mass');
-        assert.deepEqual(await evaluate(window, `[document.querySelector('#edgeSource').value, document.querySelector('#edgeTarget').value]`), ['4', '1']);
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').value`), 'target:2', 'A directed edge made source first lands on its source.');
-        // A state the person chooses stays chosen when an end is picked again.
-        await evaluate(window, `(() => { const select = document.querySelector('#edgeEquationOutput'); select.value = 'source:6'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-        await pick('target', 'Mass');
-        assert.equal(await evaluate(window, `document.querySelector('#edgeEquationOutput').value`), 'source:6', 'Picking an end again dropped the state chosen.');
-        await evaluate(window, `(() => { const field = document.querySelector('#edgeMathField'); field.setValue('0'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await clickElement(window, `document.querySelector('#createEdge')`);
-        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Create edge did not open the new relationship.');
+        await waitFor(window, `!document.querySelector('#endpointPickBanner').hidden && /source/.test(document.querySelector('#endpointPickTitle').textContent)`, 'New relationship did not start by picking its source.');
+        await clickElement(window, nodeLabel('Probe'));
+        await waitFor(window, `/target/.test(document.querySelector('#endpointPickTitle').textContent)`, 'Clicking Probe did not pick the source.');
+        await clickElement(window, nodeLabel('Mass'));
+        await waitFor(window, `document.querySelector('#endpointPickBanner').hidden`, 'Clicking Mass did not pick the target.');
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'The new relationship did not open its card.');
+        // While only the source was known, its states must not have become where the part lands.
         const made = (await savedProject()).edges.find((edge) => edge.id !== 7);
-        assert.deepEqual([made.source.nodeId, made.target.nodeId, made.equationModel.output], [4, 1, { role: 'source', stateId: 6 }]);
+        assert.deepEqual([made.source.nodeId, made.target.nodeId, made.equationModel.output], [4, 1, { role: 'target', stateId: 2 }]);
         await undoRedo('undo');
-        assert.equal((await savedProject()).edges.length, 1, 'Undo left the new edge behind.');
+        assert.equal((await savedProject()).edges.length, 1, 'Undo left the new relationship behind.');
         await undoRedo('redo');
-        assert.equal((await savedProject()).edges.length, 2, 'Redo did not bring the edge back.');
+        assert.equal((await savedProject()).edges.length, 2, 'Redo did not bring the relationship back.');
     });
 
     // A model that says no kind of any state (every node settling) and one that says them: the engine reads each by its own rules,
@@ -9287,6 +9087,29 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The mixer did not load.');
         await openNode('Mixer');
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .partChip[data-term-type="program"] .partChipBody')].map((body) => body.textContent.trim())`), ['Python · output 1 of 2', 'Python · output 2 of 2']);
+    });
+
+    await run('a parameter given a display symbol is written by it in every equation it is in, and what is typed with it is stored by its symbol', async () => {
+        await freshExample('fourBarLinkage');
+        await openRelationship('Crank drive X');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab="parameters"]').click()`);
+        await typeInto(`document.querySelector('#edgeEditorParameters [data-field="displaySymbol"]')`, '\\omega');
+        const parameter = async () => (await savedProject()).edges.find((edge) => edge.name === 'Crank drive X').parameters[0];
+        assert.equal((await parameter()).displaySymbol, '\\omega', 'The display symbol was not kept.');
+        assert.equal((await parameter()).symbol, 'angularVelocity', 'The symbol the engine reads changed.');
+        // Its field, and the chip of its part on Crank pin B, write it as ω.
+        await openRelationship('Crank drive X');
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeMathField').value`), /\\omega/);
+        await openNode('Crank pin B');
+        assert.match(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .partChip[data-term-type="relationship"]').dataset.latex`), /^-\\omega/);
+        // Typed with ω, stored by its symbol.
+        await openRelationship('Crank drive X');
+        await evaluate(window, `(() => { const field = document.querySelector('#editEdgeMathField'); field.focus(); field.setValue('\\\\omega\\\\cdot(y_B-y_A)'); field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Crank drive X').equationModel.latex.startsWith('\\\\mathrm{angularVelocity}')`, 'What was typed with ω was not stored by the parameter\'s symbol.');
+        // Left empty, it is written by its symbol again, and the file says nothing of it.
+        await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab="parameters"]').click()`);
+        await typeInto(`document.querySelector('#edgeEditorParameters [data-field="displaySymbol"]')`, '');
+        assert.equal('displaySymbol' in (await parameter()), false, 'An empty display symbol is written to the file.');
     });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
@@ -9630,7 +9453,7 @@ export async function runInteractionTests(driver) {
         const step = () => evaluate(window, `window.__debugTour.step()`);
         const waitForStep = async (id) => {
             try { await waitFor(window, `window.__debugTour.step() === ${JSON.stringify(id)}`, `The tour did not reach "${id}".`, 15000); } catch (error) {
-                const facts = await evaluate(window, `JSON.stringify({ step: window.__debugTour.step(), error: document.querySelector('#addNodeError').textContent, dialog: document.querySelector('#runLaunchDialog').open, runError: document.querySelector('#runLaunchError').textContent, status: document.querySelector('#statusText').textContent, builder: !document.querySelector('#nodeBuilder').classList.contains('hidden'), nodes: window.__debugProject.serialize().nodes.map((node) => [node.name, node.states.length]), blockers: window.__debugTour.blockers() })`);
+                const facts = await evaluate(window, `JSON.stringify({ step: window.__debugTour.step(), error: document.querySelector('#editNodeError').textContent, dialog: document.querySelector('#runLaunchDialog').open, runError: document.querySelector('#runLaunchError').textContent, status: document.querySelector('#statusText').textContent, nodeCard: !document.querySelector('#nodeEditor').classList.contains('hidden'), nodes: window.__debugProject.serialize().nodes.map((node) => [node.name, node.states.length]), blockers: window.__debugTour.blockers() })`);
                 throw new Error(`${error.message} ${facts}`);
             }
         };
@@ -9651,29 +9474,27 @@ export async function runInteractionTests(driver) {
         await press('.tourFloating .tourActions .tourLink');
         await waitFor(window, `!window.__debugTour.active() && document.querySelector('.tourFloating').hidden`, 'Skipping did not end the tour.');
 
-        // The whole way, by the "Fill this in for me" buttons and the builders' own buttons.
+        // The whole way, by the Add menu and the "Fill this in for me" buttons.
         await start();
         await press('.tourFloating .tourPrimary');
         await waitForStep('addNode');
         await press('#addButton');
         await press('[data-add-kind="node"]');
         await waitForStep('firstNode');
-        // The card never sits over what the person is working in: the builder that opened, or the editor that opens at the side.
+        // The card never sits over what the person is working in: the card of the node or relationship just made, at the side.
         const cardOverlaps = (selector) => evaluate(window, `(() => { const a = document.querySelector('.tourFloating').getBoundingClientRect(); const b = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top); })()`);
-        await waitFor(window, `document.querySelector('.tourFloating .tourTitle').textContent.startsWith('Define')`, 'The card did not describe the node builder.');
-        assert.equal(await cardOverlaps('#nodeBuilder'), false, 'The tour card covers the node builder.');
+        await waitFor(window, `document.querySelector('.tourFloating .tourTitle').textContent.startsWith('Define')`, 'The card did not describe the new node.');
+        assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`), true, 'New node did not open its card.');
+        assert.equal(await cardOverlaps('#nodeEditor'), false, 'The tour card covers the new node\'s card.');
         await fill();
-        await press('#createNode');
         await waitForStep('secondNode');
         await fill();
-        await press('#createNode');
         await waitForStep('addEdge');
         await fill();
         await waitForStep('equation');
-        assert.equal(await cardOverlaps('#edgeBuilder'), false, 'The tour card covers the edge builder.');
+        assert.equal(await cardOverlaps('#edgeEditor'), false, 'The tour card covers the new relationship\'s card.');
         await fill();
-        await waitFor(window, `document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`, 'The tour\'s equation was not valid.', 15000);
-        await press('#createEdge');
+        await waitFor(window, `document.querySelector('#equationDiagnostics').classList.contains('valid')`, 'The tour\'s equation was not valid.', 15000);
         await waitForStep('run');
         await waitFor(window, `document.querySelector('#runButton').title === 'Run simulation'`, 'The model was not validated for a run.', 15000);
         await fill();
@@ -9994,8 +9815,7 @@ export async function runInteractionTests(driver) {
         await clickLabel('Voltage source');
         await waitFor(window, `document.querySelector('#endpointPickTitle').textContent.includes('target')`, 'The source end was not taken.');
         await clickLabel('Motor');
-        await waitFor(window, `!document.querySelector('#edgeBuilder').classList.contains('hidden') && document.querySelector('#builderEquationDiagnostics').classList.contains('valid')`, 'The template\'s equation did not bind itself.', 10000);
-        await press('#createEdge');
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#equationDiagnostics').classList.contains('valid')`, 'The template\'s equation did not bind itself.', 10000);
         await waitForStep('shaft');
         await press('.tourFloating .tourSkipStep');
         await waitForStep('run', 20000);

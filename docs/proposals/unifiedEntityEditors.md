@@ -21,7 +21,7 @@ The review accepted the recommendation on each question this proposal asked, wit
 | --- | --- | --- |
 | 1 | Short names | Derived from the node's name, and editable on Details. |
 | 2 | Several own terms on one state | Shown as one sum; the first edit merges them into one term, their parameters merged too. |
-| 3 | Own programs per state | A node's own program only through its program section, not per state. A file that has a per-state program keeps it, shown as a chip opening its code; none is made anew. |
+| 3 | Own programs per state | A node's own program only through its program section, each of whose outputs either sets its state or adds to its rate, so nothing is lost. A file that has a per-state C++ or Python program keeps it, shown as a chip opening its code; none is made anew. An installed plugin's provider, which the program section cannot host, can still write a node's own part on a state ("{ } plugin"). |
 | 4 | The builders | Retired: New relationship picks two ends and opens its card on a new, empty part; New node opens its card with one state. One undo removes either. |
 | 5 | Results for a relationship | Each relationship's part is recorded over a run, giving relationships a Results tab. |
 | 6 | Display symbols | A parameter may have a display symbol (ω for angularVelocity), stored beside the symbol the engine reads. |

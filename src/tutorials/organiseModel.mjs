@@ -50,8 +50,8 @@ const steps = Object.freeze([
     {
         id: 'warmOne',
         title: 'Warm one of them',
-        text: `Click the first "${values.mass.name}" (the one without "copy" in its name) and change its Temperature from ${values.mass.from} to ${values.mass.warm} K in its editor, then press Enter.`,
-        target: (ui) => (ui.nodeEditorFor === values.mass.name ? '#nodeEditorStates input[data-field="value"]' : ui.labelOf(values.mass.name)),
+        text: `Click the first "${values.mass.name}" (the one without "copy" in its name). In its editor, click its Temperature line to open it, change where it starts from ${values.mass.from} to ${values.mass.warm} K, then press Enter.`,
+        target: (ui) => (ui.nodeEditorFor === values.mass.name ? ui.stateFieldOf(values.mass.symbol) : ui.labelOf(values.mass.name)),
         skip: 'setStateValue', node: values.mass.name, symbol: values.mass.symbol, value: values.mass.warm,
         done: ({ document }) => warmed(document)
     },

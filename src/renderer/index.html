@@ -927,7 +927,7 @@
 
         <div id="nodeEditor" data-entity-editor="node" class="contextCard editorCard nodeEditor hidden">
             <header><div><span class="contextKicker">Node</span><strong id="nodeEditorTitle">Node</strong></div><button data-close-card type="button">×</button></header>
-            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="results" type="button">Results</button><button data-editor-tab="numerics" type="button">Numerics</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
+            <nav class="cardTabs"><button class="active" data-editor-tab="equations" type="button">Equations</button><button data-editor-tab="parameters" type="button">Parameters <span class="tabCount" id="nodeParameterCount"></span></button><button data-editor-tab="details" type="button">Details</button><button data-editor-tab="results" type="button">Results</button><button data-editor-tab="numerics" type="button">Numerics</button><button data-editor-tab="appearance" type="button">Appearance</button></nav>
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-editor-panel="equations">
             <section>
@@ -964,9 +964,17 @@
             </section>
             <div class="passwordError" id="editNodeError" role="alert"></div>
             </div>
+            <div data-editor-panel="parameters" hidden>
+            <section>
+                <p class="builderHint">The parameters this node's own parts read, by the state each part is on. Live parameters can be adjusted while an online simulation runs; constant ones can be fitted against measured data.</p>
+                <div class="passwordError" id="nodeParameterError" role="alert"></div>
+                <div id="nodeEditorParameters"></div>
+            </section>
+            </div>
             <div data-editor-panel="details" hidden>
             <section>
                 <label class="editorField"><span>Name</span><input id="editNodeName" autocomplete="off"></label>
+                <label class="editorField" title="The name it goes by in other nodes' equations: y with this subscript is this node's y. Left empty, it is worked out from its name."><span>Short name</span><input id="editNodeShortName" autocomplete="off" maxlength="12"></label>
                 <label class="editorField"><span>Type</span><input id="editNodeType" autocomplete="off" placeholder="Optional classification"></label>
                 <label class="editorField" id="editNodeSubsystemField"><span>Subsystem</span><select id="editNodeSubsystem" aria-label="The subsystem this node is in"></select></label>
                 <label class="editorField"><span>Description</span><textarea id="editNodeDescription" rows="3" placeholder="Optional notes on what this node represents"></textarea></label>

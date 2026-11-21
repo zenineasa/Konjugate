@@ -197,6 +197,43 @@ async function clickElement(window, expression, modifiers = []) {
     await window.mouseUp(point, { button: 'left', clickCount: 1, modifiers });
 }
 
+// A node's own part on a state, written as a person writes it (docs/proposals/unifiedEntityEditors.md): in the state's own field
+// on the open node's Equations tab, its folded line opened first, and then left, which makes it one undoable step.
+async function writeOwnPart(window, symbol, latex) {
+    await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="equations"]').click()`);
+    const field = `document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .ownPart')`;
+    if (!await evaluate(window, `Boolean(${field})`)) await evaluate(window, `document.querySelector('#nodeEditorStates .stateFold[data-symbols~="${symbol}"] .stateSummary')?.click()`);
+    await waitFor(window, `Boolean(${field})`, `The ${symbol} state has no own field.`);
+    await evaluate(window, `(() => { const field = ${field}; field.focus(); field.setValue(${JSON.stringify(latex)}); field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+}
+
+// A state's fields, opened from its line as a person opens them (its folded line first, when nothing changes it).
+async function openStateFields(window, symbol) {
+    if (!await evaluate(window, `Boolean(document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"]'))`)) {
+        await evaluate(window, `document.querySelector('#nodeEditorStates .stateFold[data-symbols~="${symbol}"] .stateSummary')?.click()`);
+    }
+    await evaluate(window, `(() => { const line = document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .stateSummary'); if (line?.getAttribute('aria-expanded') === 'false') line.click(); })()`);
+    await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .editorStateRow:not([hidden])'))`, `The ${symbol} state's fields did not open.`);
+}
+
+// The own part's parameters on a state, on the open node's Parameters tab.
+const ownParameterGroup = (symbol) => `document.querySelector('#nodeEditorParameters .ownParameterGroup[data-symbol="${symbol}"]')`;
+const ownParameterRow = (symbol) => `${ownParameterGroup(symbol)}.querySelector('.editorParameterRow')`;
+
+// A parameter added to the own part on a state, with these fields (name, symbol, value...), as the Parameters tab adds one.
+async function addOwnParameter(window, symbol, fields) {
+    await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="parameters"]').click()`);
+    await waitFor(window, `Boolean(${ownParameterGroup(symbol)})`, `The ${symbol} state has no own part to add a parameter to.`);
+    const before = await evaluate(window, `${ownParameterGroup(symbol)}.querySelectorAll('.editorParameterRow').length`);
+    await evaluate(window, `${ownParameterGroup(symbol)}.querySelector('.addOwnParameter').click()`);
+    await waitFor(window, `${ownParameterGroup(symbol)}.querySelectorAll('.editorParameterRow').length > ${before}`, 'The parameter was not added.');
+    await evaluate(window, `(() => { const row = [...${ownParameterGroup(symbol)}.querySelectorAll('.editorParameterRow')].at(-1); for (const [field, value] of Object.entries(${JSON.stringify(fields)})) row.querySelector('[data-field="' + field + '"]').value = value; row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true })); })()`);
+}
+
+// What the own field on a state says of what is written in it, and the references it offers.
+const ownPartDiagnostics = (symbol) => `document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .ownPartDiagnostics')`;
+const ownPartReferences = (symbol) => `[...document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .ownPartReferences button')]`;
+
 // Re-resolves the element's screen position on every call rather than caching one set of
 // coordinates -- a CSS2D label can shift by a pixel or two as selection/disabled styling changes
 // its box (border, badge text), and a stale cached point can miss the element entirely on a
@@ -2279,24 +2316,31 @@ export async function runInteractionTests(driver) {
         })()`);
     });
 
-    await run('node editor authors a source term with a programmable C++ implementation', async () => {
+    await run('a node\'s own part a file holds as a C++ program opens from its chip, and is still written there', async () => {
         await freshExample();
+        const document_ = JSON.parse(await decodeProjectFile(await readFile(join(process.cwd(), 'examples', 'thermalManagement.kjt'))));
+        const air = document_.nodes.find((node) => node.name === 'Enclosed air');
+        air.sourceTerms.push({
+            id: 9001, state: air.states[0].symbol, expression: '',
+            parameters: [{ id: 9002, name: 'Source gain', symbol: 'sourceGain', value: 2, mode: 'constant' }],
+            implementation: { kind: 'cpp', providerApiVersion: 1, source: '', bindings: [], output: { key: '', stateId: air.states[0].id } }
+        });
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(document_)})`);
+        await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`, 'The model did not load.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
-        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
+        await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .partChip.own.program'))`, 'The own program has no chip in its state\'s equation.');
+        await evaluate(window, `document.querySelector('#nodeEditorStates .partChip.own.program').click()`);
         assert.equal(await isRenderedVisible(window, '#sourceTermEditor'), true);
-
-        await evaluate(window, `(() => {
-            const select = document.querySelector('#termImplementationKind');
-            select.value = 'cpp';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#termImplementationKind').value`), 'cpp');
+        assert.equal(await evaluate(window, `document.querySelector('#termImplementationKind option[value="python"]').hidden`), true, 'A part per state can be made a Python program.');
         assert.equal(await isRenderedVisible(window, '#termProviderSection'), true);
         assert.equal(await isRenderedVisible(window, '#termEquationHeading'), false);
-        assert.match(await evaluate(window, `document.querySelector('#termProviderSource').value`), /#include <konjugate\/relationshipProvider\.hpp>/);
 
         await evaluate(window, `(() => {
             document.querySelector('#termAddProviderBinding').click();
+        })()`);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termProviderBindings option')].some((option) => option.textContent === 'sourceGain')`), true, 'The program\'s own parameter is not offered to its bindings.');
+        await evaluate(window, `(() => {
             const key = document.querySelector('#termProviderBindings .providerBindingRow [data-field="key"]');
             key.value = 'temperature';
             key.dispatchEvent(new Event('change', { bubbles: true }));
@@ -3499,7 +3543,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((l) => l.textContent.includes('Rotational link'))`, 'The rotational link node template was not placed.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((l) => l.textContent.includes('Rotational link'))?.click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The placed rotational link node did not open its editor.');
-        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="angle"] .stateTerm[data-term-type="sourceTerm"]') ? 'Updates angle' : ''`), 'Updates angle', "The template's self-referencing source term was not applied to the placed node.");
+        assert.notEqual(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="angle"] .ownPart')?.value ?? ''`), '', "The template's self-referencing own part was not applied to the placed node.");
         await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         const clickLabelContaining = async (text) => {
@@ -4749,33 +4793,24 @@ export async function runInteractionTests(driver) {
             'The "Enclosed air" label did not settle back into the DOM after the previous test\'s undo.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
         await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Enclosed air node editor did not open.');
-        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await waitFor(window, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
-        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
-        await evaluate(window, `document.querySelector('#termAddParameter').click()`);
+        await writeOwnPart(window, 'temperature', '0');
+        await addOwnParameter(window, 'temperature', { name: 'Source bias', symbol: 'sourceBias', value: '0.5' });
+        await writeOwnPart(window, 'temperature', '\\mathrm{sourceBias}');
+        await waitFor(window, `${ownPartDiagnostics('temperature')}.classList.contains('valid')`, 'The source-bias equation did not become valid.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="parameters"]').click()`);
         await evaluate(window, `(() => {
-            const row = document.querySelector('#termParameters .editorParameterRow');
-            row.querySelector('[data-field="name"]').value = 'Source bias';
-            row.querySelector('[data-field="symbol"]').value = 'sourceBias';
-            row.querySelector('[data-field="value"]').value = '0.5';
-            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'sourceBias').click()`);
-        await waitFor(window, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The source-bias equation did not become valid.');
-        await evaluate(window, `(() => {
-            const row = document.querySelector('#termParameters .editorParameterRow');
+            const row = ${ownParameterRow('temperature')};
             const checkbox = row.querySelector('[data-field="tunable"]');
             checkbox.checked = true;
             checkbox.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
         await evaluate(window, `(() => {
-            const row = document.querySelector('#termParameters .editorParameterRow');
+            const row = ${ownParameterRow('temperature')};
             row.querySelector('[data-tuning-field="minimum"]').value = '-5';
             row.querySelector('[data-tuning-field="maximum"]').value = '5';
             row.querySelector('[data-tuning-field="minimum"]').dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        await evaluate(window, `document.querySelector('#sourceTermEditor [data-close-card]').click(); document.querySelector('#nodeEditor [data-close-card]').click()`);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         // Reuses the same edge the "live parameters" test above already opens -- Thermal
         // Management's Battery module -> Enclosed air relationship, whose one parameter is
@@ -5105,25 +5140,16 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: (!driver.capabilities.multiWindow && 'duplicates coverage #5/#15 already provide on the web driver; the addon-specific redraw-gating behavior itself has no web-edition equivalent') || addonMissing('konjugate.resultPlotViewer', 'konjugate-resultplotviewer') });
 
-    await run('source terms expose parameters to equations and programmable bindings', async () => {
+    await run('a node\'s own part reads its own parameters, added on its Parameters tab and picked from its references', async () => {
         await freshExample();
         await waitFor(window, `Boolean([...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')))`, 'The "Enclosed air" label was not in the DOM.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Enclosed air')).click()`);
-        await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
-        await evaluate(window, `document.querySelector('#termAddParameter').click()`);
-        await evaluate(window, `(() => {
-            const row = document.querySelector('#termParameters .editorParameterRow');
-            row.querySelector('[data-field="name"]').value = 'Source gain';
-            row.querySelector('[data-field="symbol"]').value = 'sourceGain';
-            row.querySelector('[data-field="value"]').value = '2';
-            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].some((button) => button.textContent === 'sourceGain')`), true);
-        await evaluate(window, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'sourceGain').click()`);
-        await waitFor(window, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The source-term parameter was not accepted by the equation editor.');
-        await evaluate(window, `(() => { const select = document.querySelector('#termImplementationKind'); select.value = 'cpp'; select.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#termAddProviderBinding').click(); })()`);
-        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termProviderBindings option')].some((option) => option.textContent === 'sourceGain')`), true);
+        await writeOwnPart(window, 'temperature', '0');
+        await addOwnParameter(window, 'temperature', { name: 'Source gain', symbol: 'sourceGain', value: '2' });
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="equations"]').click()`);
+        assert.equal(await evaluate(window, `${ownPartReferences('temperature')}.some((button) => button.textContent === 'sourceGain')`), true, 'The own part does not offer its parameter.');
+        await writeOwnPart(window, 'temperature', '2\\cdot\\mathrm{sourceGain}');
+        await waitFor(window, `${ownPartDiagnostics('temperature')}.classList.contains('valid')`, 'The own parameter was not accepted by the equation.');
     });
 
     await run('numerical stability findings surface as a bottom-bar indicator, a findings panel, and a per-node badge', async () => {
@@ -5158,17 +5184,12 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
-        // A freshly created source term's math field defaults to the literal "0", not empty --
-        // inserting a state reference without clearing it first produces malformed LaTeX like
-        // "0\\mathrm{x}" (concatenated, not combined with an operator).
-        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue(''); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'level').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
-        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        // Written by its reference button, as a person picks it: the growth rate is the level itself.
+        await writeOwnPart(diagnosticWindow, 'level', '');
+        await evaluate(diagnosticWindow, `${ownPartReferences('level')}.find((button) => button.textContent === 'level').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="level"] .ownPart').value.includes('level')`, 'The level reference was not put in the field.');
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="level"] .ownPart').dispatchEvent(new Event('change', { bubbles: true }))`);
+        await waitFor(diagnosticWindow, `${ownPartDiagnostics('level')}.classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         // A known, explicit run configuration -- not load-bearing for instability itself (see
@@ -5255,23 +5276,11 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Decay node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
-
-        await evaluate(diagnosticWindow, `document.querySelector('#termAddParameter').click()`);
-        await evaluate(diagnosticWindow, `(() => {
-            const row = document.querySelector('#termParameters .editorParameterRow');
-            row.querySelector('[data-field="name"]').value = 'Decay rate';
-            row.querySelector('[data-field="symbol"]').value = 'decayRate';
-            row.querySelector('[data-field="value"]').value = '21';
-            row.querySelector('[data-field="symbol"]').dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await writeOwnPart(diagnosticWindow, 'level', '0');
+        await addOwnParameter(diagnosticWindow, 'level', { name: 'Decay rate', symbol: 'decayRate', value: '21' });
         // dx/dt = -decayRate * level, matching decayProject(21, 1)'s own hand-verified math.
-        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue('-\\\\mathrm{decayRate}\\\\cdot\\\\mathrm{level}'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The decay equation did not become valid.');
-        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await writeOwnPart(diagnosticWindow, 'level', '-\\mathrm{decayRate}\\cdot\\mathrm{level}');
+        await waitFor(diagnosticWindow, `${ownPartDiagnostics('level')}.classList.contains('valid')`, 'The decay equation did not become valid.');
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         await settle(diagnosticWindow, 'validation');
@@ -5299,9 +5308,9 @@ export async function runInteractionTests(driver) {
             'The warning should include a concrete requiredSubsteps recommendation.');
 
         await evaluate(diagnosticWindow, `document.querySelector('.validationIssue').click()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`,
-            'Clicking the attributed warning did not open the source-term editor.');
-        await waitFor(diagnosticWindow, `document.activeElement?.dataset.field === 'value' && document.activeElement?.closest('#termParameters')`,
+        await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#nodeEditor [data-editor-tab].active').dataset.editorTab === 'parameters'`,
+            'Clicking the attributed warning did not open its node\'s Parameters tab.');
+        await waitFor(diagnosticWindow, `document.activeElement?.dataset.field === 'value' && document.activeElement?.closest('#nodeEditorParameters')`,
             "Clicking the attributed warning did not focus the specific parameter's value input.");
         assert.equal(
             await evaluate(diagnosticWindow, `document.activeElement.closest('.editorParameterRow').querySelector('[data-field="symbol"]').value`),
@@ -5379,14 +5388,12 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(diagnosticWindow, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'Growth node editor did not open after creation.');
 
-        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-        await waitFor(diagnosticWindow, `document.querySelectorAll('.sourceTermOpen').length > 0`, 'The new source term did not appear in the node editor.');
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#nodeEditorStates .stateCard:first-child .sourceTermOpen')].pop().click()`);
-        await waitFor(diagnosticWindow, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Source-term editor did not open.');
-        await evaluate(diagnosticWindow, `(() => { const field = document.querySelector('#termMathField'); field.setValue(''); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
-        await evaluate(diagnosticWindow, `[...document.querySelectorAll('#termStateReferenceChips button')].find((button) => button.textContent === 'level').click()`);
-        await waitFor(diagnosticWindow, `document.querySelector('#termEquationDiagnostics').classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
-        await evaluate(diagnosticWindow, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        // Written by its reference button, as a person picks it: the growth rate is the level itself.
+        await writeOwnPart(diagnosticWindow, 'level', '');
+        await evaluate(diagnosticWindow, `${ownPartReferences('level')}.find((button) => button.textContent === 'level').click()`);
+        await waitFor(diagnosticWindow, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="level"] .ownPart').value.includes('level')`, 'The level reference was not put in the field.');
+        await evaluate(diagnosticWindow, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="level"] .ownPart').dispatchEvent(new Event('change', { bubbles: true }))`);
+        await waitFor(diagnosticWindow, `${ownPartDiagnostics('level')}.classList.contains('valid')`, 'The self-referencing growth equation did not become valid.');
         await evaluate(diagnosticWindow, `document.querySelector('#nodeEditor [data-close-card]').click()`);
 
         await settle(diagnosticWindow, 'validation');
@@ -5519,11 +5526,10 @@ export async function runInteractionTests(driver) {
         assert.equal(await diagnostics(), 'Valid expression · MathJSON ready');
         await evaluate(opened, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
-        // The source-term editor offers the same chip, and the loaded cases-on-t term is valid.
+        // The node's own part offers the same reference, and the loaded cases-on-t part is valid.
         await evaluate(opened, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Heater')).click()`);
-        await evaluate(opened, `document.querySelector('.sourceTermOpen').click()`);
-        await waitFor(opened, `[...document.querySelectorAll('#termStateReferenceChips button')].some((button) => button.textContent === 't (time)')`, 'The source-term editor must offer a t (time) chip.');
-        assert.equal(await evaluate(opened, `document.querySelector('#termEquationDiagnostics').textContent`), 'Valid expression · MathJSON ready');
+        await waitFor(opened, `[...document.querySelectorAll('#nodeEditorStates .ownPartReferences button')].some((button) => button.textContent === 't (time)')`, 'A node\'s own part must offer a t (time) reference.');
+        assert.equal(await evaluate(opened, `[...document.querySelectorAll('#nodeEditorStates .ownPartDiagnostics')].find((element) => element.textContent)?.textContent`), 'Valid expression · MathJSON ready');
 
         // Run and check both time-dependent rates switched where they should.
         await openRunDialog(opened);
@@ -5659,7 +5665,9 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `Boolean(${roomLabel})`, 'The Ambient air label was not on the canvas.');
         await evaluate(opened, `${roomLabel}.click()`);
         await waitFor(opened, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Ambient air'`, 'The Ambient air editor did not open.');
-        await evaluate(opened, `document.querySelector('#nodeEditorStates .editorStateRow .tuneState').click()`);
+        // Its state's fields are opened from its line, as a person opens them.
+        await openStateFields(opened, await evaluate(opened, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Ambient air').states[0].symbol`));
+        await evaluate(opened, `document.querySelector('#nodeEditorStates .editorStateRow:not([hidden]) .tuneState').click()`);
         await waitFor(opened, `Boolean(document.querySelector('#nodeEditorStates .editorStateTuning'))`, 'The bounds of a fitted initial value were not offered.');
         assert.deepEqual(await evaluate(opened, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Ambient air').states[0].tuning`), { minimum: 0, maximum: 586.3 }, 'The bounds start as the value give or take its own size.');
         await evaluate(opened, `document.querySelector('#nodeEditor [data-close-card]').click()`);
@@ -6931,8 +6939,8 @@ export async function runInteractionTests(driver) {
 
         // A source-term parameter links the same way: its row shows the shared value and can unlink.
         await evaluate(opened, `[...document.querySelectorAll('#parametersBody tr.sharedUserRow .ownerLink')].find((link) => link.textContent.includes('source term')).click()`);
-        await waitFor(opened, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'Clicking the source-term owner did not open its editor.');
-        const termRow = `document.querySelector('#termParameters .editorParameterRow')`;
+        await waitFor(opened, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#nodeEditor [data-editor-tab].active').dataset.editorTab === 'parameters'`, 'Clicking the source-term owner did not open its node\'s Parameters tab.');
+        const termRow = `document.querySelector('#nodeEditorParameters .editorParameterRow')`;
         assert.equal(await evaluate(opened, `${termRow}.querySelector('[data-shared-select]').value`), '100');
         assert.equal(await evaluate(opened, `${termRow}.querySelector('[data-field="value"]').value`), '7', 'The source-term row must show the shared value.');
         await evaluate(opened, `(() => { const select = ${termRow}.querySelector('[data-shared-select]'); select.value = ''; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -8150,7 +8158,8 @@ export async function runInteractionTests(driver) {
             await waitFor(window, `[...document.querySelectorAll('.objectLabel')].some((label) => label.getClientRects().length && label.textContent.includes('Sensor'))`, 'The library instance\'s node is not shown.');
             await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.getClientRects().length && label.textContent.includes('Sensor')).click()`);
             await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
-            await evaluate(window, `(() => { const input = document.querySelector('#nodeEditorStates input[data-field="value"]'); input.value = '9'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); })()`);
+            await openStateFields(window, await evaluate(window, `window.__debugProject.serialize().nodes.find((item) => item.subsystemId === ${instance.id}).states[0].symbol`));
+            await evaluate(window, `(() => { const input = document.querySelector('#nodeEditorStates .editorStateRow:not([hidden]) input[data-field="value"]'); input.value = '9'; input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); input.blur(); })()`);
             await waitFor(window, `window.__debugProject.serialize().nodes.some((item) => item.subsystemId === ${instance.id} && item.states[0].initialValue === 9)`, 'The value was not changed.');
             await evaluate(window, `document.querySelector('#componentLinkSave').click()`);
             await waitFor(window, `window.componentLibrary.list().then((templates) => templates.find((template) => template.id === ${JSON.stringify(entry.id)})?.document.nodes[0].states[0].initialValue === 9)`, 'Saving did not change the library entry.');
@@ -8946,7 +8955,7 @@ export async function runInteractionTests(driver) {
 
         // One order of tabs, each kind leaving out what it has nothing for, and one width.
         await openNode('Battery module');
-        assert.deepEqual(await tabs('nodeEditor'), ['equations', 'details', 'results', 'numerics', 'appearance']);
+        assert.deepEqual(await tabs('nodeEditor'), ['equations', 'parameters', 'details', 'results', 'numerics', 'appearance']);
         assert.equal(await activeTab('nodeEditor'), 'equations', 'A node first opens on Equations.');
         const cardWidth = await width('nodeEditor');
         await openRelationship(edges[0]);
@@ -8979,10 +8988,7 @@ export async function runInteractionTests(driver) {
 
         // A source term, then a run: while its results are open, every card's inputs are off, the source term's included, but
         // what only goes somewhere (a term on a state's card) still goes there.
-        await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard .addStateTerm').click()`);
-        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term did not open.');
-        assert.equal(await width('sourceTermEditor'), cardWidth);
-        await evaluate(window, `document.querySelector('#sourceTermEditor [data-close-card]').click()`);
+        await writeOwnPart(window, 'temperature', '0');
         await openRunDialog(window);
         await evaluate(window, `(() => { document.querySelector('#runTargetTime').value = '0.5'; document.querySelector('#startRun').click(); })()`);
         // The line under Results keeps its words after results close, so the transport showing says these are this run's.
@@ -8991,34 +8997,33 @@ export async function runInteractionTests(driver) {
         assert.equal(await activeTab('nodeEditor'), 'results', 'A node does not open on Results while results are open.');
         assert.equal(await evaluate(window, `document.querySelector('#editNodeName').disabled && [...document.querySelectorAll('#nodeModelActions button')].every((button) => button.disabled)`), true);
         await clickElement(window, `document.querySelector('#nodeEditor [data-editor-tab="equations"]')`);
-        await clickElement(window, `document.querySelector('#nodeEditorStates .stateTerm[data-term-type="sourceTerm"]')`);
-        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'A source term could not be opened from its node while results are open.');
-        assert.equal(await evaluate(window, `[...document.querySelectorAll('#sourceTermEditor [data-editor-panel] :is(input, select, textarea, button):not([data-navigation]), #sourceTermEditor > footer button')].every((control) => control.disabled)`), true, 'A source term can be changed while results are open.');
-        assert.equal(await evaluate(window, `document.querySelector('#termMathField').readOnly`), true, 'A source term\'s equation can be typed in while results are open.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .ownPart')].every((field) => field.readOnly)`), true, 'A node\'s own part can be typed in while results are open.');
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .partChip, #nodeEditorStates .stateSummary')].every((control) => !control.disabled)`), true, 'What only goes somewhere is off while results are open.');
+        await clickElement(window, `document.querySelector('#nodeEditor [data-editor-tab="parameters"]')`);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#nodeEditorParameters :is(input, select, button)')].every((control) => control.disabled)`), true, 'A node\'s own parameters can be changed while results are open.');
         await evaluate(window, `document.querySelector('#closeResults').click()`);
         await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing the results did not ask.');
         await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
     });
 
-    await run('+ Add a state and + Add a term add to the node, the term to the state it is under, each undone and redone', async () => {
+    await run('+ Add a state adds a state, and a node\'s own part typed into a state\'s equation lands on that state, each undone and redone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');
         await clickElement(window, `document.querySelector('#editAddState')`);
-        await waitFor(window, `document.querySelectorAll('#nodeEditorStates .stateCard').length === 3`, '+ Add a state added no state card.');
-        assert.equal((await savedProject()).nodes[0].states.length, 3, 'The new state is not in the model.');
+        await waitFor(window, `window.__debugProject.serialize().nodes[0].states.length === 3`, '+ Add a state added no state.');
+        // Nothing changes it yet, so it is on a folded line, with the states beside it that start alike.
+        const added = (await savedProject()).nodes[0].states[2].symbol;
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('#nodeEditorStates .stateFold[data-symbols~="${added}"]'))`), true, 'The new state is not on a line of the Equations tab.');
         await undoRedo('undo');
         assert.equal((await savedProject()).nodes[0].states.length, 2, 'Undo left the new state behind.');
         await undoRedo('redo');
         assert.equal((await savedProject()).nodes[0].states.length, 3, 'Redo did not bring the state back.');
         await undoRedo('undo');
 
-        // Under the second state, not the first: the term lands where it was added, and its editor opens on it.
+        // In the second state's field, not the first's: the part lands on the state it is typed into.
         await openNode('Mass');
-        await clickElement(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="speed"] .addStateTerm')`);
-        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, '+ Add a term did not open the new term.');
-        assert.equal(await evaluate(window, `document.querySelector('#sourceTermEditor [data-editor-tab].active').dataset.editorTab`), 'equations', 'The new term opened on another tab than Equations.');
-        assert.equal(await evaluate(window, `document.querySelector('#termOutputState').value`), '3', 'The new term does not land on the state it was added under.');
+        await writeOwnPart(window, 'speed', '\\mathrm{position}');
         const terms = () => savedProject().then((project) => project.nodes[0].sourceTerms);
         assert.deepEqual((await terms()).map((term) => term.state), ['speed']);
         await undoRedo('undo');
@@ -9127,19 +9132,27 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#componentLibraryButton').click()`);
     });
 
-    await run('a node switched off keeps its values set directly, and shows its own equations, when adding a term makes the model say its kinds', async () => {
-        const gauge = { id: 30, name: 'Gauge', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Reading', symbol: 'reading', initialValue: 0 }], sourceTerms: [kindsTerm(32, 'reading', 31, '5', 5, [], true)] };
+    await run('a node switched off keeps its values set directly, and shows its own equations, when the model is made to say its kinds', async () => {
+        const gauge = { id: 30, name: 'Gauge', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Reading', symbol: 'reading', initialValue: 0 }, { id: 33, name: 'Offset', symbol: 'offset', initialValue: 0 }], sourceTerms: [kindsTerm(32, 'reading', 31, '5', 5, [], true)] };
         await loadKinds([chainNode({ enabled: false }), gauge]);
-        // A term added to an Update in a model that says no kinds makes it say them all, the switched-off Chain included.
+        // A part typed into an Update in a model that says no kinds sets its value as the state's other part does, and the model
+        // still says none: nothing else changes.
         await openNode('Gauge');
-        await clickElement(window, `document.querySelector('#nodeEditorStates .stateCard .addStateTerm')`);
-        await waitFor(window, `window.__debugProject.serialize().nodes[1].sourceTerms.length === 2`, '+ Add a term added no term.');
+        await writeOwnPart(window, 'reading', '5+1');
+        const reading = (await savedProject()).nodes[1].sourceTerms.filter((term) => term.state === 'reading');
+        assert.deepEqual(reading.map((term) => term.setsValue ?? null), [true], 'The part typed into a value set directly does not set it.');
+        assert.ok((await savedProject()).nodes.every((node) => node.states.every((state) => state.kind === undefined)), 'Typing a part made the model say its kinds.');
+        // Choosing a state's kind makes it say them all, the switched-off Chain included.
+        await writeOwnPart(window, 'offset', '1');
+        await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="offset"] .stateKind').click()`);
+        await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="offset"] .kindOption[data-kind="update"]').click()`);
+        await waitFor(window, `window.__debugProject.serialize().nodes[0].states.some((state) => state.kind)`, 'Choosing a kind did not make the model say its kinds.');
         assert.deepEqual(kindsOf((await savedProject()).nodes[0]), ['settle', 'rate', 'update', 'update', null, null, null],
             'Switched off, Chain\'s values set directly became rates, which it would integrate once switched back on.');
         // Its Equations tab shows each of its terms on its state, marked off, not as terms reaching no state.
         await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
         await openNode('Chain');
-        assert.deepEqual(await evaluate(window, `['x', 'y', 'z'].map((symbol) => document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="' + symbol + '"] .stateTerm.off').length)`), [1, 1, 1]);
+        assert.deepEqual(await evaluate(window, `['x', 'y', 'z'].map((symbol) => document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="' + symbol + '"] .ownPart.off').length)`), [1, 1, 1]);
         assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStrayTerms').hidden`), true, 'Its own terms are listed as reaching no state.');
     });
 
@@ -9147,9 +9160,8 @@ export async function runInteractionTests(driver) {
         const gauge = { id: 30, name: 'Gauge', position: [2, 0, 0], appearance: kindsBox, states: [{ id: 31, name: 'Reading', symbol: 'reading', initialValue: 0 }], sourceTerms: [kindsTerm(32, 'reading', 31, '5', 5, [], false)] };
         await loadKinds([gauge]);
         await openNode('Gauge');
-        await clickElement(window, `document.querySelector('#nodeEditorStates .sourceTermOpen')`);
-        await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term did not open.');
-        await evaluate(window, `(() => { const field = document.querySelector('#termMathField'); field.setValue('7'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        // Typing in its own part, not yet left.
+        await evaluate(window, `(() => { const field = document.querySelector('#nodeEditorStates .stateCard[data-symbol="reading"] .ownPart'); field.focus(); field.setValue('7'); field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         // Another project opened while the equation is still being written; there, a Thermal link is placed and undone.
         const body = (id, name, x) => ({ id, name, position: [x, 0, 0], appearance: kindsBox, states: [{ id: id + 1, name: 'Temperature', symbol: 'temperature', initialValue: 300, unit: 'K' }], sourceTerms: [] });
         await loadKinds([body(1, 'Pack', -2), body(10, 'Housing', 2)]);
@@ -9160,11 +9172,129 @@ export async function runInteractionTests(driver) {
         assert.equal((await savedProject()).edges.length, 0, 'Undo did not take the Thermal link away.');
         await undoRedo('redo');
         assert.equal((await savedProject()).edges.length, 2, 'Redo did not bring the Thermal link back.');
+        // The field left half-written in the project before, losing the focus now, draws nothing over this project's node.
+        await evaluate(window, `document.activeElement?.blur()`);
+        await openNode('Pack');
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeName').value`), 'Pack', 'A field of the project before drew its node over this one\'s.');
+    });
+
+    await run('a node\'s Equations tab shows one equation per state: its own part typed in, every other part a chip in its names that opens it, and states nothing changes folded', async () => {
+        await freshExample('fourBarLinkage');
+        await openNode('Crank pin B');
+        // Three equations and two folded lines, not nine cards.
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates > .stateCard')].map((card) => card.dataset.symbol)`), ['x', 'y', 'z']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates > .stateFold .stateSummary')].map((line) => line.textContent.replace(/\\s+/g, ' ').trim())`),
+            ['▸ Roll, pitch, yaw · stay at 0 rad', '▸ X, Y, Z velocity · stay at 0 m/s']);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .stateSummary').textContent.replace(/\\s+/g, ' ').trim()`), '▸ X position · x · starts at 1 m');
+        // Its own part, typed in; Crank drive X's part, read-only, in Crank pin B's names: its own y bare, Ground pivot A's as y_A.
+        assert.equal(await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .ownPart').value`), '\\mathrm{vx}');
+        const chip = `document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .partChip[data-term-type="relationship"]')`;
+        assert.equal(await evaluate(window, `${chip}.dataset.latex`), String.raw`-\mathrm{angularVelocity} \cdot \left(y - y_{\mathrm{A}}\right)`);
+        assert.equal(await evaluate(window, `${chip}.dataset.sign`), '−', 'A part that starts with a minus does not take it as its sign.');
+        assert.match(await evaluate(window, `${chip}.querySelector('small').textContent`), /Crank drive X/);
+        // A short name given on Details is the one its states go by in others' equations.
+        await openNode('Ground pivot A');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-editor-tab="details"]').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeShortName').placeholder`), 'A', 'The derived short name is not shown.');
+        await typeInto(`document.querySelector('#editNodeShortName')`, 'G');
+        await openNode('Crank pin B');
+        assert.equal(await evaluate(window, `${chip}.dataset.latex`), String.raw`-\mathrm{angularVelocity} \cdot \left(y - y_{\mathrm{G}}\right)`);
+        assert.equal((await savedProject()).nodes.find((node) => node.name === 'Ground pivot A').shortName, 'G');
+        await undoRedo('undo');
+        // The chip opens the relationship it belongs to.
+        await openNode('Crank pin B');
+        await evaluate(window, `${chip}.click()`);
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === 'Crank drive X'`, 'The chip did not open Crank drive X.');
+        // Typing its own part is one undoable step, and what is stored is the node's source term on that state.
+        await openNode('Crank pin B');
+        await writeOwnPart(window, 'x', '\\mathrm{vx}+1');
+        const ownOnX = async () => (await savedProject()).nodes.find((node) => node.name === 'Crank pin B').sourceTerms.filter((term) => term.state === 'x').map((term) => term.expressionModel.latex);
+        assert.deepEqual(await ownOnX(), ['\\mathrm{vx}+1']);
+        await undoRedo('undo');
+        assert.deepEqual(await ownOnX(), ['\\mathrm{vx}'], 'Undo did not take the typing back in one step.');
+
+        // Several own parts on one state read as one sum, and the first edit makes them one, their parameters with them;
+        // a state the node's program sets reads "set by program", saying which output it is.
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        const term = (id, latex, mathJson, parameters) => ({ id, state: 'level', expression: latex, parameters, expressionModel: { latex, mathJson, bindings: [], output: { stateId: 2 } } });
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
+            nodes: [{
+                id: 1, name: 'Tank', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'Level', symbol: 'level', initialValue: 0 }, { id: 3, name: 'Valve', symbol: 'valve', initialValue: 0 }, { id: 4, name: 'Flow', symbol: 'flow', initialValue: 0 }],
+                sourceTerms: [term(5, '\\mathrm{k}', 'k', [{ id: 6, name: 'Inflow', symbol: 'k', value: 2, mode: 'constant' }]), term(7, '-\\mathrm{k}', ['Negate', 'k'], [{ id: 8, name: 'Leak', symbol: 'k', value: 0.5, mode: 'constant' }])],
+                implementation: { kind: 'python', providerApiVersion: 1, source: '', bindings: [], outputs: [{ key: 'valve', stateId: 3, setsValue: true }, { key: 'flow', stateId: 4, setsValue: true }] }
+            }]
+        })})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The tank did not load.');
+        await openNode('Tank');
+        assert.equal(await evaluate(window, `document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="level"] .ownPart').length`), 1, 'Two own parts on one state are not one field.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .setByProgram')].map((line) => line.textContent.replace(/\\s+/g, ' ').trim())`),
+            ['set by program Python · output 1 of 2 ›', 'set by program Python · output 2 of 2 ›']);
+        await writeOwnPart(window, 'level', '\\mathrm{k}-\\mathrm{k2}');
+        const tank = (await savedProject()).nodes[0];
+        assert.equal(tank.sourceTerms.length, 1, 'The first edit did not make the two own parts one.');
+        assert.deepEqual(tank.sourceTerms[0].parameters.map((parameter) => [parameter.symbol, parameter.value]), [['k', 2], ['k2', 0.5]], 'The parameters did not come together, the clashing one renamed.');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).nodes[0].sourceTerms.length, 2, 'Undo did not bring both own parts back.');
+    });
+
+    await run('a relationship\'s card shows each state it lands on as that state\'s whole equation, its own part the one thing editable, in both ends\' names', async () => {
+        await freshExample('fourBarLinkage');
+        await openRelationship('Crank drive X');
+        // Crank pin B's x: its own part, read-only and in both ends' names, then this relationship's part, the field.
+        const ownChip = `document.querySelector('#edgeLanding [data-landing-lhs] .partChip[data-term-type="sourceTerm"]')`;
+        assert.match(await evaluate(window, `${ownChip}.querySelector('small').textContent`), /Crank pin B/);
+        assert.equal(await evaluate(window, `${ownChip}.dataset.latex`), String.raw`\mathrm{vx}_{\mathrm{B}}`);
+        assert.match(await evaluate(window, `document.querySelector('#edgeLanding .rowLeftSide').textContent`), /x/);
+        const shown = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
+        assert.ok(shown.includes('y_{\\mathrm{B}}') && shown.includes('y_{\\mathrm{A}}'), `The part is not shown in both ends' names: ${shown}`);
+        assert.ok(!shown.includes('targetY'), 'The part is shown in the relationship\'s own names.');
+        // The references insert themselves as the card writes them.
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#editStateReferenceChips button')].map((button) => button.textContent).filter((label) => /^y_/.test(label))`), ['y_A', 'y_B']);
+        // Typed in those names, stored in the relationship's own, as one undoable step.
+        const stored = async () => (await savedProject()).edges.find((edge) => edge.name === 'Crank drive X').equationModel.latex;
+        const before = await stored();
+        await evaluate(window, `(() => { const field = document.querySelector('#editEdgeMathField'); field.focus(); field.setValue('y_B-y_A'); field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Crank drive X').equationModel.latex === ${JSON.stringify(String.raw`\mathrm{targetY}-\mathrm{sourceY}`)}`, 'What was typed in both ends\' names was not stored in the relationship\'s own.');
+        await undoRedo('undo');
+        assert.equal(await stored(), before, 'Undo did not bring the part back.');
+        // Crank drive X runs one way: one row.
+        await openRelationship('Crank drive X');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow').hidden`), true);
+        // Written as a program, its part is a chip that opens the program.
+        await evaluate(window, `(() => { const select = document.querySelector('#editEdgeImplementationKind'); select.value = 'cpp'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `Boolean(document.querySelector('#edgeLanding .partChip.live.program'))`, 'A relationship written as a program has no chip for its part.');
+        await undoRedo('undo');
+
+        // A relationship running both ways: the other end's row, its part negated.
+        await freshExample('thermalEquilibrium');
+        await openRelationship((await savedProject()).edges.find((edge) => edge.directionality !== 'directed').name);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow').hidden`), false, 'A relationship running both ways has no row for its other end.');
+        assert.match(await evaluate(window, `document.querySelector('#edgeOtherEndRow .partChip.live small').textContent`), /negated/);
+
+        // A node's program writing two states: each of its chips says which output it is.
+        const box = { type: 'primitive', shape: 'box', color: '#888888' };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
+            nodes: [{
+                id: 1, name: 'Mixer', position: [0, 0, 0], appearance: box,
+                states: [{ id: 2, name: 'Hot', symbol: 'hot', initialValue: 0 }, { id: 3, name: 'Cold', symbol: 'cold', initialValue: 0 }], sourceTerms: [],
+                implementation: { kind: 'python', providerApiVersion: 1, source: '', bindings: [], outputs: [{ key: 'hot', stateId: 2 }, { key: 'cold', stateId: 3 }] }
+            }]
+        })})`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The mixer did not load.');
+        await openNode('Mixer');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .partChip[data-term-type="program"] .partChipBody')].map((body) => body.textContent.trim())`), ['Python · output 1 of 2', 'Python · output 2 of 2']);
     });
 
     await run('a node\'s states are reordered by button and by key, and each move is undone', async () => {
         await loadAuthoringProject();
         await openNode('Mass');
+        // Each state's fields are opened from its line.
+        await openStateFields(window, 'position');
+        await openStateFields(window, 'speed');
         const order = async () => (await savedProject()).nodes[0].states.map(({ symbol }) => symbol);
         const row = (symbol) => `[...document.querySelectorAll('#nodeEditorStates .editorStateRow')].find((item) => item.querySelector('[data-field="symbol"]').value === ${JSON.stringify(symbol)})`;
         assert.equal(await evaluate(window, `${row('position')}.querySelector('[data-move="-1"]').disabled`), true, 'The first state cannot move up.');
@@ -9479,15 +9609,13 @@ export async function runInteractionTests(driver) {
             assert.match(edge.implementation.source, /RelationshipProvider/, 'A program starts from a template again.');
             await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
-            // A source term of the Mass node.
+            // The Mass node's own part on its position, written with the plugin's provider from the state's "{ } plugin".
             await openNode('Mass');
-            await evaluate(window, `document.querySelector('#nodeEditorStates .addStateTerm').click()`);
-            if (await evaluate(window, `document.querySelector('#sourceTermEditor').classList.contains('hidden')`)) {
-                await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .sourceTermOpen'))`, 'The source term was not added.');
-                await evaluate(window, `[...document.querySelectorAll('#nodeEditorStates .sourceTermOpen')].at(-1).click()`);
-            }
-            await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The source term editor did not open.');
-            await select(`document.querySelector('#termImplementationKind')`, 'plugin');
+            await evaluate(window, `document.querySelector('#nodeEditorStates .stateFold[data-symbols~="position"] .stateSummary')?.click()`);
+            await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .stateCard[data-symbol="position"] .ownPluginPart'))`, 'A state offers no "{ } plugin" while a plugin offers a provider.');
+            await evaluate(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="position"] .ownPluginPart').click()`);
+            await waitFor(window, `!document.querySelector('#sourceTermEditor').classList.contains('hidden')`, 'The own part\'s program card did not open.');
+            assert.equal(await evaluate(window, `document.querySelector('#termImplementationKind').value`), 'plugin');
             await waitFor(window, `!document.querySelector('#termPluginProviderFields').hidden && document.querySelector('#termPluginProvider').options.length === 2`, 'The installed providers were not offered for the source term.');
             await select(`document.querySelector('#termPluginProvider')`, reference);
             const term = (await savedProject()).nodes[0].sourceTerms.at(-1);

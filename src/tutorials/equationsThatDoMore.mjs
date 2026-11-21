@@ -45,8 +45,8 @@ const steps = Object.freeze([
     {
         id: 'sourceTerm',
         title: 'Give a body its own equation',
-        text: `Click the ${values.hot}. Its Equations tab shows each state's equation, built from every term reaching it: temperature's has the ${values.relationship} relationship. Press + Add a term under temperature: a source term is a node's own term, with nothing on the other end. Enter −0.01·(temperature − 290), choosing temperature from the buttons below: the body leaks heat to a room at 290 K.`,
-        target: (ui) => (ui.sourceTermEditorOpen ? '#termMathField' : ui.nodeEditorFor === values.hot ? `${card('temperature')} .addStateTerm` : ui.labelOf(values.hot)),
+        text: `Click the ${values.hot}. Its Equations tab shows each state's equation, built from every part reaching it: temperature's has the ${values.relationship} relationship's part, in blue. Type the body's own part into the field beside it, a part with nothing on the other end: −0.01·(temperature − 290), choosing temperature from the references under it. The body leaks heat to a room at 290 K.`,
+        target: (ui) => (ui.nodeEditorFor === values.hot ? `${card('temperature')} .ownPart` : ui.labelOf(values.hot)),
         skip: 'addSourceTerm', node: values.hot, state: 'temperature', latex: values.lossLatex, setsValue: false,
         done: ({ document }) => leaking(document)
     },
@@ -61,8 +61,8 @@ const steps = Object.freeze([
     {
         id: 'setValue',
         title: 'Make it an update',
-        text: `Under ${values.celsius.symbol}, click the left-hand side of its equation and choose Update: its terms add up to its value, not to how fast it changes. Then press + Add a term under it and enter temperature − 273.15. It is not moved forward in time: it is worked out afresh after every step from the temperature the step reached, so it can never drift from it.`,
-        target: (ui) => (ui.sourceTermEditorOpen ? '#termMathField' : ui.nodeEditorFor === values.hot ? card(values.celsius.symbol) : ui.labelOf(values.hot)),
+        text: `Nothing changes ${values.celsius.symbol} yet, so its line says it stays at 0: click it to open its equation. Click its left side and choose ${values.celsius.symbol} =: its parts add up to its value, not to how fast it changes. Then type temperature − 273.15 in its field. It is not moved forward in time: it is worked out afresh after every step from the temperature the step reached, so it can never drift from it.`,
+        target: (ui) => (ui.nodeEditorFor === values.hot ? `${card(values.celsius.symbol)} .ownPart, #nodeEditorStates .stateFold[data-symbols~="${values.celsius.symbol}"] .stateSummary` : ui.labelOf(values.hot)),
         skip: 'addSourceTerm', node: values.hot, state: values.celsius.symbol, latex: values.celsius.latex, setsValue: true,
         done: ({ document }) => setsCelsius(document)
     },

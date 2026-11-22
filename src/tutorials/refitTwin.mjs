@@ -2,14 +2,19 @@
 
 // "Refit a drifting twin" (docs/proposals/tutorials.md), from an empty canvas: the live twin's demonstration "A rig that drifts", played at
 // 60× so there is time to work, the control room's Engineer view refitting the tank's heat loss on the latest readings and keeping the
-// result in the model, and the sandbox trying something ahead of the readings (the heater off) and keeping it as a draft scenario. The
-// tank's model starts with a heat loss of 20 W/K; the drifting tank loses heat 10 % faster every hour. Desktop only, as the live twin is.
+// result in the model, the sandbox trying something ahead of the readings (the heater off) and keeping it as a draft scenario, and the
+// forecast told the operator's plan for the heater (docs/proposals/predictionActualWindow.md, "The inputs in the forecast"), so it sees
+// the heater go off before it does. The tank's model starts with a heat loss of 20 W/K; the drifting tank loses heat 10 % faster every
+// hour; its operator switches the heater on at 09:00 UTC, off at 11:00, on at 12:00 and off at 14:00 (examples/dataSources/
+// simulatedTankRig.py, the recording's clock starting at 09:00 UTC). Desktop only, as the live twin is.
 
 export const refitTwinValues = Object.freeze({
     demonstration: 'drifting',
     pace: '60',
     heatLoss: { parameterId: 10, from: 20 },
-    tank: 'Water tank'
+    tank: 'Water tank',
+    // The operator's plan for the heater, by the rig's clock, as the person types it.
+    heater: { input: 'heaterPower', name: 'Heater power', plan: '09:00 1000\n11:00 0\n12:00 1000\n14:00 0', timeZone: 'UTC' }
 });
 const values = refitTwinValues;
 
@@ -53,9 +58,16 @@ const steps = Object.freeze([
         done: ({ ui }) => ui.scenarios > 0
     },
     {
+        id: 'plan',
+        title: 'Tell the forecast the operator\'s plan',
+        text: 'The forecast has to assume something about the heater, which nothing has said yet: by default, that it stays as it is. But this rig\'s operator works to a plan, by the rig\'s clock (UTC): heater on at 09:00, off at 11:00, on at 12:00, off at 14:00. In Engineer, under "Each input, in the forecast", set Heater power to "From a plan", set the time zone beside it to UTC, and type the plan one time and value to a line: 09:00 1000, then 11:00 0, 12:00 1000 and 14:00 0. Press "Start again with these": the recording plays again from its start, the Heater power strip draws what the forecast now assumes, dotted, and before each switch the tank\'s forecast turns with it.',
+        elsewhere: 'twin', skip: 'planTwinInput', input: values.heater.input, plan: values.heater.plan, timeZone: values.heater.timeZone,
+        done: ({ ui }) => Object.values(ui.twinInputs ?? {}).some((input) => input.forecast === 'plan')
+    },
+    {
         id: 'finish',
         title: 'You have refitted a twin',
-        text: 'The Engineer view also sets how big a drift is warned about, how far ahead the twin forecasts and how often it moves, and can track a parameter as it changes with an estimator, with a band showing how sure it is. Scenarios kept in the project can be renamed or deleted from the room\'s Scenarios list.',
+        text: 'Under each input the Engineer view says how each choice would have done against what then arrived: holding, its average, its trend, the last day again, or your plan. An input can also be handed to a controller in the model past now (From the model). The view sets how big a drift is warned about, how far ahead the twin forecasts and how often it moves, and can track a parameter as it changes with an estimator, with a band showing how sure it is. Scenarios kept in the project can be renamed or deleted from the room\'s Scenarios list.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);
@@ -63,10 +75,10 @@ const steps = Object.freeze([
 export const refitTwin = Object.freeze({
     id: 'refitTwin',
     title: 'Refit a drifting twin',
-    summary: 'In the twin\'s Engineer view, refit a drifting tank on its latest readings, keep it, and try something ahead.',
-    minutes: 5,
+    summary: 'In the twin\'s Engineer view, refit a drifting tank on its latest readings, keep it, try something ahead, and tell the forecast the operator\'s plan.',
+    minutes: 7,
     area: 'data',
-    tags: ['live twin', 'refit', 'engineer', 'drift', 'calibrate', 'sandbox', 'scenario', 'try something', 'estimator', 'forecast', 'warning', 'tank'],
+    tags: ['live twin', 'refit', 'engineer', 'drift', 'calibrate', 'sandbox', 'scenario', 'try something', 'estimator', 'forecast', 'warning', 'tank', 'plan', 'schedule', 'inputs', 'from the model'],
     start: { from: 'empty', fileName: 'Drifting rig.kjt' },
     editions: ['desktop'],
     steps

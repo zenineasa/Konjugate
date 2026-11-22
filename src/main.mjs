@@ -983,7 +983,7 @@ ipcMain.handle('twinTutorialStep', (event, step) => {
 // What a tutorial's "Skip this step" asks of a project window's twin window (docs/proposals/tutorials.md), done there as its own buttons
 // do it: a demonstration started (at a pace), the suggested matches used and the room opened, a refit run and kept, something tried in
 // the sandbox and kept as a draft. Sent once the twin window has loaded; only these actions, and only the demonstrations it offers.
-const twinTutorialActions = new Set(['demo', 'useSuggestions', 'refitAndKeep', 'tryAndKeep']);
+const twinTutorialActions = new Set(['demo', 'useSuggestions', 'refitAndKeep', 'tryAndKeep', 'planInput']);
 ipcMain.handle('twinTutorialAction', async (event, action, argument = null) => {
     requireProjectWindow(event, 'Only a project window can ask its twin window for a tutorial\'s step.');
     if (!twinTutorialActions.has(action)) return false;

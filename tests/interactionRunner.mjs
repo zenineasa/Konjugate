@@ -10305,7 +10305,9 @@ export async function runInteractionTests(driver) {
 
     await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {
         const { press, clean } = tutorialHelpers();
-        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])]) {
+        // KONJUGATE_INTERACTION_TUTORIALS=refitTwin,liveTwin skips through only those, to check one tutorial without the rest.
+        const onlyTutorials = process.env.KONJUGATE_INTERACTION_TUTORIALS?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? null;
+        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])].filter((entry) => !onlyTutorials || onlyTutorials.includes(entry))) {
             await clean();
             // The assistant's model is the person's to set up; here, the fake Ollama's, in use (as an earlier test may have left it).
             if (id === 'askAssistant') {
@@ -10391,6 +10393,9 @@ export async function runInteractionTests(driver) {
                 assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /saved with simulation results|Tutorial/);
             } else if (id === 'refitTwin') {
                 assert.notEqual(saved.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value, 20, 'The refit was kept in the model.');
+                assert.deepEqual(await evaluate(window, `window.__debugTwin.setup()?.live?.inputs?.heaterPower`),
+                    { forecast: 'plan', plan: { repeat: 'daily', timeZone: 'UTC', points: [{ at: 32400, value: 1000 }, { at: 39600, value: 0 }, { at: 43200, value: 1000 }, { at: 50400, value: 0 }] } },
+                    'The operator\'s plan for the heater was kept with the twin.');
             } else if (id === 'liveTwin' || id === 'matchSignals') {
                 assert.ok(saved.nodes.some((node) => node.name === 'Water tank'), 'The skipped demonstration opened the rig\'s model.');
             } else if (id === 'replayLog') {

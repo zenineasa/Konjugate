@@ -672,6 +672,17 @@ const tutorialActions = {
         $('#sandboxRun').click();
         await until(() => /Ran ahead/.test($('#sandboxStatus').textContent), 30000);
         $('#sandboxBack').click();
+    },
+    // An input's forecast from a plan, written as a person writes it in the engineer's view, and the twin started again with it.
+    planInput: async ({ input, plan, timeZone }) => {
+        if ($('#engineer').hidden) $('#engineerToggle').click();
+        const field = (selector) => document.querySelector(`#inputForecastRows ${selector}[data-input="${CSS.escape(input)}"]`);
+        if (!await until(() => Boolean(field('.forecastChoice')), 10000)) return;
+        const set = (element, value) => { element.value = value; element.dispatchEvent(new Event('change', { bubbles: true })); };
+        set(field('.forecastChoice'), 'plan');
+        set(field('.forecastZone'), timeZone);
+        set(field('.forecastPlan'), plan);
+        if (!$('#restartTwin').disabled) $('#restartTwin').click();
     }
 };
 api.onTutorialAction?.(async (action, argument) => {

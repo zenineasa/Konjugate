@@ -24,6 +24,8 @@ import { equationsThatDoMoreValues } from '../src/tutorials/equationsThatDoMore.
 import { programRelationshipValues } from '../src/tutorials/programRelationship.mjs';
 import { replayLogValues } from '../src/tutorials/replayLog.mjs';
 import { refitTwinValues } from '../src/tutorials/refitTwin.mjs';
+import { readDataLog } from '../src/dataLog.mjs';
+import { parsePlan } from '../src/inputForecast.mjs';
 import { scheduleChangesValues } from '../src/tutorials/scheduleChanges.mjs';
 import { organiseModelValues } from '../src/tutorials/organiseModel.mjs';
 import { driveWithJoysticksValues } from '../src/tutorials/driveWithJoysticks.mjs';
@@ -389,6 +391,20 @@ test('the third wave\'s names, ids and starting values are the shipped models\' 
     for (const { column } of replayLogValues.columns) assert.ok(log.split(/\r?\n/)[0].split(';').includes(column), `The log has a ${column} column.`);
     const rig = await exampleDocument('dataSources/simulatedTankRig.kjt');
     assert.equal(rig.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === refitTwinValues.heatLoss.parameterId).value, refitTwinValues.heatLoss.from);
+    // The operator's plan the tutorial has the person type is the drifting rig's own: each time its heater changes in the recording is a
+    // time of the plan, by the recording's clock in the plan's time zone, with the value it changed to.
+    assert.equal(rig.sharedParameters.find((parameter) => parameter.symbol === refitTwinValues.heater.input).name, refitTwinValues.heater.name);
+    const drifting = readDataLog(await readFile(join(root, 'examples', 'dataSources', 'simulatedTankRigDrifting.csv'), 'utf8'));
+    const { points } = parsePlan(refitTwinValues.heater.plan);
+    const heaterReadings = drifting.observations.filter((observation) => observation.signal === refitTwinValues.heater.input);
+    const changes = heaterReadings.filter((reading, index) => index === 0 || reading.value !== heaterReadings[index - 1].value);
+    assert.equal(changes.length, points.length);
+    for (const change of changes) {
+        const clock = new Date(drifting.header.epoch + change.time * 1000);
+        assert.equal(refitTwinValues.heater.timeZone, 'UTC');
+        const at = clock.getUTCHours() * 3600 + clock.getUTCMinutes() * 60 + clock.getUTCSeconds();
+        assert.ok(points.some((point) => point.at === at && point.value === change.value), `The heater's change to ${change.value} W at ${clock.toISOString()} is in the plan.`);
+    }
     const joint = await exampleDocument('positionControlledJoint.kjt');
     assert.equal(joint.edges.flatMap((edge) => edge.parameters).find((parameter) => parameter.id === scheduleChangesValues.setpoint.parameterId).mode, 'live');
     const mass = JSON.parse(await readFile(join(root, 'assets', 'componentLibrary', `${organiseModelValues.mass.template}.json`), 'utf8'));

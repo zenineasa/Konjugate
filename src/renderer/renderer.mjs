@@ -14159,6 +14159,8 @@ const tour = createTour({
                 twinSawRunning: tutorialTwin.sawRunning,
                 twinMovesSeen: tutorialTwin.movesSeen,
                 twinSawAlarm: tutorialTwin.sawAlarm,
+                // How each of the twin's inputs is carried into its forecast, as the setup keeps it.
+                twinInputs: projectTwinSetup?.live?.inputs ?? {},
                 demonstration: demonstrationProject,
                 scenarios: projectScenarios.length,
                 settingsOpen: $('#settingsDialog').open,
@@ -14511,6 +14513,10 @@ const tour = createTour({
         tryInTwinSandbox: async () => {
             await window.engine.liveTwin?.tutorialAction?.('tryAndKeep');
             await waitUntil(() => projectScenarios.length > 0, 60000);
+        },
+        planTwinInput: async (step) => {
+            await window.engine.liveTwin?.tutorialAction?.('planInput', { input: step.input, plan: step.plan, timeZone: step.timeZone });
+            await waitUntil(() => projectTwinSetup?.live?.inputs?.[step.input]?.forecast === 'plan', 30000);
         },
         waitForTwinAlarm: async () => { await waitUntil(() => tutorialTwin.sawAlarm, 180000); },
         openControllers: async () => { openSettings('controllers'); },

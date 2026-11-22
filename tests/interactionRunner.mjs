@@ -548,6 +548,25 @@ export async function runInteractionTests(driver) {
     });
 
     await run('example selection opens its companion guide', async () => {
+        // The web edition shows the guide in a panel of the page (webShims/guidePanel.mjs), never by sending the tab to the raw .md file.
+        if (!driver.capabilities.multiWindow) {
+            const address = await evaluate(window, `location.href`);
+            await waitFor(window, `!document.querySelector('#guidePanel')?.hidden && document.querySelector('#guidePanelTitle').textContent.includes('Thermal Management')`, 'Example guide panel did not show.');
+            assert.match(await evaluate(window, `document.querySelector('#guidePanelContent').textContent`), /enclosed-air volume/i);
+            assert.doesNotMatch(await evaluate(window, `document.querySelector('#guidePanelContent').textContent`), /Copyright|## /);
+            await waitFor(window, `document.querySelectorAll('#guidePanelContent .equation .ML__latex').length > 0`, 'Example equations did not render with MathLive.');
+            assert.equal(await evaluate(window, `location.href`), address, 'Opening the guide must not navigate the tab.');
+            assert.equal(driver.allHandles().length, 1, 'Opening the guide must not open another tab.');
+            await evaluate(window, `document.querySelector('#closeGuidePanel').click()`);
+            await waitFor(window, `document.querySelector('#guidePanel').hidden`, 'Close guide did not close the panel.');
+            assert.equal(await evaluate(window, `document.querySelector('#exampleGuideButton').hidden`), false);
+            await evaluate(window, `document.querySelector('#exampleGuideButton').click()`);
+            await waitFor(window, `!document.querySelector('#guidePanel').hidden && document.querySelector('#guidePanelTitle').textContent.includes('Thermal Management')`, 'About this example did not reopen the guide.');
+            assert.equal(await evaluate(window, `location.href`), address, 'About this example must not navigate the tab.');
+            assert.equal(await evaluate(window, `document.querySelectorAll('.node-label-container').length`), 3, 'The model stays open beside its guide.');
+            await evaluate(window, `document.querySelector('#closeGuidePanel').click()`);
+            return;
+        }
         // No "before" snapshot here, deliberately: loadExample()'s own click handler (the
         // previous scenario) may already have opened the guide window as a side effect before
         // this scenario even starts, so this must find ANY window matching the title, not one
@@ -566,16 +585,6 @@ export async function runInteractionTests(driver) {
         const beforeReopen = driver.allHandles();
         await evaluate(window, `document.querySelector('#exampleGuideButton').click()`);
         await driver.waitForNewHandle(beforeReopen, { titleIncludes: 'Example Guide' });
-    }, {
-        // A real, previously-unknown web-edition gap, not a driver/test issue -- confirmed by
-        // reading src/renderer/webShims/projectFiles.mjs's openExampleGuide(), not assumed:
-        // it does `window.open(rawMarkdownFileUrl, '_blank')`, opening the unrendered .md file
-        // directly rather than a guide page with the #guideTitle/#content/MathLive-rendered-
-        // equations structure this scenario (and the desktop guide window) actually has. The
-        // window.open() mechanism itself is real and portable (confirmed separately -- this
-        // scenario's own waitForNewHandle call reliably finds the opened tab), so this is gated
-        // on a missing renderer, not a missing capability category.
-        skip: !driver.capabilities.renderedExampleGuide && "the web edition's Example Guide opens the raw .md file directly, not a rendered guide page (see docs/proposals/webEdition.md)"
     });
 
     await run('export simulation code writes a standalone C++ or Python program', async () => {
@@ -10588,6 +10597,17 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Tank Calibration').click()`);
         await waitFor(window, `document.querySelector('#examplesExplorerDetailTitle').textContent === 'Tank Calibration'`, 'The example was not selected.');
         await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        if (!driver.capabilities.multiWindow) {
+            // The web edition's guide panel, in the page: the same cards, and its button starts the tutorial here.
+            await waitFor(window, `!document.querySelector('#guidePanel')?.hidden && Boolean(document.querySelector('#guidePanel [data-start-tutorial]'))`, 'The guide did not offer its tutorial.');
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#guidePanel .tourCard strong')].map((title) => title.textContent)`), ['Calibrate a model against measured data', 'Optimise towards a goal'], 'The guide offers every tutorial on its example.');
+            await evaluate(window, `document.querySelector('#guidePanel [data-start-tutorial]').click()`);
+            await waitFor(window, `window.__debugTour.tutorial() === 'calibrateTank'`, 'The guide did not start its tutorial.');
+            assert.equal(await evaluate(window, `document.querySelector('#guidePanel').hidden`), true, 'Starting the tutorial puts the guide away.');
+            await waitForStep('welcome');
+            await evaluate(window, `window.__debugTour.stop()`);
+            return;
+        }
         const guideWindow = await driver.waitForNewHandle(before, { titleIncludes: 'Example Guide' });
         await waitFor(guideWindow, `Boolean(document.querySelector('[data-start-tutorial]'))`, 'The guide did not offer its tutorial.');
         assert.deepEqual(await evaluate(guideWindow, `[...document.querySelectorAll('.tourCard strong')].map((title) => title.textContent)`), ['Calibrate a model against measured data', 'Optimise towards a goal'], 'The guide offers every tutorial on its example.');
@@ -10596,7 +10616,60 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `window.__debugTour.tutorial() === 'calibrateTank'`, 'The guide did not start its tutorial.');
         await waitForStep('welcome');
         await evaluate(window, `window.__debugTour.stop()`);
-    }, { skip: !driver.capabilities.renderedExampleGuide && 'the web edition opens an example\'s guide as its raw .md file, with no page to offer the tutorial in' });
+    });
+
+    await run('an empty canvas offers the first-model tutorial and the examples, and an empty model is not a warning', async () => {
+        const { clean, waitForStep } = tutorialHelpers();
+        await clean();
+        await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The empty model was not validated.');
+        assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Model valid', 'An empty model is where every model starts, not a warning.');
+        assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('warning')`), false);
+        assert.equal(await isRenderedVisible(window, '#emptyCanvasState section'), true, 'The empty canvas says what to do first.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#emptyCanvasState button')].map((button) => button.textContent)`), ['Start the 3-minute tutorial', 'Open an example']);
+        await evaluate(window, `document.querySelector('#emptyCanvasTutorial').click()`);
+        await waitFor(window, `window.__debugTour.tutorial() === 'firstModel'`, 'Start the 3-minute tutorial did not start the first-model tutorial.');
+        await waitForStep('welcome');
+        assert.equal(await evaluate(window, `document.querySelector('#emptyCanvasState').hidden`), true, 'The tutorial\'s card is the one thing saying what to do while it runs.');
+        await evaluate(window, `window.__debugTour.stop()`);
+        await waitFor(window, `!document.querySelector('#emptyCanvasState').hidden`, 'The empty canvas did not offer its first steps again after the tutorial was left.');
+        await evaluate(window, `document.querySelector('#emptyCanvasExample').click()`);
+        await waitFor(window, `document.querySelector('#examplesExplorerDialog').open`, 'Open an example did not open the Examples dialog.');
+        await evaluate(window, `document.querySelector('#examplesExplorerCancel').click()`);
+        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'The Examples dialog did not close.');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [{ id: 1, name: 'Heater', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 300 }] }], edges: [], subsystems: [], edgeGroups: [] })}, 'one node.kjt')`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('1 nodes') && document.querySelector('#emptyCanvasState').hidden`, 'The empty canvas card stayed over a model.');
+    });
+
+    // Last, as it reloads the page: what follows a reload is a fresh page, with the project it kept.
+    await run('the web edition keeps the open project across a reload, says so, and starts fresh on request', async () => {
+        const { clean } = tutorialHelpers();
+        await clean();
+        const keptRecord = `new Promise((resolve) => { const request = indexedDB.open('konjugate.autosave', 1); request.onupgradeneeded = () => request.result.createObjectStore('projects'); request.onsuccess = () => { const get = request.result.transaction('projects').objectStore('projects').get('current'); get.onsuccess = () => { resolve(get.result ? { fileName: get.result.fileName, exampleId: get.result.exampleId ?? null } : null); request.result.close(); }; }; request.onerror = () => resolve('unavailable'); })`;
+        await waitFor(window, `${keptRecord}.then((kept) => kept === null)`, 'An empty project still left a project kept in the browser.');
+        await evaluate(window, `document.querySelector('#exampleButton').click()`);
+        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper'))`, 'Examples explorer did not populate.');
+        await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper').click()`);
+        await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('2 nodes') && !document.querySelector('#guidePanel')?.hidden`, 'The example did not load with its guide.');
+        await evaluate(window, `document.querySelector('#closeGuidePanel').click()`);
+        await waitFor(window, `${keptRecord}.then((kept) => kept?.exampleId === 'springMassDamper.kjt')`, 'The example was not kept in the browser.');
+        await evaluate(window, `(() => { setTimeout(() => location.reload(), 0); })()`);
+        // The page is navigating: until the new one has set itself up, asking it anything can fail.
+        for (let tries = 0; tries < 150; tries += 1) {
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            if (await evaluate(window, `document.readyState === 'complete' && Boolean(window.__debugTour)`).catch(() => false)) break;
+        }
+        await waitFor(window, `document.querySelector('#validationSummary')?.dataset.validationSource === 'engine' && !document.querySelector('#restoredNotice').hidden`, 'The kept project was not brought back after the reload.', 30000);
+        assert.match(await evaluate(window, `document.querySelector('.modelStatus').textContent`), /2 nodes/);
+        assert.match(await evaluate(window, `document.querySelector('#restoredNoticeText').textContent`), /^Restored your last model/);
+        assert.equal(await evaluate(window, `document.querySelector('#restoredNoticeStartFresh').textContent`), 'Start fresh');
+        assert.equal(await evaluate(window, `document.querySelector('#exampleGuideButton').hidden`), false, 'About this example is back with the example.');
+        // A change not yet kept is what makes closing the tab ask; once it is kept, nothing is asked.
+        await evaluate(window, `(() => { window.confirm = () => true; })()`);
+        await evaluate(window, `document.querySelector('#restoredNoticeStartFresh').click()`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('0 nodes') && document.querySelector('#restoredNotice').hidden && !document.querySelector('#emptyCanvasState').hidden`, 'Start fresh did not leave an empty project.');
+        await waitFor(window, `${keptRecord}.then((kept) => kept === null)`, 'Start fresh left the old project kept in the browser.');
+    }, { skip: driver.capabilities.multiWindow && 'the desktop keeps projects in files, and asks before a window with unsaved changes closes' });
 
     await new Promise((resolve) => setTimeout(resolve, 1000));
     for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (after the last test, a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);

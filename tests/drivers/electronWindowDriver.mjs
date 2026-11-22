@@ -304,7 +304,6 @@ export function createElectronDriver(mainWindow) {
             heldCommands: true,
             forks: true,
             fitProgress: true,
-            renderedExampleGuide: true,
             aiAssistant: true,
             cancellableValidation: true
         },

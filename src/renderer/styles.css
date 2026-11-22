@@ -683,6 +683,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .css2dContainer { position: absolute; inset: 0; transition: right .18s ease; }
 .webglContainer { z-index: 1; }
 .css2dContainer { z-index: 4; overflow: hidden; pointer-events: none; }
+/* Beside the web edition's guide panel (webShims/guidePanel.mjs), unless an editor's card is open too (the rule after this one). */
+.canvas:has(> .guidePanel:not([hidden])) :is(.webglContainer, .css2dContainer) { right: calc(min(500px, calc(100vw - var(--rail-width) - 16px)) + 16px); }
 .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .webglContainer,
 .canvas:has(> .nodeEditor:not(.hidden), > .edgeEditor:not(.hidden)) .css2dContainer { right: 460px; }
 .webglSurface,
@@ -1093,6 +1095,22 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .paletteShape.sphere { width: 20px; height: 20px; background: radial-gradient(circle at 30% 30%, #e9bd7c, #9f5748); border-color: #d2925b; border-radius: 50%; transform: none; }
 .importIcon { display: grid; width: 25px; height: 25px; place-items: center; color: #8a9ca6; background: #1a2a34; border-radius: 4px; font-style: normal; }
 
+/* An empty canvas's first steps (updateEmptyCanvasState in renderer.mjs): only the card takes clicks, the canvas around it stays the canvas. */
+.emptyCanvasState { position: absolute; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; pointer-events: none; }
+.emptyCanvasState[hidden] { display: none; }
+.emptyCanvasState section { width: min(420px, 100%); padding: 18px 20px; color: #b9ccd4; background: rgb(12 24 33 / 94%); border: 1px solid #2c4752; border-radius: 10px; box-shadow: 0 12px 32px rgb(0 0 0 / 35%); text-align: center; pointer-events: auto; }
+.emptyCanvasState strong { display: block; color: #e6f0f2; font-size: 15px; }
+.emptyCanvasState p { margin: 6px 0 14px; font-size: 12.5px; line-height: 1.5; }
+.emptyCanvasState div { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.emptyCanvasState button { height: 32px; padding: 0 14px; color: #cfe0e3; background: transparent; border: 1px solid #3b5460; border-radius: 6px; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.emptyCanvasState button:hover, .emptyCanvasState button:focus-visible { border-color: #42c9bc; }
+.emptyCanvasState button.primary { color: #061412; background: #42c9bc; border-color: #42c9bc; }
+.emptyCanvasState button.primary:hover, .emptyCanvasState button.primary:focus-visible { background: #59d6ca; }
+/* The web edition's word that it brought back the project kept in the browser (restoreBrowserAutosave in renderer.mjs). */
+.restoredNotice { position: absolute; z-index: 9; bottom: 48px; left: 50%; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100% - 24px); padding: 8px 8px 8px 14px; color: #d8e5ea; background: rgb(12 24 33 / 97%); border: 1px solid #2c6b66; border-radius: 9px; box-shadow: 0 12px 32px rgb(0 0 0 / 40%); font-size: 12.5px; line-height: 1.45; transform: translateX(-50%); }
+.restoredNotice[hidden] { display: none; }
+.restoredNotice button { flex: 0 0 auto; height: 28px; padding: 0 12px; color: #74ddd3; background: rgb(66 201 188 / 10%); border: 1px solid #2c6b66; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
+.restoredNotice .restoredNoticeDismiss { width: 28px; padding: 0; color: #8da2ad; background: none; border-color: transparent; font-size: 16px; }
 .canvasHelp { position: absolute; z-index: 8; bottom: 13px; left: 50%; display: flex; align-items: center; gap: 8px; padding: 5px 9px; color: #4f6571; background: rgb(8 17 24 / 80%); border: 1px solid #22343f; border-radius: 5px; font-size: 7px; transform: translateX(-50%); }
 .canvasHelp b { color: #758995; font-weight: 600; }
 .canvasHelp i { width: 1px; height: 9px; background: #2a3b46; }
@@ -1611,6 +1629,27 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     cursor: pointer;
     padding: 2px 4px;
 }
+
+/* The web edition's guide panel (webShims/guidePanel.mjs): an example's guide beside the model, in the page, where the desktop opens a
+   guide window. What is in the guide is styled by that window's own exampleGuide/guideContent.css; these rules are the panel around it. */
+.guidePanel {
+    --guide-panel-width: min(500px, calc(100vw - var(--rail-width) - 16px));
+    position: absolute; z-index: 19; top: 8px; right: 8px; bottom: 8px;
+    display: flex; flex-direction: column; width: var(--guide-panel-width); overflow: hidden;
+    color: #9eb0b9; background: rgb(9 19 27 / 98%); border: 1px solid #2c4450; border-radius: 10px; box-shadow: 0 14px 38px rgb(0 0 0 / 45%);
+}
+/* The model stays in sight beside the guide, as it does beside an editor's card (whose rule, below, wins when both are open); and the
+   trial banner moves into the space left of the guide, so it never covers the guide's own header and its Close button. */
+[data-web-edition]:has(.guidePanel:not([hidden])) .webEditionBanner {
+    left: calc(var(--rail-width) + (100vw - var(--rail-width) - min(500px, calc(100vw - var(--rail-width) - 16px)) - 16px) / 2);
+    width: max(220px, min(680px, calc(100vw - var(--rail-width) - min(500px, calc(100vw - var(--rail-width) - 16px)) - 48px)));
+}
+.guidePanel[hidden] { display: none; }
+.guidePanel > header { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px 10px 16px; background: #0b1922; border-bottom: 1px solid #263b46; }
+.guidePanel > header strong { overflow: hidden; color: #e6f0f2; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.guidePanel > header button { flex: 0 0 auto; height: 28px; padding: 0 12px; color: #cfe0e3; background: transparent; border: 1px solid #3b5460; border-radius: 6px; font-size: 12px; cursor: pointer; }
+.guidePanel > header button:hover, .guidePanel > header button:focus-visible { color: #fff; border-color: #42c9bc; }
+.guidePanelContent { flex: 1 1 auto; overflow-y: auto; padding: 18px 22px 40px; }
 
 /* The banner's offline button, and the notice that a newer build is ready. */
 .webEditionBannerShort { display: none; }

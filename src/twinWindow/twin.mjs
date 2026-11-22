@@ -63,7 +63,8 @@ function renderModel() {
         ...states.map(chip),
         ...(parameters.length ? [Object.assign(document.createElement('span'), { className: 'hint', textContent: ` and ${parameters.length} shared parameter${parameters.length === 1 ? '' : 's'} to drive with inputs:` }), ...parameters.map(chip)] : [])
     );
-    if (!states.length) summary.replaceChildren(Object.assign(document.createElement('p'), { className: 'status warning modelEmpty', textContent: 'The model has no states, so there is nothing to compare with readings. Add a node with a state in the project window, or see a demonstration (the link under the sources below).' }));
+    // Guidance, not a fault: a twin is often opened before its model is built (a tutorial does exactly that), so this reads as the next step.
+    if (!states.length) summary.replaceChildren(Object.assign(document.createElement('p'), { className: 'status modelEmpty', textContent: 'No states yet, so there is nothing to compare with readings. Add a node with a state in the project window, or see a demonstration (the link under the sources below).' }));
 }
 
 // ---- Step 2: the source --------------------------------------------------------------------------------------------------------

@@ -780,6 +780,13 @@ const edgeResultPlot = new ResultPlot($('#edgeResultPlot'), {
     }
 });
 const documentController = new DocumentController();
+// The web edition keeps the open project in the browser (see restoreBrowserAutosave). window.projectFiles.autosave is the web shell's
+// alone: the desktop keeps projects in files, and asks before a window with unsaved changes closes.
+const browserAutosave = window.projectFiles.autosave ?? null;
+const autosaveState = { started: false, kept: null, owned: false, failed: false, timer: null, writing: Promise.resolve() };
+// Set once the page has finished setting itself up: the empty canvas's card (updateEmptyCanvasState) reads the tutorial state, which
+// is not there before.
+let emptyCanvasStateReady = false;
 
 function updateHistoryControls() {
     $('#undoButton').disabled = Boolean(activeResult) || !documentController.canUndo;
@@ -1628,6 +1635,7 @@ function refreshSubsystemView() {
     }
     clearSelection();
     applySubsystemVisibility();
+    updateEmptyCanvasState();
     // Laid out afresh for the view just entered, from where its contents are now.
     subsystemTerminalSignature = '';
     updateRelationships();
@@ -5887,7 +5895,16 @@ function startEndpointPick(endpoint) {
     $('#endpointPickBanner').hidden = false;
 }
 
+// An empty canvas says what to do first: take the first-model tutorial or open an example. Not while a tutorial runs (its card says what
+// to do), nor inside a subsystem.
+function updateEmptyCanvasState() {
+    if (!emptyCanvasStateReady) return;
+    const empty = !model.nodes.some((node) => !node.deleted) && !model.subsystems.some((subsystem) => !subsystem.deleted);
+    $('#emptyCanvasState').hidden = !empty || tour.active || activeSubsystemId !== null;
+}
+
 function updateModelStatus() {
+    updateEmptyCanvasState();
     const status = $$('.modelStatus span');
     const visibleNodes = model.nodes.filter((node) => !node.deleted).length;
     const visibleRelationships = model.relationships.filter((relationship) => !relationship.deleted).length;
@@ -5959,6 +5976,7 @@ function navigateToValidationIssue(item) {
 
 function updateValidationStatus() {
     scheduleEngineValidation();
+    scheduleAutosave();
 }
 
 // Resolves when the model's validation has settled. Waiters are released only by the latest validation
@@ -9394,6 +9412,7 @@ async function loadProjectDocument(document, {
     await discardResultPlayback();
     discardAssistantProposal();
     hideAssistantPanel();
+    hideRestoredNotice();
     demonstrationProject = false;
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
@@ -15328,6 +15347,7 @@ const tour = createTour({
     },
     // A step whose work is in the twin window is shown there too, since that window covers this one's card.
     onStep: (step, label, status = '') => {
+        updateEmptyCanvasState();
         if (step !== tutorialStepShown) releaseTutorialRelationshipLabels();
         tutorialStepShown = step;
         const inTwin = step?.elsewhere === 'twin';
@@ -15337,6 +15357,7 @@ const tour = createTour({
         window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition), status, target: step.twinTarget ?? null } : null, { raiseProject: Boolean(step) && !inTwin });
     },
     onFinish: (outcome, tutorial) => {
+        updateEmptyCanvasState();
         $('#statusText').textContent = outcome === 'completed' ? `Tutorial finished: ${tutorial.title}` : 'Tutorial left · take it again any time from Tutorials';
         if (outcome === 'completed') {
             if (!tutorialsCompleted.includes(tutorial.id)) tutorialsCompleted = [...tutorialsCompleted, tutorial.id];
@@ -15353,13 +15374,17 @@ function keepTutorialForRestart() {
     if (!tour.active) return;
     try { localStorage.setItem(tutorialResumeKey, JSON.stringify({ id: tour.tutorial.id, step: tour.step, at: Date.now() })); } catch { /* storage blocked: the tutorial is not carried on */ }
 }
+// Whether a tutorial is carrying on after a restart, which starts from its own project: the project kept in the browser is not brought back then.
+let tutorialResumePending = false;
 function resumeTutorialAfterRestart() {
     let kept = null;
     try {
         kept = JSON.parse(localStorage.getItem(tutorialResumeKey) ?? 'null');
         localStorage.removeItem(tutorialResumeKey);
     } catch { return; }
-    if (kept?.id && Date.now() - Number(kept.at) < 15 * 60 * 1000) setTimeout(() => startTutorial(kept.id, { resumeAt: kept.step }), 1500);
+    if (!kept?.id || Date.now() - Number(kept.at) >= 15 * 60 * 1000) return;
+    tutorialResumePending = true;
+    setTimeout(() => startTutorial(kept.id, { resumeAt: kept.step }), 1500);
 }
 
 // Starts a tutorial where it starts: a new, empty project, or a fresh copy of its example (the example's guide is not opened, so the
@@ -15379,6 +15404,8 @@ function closeLeftoversForTutorial() {
         if (!$(panel).hidden) $(close).click();
     }
     if (twinWindowOpen) window.engine.liveTwin?.closeWindow?.();
+    // The web edition's guide panel (webShims/guidePanel.mjs) sits where a tutorial's steps point; About this example brings it back.
+    if ($('#guidePanel') && !$('#guidePanel').hidden) $('#closeGuidePanel').click();
 }
 async function startTutorial(id, { resumeAt = null } = {}) {
     const tutorial = tutorialById(id);
@@ -15488,6 +15515,127 @@ async function checkPendingProjectOpen() {
     }
 }
 
+// ---- The web edition keeps the open project in the browser (webShims/projectFiles.mjs's autosave) ---------------------------------
+// A change is kept a moment after it is made, and the page brings the project back when it is opened again, saying so and offering to
+// start fresh. Kept: the model, as Save writes it. Not kept: an encrypted project (it would sit unencrypted in the browser) and results
+// (the web edition cannot save them; the notice says so). Until a change is kept, closing or reloading the tab asks first. An empty
+// project keeps nothing, and clears what this tab kept before; a tab that never kept anything (a new window) leaves another's alone.
+
+// What this tab would keep now, as the text compared with what was kept last: '' when there is nothing to keep.
+function autosaveSnapshot() {
+    const projectDocument = serializeProjectDocument();
+    (projectDocument.subsystemDefinitions ?? []).forEach((definition) => { if (definition.link) delete definition.link.editing; });
+    const empty = !projectDocument.nodes.length && !projectDocument.edges.length && !projectDocument.subsystems.length;
+    if (empty || currentProjectPassword) return { key: '', content: '', details: null };
+    const content = projectFileContent(projectDocument, projectOwnership);
+    const details = { fileName: currentProjectFilename, unsaved: documentController.dirty, resultLeftOut: Boolean(activeResult), exampleId: activeExampleId };
+    return { key: `${JSON.stringify(details)}\n${content}`, content, details };
+}
+
+function scheduleAutosave() {
+    if (!browserAutosave || !autosaveState.started) return;
+    clearTimeout(autosaveState.timer);
+    autosaveState.timer = setTimeout(flushAutosave, 600);
+}
+
+function flushAutosave() {
+    clearTimeout(autosaveState.timer);
+    if (!browserAutosave || !autosaveState.started) return autosaveState.writing;
+    autosaveState.writing = autosaveState.writing.then(async () => {
+        const snapshot = autosaveSnapshot();
+        if (snapshot.key === autosaveState.kept) return;
+        try {
+            if (snapshot.content) {
+                await browserAutosave.write(snapshot.content, snapshot.details);
+                autosaveState.owned = true;
+            } else if (autosaveState.owned) {
+                await browserAutosave.clear();
+            }
+            autosaveState.kept = snapshot.key;
+            autosaveState.failed = false;
+        } catch (error) {
+            // Full storage, or a browser that keeps nothing: closing the tab asks again, as it does with nothing kept.
+            console.warn('This browser did not keep the project.', error);
+            autosaveState.failed = true;
+        }
+    });
+    return autosaveState.writing;
+}
+
+// Whether closing the tab now would lose work: a change not yet kept in the browser (or, where nothing can be kept there, any unsaved change).
+function changesNotKept() {
+    if (!autosaveState.started) return false;
+    if (autosaveState.failed || currentProjectPassword) return documentController.dirty || addonDataUnsaved;
+    return autosaveSnapshot().key !== autosaveState.kept;
+}
+
+function hideRestoredNotice() {
+    $('#restoredNotice').hidden = true;
+}
+
+function showRestoredNotice(kept) {
+    const name = kept.fileName && kept.fileName !== 'untitled.kjt' ? ` (${kept.fileName.replace(/\.kjt$/i, '')})` : '';
+    $('#restoredNoticeText').textContent = `Restored your last model${name}.${kept.resultLeftOut ? ' Its results are not kept in the browser: run it again to see them.' : ''}`;
+    $('#restoredNotice').hidden = false;
+}
+
+// Brings back the project this browser kept, once, when the page opens: not in a tab opened as a new window (?new), nor while a tutorial
+// carries on after a restart, nor over a project that is already open.
+async function restoreBrowserAutosave() {
+    if (!browserAutosave) return;
+    const freshTab = new URLSearchParams(location.search).has('new');
+    if (freshTab) history.replaceState(history.state, '', `${location.pathname}${location.hash}`);
+    let restored = false;
+    try {
+        const projectOpen = documentController.dirty || model.nodes.some((node) => !node.deleted) || currentProjectPath !== null;
+        const kept = freshTab || tutorialResumePending || projectOpen || tour.active ? null : await browserAutosave.read();
+        if (kept) {
+            await loadProjectDocument(JSON.parse(kept.content), { fileName: kept.fileName || 'untitled.kjt', saved: !kept.unsaved });
+            activeExampleId = kept.exampleId ?? null;
+            exampleAsLoaded = null;
+            $('#exampleGuideButton').hidden = !activeExampleId;
+            $('#statusText').textContent = 'Restored your last model';
+            showRestoredNotice(kept);
+            restored = true;
+        }
+    } catch (error) {
+        console.warn('The project kept in this browser could not be read.', error);
+    }
+    autosaveState.owned = restored;
+    autosaveState.kept = restored ? autosaveSnapshot().key : null;
+    autosaveState.started = true;
+    scheduleAutosave();
+}
+
+// "Start fresh": an empty project in place of the one brought back (after the usual question, as it was never saved to a file).
+async function startFreshProject() {
+    if (simulationRunning) {
+        $('#statusText').textContent = 'Stop the run first, then start fresh.';
+        return;
+    }
+    if ((documentController.dirty || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return;
+    hideRestoredNotice();
+    await loadProjectDocument(structuredClone(emptyProjectDocument));
+    activeExampleId = null;
+    $('#exampleGuideButton').hidden = true;
+    $('#statusText').textContent = 'New project';
+    await flushAutosave();
+}
+
+$('#restoredNoticeStartFresh').addEventListener('click', startFreshProject);
+$('#restoredNoticeDismiss').addEventListener('click', hideRestoredNotice);
+if (browserAutosave) {
+    documentController.subscribe(scheduleAutosave);
+    // What changes without passing through the model's history (a tuning or twin setup, a result arriving) is caught here.
+    setInterval(() => { if (document.visibilityState === 'visible') scheduleAutosave(); }, 5000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushAutosave(); });
+    window.addEventListener('beforeunload', (event) => {
+        if (!changesNotKept()) return;
+        event.preventDefault();
+        event.returnValue = '';
+    });
+}
+
 function requestSaveContentChoice() {
     const dialog = $('#saveContentDialog');
     const form = $('form', dialog);
@@ -15512,6 +15660,12 @@ function requestSaveContentChoice() {
         cancel.addEventListener('click', onCancelClick);
         dialog.showModal();
     });
+}
+
+// The text of a project file: the model, with its ownership details (`ownership`, or none), add-on data, tuning and twin setups and
+// scenarios. What Save writes, and what the web edition keeps in the browser between visits.
+function projectFileContent(projectDocument, ownership) {
+    return `${JSON.stringify({ ...projectDocument, ...(ownership ? { ownership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
 }
 
 // `rename` is a Save As under a new name that stands in for renaming the file (the title bar): the file keeps the ownership details it
@@ -15549,7 +15703,7 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         const resultComponents = includeResults ? [...branches.values()].filter((branch) => branch.components?.length).map((branch) => (branches.size > 1
             ? { branchUuid: branch.branchUuid, components: branch.components } : { components: branch.components })) : [];
         if (resultComponents.length) projectDocument.resultComponents = resultComponents;
-        const content = `${JSON.stringify({ ...projectDocument, ...(fileOwnership ? { ownership: fileOwnership } : {}), ...(Object.keys(projectAddonData).length ? { addonData: projectAddonData } : {}), ...(projectTuningSetup ? { tuningSetup: projectTuningSetup } : {}), ...(projectTwinSetup ? { twin: projectTwinSetup } : {}), ...(projectScenarios.length ? { scenarios: projectScenarios } : {}) }, null, 4)}\n`;
+        const content = projectFileContent(projectDocument, fileOwnership);
         // Refresh the active branch's own record before reading it (mirrors activateBranch's own
         // park-on-switch refresh) -- it can otherwise be stale between live updates.
         const activeBranchRecord = branches.get(activeBranchUuid);
@@ -19842,7 +19996,11 @@ setTool('select');
 setCameraView('orbit', false);
 updateModelStatus();
 initializeAddonRailContributions();
-checkPendingProjectOpen();
+checkPendingProjectOpen().then(restoreBrowserAutosave);
+emptyCanvasStateReady = true;
+updateEmptyCanvasState();
+$('#emptyCanvasTutorial').addEventListener('click', () => startTutorial('firstModel'));
+$('#emptyCanvasExample').addEventListener('click', openExamplesExplorer);
 
 // What the interaction tests wait on, instead of watching the page with a time limit: each resolves once this window has
 // finished a piece of its own work, however long that took on the machine running it. A camera is still once two frames

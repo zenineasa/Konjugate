@@ -27,7 +27,7 @@ const steps = Object.freeze([
     {
         id: 'welcome',
         title: 'Optimise towards a goal',
-        text: 'Parameter tuning can do more than match measurements: it can search for the parameter values that make a number from the run as large or as small as possible. On this water tank you will ask for the warmest water after eight hours, see where the search goes, then hold it to a limit. The Example guide button in the toolbar explains the model, whenever you want the details.',
+        text: 'Parameter tuning can do more than match measurements: it can search for the parameter values that make a number from the run as large or as small as possible. On this water tank you will ask for the warmest water after eight hours, see where the search goes, then hold it to a limit. The About this example button (?) in the toolbar explains the model, whenever you want the details.',
         advance: 'next', nextLabel: 'Start', done: () => true
     },
     {

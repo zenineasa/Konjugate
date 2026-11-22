@@ -23,7 +23,7 @@ const steps = Object.freeze([
     {
         id: 'welcome',
         title: 'Calibrate a model against measured data',
-        text: 'This water tank is warmed by a heater and loses heat to the room, but two of its numbers are only guesses: how much heat it takes to warm it, and how fast it leaks heat away. You will fit both to eight hours of measured temperatures, put the fitted values in the model and run it. The Example guide button in the toolbar explains the model, whenever you want the details.',
+        text: 'This water tank is warmed by a heater and loses heat to the room, but two of its numbers are only guesses: how much heat it takes to warm it, and how fast it leaks heat away. You will fit both to eight hours of measured temperatures, put the fitted values in the model and run it. The About this example button (?) in the toolbar explains the model, whenever you want the details.',
         advance: 'next', nextLabel: 'Start', done: () => true
     },
     {

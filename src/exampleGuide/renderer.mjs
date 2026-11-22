@@ -4,44 +4,9 @@ import { convertLatexToMarkup } from '../../node_modules/mathlive/mathlive.min.m
 import { guideKindSuffix } from './guideKind.mjs';
 import { describeCheckedAt, describeUpdateStatus } from '../updatePanel.mjs';
 import { featuredLabel, watchLibrary, welcomeLinks, welcomeSectionOrder } from '../welcomeModel.mjs';
-import { prepareGuideMarkdown } from './markdown.mjs';
+import { escapeHtml, guideTutorialCards, renderGuideMarkdown } from './markdownHtml.mjs';
 
-const escapeHtml = (value) => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
-
-function renderInline(value) {
-    return value.replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/!\[([^\]]*)\]\((https:\/\/[^)]+)\)/g, '<img src="$2" alt="$1">')
-        .replace(/\[([^\]]+)\]\((https:\/\/[^)]+)\)/g, '<a href="$2" data-external-link>$1</a>')
-        .replace(/\$([^$]+)\$/g, (_match, latex) => `<span class="inlineMath">${convertLatexToMarkup(latex)}</span>`);
-}
-
-function renderMarkdown(markdown) {
-    const lines = escapeHtml(prepareGuideMarkdown(markdown)).split('\n');
-    const output = [];
-    let list = null;
-    let code = false;
-    for (const line of lines) {
-        if (line.startsWith('```')) {
-            if (code) output.push('</code></pre>'); else output.push('<pre><code>');
-            code = !code;
-            continue;
-        }
-        if (code) { output.push(`${line}\n`); continue; }
-        const item = line.match(/^[-*] (.+)$/);
-        if (item) {
-            if (!list) { output.push('<ul>'); list = 'ul'; }
-            output.push(`<li>${renderInline(item[1])}</li>`);
-            continue;
-        }
-        if (list) { output.push('</ul>'); list = null; }
-        const heading = line.match(/^(#{1,3}) (.+)$/);
-        if (heading) { const level = heading[1].length; output.push(`<h${level}>${renderInline(heading[2])}</h${level}>`); }
-        else if (/^\$\$.+\$\$$/.test(line)) output.push(`<div class="equation">${convertLatexToMarkup(line.slice(2, -2), { mathstyle: 'displaystyle' })}</div>`);
-        else if (line.trim()) output.push(`<p>${renderInline(line)}</p>`);
-    }
-    if (list) output.push('</ul>');
-    return output.join('');
-}
+const renderMarkdown = (markdown) => renderGuideMarkdown(markdown, convertLatexToMarkup);
 
 // One reusable card (thumbnail + title, linking out) for every card-shaped content type this window
 // shows: the On-Ramp episodes, More to watch, and recent blog posts. Card fields are escaped
@@ -326,8 +291,7 @@ window.exampleGuide.onContent((payload) => {
     welcome = null;
     // An example with tutorials (docs/proposals/tutorials.md) offers them first, so someone who opened the example from the Examples
     // dialog learns there are walkthroughs of it.
-    const tutorialCards = (payload.tutorials ?? []).map((tutorial) => `<section class="tourCard"><div><strong>${escapeHtml(tutorial.title)}</strong><p>${escapeHtml(tutorial.summary)} A ${escapeHtml(String(tutorial.minutes))}-minute tutorial on this example, step by step, right in the app.</p></div><button type="button" data-start-tutorial="${escapeHtml(tutorial.id)}">Take the tutorial</button></section>`).join('');
-    document.querySelector('#content').innerHTML = tutorialCards + renderMarkdown(markdown);
+    document.querySelector('#content').innerHTML = guideTutorialCards(payload.tutorials ?? []) + renderMarkdown(markdown);
     document.querySelectorAll('[data-start-tutorial]').forEach((button) => button.addEventListener('click', () => window.exampleGuide.startTutorial(button.dataset.startTutorial)));
     document.querySelectorAll('[data-external-link]').forEach((link) => link.addEventListener('click', (event) => {
         event.preventDefault();

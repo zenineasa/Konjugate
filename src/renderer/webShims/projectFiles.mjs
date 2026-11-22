@@ -11,7 +11,10 @@
 // (exportFmu, mergeFmus) are honestly unavailable, matching webEdition.md's existing stance.
 
 import { decodeResultFile } from '../../engineProtocol.mjs';
-import { pluginExampleBytes, pluginExampleEntries, pluginExampleGuideUrl } from './packages.mjs';
+import { pluginExampleBytes, pluginExampleEntries, pluginExampleGuide } from './packages.mjs';
+import { showGuidePanel } from './guidePanel.mjs';
+import { startTutorialInPage } from './misc.mjs';
+import { tutorialsForExample } from '../../tutorials/index.mjs';
 import { publicNoticeOf } from '../../ownership.mjs';
 import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent, inspectProjectContent } from '../../browserProjectCodec.mjs';
 import { rendererResultProjection } from '../../resultSession.mjs';
@@ -169,15 +172,30 @@ async function loadExample(id) {
     return { ...file, suggestedFilename: id.split('/').at(-1) };
 }
 
+// An example's guide, rendered in the guide panel beside the model (never by sending the tab to the raw .md file, which took the person
+// away from their model with no way back). Returns whether there was a guide to show, as the desktop's openExampleGuide does.
 async function openExampleGuide(id) {
-    const bundledIds = new Set((await bundledExamples()).map((example) => example.id));
-    const pluginGuide = await pluginExampleGuideUrl(id, bundledIds);
-    if (pluginGuide) { window.open(pluginGuide, '_blank'); return; }
-    window.open(new URL(`../../examples/${id.replace(/\.kjt$/, '.md')}`, import.meta.url), '_blank');
+    const bundled = await bundledExamples();
+    const pluginGuide = await pluginExampleGuide(id, new Set(bundled.map((example) => example.id)));
+    if (pluginGuide) {
+        showGuidePanel({ ...pluginGuide, kind: 'example' }, { startTutorial: startTutorialInPage });
+        return true;
+    }
+    const example = bundled.find((entry) => entry.id === id);
+    if (!example) return false;
+    const response = await fetch(new URL(`../../examples/${id.replace(/\.kjt$/, '.md')}`, import.meta.url));
+    if (!response.ok) throw new Error('That example has no guide.');
+    // An example with tutorials says so at the top of its guide (docs/proposals/tutorials.md); only those this edition has.
+    const tutorials = tutorialsForExample(id).filter((tutorial) => tutorial.editions.includes('web'))
+        .map((tutorial) => ({ id: tutorial.id, title: tutorial.title, minutes: tutorial.minutes, summary: tutorial.summary }));
+    showGuidePanel({ title: example.label, markdown: await response.text(), kind: 'example', tutorials }, { startTutorial: startTutorialInPage });
+    return true;
 }
 
 async function openCausalInferenceInteractionHelp() {
-    window.open(new URL('../../docs/causalInferenceInteractionHelp.md', import.meta.url), '_blank');
+    const response = await fetch(new URL('../../docs/causalInferenceInteractionHelp.md', import.meta.url));
+    if (!response.ok) throw new Error('The causal inference help is not available.');
+    showGuidePanel({ title: 'Causal inference', markdown: await response.text(), kind: 'help' }, { startTutorial: startTutorialInPage });
 }
 
 async function exportResultsCsv(suggestedFilename, csv) {
@@ -190,6 +208,51 @@ async function exportGeneratedProgram(suggestedFilename, source, kind) {
     downloadBlob(new TextEncoder().encode(source), fileName, kind === 'cpp' ? 'text/x-c++src' : 'text/x-python');
     return { path: null, fileName };
 }
+
+// The project open in this tab, kept in the browser (IndexedDB, which holds far more than local storage) so a reload or a closed tab
+// does not lose it: written as the same bytes Save writes (browserProjectCodec.mjs, model only), read back when the page opens. One
+// project is kept, the latest any tab wrote. Where the browser has no IndexedDB (or refuses it, as some private windows do) every call
+// rejects, and the page asks before it is closed with unsaved changes instead.
+const autosaveDatabaseName = 'konjugate.autosave';
+const autosaveStoreName = 'projects';
+const autosaveKey = 'current';
+let autosaveDatabasePromise = null;
+function autosaveDatabase() {
+    autosaveDatabasePromise ??= new Promise((resolve, reject) => {
+        const request = indexedDB.open(autosaveDatabaseName, 1);
+        request.onupgradeneeded = () => request.result.createObjectStore(autosaveStoreName);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    return autosaveDatabasePromise;
+}
+async function autosaveRequest(mode, action) {
+    const database = await autosaveDatabase();
+    return new Promise((resolve, reject) => {
+        const transaction = database.transaction(autosaveStoreName, mode);
+        const request = action(transaction.objectStore(autosaveStoreName));
+        transaction.oncomplete = () => resolve(request.result);
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error ?? new Error('The browser did not keep the project.'));
+    });
+}
+
+const autosave = {
+    // `content` is a project file's text; `details` are kept beside it as they are (its file name, whether it had unsaved changes,
+    // whether a result was left out, the example it came from).
+    write: async (content, details) => {
+        const bytes = await encodeProjectContent(content);
+        await autosaveRequest('readwrite', (store) => store.put({ ...details, bytes, savedAt: Date.now() }, autosaveKey));
+    },
+    // The kept project as { content, savedAt, ...details }, or null when none is kept.
+    read: async () => {
+        const record = await autosaveRequest('readonly', (store) => store.get(autosaveKey));
+        if (!record?.bytes) return null;
+        const { bytes, ...details } = record;
+        return { ...details, content: (await decodeProjectContent(bytes)).content };
+    },
+    clear: () => autosaveRequest('readwrite', (store) => store.delete(autosaveKey))
+};
 
 async function confirmDiscard() {
     return window.confirm('You have unsaved changes. Discard them and continue?');
@@ -209,5 +272,6 @@ export default {
     exportGeneratedProgram,
     exportFmu: async () => ({ available: false }),
     mergeFmus: async () => ({ available: false }),
-    confirmDiscard
+    confirmDiscard,
+    autosave
 };

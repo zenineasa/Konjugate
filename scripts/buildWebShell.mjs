@@ -90,6 +90,8 @@ for (const absolutePath of visitedModules) {
 // import statement) is never missed by the graph walk above.
 await cp(join(srcDirectory, 'renderer', 'webShims'), join(outputDirectory, 'renderer', 'webShims'), { recursive: true });
 await cp(join(srcDirectory, 'renderer', 'styles.css'), join(outputDirectory, 'renderer', 'styles.css'));
+// The guide's own stylesheet, shared with the desktop's guide window, which webShims/guidePanel.mjs loads.
+await cp(join(srcDirectory, 'exampleGuide', 'guideContent.css'), join(outputDirectory, 'exampleGuide', 'guideContent.css'));
 // The registry as this site carries it, for Discover and installing from it (docs/proposals/webEditionPackages.md, stage 4). Packages are
 // downloaded from their releases only when KONJUGATE_MIRROR_PACKAGES=1 (the release workflow); a local build writes the entries and
 // images alone and needs no network.

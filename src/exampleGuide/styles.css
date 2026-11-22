@@ -16,18 +16,8 @@ body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; m
    overlapping it -- centering the 760px text column via padding rather than width+margin keeps
    main itself full-width, so the scrollbar still hugs the window's true right edge. */
 main { flex: 1 1 auto; overflow-y: auto; padding: 34px max(22px, calc((100% - 760px) / 2)) 70px; }
-h1 { margin: 0 0 8px; color: #e6f0f2; font-size: 28px; letter-spacing: -.03em; }
-h2 { margin: 32px 0 10px; padding-top: 14px; color: #cfe0e3; border-top: 1px solid #263a44; font-size: 17px; }
-h3 { margin: 22px 0 8px; color: #b8ced2; font-size: 13px; }
-p, li { font-size: 12px; line-height: 1.75; }
-a { color: #83d7cf; }
-a:hover, a:focus-visible { color: #b5efea; }
-img { max-width: 100%; height: auto; }
-ul { padding-left: 21px; }
-code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px; }
-pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }
-.inlineMath { display: inline-block; padding: 0 2px; color: #d3e7e8; font-size: 1em; vertical-align: -.15em; }
-.equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: safe center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }
+/* The guide itself (headings, text, links, code, equations, the tutorial cards) is styled by guideContent.css, which the web
+   edition's guide panel loads too. */
 /* One reusable card for every card-shaped content type this window shows (curated videos, recent
    blog posts, and eventually sponsored content) -- see renderCard()/renderCardSection() in
    renderer.mjs. Built entirely from colors already used elsewhere in this file, no new palette. */
@@ -76,10 +66,6 @@ pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243
 .updatesMeta { color: #778d98; font-size: 11px; }
 .sectionIntro { margin: 0; color: #778d98; }
 .whatsNew, .featured { position: relative; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 6%); border: 1px solid #243944; border-radius: 7px; }
-.tourCard { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 10%); border: 1px solid #2f6f6a; border-radius: 7px; }
-.tourCard p { margin: 4px 0 0; color: #a9bcc5; font-size: 13px; }
-.tourCard button { flex: none; height: 32px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
-.tourCard button:hover, .tourCard button:focus-visible { background: #74ddd3; border-color: #74ddd3; }
 /* Learn by doing: a tutorial card each, in the tour card's colours, its Start button at the bottom however long the summary. */
 /* Always the three suggestions side by side, never two and one left over; one under another only in a narrow window. */
 .tutorialCards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 14px 0 10px; }

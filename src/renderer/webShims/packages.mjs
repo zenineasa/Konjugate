@@ -181,12 +181,6 @@ function dataUrl(bytes, type) {
     return `data:${type};base64,${btoa(binary)}`;
 }
 
-const objectUrls = new Map();
-const objectUrlFor = (key, bytes, type) => {
-    if (!objectUrls.has(key)) objectUrls.set(key, URL.createObjectURL(new Blob([bytes], { type })));
-    return objectUrls.get(key);
-};
-
 // The example models the enabled plugins add, in the shape projectListExamples returns on the desktop. `takenIds` are the bundled ones.
 export async function pluginExampleEntries(takenIds) {
     const store = await packageStore();
@@ -209,11 +203,12 @@ export async function pluginExampleBytes(id, takenIds) {
     return example ? store.readFile(example.packageEntry, example.entry) : null;
 }
 
-// The address of a plugin example's guide, or null when it has none.
-export async function pluginExampleGuideUrl(id, takenIds) {
+// A plugin example's guide, as its title and markdown for the guide panel (webShims/guidePanel.mjs); null when `id` is not a plugin
+// example or it has no guide.
+export async function pluginExampleGuide(id, takenIds) {
     const store = await packageStore();
     const example = (await store.pluginExamples(takenIds)).get(id);
     if (!example?.guide) return null;
     const bytes = await store.readFile(example.packageEntry, example.guide);
-    return bytes ? objectUrlFor(`${example.pluginId}@${example.pluginVersion}:${example.guide}`, bytes, 'text/plain;charset=utf-8') : null;
+    return bytes ? { title: example.name, markdown: new TextDecoder().decode(bytes) } : null;
 }

@@ -537,8 +537,8 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         }
     }
 
+    // An empty model is where every model starts, not a problem with it: the project window shows what to do on its empty canvas.
     result.nodeCount = nodesOptional->size();
-    if (!result.nodeCount) add(result, "emptyModel", "warning", "Add at least one node to begin building a model.");
     std::set<std::string> disabledNodeIds;
     // A computational-node provider's bindings to other nodes' states, as (node, state) pairs: checked
     // once every node's states are known, since a node may read one listed after it.

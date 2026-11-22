@@ -22,7 +22,7 @@ const steps = Object.freeze([
     {
         id: 'welcome',
         title: 'Tune a controller',
-        text: `This joint follows a target angle of 1.2 rad. A controller, the "${values.controller}" relationship, compares the joint's angle with the target and sets the voltage that drives its motor. You will run it, make the controller push harder, run it again and see what changes. The Example guide button in the toolbar explains the model, whenever you want the details.`,
+        text: `This joint follows a target angle of 1.2 rad. A controller, the "${values.controller}" relationship, compares the joint's angle with the target and sets the voltage that drives its motor. You will run it, make the controller push harder, run it again and see what changes. The About this example button (?) in the toolbar explains the model, whenever you want the details.`,
         advance: 'next', nextLabel: 'Start', done: () => true
     },
     {

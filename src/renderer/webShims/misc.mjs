@@ -61,7 +61,8 @@ export const windowControls = {
     minimize: () => {},
     toggleMaximize: () => {},
     close: () => {},
-    newWindow: () => window.open(location.href, '_blank'),
+    // A new tab with an empty project: ?new tells it not to bring back the project this browser kept (webShims/projectFiles.mjs's autosave).
+    newWindow: () => window.open(`${location.pathname}?new`, '_blank'),
     onMaximizedChange: () => {}
 };
 
@@ -115,9 +116,11 @@ export const tutorials = {
         setTimeout(() => URL.revokeObjectURL(link.href), 10_000);
         return { path: null, fileName: name };
     },
-    // There is no example guide window to start one from in the browser.
-    onStart: () => {}
+    // Started from an example's guide, in the guide panel (webShims/guidePanel.mjs) rather than a window of its own.
+    onStart: (callback) => { tutorialStarters.push(callback); }
 };
+const tutorialStarters = [];
+export const startTutorialInPage = (id) => tutorialStarters.forEach((start) => start(id));
 
 export const applicationInfo = {
     get: async () => ({ version }),

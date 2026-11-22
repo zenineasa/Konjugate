@@ -1,0 +1,22 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+/* An example's guide (and a help page) as it reads everywhere it is shown: the desktop's guide window (index.html) and the web edition's
+   guide panel (src/renderer/webShims/guidePanel.mjs), both rendering with markdownHtml.mjs into an element of class guideContent. The
+   scope is :where(), which adds nothing to a selector's weight, so each page's own rules settle anything else as they did before. */
+:where(.guideContent) h1 { margin: 0 0 8px; color: #e6f0f2; font-size: 28px; letter-spacing: -.03em; }
+:where(.guideContent) h2 { margin: 32px 0 10px; padding-top: 14px; color: #cfe0e3; border-top: 1px solid #263a44; font-size: 17px; }
+:where(.guideContent) h3 { margin: 22px 0 8px; color: #b8ced2; font-size: 13px; }
+:where(.guideContent) p, :where(.guideContent) li { font-size: 12px; line-height: 1.75; }
+:where(.guideContent) a { color: #83d7cf; }
+:where(.guideContent) a:hover, :where(.guideContent) a:focus-visible { color: #b5efea; }
+:where(.guideContent) img { max-width: 100%; height: auto; }
+:where(.guideContent) ul { padding-left: 21px; }
+:where(.guideContent) code { padding: 2px 5px; color: #83d7cf; background: #10242b; border-radius: 4px; }
+:where(.guideContent) pre { overflow: auto; padding: 14px; background: #071017; border: 1px solid #243944; border-radius: 7px; }
+:where(.guideContent) .inlineMath { display: inline-block; padding: 0 2px; color: #d3e7e8; font-size: 1em; vertical-align: -.15em; }
+:where(.guideContent) .equation { display: flex; width: 100%; min-height: 48px; margin: 16px 0; padding: 14px; align-items: center; justify-content: safe center; overflow-x: auto; color: #d3e7e8; background: rgb(66 201 188 / 6%); border-left: 2px solid #42c9bc; font-size: 17px; }
+/* An example's tutorials, offered at the top of its guide (guideTutorialCards in markdownHtml.mjs). */
+:where(.guideContent) .tourCard { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin: 0 0 22px; padding: 14px 18px; background: rgb(66 201 188 / 10%); border: 1px solid #2f6f6a; border-radius: 7px; }
+:where(.guideContent) .tourCard p { margin: 4px 0 0; color: #a9bcc5; font-size: 13px; }
+:where(.guideContent) .tourCard button { flex: none; height: 32px; padding: 0 16px; color: #061412; background: #42c9bc; border: 1px solid #42c9bc; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; }
+:where(.guideContent) .tourCard button:hover, :where(.guideContent) .tourCard button:focus-visible { background: #74ddd3; border-color: #74ddd3; }

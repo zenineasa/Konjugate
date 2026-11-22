@@ -18,6 +18,7 @@ const ignoredTopLevelDirectories = new Set([
     'docs',
     'packaging',
     'evals',
+    'benchmarks',
     'welcome',
     'scripts',
     'distribution',

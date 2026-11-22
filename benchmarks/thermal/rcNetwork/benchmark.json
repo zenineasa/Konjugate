@@ -1,0 +1,16 @@
+{
+    "title": "Thermal RC network",
+    "summary": "Four thermal masses, five conductances, a 500 W heater and a fixed ambient, one node per mass: transient and steady-state error against the matrix-exponential solution, and the energy balance.",
+    "transient": { "globalTimeStep": 16, "coarseGlobalTimeStep": 64, "targetTime": 16384, "outputInterval": 256 },
+    "steadyState": { "globalTimeStep": 64, "targetTime": 524288, "outputInterval": 32768 },
+    "timing": [
+        { "label": "Network, 8,192 steps of 2 s", "model": "rcNetwork", "run": { "globalTimeStep": 2, "targetTime": 16384, "outputInterval": 256 } }
+    ],
+    "thresholds": {
+        "transientRelativeError": { "max": 0.0018 },
+        "energyBalanceResidual": { "max": 1e-12 },
+        "steadyStateError": { "max": 1e-8 },
+        "semiImplicitDifference": { "max": 0 },
+        "referenceAgreement": { "max": 1e-10 }
+    }
+}

@@ -17,6 +17,7 @@ test('Electron Packager excludes build-only top-level directories', async () => 
         'docs',
         'packaging',
         'evals',
+        'benchmarks',
     ];
 
     for (const directory of excluded) {

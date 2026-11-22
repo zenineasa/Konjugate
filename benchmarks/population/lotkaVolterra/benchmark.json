@@ -1,0 +1,20 @@
+{
+    "title": "Lotka–Volterra",
+    "summary": "Predator and prey over about 50 cycles, as one node and as two: drift of the conserved quantity for explicit and semi-implicit Euler, and trajectory error against a SciPy DOP853 reference.",
+    "longRun": { "globalTimeStep": 0.015625, "targetTime": 512, "outputInterval": 0.5 },
+    "phase": { "globalTimeStep": 0.015625, "targetTime": 32, "outputInterval": 0.0625 },
+    "globalTimeSteps": [0.0625, 0.015625, 0.00390625],
+    "timing": [
+        { "label": "One node, 131,072 steps", "model": "oneNode", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 512, "outputInterval": 0.5 } },
+        { "label": "Two nodes, 131,072 steps", "model": "twoNodes", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 512, "outputInterval": 0.5 } }
+    ],
+    "thresholds": {
+        "invariantDriftExplicit": { "min": 9.3, "max": 15 },
+        "relativeErrorExplicit": { "max": 6.9 },
+        "invariantDriftSemiImplicit": { "max": 0.026 },
+        "relativeErrorSemiImplicit": { "max": 0.88 },
+        "splitMatchesOneNodeExplicit": { "max": 1e-12 },
+        "splitSemiImplicitMatchesExplicit": { "max": 0 },
+        "referenceInvariantDrift": { "max": 1e-9 }
+    }
+}

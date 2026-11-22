@@ -1,0 +1,17 @@
+{
+    "title": "Pendulum at large amplitude",
+    "summary": "A pendulum released from rest at 2 rad, one node: trajectory error against the exact elliptic-function solution and energy over a long run, explicit against semi-implicit Euler.",
+    "accuracy": { "globalTimeStep": 0.0009765625, "targetTime": 16, "outputInterval": 0.0625 },
+    "longRun": { "globalTimeStep": 0.0009765625, "targetTime": 128, "outputInterval": 0.25 },
+    "timing": [
+        { "label": "131,072 steps, semi-implicit", "model": "pendulum", "variant": { "integration": "semiImplicit" }, "run": { "globalTimeStep": 0.0009765625, "targetTime": 128, "outputInterval": 0.25 } }
+    ],
+    "thresholds": {
+        "relativeErrorExplicit": { "max": 0.51 },
+        "energyDriftExplicit": { "min": 0.38, "max": 0.59 },
+        "relativeErrorSemiImplicit": { "max": 0.00081 },
+        "energyDriftSemiImplicit": { "max": 0.0016 },
+        "referenceAgreementElliptic": { "max": 1e-10 },
+        "referenceAgreementSolveIvp": { "max": 1e-9 }
+    }
+}

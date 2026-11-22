@@ -1,0 +1,20 @@
+{
+    "title": "Graph coupling: one node against three",
+    "summary": "Three damped masses joined by springs, written as one node and as three nodes coupled through the snapshot: the coupling error against the global step and the node substeps.",
+    "run": { "globalTimeStep": 0.015625, "targetTime": 16, "outputInterval": 0.125 },
+    "globalTimeSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625],
+    "substeps": [1, 2, 4, 8, 16],
+    "orderSubsteps": 4,
+    "timing": [
+        { "label": "One node, h = 2^-10 s", "model": "monolithic", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0009765625, "targetTime": 64, "outputInterval": 0.125 } },
+        { "label": "Three nodes, H = 2^-6 s with 16 substeps", "model": "split", "variant": { "integration": "explicit", "substeps": 16 }, "run": { "globalTimeStep": 0.015625, "targetTime": 64, "outputInterval": 0.125 } },
+        { "label": "Three nodes, h = 2^-10 s", "model": "split", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0009765625, "targetTime": 64, "outputInterval": 0.125 } }
+    ],
+    "thresholds": {
+        "couplingErrorOneSubstep": { "max": 1e-12 },
+        "couplingErrorOrder": { "min": 0.9, "max": 1.1 },
+        "substepsFloorRatio": { "min": 1, "max": 1.5 },
+        "couplingFactorPerSubstepDoubling": { "min": 0.9, "max": 1.25 },
+        "semiImplicitSplitDifference": { "max": 0.075 }
+    }
+}

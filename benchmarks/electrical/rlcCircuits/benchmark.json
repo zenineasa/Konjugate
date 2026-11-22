@@ -1,0 +1,25 @@
+{
+    "title": "RLC circuits",
+    "summary": "A series RLC circuit and a pair of RLC loops coupled through a resistor, driven by a 10 V step: currents, voltages and energy dissipated against the exact solution, for explicit and semi-implicit Euler.",
+    "run": { "globalTimeStep": 0.0000152587890625, "coarseGlobalTimeStep": 0.00006103515625, "targetTime": 0.03125, "outputInterval": 0.00048828125 },
+    "timing": [
+        { "label": "Series circuit, 65,536 steps, explicit", "model": "seriesRlc", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 4.76837158203125e-7, "targetTime": 0.03125, "outputInterval": 0.00048828125 } },
+        { "label": "Coupled pair, 65,536 steps, semi-implicit", "model": "coupledRlc", "variant": { "integration": "semiImplicit" }, "run": { "globalTimeStep": 4.76837158203125e-7, "targetTime": 0.03125, "outputInterval": 0.00048828125 } }
+    ],
+    "thresholds": {
+        "seriesRelativeErrorExplicit": { "max": 0.025 },
+        "seriesDissipatedEnergyErrorExplicit": { "max": 0.1 },
+        "seriesEnergyBalanceDefectExplicit": { "max": 0.054 },
+        "seriesRelativeErrorSemiImplicit": { "max": 0.0055 },
+        "seriesDissipatedEnergyErrorSemiImplicit": { "max": 0.0035 },
+        "seriesEnergyBalanceDefectSemiImplicit": { "max": 0.0036 },
+        "seriesReferenceAgreement": { "max": 1e-10 },
+        "coupledRelativeErrorExplicit": { "max": 0.035 },
+        "coupledDissipatedEnergyErrorExplicit": { "max": 0.0037 },
+        "coupledEnergyBalanceDefectExplicit": { "max": 0.0035 },
+        "coupledRelativeErrorSemiImplicit": { "max": 0.006 },
+        "coupledDissipatedEnergyErrorSemiImplicit": { "max": 0.00042 },
+        "coupledEnergyBalanceDefectSemiImplicit": { "max": 0.00028 },
+        "coupledReferenceAgreement": { "max": 1e-10 }
+    }
+}

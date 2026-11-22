@@ -18,7 +18,8 @@
         "src/**/*.{mjs,cjs,js}",
         "scripts/**/*.{mjs,js}",
         "tests/**/*.{mjs,cjs}",
-        "evals/**/*.mjs"
+        "evals/**/*.mjs",
+        "benchmarks/**/*.mjs"
     ],
     "ignoreExportsUsedInFile": true,
     "ignoreDependencies": [

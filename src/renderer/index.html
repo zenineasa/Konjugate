@@ -1095,7 +1095,7 @@
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
                 <div id="edgeLanding" class="termLanding">
-                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
+                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="editEdgeDirection" class="equationModes directionSwitch" role="radiogroup" aria-label="Direction"><button data-direction="directed" role="radio" type="button" title="One way: it changes only the node it runs to">One way</button><button data-direction="bidirectional" role="radio" type="button" title="Both ways: the other end gets the same term, negated">Both ways</button></div><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
                     <div class="landingState"><select id="editEquationOutput"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
                     <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="editEdgeMathField" class="equationMathField" placeholder="\text{type this relationship's term}" aria-label="Equation expression"></math-field><textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
                     <button class="landingReciprocal" data-landing-reciprocal data-navigation type="button" hidden></button>
@@ -1123,7 +1123,7 @@
                     <label class="editorField"><span>From</span><select id="editEdgeSource"></select></label>
                     <label class="editorField"><span>To</span><select id="editEdgeTarget"></select></label>
                 </div>
-                <label class="editorField"><span>Direction</span><select id="editEdgeDirectionality"><option value="bidirectional">Both ways</option><option value="directed">One way: from → to</option></select></label>
+                <div class="editorField directionReadout"><span>Direction</span><button id="edgeDirectionReadout" data-navigation type="button" title="Direction is set on the Equations tab"></button></div>
             </section>
             </div>
             <div data-editor-panel="results" hidden>
@@ -1476,6 +1476,7 @@
         <div id="edgeContextMenu" class="contextCard addPalette hidden">
             <span class="contextKicker">Relationship</span>
             <button id="edgeContextAddWaypoint" type="button"><i class="primitiveIcon edgeIcon">✛</i><span><strong>Add waypoint here</strong><small>Route the relationship around this point</small></span><b>›</b></button>
+            <button id="edgeContextDirection" type="button"><i class="primitiveIcon edgeIcon" id="edgeContextDirectionIcon">⇄</i><span><strong id="edgeContextDirectionLabel">Make it act both ways</strong><small id="edgeContextDirectionHint">The other end gets the same term, negated</small></span><b>›</b></button>
             <button id="edgeContextToggle" type="button"><i class="primitiveIcon edgeIcon">⏻</i><span><strong id="edgeContextToggleLabel">Disable relationship</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
             <button id="edgeContextOpenGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Open relationship group</strong><small>Detach a member from its own row in the editor</small></span><b>›</b></button>
             <hr>

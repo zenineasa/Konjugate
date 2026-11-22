@@ -2835,7 +2835,10 @@ export async function runInteractionTests(driver) {
         await newRelationship('Electrical losses', 'Enclosed air');
         assert.equal(await relationshipCount(), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'directed');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirection [aria-checked="true"]')?.dataset.direction`), 'directed');
+        // Its direction is offered there, in view at the top of its equation: One way, or Both ways.
+        assert.ok(await evaluate(window, `(() => { const bounds = document.querySelector('#editEdgeDirection').getBoundingClientRect(), card = document.querySelector('#edgeEditor').getBoundingClientRect(); return bounds.height > 0 && bounds.top >= card.top && bounds.bottom <= card.bottom; })()`), 'The new relationship\'s Direction switch is not in view.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#editEdgeDirection [data-direction]')].map((button) => button.textContent)`), ['One way', 'Both ways']);
         // The other end is not offered as its own target.
         const made = async () => (await savedProject()).edges.find((edge) => edge.name === 'New relationship');
         assert.equal((await made()).equationModel.output.role, 'target');
@@ -3423,7 +3426,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `[...document.querySelectorAll('.bundleLabel')].some((l) => l.textContent.includes('Thermal mass'))`, 'The relationship bundle label for the new Conduction edge did not appear.');
         await evaluate(window, `[...document.querySelectorAll('.bundleLabel')].find((l) => l.textContent.includes('Thermal mass'))?.click()`);
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'Clicking the new Conduction relationship did not open the edge editor.');
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'bidirectional', 'Conduction was not created as a bidirectional edge.');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirection [aria-checked="true"]')?.dataset.direction`), 'bidirectional', 'Conduction was not created as a bidirectional edge.');
         // Likewise the edge template's description reaches the edge editor and the saved document.
         const conductionDescription = await templateDescription('conduction');
         assert.ok(conductionDescription.length > 60, 'The Conduction template has no real description to carry.');
@@ -8671,7 +8674,7 @@ export async function runInteractionTests(driver) {
         await pick('Mass');
         await waitFor(window, `window.__debugProject.serialize().edges.length === 1`, 'One-way conduction was not made once both bodies were picked.');
         await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`, 'One-way conduction did not open its card.');
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').value`), 'directed');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirection [aria-checked="true"]')?.dataset.direction`), 'directed');
         const [edge] = (await saved()).edges;
         assert.equal(edge.directionality, 'directed');
         assert.deepEqual([edge.source.nodeId, edge.target.nodeId], [1, 10], 'The heat does not flow from the boundary to the mass.');
@@ -9174,6 +9177,39 @@ export async function runInteractionTests(driver) {
         assert.ok(await evaluate(window, `document.querySelector('#edgeOtherEndRow').getBoundingClientRect().height > 0`), 'The other end\'s row is not on screen.');
         // Taken away whole, its minus stands before it, outside the chip.
         assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow .partChip.live').previousElementSibling?.textContent`), '−');
+        // Switched to One way at the top of its equation: the other end's row goes at once, in one undoable step; the Details tab
+        // says which way it acts, and goes back to the switch.
+        const conduction = (await savedProject()).edges.find((edge) => edge.directionality !== 'directed').name;
+        await clickElement(window, `document.querySelector('#editEdgeDirection [data-direction="directed"]')`);
+        await waitFor(window, `document.querySelector('#edgeOtherEndRow').hidden`, 'One way left the other end\'s row.');
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'directed');
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirection [aria-checked="true"]')?.dataset.direction`), 'directed');
+        await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab="details"]').click()`);
+        assert.match(await evaluate(window, `document.querySelector('#edgeDirectionReadout').textContent`), /^One way: .+ → .+ · set on the Equations tab/);
+        assert.equal(await evaluate(window, `document.querySelectorAll('#edgeEditor select[id*="Direction"], #edgeEditor [data-editor-panel="details"] [data-direction]').length`), 0, 'Direction is editable in two places.');
+        await evaluate(window, `document.querySelector('#edgeDirectionReadout').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'bidirectional', 'One undo did not bring Both ways back.');
+        // Undo closes the cards; opened again, its other end's row is back.
+        await openRelationship(conduction);
+        assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow').hidden`), false, 'Undo did not bring the other end\'s row back.');
+        // A right-click on its label offers the other way: "Make it one way" here, then "Make it act both ways", each one undoable step.
+        const conductionRow = `document.querySelector('.relationshipRow[data-relationship="' + window.__debugProject.serialize().edges.find((edge) => edge.name === ${JSON.stringify(conduction)}).id + '"]').closest('.bundleLabel')`;
+        await rightClickElement(window, conductionRow);
+        await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking the relationship did not open its menu.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextDirectionLabel').textContent`), 'Make it one way');
+        await evaluate(window, `document.querySelector('#edgeContextDirection').click()`);
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'directed');
+        await rightClickElement(window, conductionRow);
+        await waitFor(window, `!document.querySelector('#edgeContextMenu').classList.contains('hidden')`, 'Right-clicking the relationship again did not open its menu.');
+        assert.equal(await evaluate(window, `document.querySelector('#edgeContextDirectionLabel').textContent`), 'Make it act both ways');
+        await evaluate(window, `document.querySelector('#edgeContextDirection').click()`);
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'bidirectional');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'directed', 'The menu\'s change was not one undoable step.');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).edges.find((edge) => edge.name === conduction).directionality, 'bidirectional');
 
         // A node's program writing two states: each of its chips says which output it is.
         const box = { type: 'primitive', shape: 'box', color: '#888888' };
@@ -9266,7 +9302,7 @@ export async function runInteractionTests(driver) {
         let edge = await several();
         assert.equal(edge.directionality, 'directed');
         assert.deepEqual(edge.equationModel.outputs, [{ role: 'target', stateId: 6, latex: String.raw`\mathrm{sourceSpeed}`, mathJson: 'sourceSpeed', setsValue: true }]);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').disabled`), true);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#editEdgeDirection [data-direction]')].every((button) => button.disabled)`), true);
         await evaluate(window, `document.querySelector('[data-equation-mode="latex"]').click()`);
 
         // An intermediate quantity, renamed: the equations reading it follow.
@@ -9322,7 +9358,7 @@ export async function runInteractionTests(driver) {
         edge = await several();
         assert.equal(edge.equationModel.outputs, undefined);
         assert.deepEqual(edge.equationModel.output, { role: 'target', stateId: 6 });
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeDirectionality').disabled`), false);
+        assert.equal(await evaluate(window, `[...document.querySelectorAll('#editEdgeDirection [data-direction]')].every((button) => button.disabled)`), false);
         await evaluate(window, `document.querySelector('[data-equation-mode="visual"]').click()`);
         await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
     });

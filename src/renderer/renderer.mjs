@@ -4136,6 +4136,34 @@ function parameterControlError(value, control) {
     return '';
 }
 
+// A relationship's direction, at the top of its Equations tab beside where it lands: One way changes only the node it runs to;
+// Both ways gives the other end the same term negated, its row shown below at once. The Details tab says which, and goes there.
+// A relationship with several equations is directed: what it sets on each node is written out, one equation per state.
+function renderEdgeDirection(definition, several = isSeveralEquations(definition.equationModel)) {
+    const bothWays = definition.directionality === 'bidirectional';
+    const control = $('#editEdgeDirection');
+    control.title = several ? 'A relationship with several equations is directed: each equation names the state it sets.' : '';
+    for (const button of control.querySelectorAll('[data-direction]')) {
+        const on = button.dataset.direction === definition.directionality;
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-checked', String(on));
+        button.disabled = several || Boolean(activeResult);
+    }
+    const title = (id) => model.nodes.find((node) => node.id === id)?.title ?? '';
+    const from = title(definition.source);
+    const to = title(definition.target);
+    $('#edgeDirectionReadout').textContent = `${bothWays ? `Both ways: ${from} ⇄ ${to}` : `One way: ${from} → ${to}`} · set on the Equations tab ›`;
+}
+
+// One undoable step; the card, the canvas's arrow and the other end's row follow from it.
+function setEdgeDirection(definition, directionality) {
+    if (!definition || activeResult || definition.groupId != null || isSeveralEquations(definition.equationModel)) return;
+    if (definition.directionality === directionality) return;
+    changeEdgeModel(definition, (snapshot) => {
+        snapshot.directionality = directionality;
+    });
+}
+
 function renderEdgeEditor(definition) {
     $('#editEdgeError').textContent = '';
     $('#edgeEditorTitle').textContent = definition.title;
@@ -4152,7 +4180,6 @@ function renderEdgeEditor(definition) {
     source.value = definition.source;
     target.value = definition.target;
     target.value = definition.target;
-    $('#editEdgeDirectionality').value = definition.directionality;
     $('#editEdgeColor').value = `#${definition.color.toString(16).padStart(6, '0')}`;
     const parameterContainer = $('#edgeEditorParameters');
     parameterContainer.replaceChildren();
@@ -4299,11 +4326,7 @@ function renderEdgeEditor(definition) {
         $('#editEdgeImplementationKind').value = 'equations';
         $('[data-landing-reciprocal]', $('#edgeLanding')).hidden = true;
     }
-    // Such a relationship is directed: what it sets on each node is written out, one equation per state.
-    const directionality = $('#editEdgeDirectionality');
-    directionality.toggleAttribute('data-unavailable', several);
-    directionality.disabled = several || Boolean(activeResult);
-    directionality.title = several ? 'A relationship with several equations is directed: each equation names the state it sets.' : '';
+    renderEdgeDirection(definition, several);
     if (several) {
         for (const id of ['#equationDiagnostics', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
         for (const id of ['#editEdgeEquationHeading', '#edgeFunctions', '#editEdgeReferencePicker']) $(id).hidden = false;
@@ -4940,6 +4963,12 @@ function openEdgeContextMenu(clientX, clientY) {
     $('#edgeContextToggleLabel').textContent = enabled ? 'Disable relationship' : 'Enable relationship';
     $('#edgeContextAddWaypoint').hidden = grouped || !pendingWaypoint;
     $('#edgeContextToggle').hidden = grouped;
+    // Its direction, the other way from what it is; a group's members, and a relationship with several equations, are directed.
+    const bothWays = selectedRelationship?.directionality === 'bidirectional';
+    $('#edgeContextDirection').hidden = grouped || !selectedRelationship || isSeveralEquations(selectedRelationship.equationModel);
+    $('#edgeContextDirectionLabel').textContent = bothWays ? 'Make it one way' : 'Make it act both ways';
+    $('#edgeContextDirectionHint').textContent = bothWays ? 'Only the node it runs to changes' : 'The other end gets the same term, negated';
+    $('#edgeContextDirectionIcon').textContent = bothWays ? '→' : '⇄';
     $('#edgeContextDelete').hidden = grouped;
     $('#edgeContextOpenGroup').hidden = !grouped;
     positionCard(menu, clientX, clientY);
@@ -13612,11 +13641,13 @@ $('#editEdgeTarget').addEventListener('change', (event) => {
         snapshot.targetStateId = null;
     });
 });
-$('#editEdgeDirectionality').addEventListener('change', (event) => {
-    if (!selectedRelationship || isSeveralEquations(selectedRelationship.equationModel)) return;
-    changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.directionality = event.target.value;
-    });
+$('#editEdgeDirection').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-direction]');
+    if (button && !button.disabled) setEdgeDirection(selectedRelationship, button.dataset.direction);
+});
+$('#edgeDirectionReadout').addEventListener('click', () => {
+    $('#edgeEditor [data-editor-tab="equations"]').click();
+    $('#editEdgeDirection [aria-checked="true"]')?.focus();
 });
 $('#editEdgeColor').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
@@ -19870,6 +19901,11 @@ $('#nodeContextEnableAll').addEventListener('click', () => {
 $('#nodeContextDelete').addEventListener('click', () => {
     hideCards();
     deleteSelected();
+});
+$('#edgeContextDirection').addEventListener('click', () => {
+    hideCards();
+    const definition = selectedRelationship;
+    setEdgeDirection(definition, definition?.directionality === 'bidirectional' ? 'directed' : 'bidirectional');
 });
 $('#edgeContextToggle').addEventListener('click', () => {
     hideCards();

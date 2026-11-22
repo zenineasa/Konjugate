@@ -510,12 +510,16 @@ test('a step that asks to look at something stays done for the rest of that play
     open = false;
     assert.equal(seen({ start: play }), true, 'Closing what was looked at does not undo the step.');
     assert.equal(seen({ start: {} }), false, 'Another play of the tutorial starts afresh.');
-    // The relationship tutorial's first step: Direction seen on the Details tab, then the next step opens the Hot body.
+    // The relationship tutorial's first step: Direction seen at the top of the card's Equations tab, then the next step opens the Hot body.
     const bothWays = tutorialById('equationsThatDoMore').steps.find((step) => step.id === 'bothWays');
     const start = {};
     const facts = (ui) => ({ document: { nodes: [] }, start, ui: { edgeEditorFor: null, edgeEditorTab: null, ...ui } });
-    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'equations' })), false, 'Opening the card is not seeing its Direction.');
-    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'details' })), true);
+    assert.equal(bothWays.waitForNext, true, 'The card opens on Direction: the step waits for Next so it is read.');
+    assert.equal(bothWays.tab, 'equations', 'Its skip opens the card where Direction is.');
+    assert.equal(bothWays.target({ edgeEditorFor: 'Conduction', edgeEditorTab: 'equations' }), '#editEdgeDirection');
+    assert.equal(bothWays.target({ edgeEditorFor: 'Conduction', edgeEditorTab: 'parameters' }), '#edgeEditor [data-editor-tab="equations"]');
+    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'parameters' })), false, 'A tab without Direction is not seeing it.');
+    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'equations' })), true);
     assert.equal(bothWays.done(facts({ nodeEditorFor: 'Hot body' })), true, 'Going on to the Hot body is not undoing it.');
 });
 

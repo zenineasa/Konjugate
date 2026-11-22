@@ -2507,6 +2507,15 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .termLanding[hidden], .landingState[hidden], .equationLhs[hidden], .equationRhs[hidden], .landingReciprocal[hidden] { display: none; }
 .landingHead { display: flex; align-items: center; justify-content: space-between; min-height: 25px; }
 .landsOnLabel { color: #6e828e; font-size: 7px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+/* A relationship's direction, at the top of its equation: one way, or both ways (the other end's row shown below). */
+.landingHead .directionSwitch { margin: 0 6px 0 auto; }
+.directionSwitch[hidden] { display: none; }
+.directionSwitch button { font-weight: 700; }
+.directionSwitch button.active { color: #e6c27a; background: rgb(230 194 122 / 13%); }
+.directionSwitch button:disabled { cursor: not-allowed; opacity: .55; }
+/* Its read-only line on the Details tab, which goes to the switch. */
+.directionReadout button { justify-self: start; padding: 2px 0; color: #aab9c1; background: none; border: 0; font-size: 8px; text-align: left; cursor: pointer; }
+.directionReadout button:hover { color: #a1e8e2; }
 .landingState { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .landingState select { flex: 1 1 150px; min-width: 0; height: 29px; padding: 0 7px; color: #c6d5db; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; font-weight: 600; }
 .landingState small { color: #627782; font-size: 7px; }

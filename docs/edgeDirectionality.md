@@ -12,6 +12,10 @@ status: stable
 
 A relationship can update one side, update both sides identically, or update both sides with opposite sign -- and which of the three it does isn't just a labeling choice, it changes the resulting numbers. The same worked example runs through every case below so the results are directly comparable: two identical nodes A and B, both starting at 0, connected by a relationship whose equation is the constant `0.01`, run for 10 seconds.
 
+## Setting it
+
+A relationship's card shows its direction at the top of its Equations tab, beside where it lands: a switch, One way · Both ways. Switching it shows or hides the row for the other end at once (Both ways gives that end the same term, negated), as one undoable step, and the arrow on the canvas follows. Right-clicking a relationship offers the same choice, Make it act both ways or Make it one way, whichever it is not. A new relationship made by picking its two ends starts one way, its card open on the Equations tab with the switch in view; one placed from the component library keeps its template's direction. The Details tab says which way it acts and goes to the switch; it is the one control, as [Design principles](designPrinciples.md) ask. A relationship with several equations, and every member of a [relationship group](edgeGroups.md), is one way, so the switch is unavailable and the menu leaves the choice out. Nothing new is saved: the switch writes the same `directionality` field a file has always had.
+
 ## One way (`directionality: "directed"`)
 
 The baseline case. The equation is evaluated once and contributes only to its own output state -- normally the target, though the output picker can point it at the source's own state instead. A → B, equation `0.01`: B ends at 0.1, A is untouched.

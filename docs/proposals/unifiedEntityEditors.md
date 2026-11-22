@@ -201,9 +201,9 @@ const relationshipEditor = new EntityEditor({
 
 | Tab | Node | Relationship | Edge group |
 | --- | --- | --- | --- |
-| **Equations** | each state's equation, its own part editable | each state it lands on, its part editable | its part, landing on a state every member has |
+| **Equations** | each state's equation, its own part editable | its direction (One way · Both ways) above each state it lands on, its part editable | its part, landing on a state every member has |
 | **Parameters** | every parameter its own parts and program read, grouped by state | its parameters | the parameters shared by every member |
-| **Details** | name, short name, type, subsystem, description | name, description, from, to, direction | name, members, adding missing states |
+| **Details** | name, short name, type, subsystem, description | name, description, from, to, and its direction read out, going to the Equations tab | name, members, adding missing states |
 | **Results** | its states over the run | its part over the run, at each end it lands on | its part over the run, per member |
 | **Numerics** | substeps, integration, how its updates are worked out | — | — |
 | **Appearance** | colour, shape, rotation, scale, body parts | colour | colour |

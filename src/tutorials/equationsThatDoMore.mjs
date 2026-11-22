@@ -39,12 +39,14 @@ const steps = Object.freeze([
     },
     {
         id: 'bothWays',
+        // Its card opens on the Equations tab, where Direction is: it waits for Next, so the card is read before the step moves on.
+        waitForNext: true,
         title: 'A relationship that acts both ways',
-        text: `Click "${values.relationship}" in the label between the two bodies, and open its Details tab. Its Direction is "Both ways": one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made. "One way" changes only the node it runs to.`,
-        target: (ui) => (ui.edgeEditorFor === values.relationship ? (ui.edgeEditorTab === 'details' ? '#editEdgeDirectionality' : '#edgeEditor [data-editor-tab="details"]') : ui.relationshipRowOf(values.relationship)),
-        skip: 'openRelationship', relationship: values.relationship, tab: 'details',
+        text: `Click "${values.relationship}" in the label between the two bodies. At the top of its Equations tab, its direction is "Both ways": one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made, and the row for its other end below shows the same term negated. "One way" changes only the node it runs to, and that row goes. Right-clicking a relationship offers the same choice.`,
+        target: (ui) => (ui.edgeEditorFor === values.relationship ? (ui.edgeEditorTab === 'equations' ? '#editEdgeDirection' : '#edgeEditor [data-editor-tab="equations"]') : ui.relationshipRowOf(values.relationship)),
+        skip: 'openRelationship', relationship: values.relationship, tab: 'equations',
         // Kept once Direction has been on screen: the next step opens the Hot body, which closes this card.
-        done: latch(({ document, ui }) => (ui.edgeEditorFor === values.relationship && ui.edgeEditorTab === 'details') || leaking(document))
+        done: latch(({ document, ui }) => (ui.edgeEditorFor === values.relationship && ui.edgeEditorTab === 'equations') || leaking(document))
     },
     {
         id: 'sourceTerm',

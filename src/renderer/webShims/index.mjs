@@ -15,7 +15,7 @@ import { installOffline } from './offline.mjs';
 import { version } from './buildInfo.mjs';
 import {
     addons, aiProviders, launcherHost, applicationInfo, componentLibrary, diagnostics, extensions,
-    helpFeedback, inputBindings, modelClipboard, ownershipDefaults, providerToolchains, shapeLibrary, tour, tutorials, uiZoom, windowControls
+    firstSteps, helpFeedback, inputBindings, modelClipboard, ownershipDefaults, providerToolchains, shapeLibrary, tour, tutorials, uiZoom, windowControls
 } from './misc.mjs';
 
 window.engine = engine;
@@ -39,6 +39,7 @@ window.addons = addons;
 window.launcherHost = launcherHost;
 window.tour = tour;
 window.tutorials = tutorials;
+window.firstSteps = firstSteps;
 
 // Drag-drop project load: reuses openProject()'s real flow (its confirmDiscard() check included)
 // by stashing the dropped file's bytes for projectFiles.open() to pick up, then synthesizing a

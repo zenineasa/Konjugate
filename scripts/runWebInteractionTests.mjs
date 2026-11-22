@@ -76,10 +76,10 @@ try {
     const browser = await chromium.launch({ headless: !(process.env.KONJUGATE_HEADED || process.argv.includes('--headed')), ...(process.env.KONJUGATE_CHROMIUM_PATH ? { executablePath: process.env.KONJUGATE_CHROMIUM_PATH } : {}), args: ['--disable-popup-blocking'] });
     try {
         const context = await browser.newContext({ acceptDownloads: true });
-        // A first visit offers the guided tour by itself (src/renderer/webShims/misc.mjs), and its card then stays over the canvas for
-        // every test after it, in the way of any drag that starts under it. The desktop suite skips the first-launch offer the same
-        // way (shouldSkipWelcomeTrigger in src/main.mjs); the tour's own test starts it itself.
-        await context.addInitScript(() => { try { window.localStorage.setItem('konjugate.tourOffered', '1'); } catch { /* storage blocked: the tour is offered */ } });
+        // A first visit offers its first steps on the empty canvas (firstSteps in src/renderer/webShims/misc.mjs), and that card would
+        // then stay over the canvas for every test after it, in the way of any drag that starts under it. The desktop suite skips the
+        // first-launch offer the same way (shouldSkipWelcomeTrigger in src/main.mjs); the card's own test offers it itself.
+        await context.addInitScript(() => { try { window.localStorage.setItem('konjugate.firstStepsDone', '1'); } catch { /* storage blocked: the card is offered */ } });
         const page = await context.newPage();
         page.on('pageerror', (error) => console.error('[browser:pageerror]', error));
         await page.goto(`http://localhost:${port}/`, { waitUntil: 'load', timeout: 30000 });

@@ -66,21 +66,39 @@ export const windowControls = {
     onMaximizedChange: () => {}
 };
 
-// The first-model tour (docs/proposals/guidedTour.md). The web edition has no Welcome window, so it offers the tour itself: once, on a
-// first visit, and again whenever the Konjugate button is pressed (what opens the Welcome window on the desktop). Whether it was
-// offered is kept in this browser's local storage, which may be unavailable (a private window), in which case it is offered every visit.
-const tourOfferedKey = 'konjugate.tourOffered';
+// The first-model tour (docs/proposals/guidedTour.md). The web edition has no Welcome window: a first-time visitor is offered the tour on
+// the empty canvas, beside the examples (firstSteps below), and it starts whenever the Konjugate button is pressed (what opens the Welcome
+// window on the desktop). It never starts by itself.
 const tourStarters = [];
 const storage = (action) => { try { return action(window.localStorage); } catch { return null; } };
 export const tour = {
-    onStart: (callback) => {
-        tourStarters.push(callback);
-        if (storage((local) => local.getItem(tourOfferedKey))) return;
-        storage((local) => local.setItem(tourOfferedKey, '1'));
-        // After the renderer has finished setting itself up.
-        setTimeout(callback, 800);
-    },
+    onStart: (callback) => { tourStarters.push(callback); },
     recordCompleted: async () => true
+};
+
+// The first steps a first-time visitor is offered on the empty canvas (the first-model tutorial, an example). Dismissed, or once a tutorial
+// has been started or an example opened, never again in this browser (local storage); "Remind me later" hides them until the web edition is
+// next opened, a reload in the same visit included (session storage). Where storage is blocked, only this page's word counts, as for the
+// finished tutorials. The desktop has no such card: its Welcome window and Tutorials say the same.
+const firstStepsDoneKey = 'konjugate.firstStepsDone';
+const firstStepsLaterKey = 'konjugate.firstStepsLater';
+const inSession = (action) => { try { return action(window.sessionStorage); } catch { return null; } };
+const firstStepsInMemory = { done: false, later: false };
+export const firstSteps = {
+    offered: async () => {
+        // '' when nothing is kept yet; null when the storage is blocked.
+        const done = storage((local) => local.getItem(firstStepsDoneKey) ?? '');
+        const later = inSession((session) => session.getItem(firstStepsLaterKey) ?? '');
+        return !(done === null ? firstStepsInMemory.done : done === '1') && !(later === null ? firstStepsInMemory.later : later === '1');
+    },
+    done: async () => {
+        firstStepsInMemory.done = true;
+        storage((local) => local.setItem(firstStepsDoneKey, '1'));
+    },
+    later: async () => {
+        firstStepsInMemory.later = true;
+        inSession((session) => session.setItem(firstStepsLaterKey, '1'));
+    }
 };
 
 // The tutorials (docs/proposals/tutorials.md). Which are finished is kept in this browser's local storage (or, where that is blocked,

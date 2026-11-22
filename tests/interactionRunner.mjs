@@ -10720,26 +10720,90 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.__debugTour.stop()`);
     });
 
-    await run('an empty canvas offers the first-model tutorial and the examples, and an empty model is not a warning', async () => {
+    await run('an empty model is not a warning, and only a first-time web visitor is offered the first-model tutorial and the examples: Remind me later hides them for the visit, Dismiss, a tutorial or an example for good', async () => {
         const { clean, waitForStep } = tutorialHelpers();
         await clean();
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`, 'The empty model was not validated.');
         assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Model valid', 'An empty model is where every model starts, not a warning.');
         assert.equal(await evaluate(window, `document.querySelector('#validationSummary').classList.contains('warning')`), false);
+        const cardHidden = `document.querySelector('#emptyCanvasState').hidden`;
+        const leaveTutorial = async () => {
+            await waitFor(window, `window.__debugTour.tutorial() === 'firstModel'`, 'The first-model tutorial did not start.');
+            await waitForStep('welcome');
+            assert.equal(await evaluate(window, cardHidden), true, 'The tutorial\'s card is the one thing saying what to do while it runs.');
+            await evaluate(window, `window.__debugTour.stop()`);
+            await waitFor(window, `!window.__debugTour.active()`, 'The tutorial was not left.');
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            assert.equal(await evaluate(window, cardHidden), true, 'The empty canvas offered its first steps again right after a tutorial was left.');
+        };
+        if (driver.capabilities.multiWindow) {
+            // The desktop has no such card: its Welcome window and Tutorials say the same. Not even after a tutorial is left.
+            assert.equal(await evaluate(window, `Boolean(window.firstSteps)`), false);
+            assert.equal(await evaluate(window, `window.__debugFirstSteps.offer().then(() => window.__debugFirstSteps.offered())`), false);
+            assert.equal(await evaluate(window, cardHidden), true, 'The desktop\'s empty canvas showed the first-steps card.');
+            await evaluate(window, `window.__debugTour.startTutorial('firstModel')`);
+            await leaveTutorial();
+            return;
+        }
+        // A first-time visitor: nothing kept of the card in this browser (the suite marks it seen for every other test). A new visit is a
+        // new session: what this one kept in session storage is gone.
+        const newVisit = `(async () => { sessionStorage.removeItem('konjugate.firstStepsLater'); await window.__debugFirstSteps.offer(); return window.__debugFirstSteps.offered(); })()`;
+        const firstVisit = async () => {
+            await evaluate(window, `localStorage.removeItem('konjugate.firstStepsDone')`);
+            assert.equal(await evaluate(window, newVisit), true);
+            await waitFor(window, `!${cardHidden}`, 'A first-time visitor\'s empty canvas did not offer its first steps.');
+        };
+        const seen = () => evaluate(window, `localStorage.getItem('konjugate.firstStepsDone')`);
+        const later = () => evaluate(window, `sessionStorage.getItem('konjugate.firstStepsLater')`);
+        const sameVisit = `window.__debugFirstSteps.offer().then(() => window.__debugFirstSteps.offered())`;
+        await firstVisit();
         assert.equal(await isRenderedVisible(window, '#emptyCanvasState section'), true, 'The empty canvas says what to do first.');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#emptyCanvasState button')].map((button) => button.textContent)`), ['Start the 3-minute tutorial', 'Open an example']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#emptyCanvasState section > div button')].map((button) => button.textContent)`), ['Start the 3-minute tutorial', 'Open an example', 'Remind me later', 'Dismiss']);
+        // Over a model it steps aside, and is back on an empty canvas while it has not been dismissed.
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [{ id: 1, name: 'Heater', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 300 }] }], edges: [], subsystems: [], edgeGroups: [] })}, 'one node.kjt')`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('1 nodes') && ${cardHidden}`, 'The empty canvas card stayed over a model.');
+        await clean();
+        await waitFor(window, `!${cardHidden}`, 'The first steps were not offered again on an empty canvas before being dismissed.');
+        // Remind me later: hidden for this visit (a reload in it too, as session storage outlasts one), offered again on the next.
+        await clickElement(window, `document.querySelector('#emptyCanvasLater')`);
+        await waitFor(window, cardHidden, 'Remind me later did not hide the card.');
+        assert.deepEqual([await later(), await seen()], ['1', null], 'Remind me later was kept as anything but this visit\'s.');
+        assert.equal(await evaluate(window, sameVisit), false, 'Remind me later offered the card again in the same visit.');
+        assert.equal(await evaluate(window, newVisit), true, 'Remind me later did not offer the card again on the next visit.');
+        await waitFor(window, `!${cardHidden}`, 'The card was not back on the next visit.');
+        // Its × is Remind me later too.
+        await clickElement(window, `document.querySelector('#emptyCanvasClose')`);
+        await waitFor(window, cardHidden, 'The card\'s × did not hide it.');
+        assert.deepEqual([await later(), await seen()], ['1', null], 'The card\'s × was not Remind me later.');
+        assert.equal(await evaluate(window, newVisit), true);
+        // Dismiss: never offered again in this browser, not on a later visit either.
+        await clickElement(window, `document.querySelector('#emptyCanvasDismiss')`);
+        await waitFor(window, cardHidden, 'Dismiss did not hide the card.');
+        assert.equal(await seen(), '1', 'Dismissing the card was not kept in the browser.');
+        assert.equal(await evaluate(window, newVisit), false, 'A dismissed card was offered again on a later visit.');
+        // Starting the tutorial from it: never offered again, not even once the tutorial is left.
+        await firstVisit();
         await evaluate(window, `document.querySelector('#emptyCanvasTutorial').click()`);
-        await waitFor(window, `window.__debugTour.tutorial() === 'firstModel'`, 'Start the 3-minute tutorial did not start the first-model tutorial.');
-        await waitForStep('welcome');
-        assert.equal(await evaluate(window, `document.querySelector('#emptyCanvasState').hidden`), true, 'The tutorial\'s card is the one thing saying what to do while it runs.');
-        await evaluate(window, `window.__debugTour.stop()`);
-        await waitFor(window, `!document.querySelector('#emptyCanvasState').hidden`, 'The empty canvas did not offer its first steps again after the tutorial was left.');
+        await leaveTutorial();
+        assert.equal(await seen(), '1', 'Starting a tutorial did not retire the card.');
+        assert.equal(await evaluate(window, newVisit), false, 'The card was offered again on a later visit after a tutorial was started.');
+        // Opening an example: the Examples dialog alone does not retire it; loading one does.
+        await firstVisit();
         await evaluate(window, `document.querySelector('#emptyCanvasExample').click()`);
         await waitFor(window, `document.querySelector('#examplesExplorerDialog').open`, 'Open an example did not open the Examples dialog.');
         await evaluate(window, `document.querySelector('#examplesExplorerCancel').click()`);
-        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'The Examples dialog did not close.');
-        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [{ id: 1, name: 'Heater', position: [0, 0, 0], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 300 }] }], edges: [], subsystems: [], edgeGroups: [] })}, 'one node.kjt')`);
-        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('1 nodes') && document.querySelector('#emptyCanvasState').hidden`, 'The empty canvas card stayed over a model.');
+        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open && !${cardHidden}`, 'Cancelling the Examples dialog retired the card.');
+        await evaluate(window, `document.querySelector('#emptyCanvasExample').click()`);
+        await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper'))`, 'Examples explorer did not populate.');
+        await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper').click()`);
+        await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('2 nodes')`, 'The example did not load.');
+        assert.equal(await seen(), '1', 'Opening an example did not retire the card.');
+        assert.equal(await evaluate(window, newVisit), false, 'The card was offered again on a later visit after an example was opened.');
+        await evaluate(window, `document.querySelector('#closeGuidePanel')?.click()`);
+        await clean();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await evaluate(window, cardHidden), true, 'The card was offered again after an example was opened.');
     });
 
     // Last, as it reloads the page: what follows a reload is a fresh page, with the project it kept.
@@ -10769,7 +10833,8 @@ export async function runInteractionTests(driver) {
         // A change not yet kept is what makes closing the tab ask; once it is kept, nothing is asked.
         await evaluate(window, `(() => { window.confirm = () => true; })()`);
         await evaluate(window, `document.querySelector('#restoredNoticeStartFresh').click()`);
-        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('0 nodes') && document.querySelector('#restoredNotice').hidden && !document.querySelector('#emptyCanvasState').hidden`, 'Start fresh did not leave an empty project.');
+        // A visitor whose project was brought back is not a first-time one: no first steps on the fresh canvas.
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('0 nodes') && document.querySelector('#restoredNotice').hidden && document.querySelector('#emptyCanvasState').hidden`, 'Start fresh did not leave an empty project.');
         await waitFor(window, `${keptRecord}.then((kept) => kept === null)`, 'Start fresh left the old project kept in the browser.');
     }, { skip: driver.capabilities.multiWindow && 'the desktop keeps projects in files, and asks before a window with unsaved changes closes' });
 

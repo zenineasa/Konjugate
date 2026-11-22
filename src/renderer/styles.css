@@ -1095,10 +1095,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .paletteShape.sphere { width: 20px; height: 20px; background: radial-gradient(circle at 30% 30%, #e9bd7c, #9f5748); border-color: #d2925b; border-radius: 50%; transform: none; }
 .importIcon { display: grid; width: 25px; height: 25px; place-items: center; color: #8a9ca6; background: #1a2a34; border-radius: 4px; font-style: normal; }
 
-/* An empty canvas's first steps (updateEmptyCanvasState in renderer.mjs): only the card takes clicks, the canvas around it stays the canvas. */
+/* A first-time web visitor's first steps on an empty canvas (updateEmptyCanvasState in renderer.mjs): only the card takes clicks, the canvas around it stays the canvas. */
 .emptyCanvasState { position: absolute; z-index: 4; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; pointer-events: none; }
 .emptyCanvasState[hidden] { display: none; }
-.emptyCanvasState section { width: min(420px, 100%); padding: 18px 20px; color: #b9ccd4; background: rgb(12 24 33 / 94%); border: 1px solid #2c4752; border-radius: 10px; box-shadow: 0 12px 32px rgb(0 0 0 / 35%); text-align: center; pointer-events: auto; }
+.emptyCanvasState section { position: relative; width: min(420px, 100%); padding: 18px 20px; color: #b9ccd4; background: rgb(12 24 33 / 94%); border: 1px solid #2c4752; border-radius: 10px; box-shadow: 0 12px 32px rgb(0 0 0 / 35%); text-align: center; pointer-events: auto; }
 .emptyCanvasState strong { display: block; color: #e6f0f2; font-size: 15px; }
 .emptyCanvasState p { margin: 6px 0 14px; font-size: 12.5px; line-height: 1.5; }
 .emptyCanvasState div { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
@@ -1106,6 +1106,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .emptyCanvasState button:hover, .emptyCanvasState button:focus-visible { border-color: #42c9bc; }
 .emptyCanvasState button.primary { color: #061412; background: #42c9bc; border-color: #42c9bc; }
 .emptyCanvasState button.primary:hover, .emptyCanvasState button.primary:focus-visible { background: #59d6ca; }
+.emptyCanvasState .emptyCanvasLater { margin-top: 10px; gap: 4px; }
+.emptyCanvasState .emptyCanvasLater button { height: 26px; padding: 0 10px; color: #8ea3ad; border-color: transparent; font-size: 12px; font-weight: 500; }
+.emptyCanvasState .emptyCanvasLater button:hover, .emptyCanvasState .emptyCanvasLater button:focus-visible { color: #e6f0f2; border-color: #3b5460; }
+.emptyCanvasState .emptyCanvasClose { position: absolute; top: 6px; right: 6px; width: 26px; height: 26px; padding: 0; color: #7d929d; border-color: transparent; font-size: 17px; font-weight: 400; line-height: 1; }
+.emptyCanvasState .emptyCanvasClose:hover, .emptyCanvasState .emptyCanvasClose:focus-visible { color: #e6f0f2; border-color: #3b5460; }
 /* The web edition's word that it brought back the project kept in the browser (restoreBrowserAutosave in renderer.mjs). */
 .restoredNotice { position: absolute; z-index: 9; bottom: 48px; left: 50%; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100% - 24px); padding: 8px 8px 8px 14px; color: #d8e5ea; background: rgb(12 24 33 / 97%); border: 1px solid #2c6b66; border-radius: 9px; box-shadow: 0 12px 32px rgb(0 0 0 / 40%); font-size: 12.5px; line-height: 1.45; transform: translateX(-50%); }
 .restoredNotice[hidden] { display: none; }

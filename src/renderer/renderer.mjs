@@ -784,9 +784,10 @@ const documentController = new DocumentController();
 // alone: the desktop keeps projects in files, and asks before a window with unsaved changes closes.
 const browserAutosave = window.projectFiles.autosave ?? null;
 const autosaveState = { started: false, kept: null, owned: false, failed: false, timer: null, writing: Promise.resolve() };
-// Set once the page has finished setting itself up: the empty canvas's card (updateEmptyCanvasState) reads the tutorial state, which
-// is not there before.
-let emptyCanvasStateReady = false;
+// Whether the empty canvas offers its first steps (updateEmptyCanvasState): on the web only, to a first-time visitor, which is one with
+// no project brought back from the browser who has never dismissed the card, started a tutorial or opened an example (window.firstSteps,
+// webShims/misc.mjs). The desktop has none: its Welcome window and Tutorials say the same.
+let firstStepsOffered = false;
 
 function updateHistoryControls() {
     $('#undoButton').disabled = Boolean(activeResult) || !documentController.canUndo;
@@ -5924,12 +5925,31 @@ function startEndpointPick(endpoint) {
     $('#endpointPickBanner').hidden = false;
 }
 
-// An empty canvas says what to do first: take the first-model tutorial or open an example. Not while a tutorial runs (its card says what
-// to do), nor inside a subsystem.
+// An empty canvas says what to do first to a first-time visitor on the web: take the first-model tutorial or open an example. Not while a
+// tutorial runs (its card says what to do), nor inside a subsystem.
 function updateEmptyCanvasState() {
-    if (!emptyCanvasStateReady) return;
+    // Never offered while the page sets itself up (the tutorial state is not there yet): only once the browser's project has been looked for.
+    if (!firstStepsOffered) {
+        $('#emptyCanvasState').hidden = true;
+        return;
+    }
     const empty = !model.nodes.some((node) => !node.deleted) && !model.subsystems.some((subsystem) => !subsystem.deleted);
     $('#emptyCanvasState').hidden = !empty || tour.active || activeSubsystemId !== null;
+}
+
+// Dismissed, or a tutorial started or an example opened: the first steps are never offered again in this browser. "Remind me later"
+// (`later`): not again until the web edition is next opened.
+function retireFirstSteps({ later = false } = {}) {
+    if (!window.firstSteps) return;
+    firstStepsOffered = false;
+    if (later) window.firstSteps.later();
+    else window.firstSteps.done();
+    updateEmptyCanvasState();
+}
+
+async function offerFirstSteps() {
+    firstStepsOffered = Boolean(await window.firstSteps?.offered());
+    updateEmptyCanvasState();
 }
 
 function updateModelStatus() {
@@ -15446,6 +15466,7 @@ async function startTutorial(id, { resumeAt = null } = {}) {
         $('#statusText').textContent = blocked;
         return false;
     }
+    retireFirstSteps();
     if (tutorial.start.from === 'example') {
         // An example is used as it is only while nothing has been done with it: no results, no change, and nothing loaded into Parameter
         // tuning or causal inference.
@@ -15636,6 +15657,8 @@ async function restoreBrowserAutosave() {
     autosaveState.kept = restored ? autosaveSnapshot().key : null;
     autosaveState.started = true;
     scheduleAutosave();
+    // A visitor whose project was brought back has been here before.
+    if (!restored) await offerFirstSteps();
 }
 
 // "Start fresh": an empty project in place of the one brought back (after the usual question, as it was never saved to a file).
@@ -15796,6 +15819,7 @@ async function loadExample(id, { openGuide = true } = {}) {
             embeddedBranches: example.embeddedBranches
         });
         activeExampleId = id;
+        retireFirstSteps();
         exampleAsLoaded = JSON.stringify(serializeProjectDocument());
         $('#exampleGuideButton').hidden = false;
         if (openGuide) await window.projectFiles.openExampleGuide(id);
@@ -20033,10 +20057,13 @@ setCameraView('orbit', false);
 updateModelStatus();
 initializeAddonRailContributions();
 checkPendingProjectOpen().then(restoreBrowserAutosave);
-emptyCanvasStateReady = true;
-updateEmptyCanvasState();
 $('#emptyCanvasTutorial').addEventListener('click', () => startTutorial('firstModel'));
 $('#emptyCanvasExample').addEventListener('click', openExamplesExplorer);
+$('#emptyCanvasLater').addEventListener('click', () => retireFirstSteps({ later: true }));
+$('#emptyCanvasClose').addEventListener('click', () => retireFirstSteps({ later: true }));
+$('#emptyCanvasDismiss').addEventListener('click', () => retireFirstSteps());
+// For the tests: the first steps offered as to a first-time visitor (once the browser's record of them is cleared), and whether they are.
+window.__debugFirstSteps = { offer: offerFirstSteps, offered: () => firstStepsOffered };
 
 // What the interaction tests wait on, instead of watching the page with a time limit: each resolves once this window has
 // finished a piece of its own work, however long that took on the machine running it. A camera is still once two frames

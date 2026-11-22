@@ -101,12 +101,11 @@ function cppNodeStepBlocks(model, providerInfo) {
             `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
             `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
             '            const double stepTime = currentTime + substep * nodeTimeStep;',
-            cppAlgebraicLines(plan, providerInfo),
             `            double derivative[${stateCount}] = {};`,
             contributionLines,
             `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
             '        }',
-            cppAlgebraicLines(plan, providerInfo, 'end'),
+            cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    }'
         ].join('\n');

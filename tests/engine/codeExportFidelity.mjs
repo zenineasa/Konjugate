@@ -50,7 +50,8 @@ function commandExists(executable) {
 // side" local/snapshot reclassification), a multi-substep node, and a live parameter resolved to
 // its baked default (no runtime override is sent to any of the three engines being compared).
 // The sixth node covers algebraic (setsValue) states: two of them, declared out of dependency
-// order, recomputed every substep and read by an ordinary differential term, plus a cases term.
+// order, on a node with two substeps: they hold their values through the step and are worked out
+// after it, while an ordinary differential term reads them within it. Plus a cases term.
 // A seventh node reads one of them across a bidirectional edge, so it sees the value the algebraic
 // node hands back after its step, which exports must recompute the same way the engine does.
 const nodeIds = { source: 1, squarer: 2, adder: 3, power: 4, coupled: 5, algebraic: 6, tank: 7 };

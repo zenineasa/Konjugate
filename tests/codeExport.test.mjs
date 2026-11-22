@@ -347,7 +347,7 @@ test('every number is written as a floating-point literal, so C++ neither divide
     assert.equal(emitExpression(compileExpressionNode(['Min', '75', 'x']), symbols, cppOperators), 'std::min(75.0, x)');
 });
 
-test('a setsValue source term is assigned before the derivatives, not integrated', async () => {
+test('a setsValue source term is held through the substeps and assigned once after them, not integrated', async () => {
     const { generateFmiModel } = await import('../src/fmiCodeGen.mjs');
     const document = baseDocument();
     const nodeId = id();
@@ -370,11 +370,20 @@ test('a setsValue source term is assigned before the derivatives, not integrated
         python: generateStandaloneProgram(document, 'python'),
         fmu: generateFmiModel(document).source
     };
+    // As the engine does (docs/proposals/ratesAndUpdates.md): an Update holds its value from the
+    // step's start through every substep and is worked out once after the last one.
     for (const [kind, source] of Object.entries(sources)) {
-        const assignment = kind === 'python' ? source.indexOf('state[1] = algebraic_value') : source.indexOf('state[1] = algebraicValue;');
-        const derivatives = source.indexOf(kind === 'python' ? 'derivative = [0.0]' : 'double derivative[');
-        assert.ok(assignment > 0, `${kind}: the algebraic state must be assigned.`);
-        assert.ok(assignment < derivatives, `${kind}: the algebraic state must be assigned before derivatives are evaluated.`);
+        // The node's step: from its header to where it hands its states back.
+        const integrationAt = source.indexOf(kind === 'python' ? 'state[index] += node_time_step * derivative[index]' : 'state[index] += nodeTimeStep * derivative[index];');
+        assert.ok(integrationAt > 0, `${kind}: the node must integrate its rates.`);
+        const nodeStart = source.lastIndexOf(kind === 'python' ? '# Node: Node' : '// Node: Node', integrationAt);
+        const commitAt = source.slice(integrationAt).search(/(globalState|global_state|state_)\[\d+\] = state\[/);
+        assert.ok(nodeStart > 0 && commitAt > 0, `${kind}: the node's step must be written.`);
+        const step = source.slice(nodeStart, integrationAt + commitAt);
+        const integration = integrationAt - nodeStart;
+        const assignment = kind === 'python' ? 'state[1] = algebraic_value' : 'state[1] = algebraicValue;';
+        assert.equal(step.split(assignment).length - 1, 1, `${kind}: the algebraic state must be assigned once per step.`);
+        assert.ok(step.indexOf(assignment) > integration, `${kind}: the algebraic state must be assigned after the substeps, not within them.`);
         assert.doesNotMatch(source, /derivative\[1\] \+=/, `${kind}: the algebraic state must not be integrated.`);
     }
 });

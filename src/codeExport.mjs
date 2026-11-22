@@ -225,8 +225,8 @@ export function buildModel(sourceDocument, options = {}) {
         localIndexByStateId: new Map(node.states.map((state, index) => [state.id, index])),
         substeps: node.numerics?.substepsPerGlobalStep ?? 1,
         contributions: [],
-        // setsValue source terms: recomputed and written directly at the start of every substep,
-        // never integrated (see applyAlgebraicTasks in engine/src/executionPlan.cpp).
+        // setsValue source terms (Updates): held through the step's substeps, then worked out and
+        // written directly once after it, never integrated (see applyUpdates in engine/src/executionPlan.cpp).
         algebraic: [],
         nodeProvider: null
     }));
@@ -725,14 +725,13 @@ export function emitCppAlgebraicTask(task, info) {
     return lines.join('\n');
 }
 
-// The engine computes a node's algebraic states twice: at the start of every substep, before its
-// derivatives, and once more after the last update, so what the node hands back (and other nodes
-// read next step) agrees with its states. `where` picks which; both set algebraicTime to the instant
-// the states represent.
-export function cppAlgebraicLines(plan, providerInfo, where = 'substep') {
+// A node's Update (setsValue) states hold their values from the step's start through all of its
+// substeps, and are worked out once after its last update, from the states the step reached at the
+// step's end time -- as the engine's applyUpdates does (docs/proposals/ratesAndUpdates.md) -- so what
+// the node hands back (and other nodes read next step) agrees with its states.
+export function cppAlgebraicLines(plan, providerInfo) {
     if (!plan.algebraic.length) return '';
     const tasks = plan.algebraic.map((task) => emitCppAlgebraicTask(task, providerInfo.get(task))).join('\n');
-    if (where === 'substep') return ['        {', '            const double algebraicTime = stepTime;', tasks, '        }'].join('\n');
     return ['        {', '            // After the last update: the value handed back with the states.', '            const double algebraicTime = currentTime + globalTimeStep;', tasks, '        }'].join('\n');
 }
 
@@ -802,12 +801,11 @@ function cppNodeIntegratorLambdas(model, providerInfo) {
             `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
             `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
             '            const double stepTime = currentTime + substep * nodeTimeStep;',
-            cppAlgebraicLines(plan, providerInfo),
             `            double derivative[${stateCount}] = {};`,
             contributionLines,
             `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
             '        }',
-            cppAlgebraicLines(plan, providerInfo, 'end'),
+            cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    };'
         ].join('\n');
@@ -941,7 +939,7 @@ function cppWholeModelUpdateLines(model, providerInfo) {
         '        {',
         `            double state[${plan.node.states.length}] = { ${plan.node.states.map((state) => `globalState[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')} };`,
         '            [[maybe_unused]] const double nodeTimeStep = globalTimeStep / static_cast<double>(stepsPerGlobalStep);',
-        cppAlgebraicLines(plan, providerInfo, 'end').split('\n').map((line) => `    ${line}`).join('\n'),
+        cppAlgebraicLines(plan, providerInfo).split('\n').map((line) => `    ${line}`).join('\n'),
         ...plan.node.states.map((state, index) => `            globalState[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`),
         '        }'
     ].join('\n'));
@@ -1257,10 +1255,8 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
                 : emitPythonRegularContribution(contribution)
         )).join('\n');
         const nodeProviderLines = plan.nodeProvider ? emitPythonNodeProvider(plan.nodeProvider, providerInfo.get(plan.nodeProvider)) : '';
-        // Twice, as the engine does: before each substep's derivatives, and after the last update
-        // (see cppAlgebraicLines).
+        // Once, after the last update, as the engine does (see cppAlgebraicLines).
         const algebraicLines = plan.algebraic.map((task) => emitPythonAlgebraicTask(task, providerInfo.get(task))).join('\n');
-        const algebraicAtStart = algebraicLines && ['        algebraic_time = step_time', algebraicLines].join('\n');
         const algebraicAtEnd = algebraicLines && ['    algebraic_time = current_time + global_time_step', algebraicLines.split('\n').map((line) => line.replace(/^    /, '')).join('\n')].join('\n');
         const hasPendingAlgebraic = plan.nodeProvider?.outputs.some((output) => output.setsValue);
         const commitLines = plan.node.states.map((state, index) => (
@@ -1272,7 +1268,6 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
             `    node_time_step = global_time_step / ${plan.substeps}`,
             `    for substep in range(${plan.substeps}):`,
             '        step_time = current_time + substep * node_time_step',
-            algebraicAtStart,
             `        derivative = [0.0] * ${stateCount}`,
             hasPendingAlgebraic ? '        pending_algebraic = []' : '',
             contributionLines,

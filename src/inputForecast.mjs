@@ -145,6 +145,22 @@ export function scoredChoice(score) {
     };
 }
 
+// The score beside an input in the Engineer view, in words: over how many forecasts, the choice that came closest to what then arrived,
+// against holding. A choice within rounding of holding is no closer (a flat signal's second-order trend, off by 1e-13, is not "1×
+// closer"), and one that missed by nothing beside holding (a plan that is the operator's own, exactly) matched what arrived, said with no
+// ratio (not "410000000000000× closer"). score: { projections, error: { choice: root mean square } }; figure: a value with its unit.
+export function scoreSentence(score, figure = (value) => String(Number(value.toPrecision(3)))) {
+    const over = `Over ${score.projections} forecast${score.projections === 1 ? '' : 's'}`;
+    const hold = score.error.hold;
+    const [best, error] = Object.entries(score.error).filter(([choice, value]) => choice !== 'hold' && choice !== 'automatic' && Number.isFinite(value))
+        .sort((a, b) => a[1] - b[1])[0] ?? [];
+    if (!best || !(error < hold * (1 - 1e-3))) return `${over}, holding has been closest (missed by ${figure(hold)}).`;
+    const name = forecastLabels[best].toLowerCase();
+    if (error <= 1e-3 * hold) return `${over}, ${name} matched what arrived (missed by ${figure(0)}, against ${figure(hold)} for holding).`;
+    const ratio = hold / error;
+    return `${over}, ${name} would have been ${ratio < 1.1 ? ratio.toFixed(2) : Number(ratio.toPrecision(2))}× closer than holding (${figure(error)} against ${figure(hold)}).`;
+}
+
 // The projection of one input past now. readings: its good readings up to now, in time order. settings: { choice, span, damping,
 // period }; context: { now, horizon, timeStep, limits: { minimum, maximum } | null, resolution, score: how each choice has done for
 // this input so far ({ projections, error: { choice: root mean square } }) }. Returns { choice, using, reason, samples }: `using` the

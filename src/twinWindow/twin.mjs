@@ -637,6 +637,8 @@ api.onTutorialStep?.((step) => {
     $('#tutorialBannerLabel').textContent = step.label || 'Tutorial';
     $('#tutorialBannerTitle').textContent = step.title;
     $('#tutorialBannerText').textContent = step.text;
+    $('#tutorialBannerStatus').textContent = step.status ?? '';
+    $('#tutorialBannerStatus').hidden = !step.status;
 });
 // A step the project window's tutorial asks of this window ("Skip this step", docs/proposals/tutorials.md): done as its buttons here do
 // it, once the window has its context.
@@ -678,7 +680,11 @@ const tutorialActions = {
         if ($('#engineer').hidden) $('#engineerToggle').click();
         const field = (selector) => document.querySelector(`#inputForecastRows ${selector}[data-input="${CSS.escape(input)}"]`);
         if (!await until(() => Boolean(field('.forecastChoice')), 10000)) return;
-        const set = (element, value) => { element.value = value; element.dispatchEvent(new Event('change', { bubbles: true })); };
+        const set = (element, value) => {
+            element.value = value;
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+        };
         set(field('.forecastChoice'), 'plan');
         set(field('.forecastZone'), timeZone);
         set(field('.forecastPlan'), plan);

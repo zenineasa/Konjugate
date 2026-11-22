@@ -10805,24 +10805,35 @@ function openParameterTuning() {
 }
 
 // The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md). From
-// the tuning card's replay, the log it has open goes too, chosen as the twin's source.
-function openTwinWindow(log = null, { fresh = false } = {}) {
-    if (activeResult) return;
-    twinWindowOpen = true;
-    window.engine.liveTwin.openWindow({
+// the tuning card's replay, the log it has open goes too, chosen as the twin's source. A twin window already open is brought to the front
+// and handed this project. Returns whether the window is there to be seen, as the main process answers once it is.
+async function openTwinWindow(log = null, { fresh = false } = {}) {
+    if (activeResult) return false;
+    const opened = await window.engine.liveTwin.openWindow({
         document: serializeProjectDocument(), projectName: $('.documentTitle').textContent, projectPath: currentProjectPath, setup: projectTwinSetup,
         // A demonstration's model, opened as it ships and not saved as the person's own: picked again, it is opened afresh.
         demonstration: demonstrationProject,
         // Opened afresh (a demonstration picked again): the twin starts from this setup, not from the one it had.
         ...(fresh ? { fresh: true } : {}),
         ...(log ? { log } : {})
-    });
+    }).catch((error) => { console.error('The live twin\'s window could not be opened.', error); return false; });
+    if (!opened) return false;
+    twinWindowOpen = true;
+    // A tutorial's "Open the live twin" is done by the window being brought up for it, not by one left open from before (minimized,
+    // behind this window, or holding the project before), which the person may not see.
+    if (tour.active) {
+        tutorialTwin.windowShown = true;
+        tour.notify();
+    }
+    return true;
 }
 window.engine.liveTwin?.onSetupChanged?.((setup) => {
     // Where the twin's window sits is this window's to keep (it is told when the twin's window closes), not the twin window's.
     const bounds = projectTwinSetup?.layout?.bounds;
     const normalized = normalizeTwinSetup(bounds ? { ...setup, layout: { ...(setup?.layout ?? {}), bounds } } : setup);
     if (JSON.stringify(normalized) === JSON.stringify(projectTwinSetup)) return;
+    // The plan's turn a tutorial waits for is the inputs' own: one seen before they changed (the plan in another time zone, say) is not it.
+    if (JSON.stringify(normalized?.live?.inputs ?? {}) !== JSON.stringify(projectTwinSetup?.live?.inputs ?? {})) tutorialTwin.sawPlanTurn = false;
     projectTwinSetup = normalized;
     if (!demonstrationProject) addonDataUnsaved = true;
     updateHistoryControls();
@@ -10923,9 +10934,10 @@ function refreshLiveTwinChip() {
 }
 window.engine.liveTwin?.onStatusChanged?.((status) => {
     windowTwinStatus = status;
-    if (status?.closed) twinWindowOpen = false;
+    if (status?.closed) twinWindowOpen = tutorialTwin.windowShown = false;
     if (tour.active && status) {
         if (status.running) tutorialTwin.sawRunning = true;
+        if (status.planTurns) tutorialTwin.sawPlanTurn = true;
         tutorialTwin.movesSeen = Math.max(tutorialTwin.movesSeen, Number(status.moves) || 0);
         if (status.alarm) tutorialTwin.sawAlarm = true;
     }
@@ -14014,9 +14026,10 @@ let tutorialObjectiveSearched = false;
 let tutorialFollowedIssue = null;
 // The values each fork started with, by its job, while a tutorial ran.
 const tutorialForkValues = new Map();
-// The live twin while a tutorial ran: whether its window is open, and what it has done (kept: it stops when its recording ends).
+// The live twin while a tutorial ran: whether its window is open, whether it was brought up since the tutorial started, and what it has
+// done (kept: it stops when its recording ends).
 let twinWindowOpen = false;
-const tutorialTwin = { sawRunning: false, movesSeen: 0, sawAlarm: false };
+const tutorialTwin = { windowShown: false, sawRunning: false, movesSeen: 0, sawAlarm: false, sawPlanTurn: false };
 // Whether a tutorial step is shown in the twin window now.
 let tutorialStepInTwin = false;
 // The live parameters changed by hand during a run while a tutorial ran (kept: the results are closed before the model can change).
@@ -14233,9 +14246,12 @@ const tour = createTour({
                 inferenceCandidates: !$('#causalInferenceCandidatesSection').hidden,
                 anyRelationshipRow: document.querySelector('.relationshipRow'),
                 twinWindowOpen,
+                twinWindowShown: tutorialTwin.windowShown,
                 twinSawRunning: tutorialTwin.sawRunning,
                 twinMovesSeen: tutorialTwin.movesSeen,
                 twinSawAlarm: tutorialTwin.sawAlarm,
+                // A move since the twin's setup last changed whose forecast followed a plan that switches before its horizon.
+                twinSawPlanTurn: tutorialTwin.sawPlanTurn,
                 // How each of the twin's inputs is carried into its forecast, as the setup keeps it.
                 twinInputs: projectTwinSetup?.live?.inputs ?? {},
                 demonstration: demonstrationProject,
@@ -14568,10 +14584,11 @@ const tour = createTour({
             const relationship = model.relationships.find((candidate) => !candidate.deleted);
             if (relationship) openRelationshipEditor(relationship);
         },
-        openTwin: async () => { if (!twinWindowOpen) openTwinWindow(); },
+        // Opened, or brought to the front with this project if it is open already (minimized, say, or behind this window).
+        openTwin: async () => { await openTwinWindow(); },
         // The demonstration started in the twin window, as its own button there starts it.
         startTwinDemo: async (step) => {
-            if (!twinWindowOpen) openTwinWindow();
+            if (!tutorialTwin.windowShown) await openTwinWindow();
             await window.engine.liveTwin?.tutorialAction?.('demo', { variant: step.variant, pace: step.pace ?? 'own' });
             // A plant's names stay on the mapping for the person to review: that step waits for its model, the others for the twin.
             if (step.waitFor === 'model') await waitUntil(() => demonstrationProject && model.nodes.some((node) => !node.deleted && node.title === 'Water tank'), 30000);
@@ -14594,6 +14611,8 @@ const tour = createTour({
         planTwinInput: async (step) => {
             await window.engine.liveTwin?.tutorialAction?.('planInput', { input: step.input, plan: step.plan, timeZone: step.timeZone });
             await waitUntil(() => projectTwinSetup?.live?.inputs?.[step.input]?.forecast === 'plan', 30000);
+            // The step is done when the forecast has turned with the plan, a few of the twin's moves after it starts again.
+            await waitUntil(() => tutorialTwin.sawPlanTurn, 120000);
         },
         waitForTwinAlarm: async () => { await waitUntil(() => tutorialTwin.sawAlarm, 180000); },
         openControllers: async () => { openSettings('controllers'); },
@@ -15205,11 +15224,11 @@ const tour = createTour({
         }
     },
     // A step whose work is in the twin window is shown there too, since that window covers this one's card.
-    onStep: (step, label) => {
+    onStep: (step, label, status = '') => {
         const inTwin = step?.elsewhere === 'twin';
         if (!inTwin && !tutorialStepInTwin) return;
         tutorialStepInTwin = inTwin;
-        window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition) } : null);
+        window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition), status } : null);
     },
     onFinish: (outcome, tutorial) => {
         $('#statusText').textContent = outcome === 'completed' ? `Tutorial finished: ${tutorial.title}` : 'Tutorial left · take it again any time from Tutorials';
@@ -15256,7 +15275,7 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     tutorialObjectiveSearched = false;
     tutorialFollowedIssue = null;
     tutorialForkValues.clear();
-    Object.assign(tutorialTwin, { sawRunning: false, movesSeen: 0, sawAlarm: false });
+    Object.assign(tutorialTwin, { windowShown: false, sawRunning: false, movesSeen: 0, sawAlarm: false, sawPlanTurn: false });
     tutorialSteered.clear();
     tutorialEnteredSubsystem = false;
     tutorialSeriesSeen.clear();

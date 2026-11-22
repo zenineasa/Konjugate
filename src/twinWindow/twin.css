@@ -377,6 +377,8 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .tutorialBanner small { display: block; color: #7fa3ad; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .tutorialBanner strong { display: block; margin: 2px 0 6px; font-size: 15px; }
 .tutorialBanner p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: #b9ccd4; }
+.tutorialBanner .tutorialBannerStatus { padding: 6px 9px; color: #b9ccd4; background: rgb(66 201 188 / 8%); border-left: 2px solid #42c9bc; border-radius: 3px; font-size: 12px; line-height: 1.45; }
+.tutorialBanner .tutorialBannerStatus[hidden] { display: none; }
 .tutorialBanner .tutorialBannerNote { display: block; font-size: 11px; color: #7fa3ad; }
 
 /* The engineer's choice of how each input is carried into the forecast: its name, the choice, the spans that choice reads, its score. */
@@ -389,5 +391,6 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .forecastRow .forecastPlan { grid-column: 1 / -1; width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; resize: vertical; }
 .forecastRow .forecastState { grid-column: 1 / -1; }
 .forecastRow .forecastZone { grid-column: 2 / -1; height: 26px; min-width: 0; }
+.forecastRow .forecastZoneLabel { grid-column: 1; color: var(--muted); }
 .forecastRow [hidden] { display: none; }
 .engineer .field.check { display: flex; gap: 6px; align-items: center; }

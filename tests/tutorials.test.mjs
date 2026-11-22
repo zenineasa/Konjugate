@@ -457,3 +457,21 @@ test('a step asking for an online run points at what is left to set, one thing a
     assert.equal(at({ runDialog: { online: true, pacing: 'realTime', targetTime: '1' } }), '#runTargetTime');
     assert.equal(at({ runDialog: { online: true, pacing: 'realTime', targetTime: '60' } }), '#startRun');
 });
+
+test('a twin tutorial\'s "Open the live twin" is done by the window brought up for it, and the plan step by the forecast turning with a plan in UTC', () => {
+    for (const id of ['liveTwin', 'matchSignals', 'refitTwin']) {
+        const open = tutorialById(id).steps.find((step) => step.id === 'openTwin');
+        // A twin window left open from before (minimized, or behind the project window) is not one the person has in front of them.
+        assert.equal(Boolean(open.done({ document: { nodes: [] }, ui: { twinWindowOpen: true, twinWindowShown: false, twinSawRunning: true } })), false, `${id}: a window from before is not it.`);
+        assert.equal(open.done({ document: { nodes: [] }, ui: { twinWindowShown: true } }), true, `${id}: the window brought up is.`);
+    }
+    const plan = tutorialById('refitTwin').steps.find((step) => step.id === 'plan');
+    const inZone = (timeZone) => ({ [refitTwinValues.heater.input]: { forecast: 'plan', plan: { repeat: 'daily', timeZone, points: [] } } });
+    assert.equal(plan.done({ ui: { twinInputs: inZone('UTC'), twinSawPlanTurn: false } }), false, 'Kept, but not yet seen turning.');
+    assert.equal(plan.done({ ui: { twinInputs: inZone('Asia/Calcutta'), twinSawPlanTurn: true } }), false, 'The computer\'s own zone is not the rig\'s clock.');
+    assert.equal(plan.done({ ui: { twinInputs: inZone('UTC'), twinSawPlanTurn: true } }), true);
+    assert.equal(plan.done({ ui: { twinInputs: inZone('Etc/UTC'), twinSawPlanTurn: true } }), true);
+    assert.equal(plan.status({ twinInputs: {} }), '');
+    assert.match(plan.status({ twinInputs: inZone('Asia/Calcutta') }), /in Asia\/Calcutta: the rig's clock is UTC/);
+    assert.match(plan.status({ twinInputs: inZone('UTC') }), /^The plan is kept/);
+});

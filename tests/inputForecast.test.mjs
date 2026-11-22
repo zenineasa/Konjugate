@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticChoice, fitPolynomial, heldAt, parsePlan, planText, projectInput, projectionError, scoredChoice } from '../src/inputForecast.mjs';
+import { automaticChoice, fitPolynomial, heldAt, parsePlan, planText, projectInput, projectionError, scoreSentence, scoredChoice } from '../src/inputForecast.mjs';
 
 const context = { now: 3600, horizon: 3600, timeStep: 60 };
 const near = (actual, expected, tolerance, message) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message ?? ''} ${actual} is not within ${tolerance} of ${expected}`);
@@ -153,4 +153,18 @@ test('a plan is read as written, and written back the same', () => {
 
 test('a plan and the model are never what Automatic picks, being set up rather than read from the past', () => {
     assert.equal(scoredChoice({ projections: 40, error: { hold: 9, plan: 1, model: 1, mean: 5 } }).using, 'mean');
+});
+
+test('the score in words: an exact plan matched what arrived, a rounding is no closer, and a real gain is a ratio', () => {
+    const watts = (value) => `${Number(value.toPrecision(3))} W`;
+    // The refit tutorial's plan is the operator's own: it misses by nothing, which is no "410000000000000× closer".
+    assert.equal(scoreSentence({ projections: 3, error: { hold: 408, mean: 300, plan: 0 } }, watts), 'Over 3 forecasts, from a plan matched what arrived (missed by 0 W, against 408 W for holding).');
+    assert.equal(scoreSentence({ projections: 3, error: { hold: 408, plan: 1e-9 } }, watts), 'Over 3 forecasts, from a plan matched what arrived (missed by 0 W, against 408 W for holding).');
+    // A flat signal's second-order trend differs from holding only by floating point: holding, not "1× closer".
+    assert.equal(scoreSentence({ projections: 2, error: { hold: 317, trend2: 317 - 1e-11 } }, watts), 'Over 2 forecasts, holding has been closest (missed by 317 W).');
+    assert.equal(scoreSentence({ projections: 1, error: { hold: 0, trend2: 1.6e-11 } }, watts), 'Over 1 forecast, holding has been closest (missed by 0 W).');
+    // A gain that rounds to one at two figures is said with two decimals; a larger one at two figures.
+    assert.equal(scoreSentence({ projections: 6, error: { hold: 100, mean: 96 } }, watts), 'Over 6 forecasts, hold the average would have been 1.04× closer than holding (96 W against 100 W).');
+    assert.equal(scoreSentence({ projections: 6, error: { hold: 100, mean: 40, trend: 30, automatic: 1 } }, watts), 'Over 6 forecasts, follow the trend would have been 3.3× closer than holding (30 W against 100 W).');
+    assert.equal(scoreSentence({ projections: 6, error: { hold: 10, mean: 40 } }, watts), 'Over 6 forecasts, holding has been closest (missed by 10 W).');
 });

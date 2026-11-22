@@ -7,7 +7,7 @@
 
 import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
-import { forecastChoices, forecastLabels, parsePlan, planText } from '../inputForecast.mjs';
+import { forecastChoices, forecastLabels, parsePlan, planText, scoreSentence } from '../inputForecast.mjs';
 import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
 let host = null;
@@ -150,12 +150,17 @@ function renderInputForecasts(twin) {
         const repeat = element('select', { className: 'forecastRepeat' });
         repeat.append(new Option('Daily', 'daily'), new Option('Weekly', 'weekly'));
         repeat.value = setting.plan?.repeat ?? 'daily';
+        // As tall as its lines and one more, five at least, so the line being typed is in sight.
+        const planRows = (text) => Math.max(5, String(text).split('\n').length + 1);
         const programme = element('textarea', {
-            className: 'forecastPlan', rows: 3, placeholder: `06:30 ${scale.unit === '°C' ? '21' : '1'}\n23:00 ${scale.unit === '°C' ? '17' : '0'}`,
+            className: 'forecastPlan', rows: planRows(setting.plan ? planText(setting.plan, scale.shown) : ''), placeholder: `06:30 ${scale.unit === '°C' ? '21' : '1'}\n23:00 ${scale.unit === '°C' ? '17' : '0'}`,
             value: setting.plan ? planText(setting.plan, scale.shown) : ''
         });
+        programme.addEventListener('input', () => { programme.rows = planRows(programme.value); });
         programme.title = `One time and value to a line${scale.unit ? `, in ${scale.unit}` : ''}; weekly, the day first (Mon 06:30 21). Each value holds until the next.`;
         const zone = element('input', { type: 'text', className: 'forecastZone', value: setting.plan?.timeZone ?? ownTimeZone(), title: 'The time zone the plan\'s times are in' });
+        zone.id = `forecastZone-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`;
+        const zoneLabel = element('label', { className: 'forecastZoneLabel', textContent: 'Time zone', htmlFor: zone.id });
         // From the model: the state it follows past now (a controller's output), any but those the readings measure.
         const measured = new Set(twin.tiles.map((tile) => tile.target?.id));
         const follow = element('select', { className: 'forecastState' });
@@ -169,14 +174,14 @@ function renderInputForecasts(twin) {
         }
         const showFields = () => {
             fields.forEach((field) => { field.hidden = !spanFields[field.dataset.key].includes(choice.value); });
-            for (const field of [repeat, programme, zone]) field.hidden = choice.value !== 'plan';
+            for (const field of [repeat, programme, zoneLabel, zone]) field.hidden = choice.value !== 'plan';
             follow.hidden = choice.value !== 'model';
         };
         showFields();
         choice.addEventListener('change', () => { showFields(); markDirty(); });
         const score = element('small', { className: 'forecastScore' });
         score.dataset.input = input.signal;
-        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zone, programme, follow, score);
+        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zoneLabel, zone, programme, follow, score);
     }));
     showInputScores(twin, twin.cycles.at(-1));
 }
@@ -191,14 +196,8 @@ function showInputScores(twin, cycle) {
         const projection = cycle?.projections?.[score.dataset.input];
         const parts = [];
         if (projection && projection.choice !== 'hold') parts.push(`Now: ${forecastLabels[projection.using].toLowerCase()}${projection.reason ? ` (${projection.reason})` : ''}.`);
-        if (scored?.projections) {
-            const ranked = Object.entries(scored.error).filter(([choice]) => choice !== 'automatic').sort((a, b) => a[1] - b[1]);
-            const [best, error] = ranked[0];
-            const figure = (value) => `${shown(Number(value.toPrecision(3)))}${unit}`;
-            parts.push(best === 'hold' || !(error < scored.error.hold)
-                ? `Over ${scored.projections} forecasts, holding has been closest (missed by ${figure(scored.error.hold)}).`
-                : `Over ${scored.projections} forecasts, ${forecastLabels[best].toLowerCase()} would have been ${Number((scored.error.hold / Math.max(error, 1e-12)).toPrecision(2))}× closer than holding (${figure(error)} against ${figure(scored.error.hold)}).`);
-        } else parts.push('Scored once a forecast\'s horizon has passed.');
+        if (scored?.projections) parts.push(scoreSentence(scored, (value) => `${shown(Number(value.toPrecision(3)))}${unit}`));
+        else parts.push('Scored once a forecast\'s horizon has passed.');
         score.textContent = parts.join(' ');
     }
 }

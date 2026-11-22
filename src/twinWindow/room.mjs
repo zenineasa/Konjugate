@@ -188,8 +188,13 @@ export function abandonRoom() {
     closeRoom();
 }
 
+// The twin's status for the project window's chip and its tutorial: running, its moves, drifting past the warning, and whether its latest
+// forecast follows a plan that switches before the horizon (an input's dotted line steps, and the forecast turns with it).
 function reportStatus() {
-    host.reportStatus({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad' });
+    const latest = twin?.cycles.at(-1);
+    const planTurns = Object.values(latest?.projections ?? {}).some((projection) => projection.using === 'plan'
+        && new Set([...(Number.isFinite(projection.last) ? [projection.last] : []), ...(projection.samples ?? []).map((sample) => sample.value)]).size > 1);
+    host.reportStatus({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad', planTurns });
     // Trying something starts from the twin's latest move, while it runs: once the log has been played or the twin stopped, it is not
     // offered, and says why.
     $('#trySomething').disabled = !twin?.running || Boolean(twin.sandbox);

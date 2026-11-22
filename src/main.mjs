@@ -868,11 +868,13 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
 // project's model and the twin's saved setup, maximized in the workspace, and free to move to another screen. It runs its twin
 // itself (the live twin's messages are answered to whichever window sends them); what it changes in the setup is handed back to the
 // project window, which keeps it with the project.
+// Answers once the window is there to be seen: an open one brought to the front (from the Dock, if it was minimized), a new one loaded.
 function openTwinWindow(projectWindow, payload) {
     const state = projectWindowState.get(projectWindow);
     state.twinContext = payload;
     if (state.twinWindow && !state.twinWindow.isDestroyed()) {
         state.twinWindow.webContents.send('twinContext', payload);
+        if (state.twinWindow.isMinimized()) state.twinWindow.restore();
         state.twinWindow.show();
         state.twinWindow.focus();
         return true;
@@ -900,10 +902,16 @@ function openTwinWindow(projectWindow, payload) {
         // Its twin ends with it: the project window's chip is told, and that the window has gone.
         if (!projectWindow.isDestroyed()) projectWindow.webContents.send('twinStatusChanged', { running: false, closed: true });
     });
-    createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext); });
+    const loaded = new Promise((resolve) => {
+        createdWindow.webContents.once('did-finish-load', () => {
+            if (!createdWindow.isDestroyed()) createdWindow.webContents.send('twinContext', state.twinContext);
+            resolve(!createdWindow.isDestroyed());
+        });
+        createdWindow.once('closed', () => resolve(false));
+    });
     createdWindow.loadFile(join(currentDir, 'twinWindow', 'index.html'));
     if (state.twinBounds ? false : !saved || saved.maximized) createdWindow.maximize();
-    return true;
+    return loaded;
 }
 
 ipcMain.handle('twinOpenWindow', (event, payload) => {
@@ -970,12 +978,13 @@ ipcMain.handle('twinOpenConnections', (event) => {
 });
 // A demonstration's model (the simulated rig), opened in the project window for the twin window that asks for it.
 // A tutorial's step whose work is in the twin window (docs/proposals/tutorials.md), shown there too, since the twin window opens in
-// front of the project window and its card; null when the step is over. Only its text: the tutorial is run from the project window.
+// front of the project window and its card; null when the step is over. Only its text, and what its card says of it now (its status):
+// the tutorial is run from the project window.
 ipcMain.handle('twinTutorialStep', (event, step) => {
     requireProjectWindow(event, 'Only a project window can show its tutorial in its twin window.');
     const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
     if (!twinWindow || twinWindow.isDestroyed()) return false;
-    const shown = step && typeof step === 'object' ? { label: String(step.label ?? ''), title: String(step.title ?? ''), text: String(step.text ?? '') } : null;
+    const shown = step && typeof step === 'object' ? { label: String(step.label ?? ''), title: String(step.title ?? ''), text: String(step.text ?? ''), status: String(step.status ?? '') } : null;
     const send = () => { if (!twinWindow.isDestroyed()) twinWindow.webContents.send('twinTutorialStep', shown); };
     if (twinWindow.webContents.isLoading()) twinWindow.webContents.once('did-finish-load', send); else send();
     return true;

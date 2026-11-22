@@ -22,7 +22,7 @@ const steps = Object.freeze([
         title: 'Open the live twin',
         text: 'Press Live twin in the toolbar. Its window opens in front of this one; this tutorial follows you there.',
         target: '#liveTwinButton', skip: 'openTwin',
-        done: ({ document, ui }) => ui.twinWindowOpen || demonstrationOpen(document, ui)
+        done: ({ document, ui }) => ui.twinWindowShown || demonstrationOpen(document, ui)
     },
     {
         id: 'chooseDemo',

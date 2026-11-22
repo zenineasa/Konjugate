@@ -6025,7 +6025,7 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputForecastRows .forecastChoice')].map((choice) => [choice.dataset.input, choice.value])`),
             [['outdoorTemperature', 'hold'], ['solarGain', 'hold'], ['livingRoomHeater', 'hold'], ['bedroomHeater', 'hold'], ['kitchenHeater', 'hold']]);
         const scoreOf = (name) => evaluate(twin, `[...document.querySelectorAll('#inputForecastRows .forecastRow')].find((row) => row.querySelector('.forecastChoice').dataset.input === ${JSON.stringify(name)}).querySelector('.forecastScore').textContent`);
-        assert.match(await scoreOf('livingRoomHeater'), /^Over \d+ forecasts, (holding has been closest|.+ would have been [\d.]+× closer than holding)/);
+        assert.match(await scoreOf('livingRoomHeater'), /^Over \d+ forecasts?, (holding has been closest|.+ matched what arrived|.+ would have been [\d.]+× closer than holding)/);
         await setField(twin, '#inputForecastRows .forecastChoice[data-input="outdoorTemperature"]', 'mean');
         await setField(twin, '#inputForecastRows .forecastChoice[data-input="livingRoomHeater"]', 'automatic');
         assert.equal(await evaluate(twin, `document.querySelector('#inputForecastRows .forecastSpan[data-input="outdoorTemperature"][data-key="span"]').hidden`), false, 'An average asks over how long.');
@@ -10064,6 +10064,53 @@ export async function runInteractionTests(driver) {
         await press('.tourFloating .tourPrimary');
         await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
         await closeTutorialTwin();
+    }, { skip: !driver.capabilities.multiWindow && 'the live twin has its own window, in the desktop app' });
+
+    // "Skip this step" on "Open the live twin" alone, pressed as a person presses it, then the next step done by hand in the twin window.
+    // A twin window left open from before (minimized here) once made the step count as done without being brought up, so the next step's
+    // banner went to a window nobody could see; and the skip only opened a window when none was open.
+    await run('skipping only "Open the live twin" brings the twin window up, one left minimized too, and the next step is done there by hand', async () => {
+        const { waitForStep, clean } = tutorialHelpers();
+        // A real click at an element's centre, in whichever window it is.
+        const clickAt = async (handle, selector) => {
+            await waitFor(handle, `(() => { const element = document.querySelector(${JSON.stringify(selector)}); return Boolean(element && element.getClientRects().length && !element.disabled); })()`, `${selector} was not there to press.`, 15000);
+            const point = await evaluate(handle, `(() => { const rect = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }; })()`);
+            await handle.click(point);
+        };
+        for (const id of ['liveTwin', 'refitTwin']) {
+            await clean();
+            // A twin window from before, left minimized.
+            const beforeTwin = driver.allHandles();
+            await evaluate(window, `document.querySelector('#liveTwinButton').click()`);
+            const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+            await waitFor(twin, `!document.hidden`, 'The twin window did not open.');
+            await evaluate(twin, `window.windowControls.minimize()`);
+            await waitFor(twin, `document.hidden`, 'The twin window was not minimized.');
+            await window.focus();
+            assert.equal(await evaluate(window, `window.__debugTour.startTutorial(${JSON.stringify(id)})`), true);
+            await waitForStep('welcome');
+            await clickAt(window, '.tourFloating .tourPrimary');
+            await waitForStep('openTwin');
+            await clickAt(window, '.tourFloating .tourSkipStep');
+            await waitForStep('chooseDemo');
+            // The same window, brought up in front, with the next step in its banner.
+            await waitFor(twin, `!document.hidden`, `${id}: the twin window was not brought up.`);
+            const title = id === 'refitTwin' ? 'A rig that drifts, slowly' : 'Choose a demonstration';
+            await waitFor(twin, `!document.querySelector('#tutorialBanner').hidden && document.querySelector('#tutorialBannerTitle').textContent === ${JSON.stringify(title)}`, `${id}: the next step was not shown in the twin window.`);
+            assert.equal(await evaluate(window, `document.querySelector('.tourFloating .tourNotice').hidden`), true, `${id}: the skip was reported undone.`);
+            if (id === 'refitTwin') {
+                // Step 2 by hand, as its text says: "See a demonstration", "Data arrives" at 60×, "A rig that drifts".
+                await clickAt(twin, '#openDemos');
+                await waitFor(twin, `document.querySelector('#demosDialog').open`, 'The demonstrations were not offered.');
+                await evaluate(twin, `(() => { const pace = document.querySelector('#demoPace'); pace.value = '60'; pace.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+                await clickAt(twin, '[data-demo="drifting"]');
+                await waitForStep('refit', 60000);
+                await waitFor(twin, `document.querySelector('#tutorialBannerTitle').textContent === 'Refit it on the latest readings'`, 'The step after was not shown in the twin window.');
+                assert.equal(await evaluate(twin, `document.querySelector('#fileSpeed').value`), '60', 'The recording arrives at the pace chosen.');
+            }
+            await evaluate(window, `window.__debugTour.stop()`);
+            await closeTutorialTwin();
+        }
     }, { skip: !driver.capabilities.multiWindow && 'the live twin has its own window, in the desktop app' });
 
     await run('the steering tutorial binds W and S to the joint\'s target angle in Settings and steers it with them in a real-time run', async () => {

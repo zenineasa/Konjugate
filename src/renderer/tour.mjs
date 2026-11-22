@@ -20,8 +20,8 @@ const element = (tag, className, text) => {
 // the card's text, such as a download; what it returns is said under the text); edition: 'desktop' | 'web';
 // onFinish(outcome, tutorial) with 'completed' or 'skipped', after the card has gone from the screen.
 // start(tutorial, { start }) plays a tutorial; `start` is the project as the tutorial found it, handed to every check.
-// onStep(step | null, label) is told whenever the step on screen changes, and null when the tutorial ends: for a step whose work is in
-// another window, which shows it there.
+// onStep(step | null, label, status) is told whenever the step on screen changes, or what its card says of it now (its status), and null
+// when the tutorial ends: for a step whose work is in another window, which shows it there.
 export function createTour({ getFacts, actions: pageActions = {}, edition, onFinish = () => {}, onStep = () => {}, pollMilliseconds = 300 }) {
     let tutorial = null;
     let steps = [];
@@ -39,6 +39,7 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     // The step whose skip could not do it, while the person is still on it.
     let skipFailed = null;
     let shownStep = null;
+    let shownStatus = '';
     const ring = element('div', 'tourRing');
     ring.hidden = true;
     ring.setAttribute('aria-hidden', 'true');
@@ -180,9 +181,10 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
             back.textContent = `Go back to step ${broken}`;
             back.onclick = () => { reached = broken; render(); };
         }
-        if (shownStep !== step) {
+        if (shownStep !== step || shownStatus !== said) {
             shownStep = step;
-            onStep(step, stepLabel(reached, steps));
+            shownStatus = said;
+            onStep(step, stepLabel(reached, steps), said);
         }
         const ringRect = placeRing(step, facts);
         placeCard(ringRect);
@@ -195,6 +197,7 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         filling = false;
         clearInterval(timer);
         shownStep = null;
+        shownStatus = '';
         onStep(null, '');
         ring.hidden = true;
         card.hidden = true;

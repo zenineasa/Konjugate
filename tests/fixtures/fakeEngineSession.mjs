@@ -32,6 +32,8 @@ export class FakeEngine {
         const states = document.nodes.flatMap((node) => node.states ?? []);
         this.stateIds = states.map((state) => state.id);
         this.algebraicStateIds = Object.keys(computed).map(Number).filter((stateId) => this.stateIds.includes(stateId));
+        // What this engine says it can do beyond the protocol's first version: nothing, unless a test says so (it follows no state).
+        this.features = [];
         this.reportedStateIds = configuration.reportedStateIds ?? this.stateIds;
         this.parameters = new Map([
             ...(document.sharedParameters ?? []),

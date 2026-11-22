@@ -39,6 +39,9 @@ test('every command reads back from the schema as what was sent', () => {
         [{ type: 'appendInputSamples', parameterId: 4, samples: [{ time: 1, value: 10 }, { time: 2, value: 20 }] },
             { appendInputSamples: { parameterId: 4, samples: [{ time: 1, value: 10 }, { time: 2, value: 20 }] } }],
         [{ type: 'appendInputSamples', parameterId: 4, samples: [], replaceFrom: 3 }, { appendInputSamples: { parameterId: 4, replace: true, replaceFrom: 3 } }],
+        [{ type: 'appendInputSamples', parameterId: 4, samples: [], followStateId: 7, followFrom: 30 }, { appendInputSamples: { parameterId: 4, followStateId: 7, followFrom: 30 } }],
+        [{ type: 'appendInputSamples', parameterId: 4, samples: [], followStateId: 7, followFrom: 30, followLimits: { minimum: 0, maximum: 2000 } },
+            { appendInputSamples: { parameterId: 4, followStateId: 7, followFrom: 30, followBounded: true, followMinimum: 0, followMaximum: 2000 } }],
         [{ type: 'restoreCheckpoint', time: 600, overrides: [{ stateId: 2, value: 21.5 }, { stateId: 3, value: -1 }] },
             { restoreCheckpoint: { time: 600, overrides: [{ stateId: 2, value: 21.5 }, { stateId: 3, value: -1 }] } }],
         [{ type: 'restoreState', time: 60, values: [1, 2.5, -3], providerStates: [{ nodeId: 8, payload: new Uint8Array([0, 255, 7]) }] },
@@ -75,8 +78,8 @@ test('events written to the schema are read back field for field', () => {
         { metisAvailable: true, metisVersion: '5.2', parameterScheduleModes: ['step', 'waveform'], heldCommands: true });
     assert.deepEqual(event({ capabilities: {} }).capabilities, { metisAvailable: false, metisVersion: '' }, 'An old engine says nothing of schedules or held commands.');
     assert.deepEqual(event({ stateTable: { states: [{ stateId: 2 }, { stateId: 2 ** 33 }] } }).stateTable, [2, 2 ** 33]);
-    assert.deepEqual(event({ sessionInfo: { algebraicStateIds: [3, 300, 2 ** 35] } }).sessionInfo, { algebraicStateIds: [3, 300, 2 ** 35] }, 'Packed, as proto3 writes it.');
-    assert.deepEqual(event({ sessionInfo: {} }).sessionInfo, { algebraicStateIds: [] });
+    assert.deepEqual(event({ sessionInfo: { algebraicStateIds: [3, 300, 2 ** 35], features: ['followState'] } }).sessionInfo, { algebraicStateIds: [3, 300, 2 ** 35], features: ['followState'] }, 'Packed, as proto3 writes it.');
+    assert.deepEqual(event({ sessionInfo: {} }).sessionInfo, { algebraicStateIds: [], features: [] }, 'An older engine says nothing of what it can do.');
     const { providerStates, ...reply } = event({
         sessionReply: { sequence: 41, ok: true, time: 600, values: [20, 5.5], providerStates: [{ nodeId: 8, payload: [1, 2, 3] }], computeNanoseconds: 2 ** 36, checkpointsTaken: 2 }
     }).sessionReply;
@@ -89,7 +92,7 @@ test('events written to the schema are read back field for field', () => {
 test('fields written unpacked, or unknown to this reader, are still read', () => {
     // A repeated varint written one by one (as an older writer may) rather than packed; a reply's single value as a fixed64.
     const info = new Uint8Array([8, 1, 50, 4, 8, 3, 8, 4]);
-    assert.deepEqual(decodeEngineEvent(info).sessionInfo, { algebraicStateIds: [3, 4] });
+    assert.deepEqual(decodeEngineEvent(info).sessionInfo, { algebraicStateIds: [3, 4], features: [] });
     const value = new Float64Array([2.5]);
     const reply = new Uint8Array([8, 1, 42, 11, 8, 7, 41, ...new Uint8Array(value.buffer)]);
     assert.deepEqual(decodeEngineEvent(reply).sessionReply.values, [2.5]);

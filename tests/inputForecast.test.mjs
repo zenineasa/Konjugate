@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticChoice, fitPolynomial, heldAt, parsePlan, planText, projectInput, projectionError, scoreSentence, scoredChoice } from '../src/inputForecast.mjs';
+import { automaticChoice, fitPolynomial, followableStates, heldAt, parsePlan, planText, projectInput, projectionError, scoreSentence, scoredChoice } from '../src/inputForecast.mjs';
+import { houseProject } from '../scripts/generateHouseTwin.mjs';
 
 const context = { now: 3600, horizon: 3600, timeStep: 60 };
 const near = (actual, expected, tolerance, message) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message ?? ''} ${actual} is not within ${tolerance} of ${expected}`);
@@ -167,4 +168,28 @@ test('the score in words: an exact plan matched what arrived, a rounding is no c
     assert.equal(scoreSentence({ projections: 6, error: { hold: 100, mean: 96 } }, watts), 'Over 6 forecasts, hold the average would have been 1.04× closer than holding (96 W against 100 W).');
     assert.equal(scoreSentence({ projections: 6, error: { hold: 100, mean: 40, trend: 30, automatic: 1 } }, watts), 'Over 6 forecasts, follow the trend would have been 3.3× closer than holding (30 W against 100 W).');
     assert.equal(scoreSentence({ projections: 6, error: { hold: 10, mean: 40 } }, watts), 'Over 6 forecasts, holding has been closest (missed by 10 W).');
+});
+
+test('an input from the model may follow a controller\'s output in its unit, not a state measured, set by an input, or in another unit', () => {
+    const house = (thermostats) => houseProject({ thermostats });
+    // The house's heaters (shared 103 to 105, in W), its weather and sun (101, 102), its rooms' air measured (states 4, 6 and 8): a
+    // heater may follow a thermostat's command, in W, and nothing in K.
+    const options = (document, parameterId) => followableStates(document, { parameterId, measured: [4, 6, 8], inputParameters: [101, 102, 103, 104, 105] });
+    const withThermostats = options(house(true), 104);
+    assert.deepEqual(withThermostats.filter((state) => !state.why).map((state) => state.label), ['Living room thermostat · Heater command', 'Bedroom thermostat · Heater command', 'Kitchen thermostat · Heater command']);
+    assert.ok(withThermostats.filter((state) => !state.why).every((state) => state.stated && state.unit === 'W'));
+    const slab = withThermostats.find((state) => state.label === 'Floor slab · Temperature');
+    assert.equal(slab.why, 'it is in K, and the input in W');
+    assert.equal(withThermostats.find((state) => state.label === 'Outdoor air · Temperature').why, 'an input sets it');
+    // Without the thermostats, nothing in the model can drive a heater.
+    assert.equal(options(house(false), 104).filter((state) => !state.why).length, 0);
+    // The outdoor temperature (in K) may follow the slab, a state in its unit no signal measures, but not the outdoor air it sets.
+    const outdoor = options(house(false), 101);
+    assert.equal(outdoor.find((state) => state.label === 'Floor slab · Temperature').why, null);
+    assert.equal(outdoor.find((state) => state.label === 'Outdoor air · Temperature').why, 'an input sets it');
+    // A state with no unit is not refused for it, and is said to have none.
+    const document = house(true);
+    document.nodes.find((node) => node.name === 'Floor slab').states[0].unit = '';
+    const unstated = options(document, 104).find((state) => state.label === 'Floor slab · Temperature');
+    assert.deepEqual([unstated.why, unstated.stated], [null, false]);
 });

@@ -170,6 +170,9 @@ message AdvanceTo {
 // state's value is added as the input's next reading (a controller in the model taking over from the readings, as a live twin's
 // forecast asks: docs/proposals/predictionActualWindow.md, "From the model"). A step that goes over a time again (after a restore)
 // replaces what it added there before. Every AppendInputSamples sets this afresh: one without a state stops the following.
+// The state starts from what the input was doing: before the step over `follow_from`, in every pass over it, the state is set to the
+// input's value there, unless the model computes it from others (it has no memory of its own to set). With `follow_bounded`, what
+// the input takes from the state, and what the state starts from, is held within `follow_minimum` and `follow_maximum`.
 message AppendInputSamples {
     uint64 parameter_id = 1;
     repeated ParameterScheduleSample samples = 2;
@@ -177,6 +180,9 @@ message AppendInputSamples {
     double replace_from = 4;
     uint64 follow_state_id = 5;
     double follow_from = 6;
+    bool follow_bounded = 7;
+    double follow_minimum = 8;
+    double follow_maximum = 9;
 }
 
 message StateOverride {
@@ -321,6 +327,9 @@ message EngineEvent {
 // measurement but not set to one.
 message SessionInfo {
     repeated uint64 algebraic_state_ids = 1;
+    // What this engine can do beyond the protocol's first version, so a session asking for more is refused in words rather than
+    // silently ignored by an older engine: "followState" (AppendInputSamples' follow fields).
+    repeated string features = 2;
 }
 
 // One-shot report messages, written once by a CLI subcommand (validate/infer/fit/inspect) and

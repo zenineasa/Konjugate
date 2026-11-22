@@ -39,8 +39,9 @@ const engineOptions = basename(engineParentDirectory) === 'out'
 const heaters = ['livingRoomHeater', 'bedroomHeater', 'kitchenHeater'];
 const rooms = ['livingRoomTemperature', 'bedroomTemperature', 'kitchenTemperature'];
 
-async function runTwin(days, inputForecasts, more = {}, { thermostats = false } = {}) {
+async function runTwin(days, inputForecasts, more = {}, { thermostats = false, edit = null, failing = false } = {}) {
     const document = houseProject({ thermostats });
+    edit?.(document);
     const log = houseDay({ days, setpoints: thermostats });
     const firstHour = (name) => log.observations.filter((observation) => observation.signal === name).slice(0, 60).map((observation) => observation.value);
     const suggestions = suggestMapping(log.header.signals.map((signal) => ({ id: signal.name, name: signal.name, unit: signal.unit, role: signal.role, values: firstHour(signal.name) })), document);
@@ -60,6 +61,7 @@ async function runTwin(days, inputForecasts, more = {}, { thermostats = false } 
         { kind: 'recording', content: formatDataLog(log), speed: Infinity }, engineOptions, (event) => events.push(event));
     for (let waited = 0; waited < 600000 && !events.some((event) => event.type === 'ended' || event.type === 'error'); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
     await twin.stop();
+    if (failing) return { events };
     assert.equal(events.find((event) => event.type === 'error'), undefined);
     return { log, cycles: events.filter((event) => event.type === 'cycle').map((event) => event.cycle) };
 }
@@ -168,6 +170,53 @@ const handedEstimated = await runTwin(1, Object.fromEntries(heaters.map((heater)
     { corrections: { livingRoomTemperature: { estimate: true } }, estimator: { members: 8 } }, { thermostats: true });
 assert.ok(handedEstimated.cycles.slice(1).every((cycle) => cycle.estimate?.band?.livingRoomTemperature?.length > 0), 'Every estimated move has its band.');
 assert.ok(forecastMiss(handedEstimated) < 0.8 * allHeldMiss, `Estimated, with the heaters handed to their thermostats: ${forecastMiss(handedEstimated).toFixed(3)} K.`);
+// The members' thermostats start where the twin's own forecast starts its own (the engine sets each to the heater's value at now, in
+// every pass), so just after now the forecast is inside its own band at every move: before, a member's thermostat could start on the
+// other side of its switch. Further ahead it may leave it: the forecast is one run from the members' mean, and a thermostat switching
+// at another time than most members' carries it out of their 10th to 90th percentile (about one point in eight over the hour here;
+// none with the heaters held, which switch nothing).
+const outsideOwnBand = ({ cycles }, within = Infinity) => {
+    let outside = 0;
+    let all = 0;
+    for (const cycle of cycles.filter((entry) => entry.estimate?.band?.livingRoomTemperature?.length)) {
+        for (const point of cycle.estimate.band.livingRoomTemperature.filter((entry) => entry.time > cycle.now + 1e-9 && entry.time <= cycle.now + within + 1e-9)) {
+            const forecast = cycle.forecast.livingRoomTemperature.find((sample) => Math.abs(sample.time - point.time) < 1e-9);
+            if (!forecast) continue;
+            all += 1;
+            if (forecast.value < point.low - 1e-6 || forecast.value > point.high + 1e-6) outside += 1;
+        }
+    }
+    return { outside, all };
+};
+const justAfterNow = outsideOwnBand(handedEstimated, 180);
+assert.ok(justAfterNow.all > 0 && justAfterNow.outside === 0, `In the three minutes after now, the forecast left its own band at ${justAfterNow.outside} of ${justAfterNow.all} points.`);
+const ownBand = outsideOwnBand(handedEstimated);
+
+// A heater whose limits are narrower than its thermostat asks for (1500 W of the 2000 W it switches to) takes no more than its limits,
+// and the forecast says so.
+const limited = await runTwin(1, { livingRoomHeater: { choice: 'model', state: thermostatOf.livingRoomHeater } }, {}, {
+    thermostats: true,
+    edit: (document) => {
+        const heater = document.sharedParameters.find((parameter) => parameter.id === 103);
+        Object.assign(heater, { value: Math.min(heater.value, 1500), tuning: { minimum: 0, maximum: 1500 } });
+    }
+});
+const limitedCourse = limited.cycles.flatMap((cycle) => cycle.projections.livingRoomHeater.samples);
+assert.ok(limitedCourse.every((sample) => sample.value <= 1500 + 1e-9) && limitedCourse.some((sample) => Math.abs(sample.value - 1500) < 1e-9), 'The heater followed its thermostat within its limits.');
+const saidLimited = limited.cycles.find((cycle) => /held within its limits for \d+% of the forecast, where the state went to 2000/.test(cycle.projections.livingRoomHeater.reason));
+assert.ok(saidLimited, `Said: ${limited.cycles.map((cycle) => cycle.projections.livingRoomHeater.reason).find((reason) => /limits/.test(reason)) ?? 'nothing'}.`);
+
+// A setup kept from before the engineer's view offered only states that could drive an input: the bedroom's heater following the
+// floor slab (in kelvin), or the outdoor air the weather station sets. The twin stops and says why, at once, instead of sitting at
+// its start with no move made.
+for (const [state, said] of [[10, /bedroomHeater cannot follow Floor slab · Temperature past now: it is in K, and the input in W\./], [2, /bedroomHeater cannot follow Outdoor air · Temperature past now: an input sets it\./]]) {
+    const started = Date.now();
+    const { events } = await runTwin(1, { bedroomHeater: { choice: 'model', state } }, {}, { failing: true });
+    const error = events.find((event) => event.type === 'error');
+    assert.match(error?.message ?? 'no error', said);
+    assert.equal(events.filter((event) => event.type === 'cycle').length, 0);
+    assert.ok(Date.now() - started < 30000, `Said within ${((Date.now() - started) / 1000).toFixed(1)} s.`);
+}
 
 // ---- The inputs' own uncertainty in the estimator's band --------------------------------------------------------------------------
 const bandWidth = ({ cycles }) => {
@@ -199,7 +248,8 @@ assert.ok(coverage(withInputs) > coverage(withoutInputs), `The forecast band hol
 assert.ok(withInputs.cycles.at(-1).inputSpreads.livingRoomHeater > 0, 'Each input is moved by how far its forecasts have been off.');
 assert.equal(windows(withInputs.cycles), windows(withoutInputs.cycles), 'The inputs\' uncertainty reaches only the forecast.');
 
-console.log(`Thermostats in the model: the rooms' forecasts missed by ${handedMiss.toFixed(3)} K with the heaters handed to them and the setpoints to their plans, ${allHeldMiss.toFixed(3)} K held. `
+console.log(`Thermostats in the model: the rooms' forecasts missed by ${handedMiss.toFixed(3)} K with the heaters handed to them and the setpoints to their plans, ${allHeldMiss.toFixed(3)} K held; `
+    + `estimated, the forecast inside its own band at every point of the three minutes after now, outside it at ${ownBand.outside} of ${ownBand.all} over the hour. `
     + `The band ${bandWidth(withInputs).toFixed(3)} K wide with the inputs' uncertainty, holding ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings; ${bandWidth(withoutInputs).toFixed(3)} K and ${(100 * coverage(withoutInputs)).toFixed(0)}% without.`);
 console.log(`Inputs in the forecast: the heaters' own forecasts missed by ${heaterScores} at their average against held; the rooms' by ${averagedMiss.toFixed(3)} K at their average, ${automaticMiss.toFixed(3)} K on Automatic, `
     + `${heldMiss.toFixed(3)} K held; on the second day the last day repeated for the weather (${dayScores.outdoorTemperature.error.day.toFixed(2)} K against ${dayScores.outdoorTemperature.error.hold.toFixed(2)} K held) and the sun.`);

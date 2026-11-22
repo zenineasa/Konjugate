@@ -131,14 +131,22 @@ export class LiveTwin {
             this.#session = new WindowSession({
                 // Data that arrives in real time is kept up with; a recording played as fast as it can go gets every move.
                 ...settings, ...timing, header, engineOptions, keepUp: settings.keepUp ?? (source.kind !== 'recording' || Number.isFinite(source.speed ?? Infinity)),
-                onCycle: (cycle) => { this.#onEvent(cycleEvent(cycle, this.#session.stats())); }
+                onCycle: (cycle) => { this.#onEvent(cycleEvent(cycle, this.#session.stats())); },
+                // A move that fails (the engine refused a command, or stopped) stops the twin and says why, as soon as it happens.
+                onFailure: (error) => this.#fail(error)
             });
         };
         const onHeader = (given) => {
             header = converting
                 ? { ...given, signals: given.signals.map((signal) => (conversions[signal.name]?.unit !== undefined ? { ...signal, unit: conversions[signal.name].unit } : signal)) }
                 : given;
-            if (!settings.timingFromReadings) begin({});
+            // A setup the session refuses (one kept from before a check was made, say) stops the twin and says why, rather than
+            // escaping from the source's callback.
+            try {
+                if (!settings.timingFromReadings) begin({});
+            } catch (error) {
+                this.#fail(error);
+            }
         };
         // Readings held while the timing waits on them, and the times of each measured signal's good ones.
         let held = [];

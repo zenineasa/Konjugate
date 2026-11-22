@@ -746,7 +746,7 @@ function bandOf(tile, cycles) {
     return {
         word, share,
         text: `band ${word} · ${share}% outside`,
-        title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile; about 20% is honest. ${word === 'too narrow' ? 'The twin is surer than it should be: give the readings more noise, or let the model drift more, in the engineer\'s view.' : word === 'too wide' ? 'The twin is more cautious than it need be: less noise, or less drift, would tighten it.' : ''}`.trim()
+        title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile; about 20% is honest. Each reading is judged against the band from the move before it, up to that move's now, where the band is the model's and the readings' uncertainty alone: the inputs' own uncertainty widens only what lies ahead of now, so this says nothing of it. ${word === 'too narrow' ? 'The twin is surer than it should be: give the readings more noise, or let the model drift more, in the engineer\'s view.' : word === 'too wide' ? 'The twin is more cautious than it need be: less noise, or less drift, would tighten it.' : ''}`.trim()
     };
 }
 
@@ -887,9 +887,12 @@ export function handleEvent(update) {
         twin.running = false;
         twin.ended = update.reason;
         twin.recordedTo = update.recordedTo ?? null;
-        $('#healthTwin').className = 'healthItem';
-        $('#healthTwin').textContent = update.reason === 'played' ? `The whole log has been played: ${plural(twin.cycles.length, 'move')}` : `Stopped after ${plural(twin.cycles.length, 'move')}`;
-        addEvent('info', update.reason === 'played' ? 'The whole log has been played' : 'The twin was stopped', plural(twin.cycles.length, 'move'), twin.cycles.at(-1)?.now ?? null);
+        // A twin that stopped on an error has said why (the end that follows it does not say it again over the reason).
+        if (!twin.failed) {
+            $('#healthTwin').className = 'healthItem';
+            $('#healthTwin').textContent = update.reason === 'played' ? `The whole log has been played: ${plural(twin.cycles.length, 'move')}` : `Stopped after ${plural(twin.cycles.length, 'move')}`;
+            addEvent('info', update.reason === 'played' ? 'The whole log has been played' : 'The twin was stopped', plural(twin.cycles.length, 'move'), twin.cycles.at(-1)?.now ?? null);
+        }
         if (update.recordedTo) {
             const path = update.recordedTo;
             $('#roomStatus').textContent = `What the source sent is recorded in ${path}.`;
@@ -905,6 +908,7 @@ export function handleEvent(update) {
         reportStatus();
     } else if (update.type === 'error') {
         twin.running = false;
+        twin.failed = update.message;
         $('#healthTwin').className = 'healthItem bad';
         $('#healthTwin').textContent = `Stopped: ${update.message}`;
         addEvent('bad', 'The twin stopped', update.message);

@@ -45,6 +45,7 @@ export class EngineSession {
     #diagnostics = '';
     #stateTable = null;
     #algebraicStateIds = [];
+    #features = [];
     #ready;
     #exited;
     #ended = false;
@@ -83,6 +84,7 @@ export class EngineSession {
                     } else if (event.sessionInfo) {
                         // Sent once, after the state table: the session is ready.
                         this.#algebraicStateIds = event.sessionInfo.algebraicStateIds;
+                        this.#features = event.sessionInfo.features ?? [];
                         readyResolve();
                     } else if (event.sampleBatch) {
                         // The samples belong to the earliest advance still running; one that asked not to have them is not given them.
@@ -121,6 +123,8 @@ export class EngineSession {
     get alive() { return !this.#ended; }
     // The states the model computes from others: they can be compared with a measurement, never set to one.
     get algebraicStateIds() { return this.#algebraicStateIds; }
+    // What the engine can do beyond the protocol's first version ("followState"); an older engine says nothing.
+    get features() { return this.#features; }
     // The engine process's id, to watch its memory or tell it apart in a process list.
     get pid() { return this.#child.pid; }
 

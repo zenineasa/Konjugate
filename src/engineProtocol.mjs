@@ -186,8 +186,10 @@ export function encodeEngineCommand(sequence, command) {
                 encodedDoubleField(2, Number(sample.value))
             ]))),
             ...(command.replaceFrom !== undefined ? [encodedField(3, 0, encodeVarint(1)), encodedDoubleField(4, Number(command.replaceFrom))] : []),
-            // Past followFrom, the input follows a state of the model (a controller taking over from the readings).
-            ...(command.followStateId ? [encodedField(5, 0, encodeVarint(command.followStateId)), encodedDoubleField(6, Number(command.followFrom))] : [])
+            // Past followFrom, the input follows a state of the model (a controller taking over from the readings), within its
+            // limits when it has them (`followLimits` { minimum, maximum }).
+            ...(command.followStateId ? [encodedField(5, 0, encodeVarint(command.followStateId)), encodedDoubleField(6, Number(command.followFrom))] : []),
+            ...(command.followStateId && command.followLimits ? [encodedField(7, 0, encodeVarint(1)), encodedDoubleField(8, Number(command.followLimits.minimum)), encodedDoubleField(9, Number(command.followLimits.maximum))] : [])
         ]);
         payloadField = 8;
     } else if (command.type === 'restoreCheckpoint') {
@@ -636,8 +638,10 @@ export function decodeEngineEvent(buffer) {
             event.sessionReply = decodedSessionReply(field.value);
         } else if (field.number === 6 && field.wireType === 2) {
             const algebraicStateIds = [];
+            const features = [];
             for (const item of fields(field.value)) {
-                if (item.number === 1 && item.wireType === 0) algebraicStateIds.push(item.value);
+                if (item.number === 2 && item.wireType === 2) features.push(decodeUtf8(item.value));
+                else if (item.number === 1 && item.wireType === 0) algebraicStateIds.push(item.value);
                 else if (item.number === 1 && item.wireType === 2) {
                     for (let offset = 0; offset < item.value.length;) {
                         const varint = readVarint(item.value, offset);
@@ -646,7 +650,7 @@ export function decodeEngineEvent(buffer) {
                     }
                 }
             }
-            event.sessionInfo = { algebraicStateIds };
+            event.sessionInfo = { algebraicStateIds, features };
         }
     }
     if (event.protocolVersion !== 1) throw new Error(`Unsupported engine protocol version ${event.protocolVersion}.`);

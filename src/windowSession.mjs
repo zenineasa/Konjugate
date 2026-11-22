@@ -20,31 +20,11 @@
 // reaches neither the live session nor its record.
 
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
-import { forecastChoices, heldAt, pastChoices, projectInput, projectionError } from './inputForecast.mjs';
+import { followableStates, forecastChoices, heldAt, pastChoices, projectInput, projectionError, statesSetByInputs } from './inputForecast.mjs';
 import { timingProblem } from './twinSetup.mjs';
 import { interpolate, replayTargets, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
 import { analyse, ensembleStatistics, explainedShareTogether, initialEnsemble, perturb, quantile, readingNoise, seededNormal } from './stateEstimator.mjs';
-
-// The states a source term sets outright (`setsValue`) to an input's value, as it is (the outdoor air's temperature, the weather
-// station's reading; the heater's heat flow, its power): their ids. A term's bindings list every symbol it may use (its own state, the
-// time), so it is its expression that says what it reads: here, one symbol, bound to a parameter an input drives (the shared parameter,
-// or the term's own copy of it).
-function statesSetByInputs(document, inputParameterIds) {
-    const set = new Set();
-    for (const node of document.nodes ?? []) {
-        for (const term of node.sourceTerms ?? []) {
-            const stateId = term.expressionModel?.output?.stateId;
-            const symbol = term.expressionModel?.mathJson;
-            if (!term.setsValue || !Number.isSafeInteger(stateId) || typeof symbol !== 'string') continue;
-            const binding = (term.expressionModel?.bindings ?? []).find((candidate) => candidate.kind === 'parameter' && candidate.symbol === symbol);
-            if (!binding) continue;
-            const local = (term.parameters ?? []).find((parameter) => parameter.id === binding.parameterId);
-            if (inputParameterIds.has(binding.parameterId) || (local?.sharedParameterId !== undefined && inputParameterIds.has(local.sharedParameterId))) set.add(stateId);
-        }
-    }
-    return set;
-}
 
 const median = (values) => {
     if (!values.length) return 0;
@@ -94,7 +74,8 @@ export class WindowSession {
 
     // document: the model; header and mapping: the log's description and how its signals map to the model (as replay maps them);
     // window, stride, horizon, timeStep in seconds; tolerances: { signal: tolerance } for the comparison; engineOptions: how to find
-    // the engine. onCycle(cycle, index) is awaited after each cycle. trendCycles: how many jumps the trend is read over; alertAt:
+    // the engine. onCycle(cycle, index) is awaited after each cycle; onFailure(error) is called once, as soon as a move fails (the
+    // engine refused a command, or stopped), and no move is made after it. trendCycles: how many jumps the trend is read over; alertAt:
     // a multiple of the tolerance the jumps' recent mean must pass to raise the alarm, or null for no alarm. keepUp: when the data
     // is arriving in real time and the twin falls `maxBehind` strides or more behind it, skip to the newest anchor instead of
     // working through the backlog (the first rung of the window document's degrade ladder: a longer stride, said so in stats()).
@@ -118,7 +99,7 @@ export class WindowSession {
     // its epoch); `state` the id of the state the input follows past now with 'model', a controller in the model, which the forecast
     // starts from the input's last reading. With the estimator, each member forecasts with each input moved by a draw of how far its
     // forecasts have been off (its score), so the band takes in what the inputs may do (`estimator.inputUncertainty`, on by default).
-    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {}, inputForecasts = {} }) {
+    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, onFailure = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {}, inputForecasts = {} }) {
         const timing = timingProblem({ window, stride, horizon, timeStep });
         if (timing) throw new Error(timing);
         this.document = document;
@@ -137,13 +118,18 @@ export class WindowSession {
         const members = estimator.members ?? 32;
         if (!(Number.isInteger(members) && members >= 4 && members <= 1000)) throw new Error('The estimator\'s ensemble has from 4 to 1000 members.');
         this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {}, parameters: [...new Set(estimator.parameters ?? [])], inputUncertainty: estimator.inputUncertainty !== false };
-        const stateIds = new Set(document.nodes.flatMap((node) => (node.states ?? []).map((state) => state.id)));
         for (const [signal, setting] of Object.entries(inputForecasts)) {
             if (!forecastChoices.includes(setting?.choice)) throw new Error(`How ${signal} is carried into the forecast is one of ${forecastChoices.join(', ')}.`);
-            if (setting.choice === 'model' && !stateIds.has(setting.state)) throw new Error(`${signal} follows a state of the model past now: name one that is in it.`);
-            if (setting.choice === 'model' && this.outputs?.some?.((entry) => entry.stateId === setting.state)) throw new Error(`${signal} cannot follow a state a signal measures.`);
+            if (setting.choice !== 'model') continue;
+            // A state it may not follow (one written before the engineer's view offered only those it may) is refused in words, before
+            // the engine is asked anything.
+            const entry = this.inputs.find((candidate) => candidate.signal === signal);
+            const state = entry && followableStates(document, { parameterId: entry.parameterId, measured: this.outputs.map((output) => output.stateId), inputParameters: this.inputs.map((input) => input.parameterId) })
+                .find((candidate) => candidate.id === setting.state);
+            if (!state) throw new Error(`${signal} follows a state of the model past now: name one that is in it.`);
+            if (state.why) throw new Error(`${signal} cannot follow ${state.label} past now: ${state.why}. Choose a controller's output in the input's unit, in the engineer's view.`);
         }
-        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections, inputForecasts });
+        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, onFailure, trendCycles, alertAt, keepUp, maxBehind, corrections, inputForecasts });
         this.estimated = this.outputs.filter((entry) => corrections[entry.signal]?.estimate);
         if (this.estimator.parameters.length && !this.estimated.length) throw new Error('A parameter is estimated from readings: choose "estimate" for at least one measured signal.');
         this.#useModel(document);
@@ -196,11 +182,19 @@ export class WindowSession {
     async #startEngine() {
         this.#engine = await EngineSession.start(JSON.stringify(this.document), this.#engineConfiguration(), this.engineOptions);
         this.#sent.clear();
+        // An engine older than the twin would take an input from the model as held, saying nothing: refused, in words, instead.
+        const following = Object.entries(this.inputForecasts).filter(([, setting]) => setting.choice === 'model').map(([signal]) => signal);
+        if (following.length && !this.#engine.features?.includes('followState')) {
+            await this.#engine.close().catch(() => {});
+            this.#engine = null;
+            throw new Error(`This engine is older than the twin and cannot hand an input to the model past now (${following.join(', ')}): build the engine again, or choose another way to carry ${following.length === 1 ? 'it' : 'them'} into the forecast.`);
+        }
     }
 
     // Takes observations as they arrive; the cycles they make due are run in order, one after another.
     push(observations) {
         if (this.#closed) throw new Error('The session is closed.');
+        if (this.#failure) return;
         for (const observation of observations) {
             const readings = this.#readings.get(observation.signal);
             if (!readings) continue;
@@ -210,7 +204,19 @@ export class WindowSession {
             if (!known || observation.revision >= known.revision) readings.set(time, { time, value: observation.value, quality: observation.quality, revision: observation.revision });
             this.#latest = Math.max(this.#latest, time);
         }
-        this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => { this.#failure ??= error; });
+        this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => this.#failed(error));
+    }
+
+    // A move failed: the first failure is kept (idle() rejects with it) and said at once, and no move is made after it (each would fail
+    // the same way, unseen).
+    #failed(error) {
+        if (this.#failure) return;
+        this.#failure = error;
+        try {
+            this.onFailure?.(error);
+        } catch {
+            // Saying it must not fail the session a second time.
+        }
     }
 
     // The time of the latest reading, counted from the first.
@@ -220,7 +226,7 @@ export class WindowSession {
     // made too. Resolves when every move is made.
     async end() {
         this.#ended = true;
-        this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => { this.#failure ??= error; });
+        this.#queue = this.#queue.then(() => this.#runDueCycles()).catch((error) => this.#failed(error));
         return this.idle();
     }
 
@@ -425,7 +431,7 @@ export class WindowSession {
         for (const [signal, projection] of Object.entries(projections)) {
             const by = shift?.[signal] ?? 0;
             if (projection.follow) {
-                before.push({ type: 'appendInputSamples', parameterId: projection.parameterId, samples: [], followStateId: projection.follow, followFrom: now });
+                before.push({ type: 'appendInputSamples', parameterId: projection.parameterId, samples: [], followStateId: projection.follow, followFrom: now, ...(projection.limits ? { followLimits: projection.limits } : {}) });
                 after.push({ type: 'appendInputSamples', parameterId: projection.parameterId, samples: [], replaceFrom: now + this.timeStep / 2 });
                 continue;
             }
@@ -449,7 +455,16 @@ export class WindowSession {
     #followed(projections, now, inferred) {
         for (const [signal, projection] of Object.entries(projections)) {
             if (!projection.follow) continue;
-            const course = (inferred[projection.follow] ?? []).filter((sample) => sample.time > now + 1e-9);
+            // The engine gives the input the state's value within the input's limits; one that went past them is said, since a
+            // controller that asks for more than the input can do, or a state that is no controller's output, needs looking at.
+            const limits = projection.limits;
+            const raw = (inferred[projection.follow] ?? []).filter((sample) => sample.time > now + 1e-9);
+            const course = raw.map(({ time, value }) => ({ time, value: Math.min(limits?.maximum ?? Infinity, Math.max(limits?.minimum ?? -Infinity, value)) }));
+            const beyond = raw.map((sample, index) => ({ value: sample.value, by: Math.abs(sample.value - course[index].value) })).filter((sample) => sample.by > 0);
+            if (beyond.length) {
+                const furthest = beyond.reduce((worst, sample) => (sample.by > worst.by ? sample : worst));
+                projection.reason = `${projection.reason}; held within its limits for ${Math.max(1, Math.round(100 * beyond.length / raw.length))}% of the forecast, where the state went to ${Number(furthest.value.toPrecision(4))}`;
+            }
             projection.samples = course;
             const pending = this.#pendingProjections.at(-1)?.now === now ? this.#pendingProjections.at(-1).inputs[signal] : null;
             if (pending) pending.choices.model = course;
@@ -468,10 +483,11 @@ export class WindowSession {
         return spreads;
     }
 
-    // The projections whose horizon has passed by `now`, scored against what arrived; each input's root mean square error by choice, over
-    // every projection scored so far, and how many there have been.
+    // The projections whose horizon has passed by `now`, a stride ago (so a reading that arrives late, up to a stride after its time,
+    // is counted), scored against what arrived; each input's root mean square error by choice, over every projection scored so far,
+    // and how many there have been.
     #scoreProjections(now) {
-        const due = this.#pendingProjections.filter((pending) => pending.now + pending.horizon <= now + 1e-9);
+        const due = this.#pendingProjections.filter((pending) => pending.now + pending.horizon + this.stride <= now + 1e-9);
         this.#pendingProjections = this.#pendingProjections.filter((pending) => !due.includes(pending));
         for (const pending of due) {
             for (const [signal, { last, choices }] of Object.entries(pending.inputs)) {
@@ -552,10 +568,10 @@ export class WindowSession {
                     ...(now > nextAnchor + 1e-9 ? [{ type: 'advanceTo', time: now - this.timeStep }, { type: 'advanceTo', time: now, takeCheckpoints: true }] : [])
                 ]);
                 forecastFrom = this.#correctionsAtNow(toNow, now, computed);
-                // A controller the forecast hands an input to starts from what the input was doing: its state set to the last reading.
-                const controllers = Object.values(projections).filter((projection) => projection.follow).map((projection) => ({ stateId: projection.follow, value: projection.last }));
+                // A controller the forecast hands an input to starts from what the input was doing: the engine sets its state to the
+                // input's value before the step from now (AppendInputSamples' follow), here and in every estimator member's run alike.
                 const onward = await this.#engine.run([
-                    { type: 'restoreCheckpoint', time: now, overrides: [...Object.values(forecastFrom).filter((entry) => entry.applied !== null).map((entry) => ({ stateId: entry.stateId, value: entry.applied })), ...controllers] },
+                    { type: 'restoreCheckpoint', time: now, overrides: [...Object.values(forecastFrom).filter((entry) => entry.applied !== null).map((entry) => ({ stateId: entry.stateId, value: entry.applied }))] },
                     ...projected.before,
                     { type: 'advanceTo', time: end },
                     ...projected.after,

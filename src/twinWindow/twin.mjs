@@ -625,7 +625,7 @@ initEngineer({
         const estimated = Object.entries(corrections).filter(([, correction]) => correction.estimate).map(([name]) => name);
         await startTwin({
             events: twin?.events ?? [],
-            said: ['The twin was started again with the engineer\'s settings', `${timingText({ window, stride })}, a ${formatSpan(horizon)} forecast, a ${formatSpan(timeStep)} time step${estimated.length ? `; estimating ${estimated.map((name) => state.rows.find((row) => row.name === name)?.target?.label ?? name).join(', ')}` : ''}${Object.keys(inputs).length ? `; ahead, ${Object.entries(inputs).map(([name, setting]) => `${state.rows.find((row) => row.name === name)?.target?.label?.replace(/^Shared · /, '') ?? name} ${forecastLabels[setting.forecast].toLowerCase()}`).join(', ')}` : ''}`]
+            said: ['The twin was started again with the engineer\'s settings', `${timingText({ window, stride })}, a ${formatSpan(horizon)} forecast, a ${formatSpan(timeStep)} time step${estimated.length ? `; estimating ${estimated.map((name) => state.rows.find((row) => row.name === name)?.target?.label ?? name).join(', ')}` : ''}${Object.values(inputs).some((setting) => setting.forecast !== 'hold') ? `; ahead, ${Object.entries(inputs).filter(([, setting]) => setting.forecast !== 'hold').map(([name, setting]) => `${state.rows.find((row) => row.name === name)?.target?.label?.replace(/^Shared · /, '') ?? name} ${forecastLabels[setting.forecast].toLowerCase()}`).join(', ')}` : ''}`]
         });
     }
 });

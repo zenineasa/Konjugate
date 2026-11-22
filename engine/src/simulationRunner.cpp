@@ -826,6 +826,7 @@ private:
     void retainFrom(double time);
     void appendInputSamples(const protocol::AppendInputSamples& command);
     void followStates(double time);
+    void startFollowing(double start, double end);
     void settleAt(double time);
     void restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates);
     long long checkpointKey(double time) const;
@@ -1707,6 +1708,7 @@ std::uint32_t Simulation::advanceTo(double time, bool takeCheckpoints) {
     };
     std::uint32_t taken = 0;
     while (stepsSinceBase < targetSteps) {
+        startFollowing(baseTime + static_cast<double>(stepsSinceBase) * globalTimeStep, baseTime + static_cast<double>(stepsSinceBase + 1) * globalTimeStep);
         settleIfParametersChanged();
         const double elapsed = baseTime + static_cast<double>(stepsSinceBase + 1) * globalTimeStep;
         integrateStep(stepCounter++, globalTimeStep, elapsed);
@@ -1814,6 +1816,11 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
         throw std::runtime_error("An input follows a state that is not in the model.");
     }
     if (command.follow_state_id() && !std::isfinite(command.follow_from())) throw std::runtime_error("An input follows a state from a finite time.");
+    if (command.follow_state_id() && command.follow_bounded() && !(command.follow_minimum() <= command.follow_maximum())) {
+        throw std::runtime_error("An input follows a state within limits whose minimum is at most its maximum.");
+    }
+    const double followMinimum = command.follow_bounded() ? command.follow_minimum() : -std::numeric_limits<double>::infinity();
+    const double followMaximum = command.follow_bounded() ? command.follow_maximum() : std::numeric_limits<double>::infinity();
     if (existing == runControl.activeSchedules.end()) {
         if (kept.empty()) return;
         ParameterSchedule schedule;
@@ -1825,6 +1832,8 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
         schedule.samples = std::move(kept);
         schedule.followStateId = command.follow_state_id();
         schedule.followFrom = command.follow_from();
+        schedule.followMinimum = followMinimum;
+        schedule.followMaximum = followMaximum;
         runControl.activeSchedules.push_back(std::move(schedule));
         return;
     }
@@ -1836,6 +1845,26 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
     existing->startTime = std::min(existing->startTime, existing->samples.front().first);
     existing->followStateId = command.follow_state_id();
     existing->followFrom = command.follow_from();
+    existing->followMinimum = followMinimum;
+    existing->followMaximum = followMaximum;
+}
+
+// A state an input follows starts from what the input was doing: before the step over followFrom (from `start` to `end`), the state
+// is set to the input's value there, within its limits, so a controller's memory (a thermostat on or off) is the input's, in every
+// pass over that time (a forecast from now, an estimator's member run on from its anchor). A state the model computes from others
+// has no memory to set, and is left to the model.
+void Simulation::startFollowing(double start, double end) {
+    bool set = false;
+    for (const auto& schedule : runControl.activeSchedules) {
+        if (!schedule.input || !schedule.followStateId || schedule.samples.empty()) continue;
+        const double tolerance = 1e-9 * std::max(1.0, std::abs(schedule.followFrom));
+        if (!(start <= schedule.followFrom + tolerance && end > schedule.followFrom + tolerance)) continue;
+        const auto index = executionPlan.stateIndexes.at(schedule.followStateId);
+        if (algebraicIndexes.contains(index)) continue;
+        states[index] = std::clamp(evaluateParameterSchedule(schedule, schedule.followFrom), schedule.followMinimum, schedule.followMaximum);
+        set = true;
+    }
+    if (set) settleAt(start);
 }
 
 // Each input that follows a state past its followFrom takes the state's value at the end of this step as its next reading; what a
@@ -1847,7 +1876,7 @@ void Simulation::followStates(double time) {
         while (!schedule.samples.empty() && schedule.samples.back().first > schedule.followFrom + tolerance && schedule.samples.back().first >= time - tolerance) {
             schedule.samples.pop_back();
         }
-        schedule.samples.emplace_back(time, states[executionPlan.stateIndexes.at(schedule.followStateId)]);
+        schedule.samples.emplace_back(time, std::clamp(states[executionPlan.stateIndexes.at(schedule.followStateId)], schedule.followMinimum, schedule.followMaximum));
     }
 }
 
@@ -1899,6 +1928,7 @@ void Simulation::serveSession() {
         for (const auto stateId : executionPlan.stateIds) {
             if (algebraicIndexes.contains(executionPlan.stateIndexes.at(stateId))) info->add_algebraic_state_ids(stateId);
         }
+        info->add_features("followState");
         writeFramedEvent(*eventStream, event);
     }
     std::uint64_t failedBatch = 0;

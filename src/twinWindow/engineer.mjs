@@ -7,7 +7,7 @@
 
 import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
-import { forecastChoices, forecastLabels, parsePlan, planText, scoreSentence } from '../inputForecast.mjs';
+import { followableStates, forecastChoices, forecastLabels, parsePlan, planText, scoreSentence } from '../inputForecast.mjs';
 import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
 let host = null;
@@ -161,12 +161,43 @@ function renderInputForecasts(twin) {
         const zone = element('input', { type: 'text', className: 'forecastZone', value: setting.plan?.timeZone ?? ownTimeZone(), title: 'The time zone the plan\'s times are in' });
         zone.id = `forecastZone-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`;
         const zoneLabel = element('label', { className: 'forecastZoneLabel', textContent: 'Time zone', htmlFor: zone.id });
-        // From the model: the state it follows past now (a controller's output), any but those the readings measure.
-        const measured = new Set(twin.tiles.map((tile) => tile.target?.id));
+        // From the model: the state it follows past now (a controller's output). Those in the input's unit, then those whose unit is
+        // not stated; never one a signal measures, one an input sets, or one in another unit (src/inputForecast.mjs, followableStates).
+        // With none, the choice says so and cannot be made; one kept from before that it may not follow is shown, and said.
+        const states = followableStates(twin.baseline, { parameterId: input.target?.id, measured: twin.tiles.map((tile) => tile.target?.id), inputParameters: twin.inputs.map((other) => other.target?.id) });
+        const fitting = states.filter((candidate) => !candidate.why);
         const follow = element('select', { className: 'forecastState' });
-        follow.append(...host.states().filter((candidate) => !measured.has(candidate.id)).map((candidate) => new Option(candidate.label, String(candidate.id))));
-        if (setting.state) follow.value = String(setting.state);
-        follow.title = 'The state of the model the input follows past now, from its last reading: a controller\'s output';
+        const options = (list) => list.map((candidate) => new Option(candidate.label, String(candidate.id)));
+        const group = (heading, list) => {
+            if (!list.length) return [];
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = heading;
+            optgroup.append(...options(list));
+            return [optgroup];
+        };
+        const unit = input.target?.unit;
+        follow.append(...(unit
+            ? [...group(`In ${unit}`, fitting.filter((candidate) => candidate.stated)), ...group('Unit not stated', fitting.filter((candidate) => !candidate.stated))]
+            : options(fitting)));
+        const kept = setting.state ? states.find((candidate) => candidate.id === setting.state) : null;
+        if (kept?.why) {
+            const refused = new Option(`${kept.label} (${kept.why})`, String(kept.id));
+            refused.disabled = true;
+            refused.dataset.why = kept.why;
+            refused.dataset.label = kept.label;
+            follow.prepend(refused);
+        }
+        if (kept) follow.value = String(kept.id);
+        // Kept with the setup while another choice is in use, once chosen, so going back to it finds it as it was.
+        follow.dataset.chosen = setting.state ? '1' : '';
+        follow.title = 'The state of the model the input follows past now, from its last reading: a controller\'s output, in the input\'s unit';
+        if (!fitting.length) {
+            const model = [...choice.options].find((option) => option.value === 'model');
+            model.disabled = true;
+            model.textContent = `${forecastLabels.model} (nothing in the model can drive it)`;
+            model.title = `No state of the model is in ${unit ?? 'the input\'s unit'} without a signal measuring it or an input setting it: the model has no controller for ${label}.`;
+        }
+        follow.addEventListener('change', () => { follow.dataset.chosen = '1'; });
         for (const [element_, label_] of [[repeat, 'How the plan repeats'], [programme, 'The plan'], [zone, 'The plan\'s time zone'], [follow, 'The state it follows']]) {
             element_.dataset.input = name;
             element_.setAttribute('aria-label', `${label_}, for ${label}`);
@@ -178,7 +209,11 @@ function renderInputForecasts(twin) {
             follow.hidden = choice.value !== 'model';
         };
         showFields();
-        choice.addEventListener('change', () => { showFields(); markDirty(); });
+        choice.addEventListener('change', () => {
+            if (choice.value === 'model') follow.dataset.chosen = '1';
+            showFields();
+            markDirty();
+        });
         const score = element('small', { className: 'forecastScore' });
         score.dataset.input = input.signal;
         return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zoneLabel, zone, programme, follow, score);
@@ -208,14 +243,28 @@ function inputsFromForm(twin, factor) {
     let problem = null;
     for (const choice of $$('#inputForecastRows .forecastChoice')) {
         const name = choice.dataset.input;
-        if (choice.value === 'hold') continue;
         const of = (selector) => $(`#inputForecastRows ${selector}[data-input="${CSS.escape(name)}"]`);
         const setting = { forecast: choice.value };
         for (const field of $$('#inputForecastRows .forecastSpan').filter((entry) => entry.dataset.input === name && !entry.hidden && Number(entry.value) > 0)) {
             setting[field.dataset.key] = Number((Number(field.value) * factor).toPrecision(12));
         }
+        const input = twin.inputs.find((candidate) => twin.run.nameOf(candidate.signal) === name);
+        const label = input?.target?.label.replace(/^Shared · /, '') ?? name;
+        // A plan written while another choice is in use is kept with it (and scored beside it), when it reads as a plan.
+        if (choice.value !== 'plan' && of('.forecastPlan').value.trim()) {
+            const scale = inputScale(twin, input?.target?.unit);
+            const parsed = parsePlan(of('.forecastPlan').value, of('.forecastRepeat').value);
+            let timeZone = of('.forecastZone').value.trim() || ownTimeZone();
+            try {
+                timeZone = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;
+            } catch {
+                timeZone = null;
+            }
+            if (!parsed.error && timeZone) setting.plan = { repeat: of('.forecastRepeat').value, timeZone, points: parsed.points.map((point) => ({ ...point, value: scale.kept(point.value) })) };
+        }
+        const follow = of('.forecastState');
+        if (choice.value !== 'model' && follow.dataset.chosen && Number(follow.value) > 0 && !follow.selectedOptions[0]?.disabled) setting.state = Number(follow.value);
         if (choice.value === 'plan') {
-            const input = twin.inputs.find((candidate) => twin.run.nameOf(candidate.signal) === name);
             const scale = inputScale(twin, input?.target?.unit);
             const repeat = of('.forecastRepeat').value;
             const parsed = parsePlan(of('.forecastPlan').value, repeat);
@@ -223,16 +272,19 @@ function inputsFromForm(twin, factor) {
             try {
                 timeZone = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;
             } catch {
-                problem ??= `${input?.target?.label.replace(/^Shared · /, '') ?? name}'s plan: "${timeZone}" is not a time zone (Europe/Paris, UTC).`;
+                problem ??= `${label}'s plan: "${timeZone}" is not a time zone (Europe/Paris, UTC).`;
             }
-            if (parsed.error) problem ??= `${input?.target?.label.replace(/^Shared · /, '') ?? name}'s plan: ${parsed.error}`;
+            if (parsed.error) problem ??= `${label}'s plan: ${parsed.error}`;
             else setting.plan = { repeat, timeZone, points: parsed.points.map((point) => ({ ...point, value: scale.kept(point.value) })) };
         }
         if (choice.value === 'model') {
-            const state = Number(of('.forecastState').value);
-            if (!(state > 0)) problem ??= `${name}: choose the state of the model it follows.`;
+            const state = Number(follow.value);
+            const refused = follow.selectedOptions[0]?.dataset.why;
+            if (refused) problem ??= `${label} cannot follow ${follow.selectedOptions[0].dataset.label}: ${refused}. Choose a controller's output in its unit.`;
+            else if (!(state > 0)) problem ??= follow.options.length ? `${label}: choose the state of the model it follows.` : `Nothing in the model can drive ${label}: no state in its unit that no signal measures and no input sets.`;
             else setting.state = state;
         }
+        if (choice.value === 'hold' && !setting.plan && !setting.state) continue;
         inputs[name] = setting;
     }
     return { inputs, problem };

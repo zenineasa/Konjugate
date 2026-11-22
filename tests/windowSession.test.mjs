@@ -409,10 +409,51 @@ test('a dead engine is replaced and the moves go on exactly as if it had not die
 test('a failure that is not the engine dying stops the twin and is reported', async (t) => {
     const engines = installFakeEngine(t, tankModel);
     engines.crash = () => { throw new TypeError('something else broke'); };
-    const twin = session();
+    const failures = [];
+    const twin = session({ onFailure: (error) => failures.push(error.message) });
     twin.push(temperatures(0, 700));
     await assert.rejects(twin.idle(), /something else broke/);
     assert.equal(twin.stats().recoveries, 0);
+    // Said as soon as it happened, once, and no move is tried after it (each would fail the same way, unseen).
+    assert.deepEqual(failures, ['something else broke']);
+    twin.push(temperatures(800, 1500));
+    await assert.rejects(twin.idle(), /something else broke/);
+    assert.deepEqual(failures, ['something else broke']);
+    assert.equal(twin.cycles.length, 0);
+    await twin.close();
+});
+
+// The tank with a controller's output in the heater's unit (state 4), for an input handed to the model past now.
+function tankWithController() {
+    const document = tankDocument();
+    document.nodes[0].states.push({ id: 4, name: 'Command', symbol: 'u', initialValue: 0, unit: 'K/s' });
+    document.nodes.push({
+        id: 5, name: 'Room', position: [1, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#34727a' },
+        states: [{ id: 6, name: 'Supply', symbol: 's', initialValue: 0, unit: 'K/s' }],
+        sourceTerms: [{
+            id: 7, state: 's', expression: 'heater', setsValue: true,
+            expressionModel: { latex: 'heater', output: { stateId: 6 }, mathJson: 'heater', bindings: [{ kind: 'parameter', parameterId: 20, symbol: 'heater' }] }
+        }]
+    });
+    return document;
+}
+
+test('an input handed to the model follows only a state that could drive it, said in words', () => {
+    const follow = (state) => session({ document: tankWithController(), inputForecasts: { heater: { choice: 'model', state } } });
+    assert.throws(() => follow(2), /heater cannot follow Tank · Temperature past now: a signal measures it\./);
+    assert.throws(() => follow(3), /heater cannot follow Tank · Wall past now: it is in K, and the input in K\/s\./);
+    assert.throws(() => follow(6), /heater cannot follow Room · Supply past now: an input sets it\./);
+    assert.throws(() => follow(99), /name one that is in it/);
+    assert.doesNotThrow(() => follow(4));
+});
+
+test('an engine older than the twin is refused for an input handed to the model, in words, as soon as it starts', async (t) => {
+    installFakeEngine(t, { derivatives: { ...tankModel.derivatives, 4: () => 0 } });
+    const failures = [];
+    const twin = session({ document: tankWithController(), inputForecasts: { heater: { choice: 'model', state: 4 } }, onFailure: (error) => failures.push(error.message) });
+    twin.push([...temperatures(0, 700), reading('heater', 0, 0)]);
+    await assert.rejects(twin.idle(), /older than the twin and cannot hand an input to the model past now \(heater\)/);
+    assert.equal(failures.length, 1);
     await twin.close();
 });
 

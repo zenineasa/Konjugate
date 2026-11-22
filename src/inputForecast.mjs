@@ -309,3 +309,42 @@ export function projectionError(readings, samples, { now, horizon, last }) {
     if (!grid.length) return null;
     return Math.sqrt(grid.reduce((sum, [time, actual]) => sum + (heldAt(projected, time) - actual) ** 2, 0) / grid.length);
 }
+
+// The states of a model an input may follow past now with 'model' (a controller's output, docs/proposals/predictionActualWindow.md,
+// "From the model"), each with why it may not, or null: one a signal measures (its readings say what it does, not the model), one an
+// input sets (the input would only copy that input), and one in another unit than the input's parameter (the engine gives the input
+// the state's value as it is: a floor's temperature in kelvin is no heater's watts). A state or an input with no unit is not refused
+// for it (`stated` false: offered apart, as one whose unit is not stated). `parameterId` is the input's shared parameter;
+// `inputParameters` every mapped input's.
+export function followableStates(document, { parameterId, measured = [], inputParameters = [] }) {
+    const unit = String((document.sharedParameters ?? []).find((parameter) => parameter.id === parameterId)?.unit ?? '').trim();
+    const setByInputs = statesSetByInputs(document, new Set(inputParameters));
+    const measuredStates = new Set(measured);
+    return (document.nodes ?? []).flatMap((node) => (node.states ?? []).map((state) => {
+        const stateUnit = String(state.unit ?? '').trim();
+        const why = measuredStates.has(state.id) ? 'a signal measures it'
+            : setByInputs.has(state.id) ? 'an input sets it'
+            : unit && stateUnit && stateUnit !== unit ? `it is in ${stateUnit}, and the input in ${unit}` : null;
+        return { id: state.id, label: `${node.name} · ${state.name}`, unit: stateUnit, stated: Boolean(unit && stateUnit), why };
+    }));
+}
+
+// The states a source term sets outright (`setsValue`) to an input's value, as it is (the outdoor air's temperature, the weather
+// station's reading; the heater's heat flow, its power): their ids. A term's bindings list every symbol it may use (its own state, the
+// time), so it is its expression that says what it reads: here, one symbol, bound to a parameter an input drives (the shared parameter,
+// or the term's own copy of it).
+export function statesSetByInputs(document, inputParameterIds) {
+    const set = new Set();
+    for (const node of document.nodes ?? []) {
+        for (const term of node.sourceTerms ?? []) {
+            const stateId = term.expressionModel?.output?.stateId;
+            const symbol = term.expressionModel?.mathJson;
+            if (!term.setsValue || !Number.isSafeInteger(stateId) || typeof symbol !== 'string') continue;
+            const binding = (term.expressionModel?.bindings ?? []).find((candidate) => candidate.kind === 'parameter' && candidate.symbol === symbol);
+            if (!binding) continue;
+            const local = (term.parameters ?? []).find((parameter) => parameter.id === binding.parameterId);
+            if (inputParameterIds.has(binding.parameterId) || (local?.sharedParameterId !== undefined && inputParameterIds.has(local.sharedParameterId))) set.add(stateId);
+        }
+    }
+    return set;
+}

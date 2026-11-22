@@ -6030,11 +6030,13 @@ export async function runInteractionTests(driver) {
         await setField(twin, '#inputForecastRows .forecastChoice[data-input="livingRoomHeater"]', 'automatic');
         assert.equal(await evaluate(twin, `document.querySelector('#inputForecastRows .forecastSpan[data-input="outdoorTemperature"][data-key="span"]').hidden`), false, 'An average asks over how long.');
         assert.equal(await evaluate(twin, `document.querySelector('#inputForecastRows .forecastSpan[data-input="outdoorTemperature"][data-key="period"]').hidden`), true);
-        // From the model: the states it may follow are the model's, but not those the readings measure.
-        await setField(twin, '#inputForecastRows .forecastChoice[data-input="kitchenHeater"]', 'model');
-        const followable = await evaluate(twin, `[...document.querySelector('#inputForecastRows .forecastState[data-input="kitchenHeater"]').options].map((option) => option.textContent)`);
-        assert.ok(followable.includes('Floor slab · Temperature') && !followable.some((label) => /Air temperature/.test(label)), `The states it may follow: ${followable.join(', ')}.`);
-        await setField(twin, '#inputForecastRows .forecastChoice[data-input="kitchenHeater"]', 'hold');
+        // From the model: a heater may follow only a state in watts that no signal measures and no input sets, and this house has no
+        // thermostat, so the choice says nothing can drive it and cannot be made. The outdoor temperature, in kelvin, may follow the floor
+        // slab, but not the outdoor air it sets itself, nor the rooms' air, which the readings measure.
+        const modelChoice = await evaluate(twin, `(() => { const option = [...document.querySelector('#inputForecastRows .forecastChoice[data-input="kitchenHeater"]').options].find((entry) => entry.value === 'model'); return { disabled: option.disabled, text: option.textContent }; })()`);
+        assert.deepEqual(modelChoice, { disabled: true, text: 'From the model (nothing in the model can drive it)' });
+        const followable = await evaluate(twin, `[...document.querySelector('#inputForecastRows .forecastState[data-input="outdoorTemperature"]').options].map((option) => option.textContent)`);
+        assert.ok(followable.includes('Floor slab · Temperature') && !followable.some((label) => /Air temperature|Outdoor air/.test(label)), `The states it may follow: ${followable.join(', ')}.`);
         // From a plan: the sun by the clock (the house's recording is in UTC), written as times and values; one written wrongly is said,
         // and the twin is not started again with it.
         await setField(twin, '#inputForecastRows .forecastChoice[data-input="solarGain"]', 'plan');
@@ -6055,6 +6057,12 @@ export async function runInteractionTests(driver) {
         assert.equal(await kindOf('Solar gain'), 'input · ahead: from a plan');
         assert.equal(await kindOf('Kitchen heater'), 'input');
         assert.ok(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow')].find((row) => row.querySelector('strong').textContent === 'Outdoor temperature').querySelector('.plot').data.some((trace) => trace.name === 'Assumed' && trace.line.dash === 'dot')`), 'What the forecast assumed is drawn dotted past now.');
+        // Back to Hold, the plan written is kept with the input (and scored beside it), so choosing From a plan again finds it.
+        await setField(twin, '#inputForecastRows .forecastChoice[data-input="solarGain"]', 'hold');
+        await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].filter((item) => /started again with the engineer's settings/.test(item.textContent)).length >= 2`, 'The twin was not started again with the sun held.', 30000);
+        assert.ok(await evaluate(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /ahead, Outdoor temperature hold the average, Living room heater automatic/.test(item.textContent))`), 'A held input is not listed among the inputs carried ahead.');
+        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup()?.live?.inputs?.solarGain) === JSON.stringify({ forecast: 'hold', plan: { repeat: 'daily', timeZone: 'UTC', points: [{ at: 27000, value: 0 }, { at: 43200, value: 1500 }, { at: 63000, value: 0 }] } })`, 'The sun\'s plan was not kept with it when held.');
         await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await twin.close();

@@ -533,7 +533,7 @@ function buildRun(setup) {
     let settings = {
         document: state.context.document, mapping, window: live.window, stride: live.stride, horizon: live.horizon, timeStep: live.timeStep,
         tolerances, corrections: structuredClone(live.corrections), conversions,
-        estimator: { members: live.members, parameters: trackable, drift: Object.fromEntries(Object.entries(live.drift ?? {}).map(([id, value]) => [Number(id), value])) },
+        estimator: { members: live.members, parameters: trackable, drift: Object.fromEntries(Object.entries(live.drift ?? {}).map(([id, value]) => [Number(id), value])), inputUncertainty: live.inputUncertainty !== false },
         alertAt: live.alert > 0 && tolerances[first.signal] > 0 ? live.alert / tolerances[first.signal] : null,
         ...(fromReadings ? { timingFromReadings: fromReadings } : {}),
         // How each input is carried past now in the forecast (src/inputForecast.mjs): held, unless the engineer chose otherwise.
@@ -619,8 +619,8 @@ initEngineer({
     // The twin started again with the engineer's settings, kept with the setup.
     restartWith: async (live) => {
         const twin = currentTwin();
-        const { window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs = {} } = live;
-        state.saved = normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs } });
+        const { window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs = {}, inputUncertainty = true } = live;
+        state.saved = normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs, inputUncertainty } });
         await api.liveTwin.stop();
         const estimated = Object.entries(corrections).filter(([, correction]) => correction.estimate).map(([name]) => name);
         await startTwin({

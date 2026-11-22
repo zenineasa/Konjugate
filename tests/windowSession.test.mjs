@@ -287,7 +287,8 @@ test('with the estimator, a correction from before its last analysis is said not
     await twin.idle();
     assert.deepEqual(twin.cycles.at(-1).inputCorrections, [{ signal: 'heater', time: 100, applied: null, reason: 'before the estimator\'s last analysis, which is not run again' }],
         'One record for the input, at its earliest change.');
-    const replaced = engines[0].batches.flat().filter((command) => command.replaceFrom !== undefined);
+    // (Commands that take a forecast's projected inputs out again send no readings: they are not corrections.)
+    const replaced = engines[0].batches.flat().filter((command) => command.replaceFrom !== undefined && command.samples.length);
     assert.deepEqual(replaced.map((command) => command.replaceFrom), [100], 'The engine still gets the readings as they now are.');
     await twin.close();
 });

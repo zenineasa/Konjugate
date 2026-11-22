@@ -11,7 +11,13 @@
 //     checks only that no choice makes the rooms' forecasts worse than holding by more than a little;
 //   - Automatic averages the heaters: at first because it sees them switching back and forth, then because the score says so;
 //   - on a second day, the last day repeated forecasts the outdoor temperature and the sun better than holding them, by the score;
-//   - nothing projected is kept as a reading: each move's window runs on exactly the readings, whatever the forecast assumed.
+//   - nothing projected is kept as a reading: each move's window runs on exactly the readings, whatever the forecast assumed;
+//   - with the house's thermostats in the model and its setpoints logged: each heater handed to its thermostat past now (From the
+//     model: the engine has the heater follow the thermostat's command, which starts from the heater's last reading) and each setpoint
+//     to its programme by the clock (From a plan), the rooms' forecasts come clearly closer than with everything held, the heaters'
+//     own forecasts too, and the setpoints' exactly;
+//   - with the estimator, the inputs' own uncertainty (how far their forecasts have been off) widens the forecast's band, and turned
+//     off it does not.
 //
 // Run manually (after `npm run build:engine`):
 //   node tests/engine/twinInputForecast.mjs [path/to/konjugateEngine]
@@ -30,18 +36,25 @@ const engineOptions = basename(engineParentDirectory) === 'out'
     ? { applicationPath: dirname(engineParentDirectory), resourcesPath: '', packaged: false }
     : { applicationPath: '', resourcesPath: engineParentDirectory, packaged: true };
 
-const document = houseProject();
 const heaters = ['livingRoomHeater', 'bedroomHeater', 'kitchenHeater'];
 const rooms = ['livingRoomTemperature', 'bedroomTemperature', 'kitchenTemperature'];
 
-async function runTwin(days, inputForecasts, more = {}) {
-    const log = houseDay({ days });
+async function runTwin(days, inputForecasts, more = {}, { thermostats = false } = {}) {
+    const document = houseProject({ thermostats });
+    const log = houseDay({ days, setpoints: thermostats });
     const firstHour = (name) => log.observations.filter((observation) => observation.signal === name).slice(0, 60).map((observation) => observation.value);
     const suggestions = suggestMapping(log.header.signals.map((signal) => ({ id: signal.name, name: signal.name, unit: signal.unit, role: signal.role, values: firstHour(signal.name) })), document);
-    const mapping = suggestions.map((suggestion) => (suggestion.role === 'input'
+    // The setpoints, in °C, onto the thermostats' shared setpoints, in kelvin (mapped by hand: what the suggestions make of them is not
+    // what is checked here).
+    const setpointIds = { livingRoomSetpoint: 106, bedroomSetpoint: 107, kitchenSetpoint: 108 };
+    const mapping = suggestions.map((suggestion) => (setpointIds[suggestion.name] ? { signal: suggestion.name, role: 'input', unit: '°C', parameterId: setpointIds[suggestion.name] }
+        : suggestion.role === 'input'
         ? { signal: suggestion.name, role: 'input', unit: suggestion.unit, parameterId: suggestion.target.id }
         : { signal: suggestion.name, role: 'output', unit: suggestion.unit, stateId: suggestion.target.id }));
-    const conversions = Object.fromEntries(suggestions.filter((entry) => entry.conversion).map((entry) => [entry.name, { scale: entry.conversion.scale, offset: entry.conversion.offset, unit: entry.target.unit }]));
+    const conversions = Object.fromEntries([
+        ...suggestions.filter((entry) => entry.conversion && !setpointIds[entry.name]).map((entry) => [entry.name, { scale: entry.conversion.scale, offset: entry.conversion.offset, unit: entry.target.unit }]),
+        ...Object.keys(setpointIds).filter(() => thermostats).map((name) => [name, { scale: 1, offset: 273.15, unit: 'K' }])
+    ]);
     const events = [];
     const twin = new LiveTwin({ document, mapping, window: 3600, stride: 600, horizon: 3600, timeStep: 60, tolerances: Object.fromEntries(rooms.map((room) => [room, 0.2])), conversions, keepUp: false, inputForecasts, ...more },
         { kind: 'recording', content: formatDataLog(log), speed: Infinity }, engineOptions, (event) => events.push(event));
@@ -123,5 +136,70 @@ for (const input of ['outdoorTemperature', 'solarGain']) {
 }
 
 const heaterScores = heaters.map((heater) => `${scores[heater].error.mean.toFixed(0)} W against ${scores[heater].error.hold.toFixed(0)} W`).join(', ');
+// ---- The house's thermostats in the model, its setpoints logged -----------------------------------------------------------------
+// Each room's thermostat: its node's Heater command state (scripts/generateHouseTwin.mjs, houseProject({ thermostats: true })).
+const thermostatOf = { livingRoomHeater: 21, bedroomHeater: 23, kitchenHeater: 25 };
+const kelvin = 273.15;
+const plans = {
+    livingRoomSetpoint: [[6.5, 21], [23, 17]], bedroomSetpoint: [[7, 17], [21, 19.5]], kitchenSetpoint: [[6, 20.5], [9, 16], [17, 20.5], [21, 16]]
+};
+const planOf = (name) => ({ repeat: 'daily', timeZone: 'UTC', points: plans[name].map(([hour, celsius]) => ({ at: hour * 3600, value: celsius + kelvin })) });
+const allHeld = await runTwin(1, {}, {}, { thermostats: true });
+const handed = await runTwin(1, {
+    ...Object.fromEntries(heaters.map((heater) => [heater, { choice: 'model', state: thermostatOf[heater] }])),
+    ...Object.fromEntries(Object.keys(plans).map((name) => [name, { choice: 'plan', plan: planOf(name) }]))
+}, {}, { thermostats: true });
+assert.equal(windows(handed.cycles), windows(allHeld.cycles), 'Following the thermostats past now changed nothing before it.');
+const allHeldMiss = forecastMiss(allHeld);
+const handedMiss = forecastMiss(handed);
+assert.ok(handedMiss < 0.8 * allHeldMiss, `With each heater handed to its thermostat and each setpoint to its plan, the rooms' forecasts miss by ${handedMiss.toFixed(3)} K, held ${allHeldMiss.toFixed(3)} K.`);
+const followed = handed.cycles.at(-1).projections.livingRoomHeater;
+assert.equal(followed.using, 'model');
+assert.ok(followed.samples.length > 50 && followed.samples.every((sample) => Math.abs(sample.value) < 1e-6 || Math.abs(sample.value - 2000) < 1e-6), 'What the thermostat did past now is read back: on or off.');
+const handedScores = handed.cycles.at(-1).inputScores;
+for (const heater of heaters) {
+    assert.ok(handedScores[heater].error.model < handedScores[heater].error.hold, `${heater}: its thermostat missed by ${handedScores[heater].error.model.toFixed(0)} W, holding ${handedScores[heater].error.hold.toFixed(0)} W.`);
+}
+for (const name of Object.keys(plans)) assert.ok(handedScores[name].error.plan < 1e-9, `${name}: its plan is what then came (missed by ${handedScores[name].error.plan}).`);
+
+// With the estimator, every member's forecast hands the heaters to the thermostats too: the engine goes over the same stretch once a
+// member, each time replacing what the heater followed on the pass before.
+const handedEstimated = await runTwin(1, Object.fromEntries(heaters.map((heater) => [heater, { choice: 'model', state: thermostatOf[heater] }])),
+    { corrections: { livingRoomTemperature: { estimate: true } }, estimator: { members: 8 } }, { thermostats: true });
+assert.ok(handedEstimated.cycles.slice(1).every((cycle) => cycle.estimate?.band?.livingRoomTemperature?.length > 0), 'Every estimated move has its band.');
+assert.ok(forecastMiss(handedEstimated) < 0.8 * allHeldMiss, `Estimated, with the heaters handed to their thermostats: ${forecastMiss(handedEstimated).toFixed(3)} K.`);
+
+// ---- The inputs' own uncertainty in the estimator's band --------------------------------------------------------------------------
+const bandWidth = ({ cycles }) => {
+    const widths = cycles.filter((cycle) => cycle.estimate?.band?.livingRoomTemperature?.length).map((cycle) => { const end = cycle.estimate.band.livingRoomTemperature.at(-1); return end.high - end.low; });
+    return widths.reduce((sum, width) => sum + width, 0) / widths.length;
+};
+// How many of the living room's later readings fell inside the band its forecast drew (from now to the horizon): about 80% for an
+// honest 10th-to-90th percentile band.
+const coverage = ({ log, cycles }) => {
+    let inside = 0;
+    let all = 0;
+    for (const cycle of cycles.filter((entry) => entry.estimate?.band?.livingRoomTemperature?.length)) {
+        const band = cycle.estimate.band.livingRoomTemperature;
+        for (const reading of log.observations) {
+            if (reading.signal !== 'livingRoomTemperature' || reading.time <= cycle.now || reading.time > cycle.now + 3600) continue;
+            const point = band.find((entry) => Math.abs(entry.time - reading.time) < 1e-9);
+            if (!point) continue;
+            all += 1;
+            if (reading.value + kelvin >= point.low && reading.value + kelvin <= point.high) inside += 1;
+        }
+    }
+    return inside / all;
+};
+const estimating = { corrections: { livingRoomTemperature: { estimate: true } }, estimator: { members: 16 } };
+const withInputs = await runTwin(1, {}, estimating);
+const withoutInputs = await runTwin(1, {}, { ...estimating, estimator: { ...estimating.estimator, inputUncertainty: false } });
+assert.ok(bandWidth(withInputs) > 1.2 * bandWidth(withoutInputs), `The band at the horizon is ${bandWidth(withInputs).toFixed(3)} K wide with the inputs' uncertainty, ${bandWidth(withoutInputs).toFixed(3)} K without.`);
+assert.ok(coverage(withInputs) > coverage(withoutInputs), `The forecast band holds ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings with the inputs' uncertainty, ${(100 * coverage(withoutInputs)).toFixed(0)}% without.`);
+assert.ok(withInputs.cycles.at(-1).inputSpreads.livingRoomHeater > 0, 'Each input is moved by how far its forecasts have been off.');
+assert.equal(windows(withInputs.cycles), windows(withoutInputs.cycles), 'The inputs\' uncertainty reaches only the forecast.');
+
+console.log(`Thermostats in the model: the rooms' forecasts missed by ${handedMiss.toFixed(3)} K with the heaters handed to them and the setpoints to their plans, ${allHeldMiss.toFixed(3)} K held. `
+    + `The band ${bandWidth(withInputs).toFixed(3)} K wide with the inputs' uncertainty, holding ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings; ${bandWidth(withoutInputs).toFixed(3)} K and ${(100 * coverage(withoutInputs)).toFixed(0)}% without.`);
 console.log(`Inputs in the forecast: the heaters' own forecasts missed by ${heaterScores} at their average against held; the rooms' by ${averagedMiss.toFixed(3)} K at their average, ${automaticMiss.toFixed(3)} K on Automatic, `
     + `${heldMiss.toFixed(3)} K held; on the second day the last day repeated for the weather (${dayScores.outdoorTemperature.error.day.toFixed(2)} K against ${dayScores.outdoorTemperature.error.hold.toFixed(2)} K held) and the sun.`);

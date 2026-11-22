@@ -11,15 +11,22 @@
 //   trend       a line fitted over the span, carried on from the last reading, damped (it levels off) and clamped to the input's limits
 //   trend2      the same with a parabola: an input rising and levelling off
 //   day         what it did one period ago (a day by default), moved to start from where it is now
-//   automatic   hold, mean or trend, by what the span shows: steps, a back-and-forth, or a ramp
+//   automatic   hold, mean or trend, by what the span shows: steps, a back-and-forth, or a ramp; then by the score
+//   plan        a programme in clock time, repeated daily or weekly: a thermostat's setpoints, a shift pattern
+//   model       a state of the model the input follows past now: a controller in the model taking over from the readings (the
+//               engine follows it, src/windowSession.mjs; nothing is projected here)
 //
 // A projection is the samples to give the engine past now ([{ time, value }], held between them, as its input schedules are); none
 // means the last reading holds.
 
-export const forecastChoices = Object.freeze(['hold', 'mean', 'trend', 'trend2', 'day', 'automatic']);
+export const forecastChoices = Object.freeze(['hold', 'mean', 'trend', 'trend2', 'day', 'automatic', 'plan', 'model']);
 export const forecastLabels = Object.freeze({
-    hold: 'Hold', mean: 'Hold the average', trend: 'Follow the trend', trend2: 'Follow the trend, second order', day: 'Repeat the last day', automatic: 'Automatic'
+    hold: 'Hold', mean: 'Hold the average', trend: 'Follow the trend', trend2: 'Follow the trend, second order', day: 'Repeat the last day', automatic: 'Automatic',
+    plan: 'From a plan', model: 'From the model'
 });
+// The choices made from the input's own past, which Automatic chooses among and every move scores; a plan and the model need more
+// than the past, and are scored only where they are set up.
+export const pastChoices = Object.freeze(['hold', 'mean', 'trend', 'trend2', 'day']);
 
 const gridPoints = 100; // points the held signal is read at over a span, for an average or a fit
 const mostSamples = 200; // samples a projection gives the engine over the horizon
@@ -127,7 +134,7 @@ export function scoredChoice(score) {
     if (!(score?.projections >= scoredAfter)) return null;
     let best = 'hold';
     for (const choice of forecastChoices) {
-        if (choice === 'automatic' || !Number.isFinite(score.error[choice])) continue;
+        if (!pastChoices.includes(choice) || !Number.isFinite(score.error[choice])) continue;
         if (score.error[choice] < score.error[best] - 1e-12 * Math.abs(score.error[best])) best = choice;
     }
     const figure = (value) => Number(value.toPrecision(3));
@@ -156,6 +163,12 @@ export function projectInput(readings, settings, context) {
         ({ using, reason } = scoredChoice(context.score) ?? automaticChoice(readings, { now, span, resolution }));
     }
     if (using === 'hold') return result('hold', [], reason);
+    if (using === 'plan') {
+        const plan = settings.plan;
+        if (!plan?.points?.length) return result('hold', [], 'no plan given');
+        if (context.clock === null || context.clock === undefined) return result('hold', [], 'the source gives no clock time to follow a plan by');
+        return result('plan', planSamples(plan, { now, horizon, timeStep, clock: context.clock, limits }), reason);
+    }
     const from = Math.max(now - span, readings[0].time);
     if (!(now - from > 0)) return result('hold', [], 'not enough of its past yet');
     if (using === 'mean') {
@@ -194,6 +207,82 @@ export function projectInput(readings, settings, context) {
         return result('day', samples, reason);
     }
     return result('hold', [], `"${choice}" is not a forecast choice`);
+}
+
+// ---- Plans --------------------------------------------------------------------------------------------------------------------
+// A plan: { repeat: 'daily' | 'weekly', timeZone, points: [{ day (0 Monday to 6 Sunday, weekly only), at (seconds into the day),
+// value }] }, each value held from its time until the next point's, round the day or the week. Times are the plant's clock in its
+// time zone (an IANA name; the computer's when the plan was written, kept with it so the plan means the same anywhere).
+
+const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+// How far a time zone's clock is ahead of UTC at an instant, in seconds.
+export function zoneOffset(epochSeconds, timeZone) {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+        timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).formatToParts(new Date(Math.floor(epochSeconds) * 1000)).map((part) => [part.type, part.value]));
+    const asUtc = Date.UTC(Number(parts.year), Number(parts.month) - 1, Number(parts.day), Number(parts.hour), Number(parts.minute), Number(parts.second)) / 1000;
+    return asUtc - Math.floor(epochSeconds);
+}
+
+const period = (plan) => (plan.repeat === 'weekly' ? 7 * 86400 : 86400);
+const placeOf = (plan, point) => (plan.repeat === 'weekly' ? (point.day ?? 0) * 86400 : 0) + point.at;
+// Where in its day (or week, from Monday) a clock time falls. 1 January 1970 was a Thursday.
+const phaseOf = (plan, wallSeconds) => {
+    const length = period(plan);
+    const shifted = plan.repeat === 'weekly' ? wallSeconds + 3 * 86400 : wallSeconds;
+    return ((shifted % length) + length) % length;
+};
+
+// The plan's value at a point of its day or week: the last point at or before it, round from the end.
+function planValueAt(plan, phase) {
+    const sorted = [...plan.points].sort((a, b) => placeOf(plan, a) - placeOf(plan, b));
+    return (sorted.filter((point) => placeOf(plan, point) <= phase + 1e-9).at(-1) ?? sorted.at(-1)).value;
+}
+
+// The samples a plan gives past now: its value a step after now, then each of its changes within the horizon. `clock(time)` is the
+// twin's time as seconds since 1970 (UTC); the zone's offset is taken at now and held over the horizon.
+export function planSamples(plan, { now, horizon, timeStep, clock, limits = null }) {
+    const offset = zoneOffset(clock(now), plan.timeZone ?? 'UTC');
+    const phaseAt = (time) => phaseOf(plan, clock(time) + offset);
+    const first = now + timeStep;
+    const samples = [{ time: first, value: clamp(planValueAt(plan, phaseAt(first)), limits) }];
+    const length = period(plan);
+    const changes = [];
+    for (const point of plan.points) {
+        let time = first + ((placeOf(plan, point) - phaseAt(first)) % length + length) % length;
+        for (; time <= now + horizon + 1e-9; time += length) if (time > first + 1e-9) changes.push(time);
+    }
+    for (const time of [...new Set(changes.map((change) => Number(change.toFixed(6))))].sort((a, b) => a - b)) {
+        samples.push({ time, value: clamp(planValueAt(plan, phaseAt(time)), limits) });
+    }
+    return samples;
+}
+
+// A plan as a person writes it, one point to a line or between commas: "06:30 21" for a day, "Mon 06:30 21" for a week. Returns
+// { points } or { error }, in the order written; the values as written (the caller converts their unit).
+export function parsePlan(text, repeat = 'daily') {
+    const entries = String(text ?? '').split(/[\n,;]+/).map((entry) => entry.trim()).filter(Boolean);
+    if (!entries.length) return { error: 'Write the plan as a time and a value, one to a line: 06:30 21.' };
+    const points = [];
+    for (const entry of entries) {
+        const match = entry.match(/^(?:([A-Za-z]{3})[a-z]*\s+)?(\d{1,2}):(\d{2})\s+(-?\d+(?:\.\d+)?(?:e-?\d+)?)$/i);
+        if (!match) return { error: `"${entry}" is not a time and a value${repeat === 'weekly' ? ' after a day (Mon 06:30 21)' : ' (06:30 21)'}.` };
+        const [, dayText, hours, minutes, value] = match;
+        const day = dayText ? dayNames.findIndex((name) => name.toLowerCase() === dayText.toLowerCase()) : null;
+        if (repeat === 'weekly' && (day === null || day < 0)) return { error: `"${entry}" needs its day, as Mon 06:30 21.` };
+        if (repeat !== 'weekly' && dayText) return { error: `"${entry}" has a day: choose Weekly to plan by the day of the week.` };
+        if (Number(hours) > 23 || Number(minutes) > 59) return { error: `"${entry}" is not a time of day.` };
+        points.push({ ...(repeat === 'weekly' ? { day } : {}), at: Number(hours) * 3600 + Number(minutes) * 60, value: Number(value) });
+    }
+    return { points };
+}
+
+// A plan written back as a person would write it, its values through `shown` (to the unit they are read in).
+export function planText(plan, shown = (value) => value) {
+    const clockText = (at) => `${String(Math.floor(at / 3600)).padStart(2, '0')}:${String(Math.floor((at % 3600) / 60)).padStart(2, '0')}`;
+    return [...plan.points].sort((a, b) => placeOf(plan, a) - placeOf(plan, b))
+        .map((point) => `${plan.repeat === 'weekly' ? `${dayNames[point.day]} ` : ''}${clockText(point.at)} ${Number(Number(shown(point.value)).toPrecision(6))}`).join('\n');
 }
 
 // How far a projection made at `now` was from what then arrived, over the horizon: the root mean square of the difference between

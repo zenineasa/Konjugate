@@ -185,7 +185,9 @@ export function encodeEngineCommand(sequence, command) {
                 encodedDoubleField(1, Number(sample.time)),
                 encodedDoubleField(2, Number(sample.value))
             ]))),
-            ...(command.replaceFrom !== undefined ? [encodedField(3, 0, encodeVarint(1)), encodedDoubleField(4, Number(command.replaceFrom))] : [])
+            ...(command.replaceFrom !== undefined ? [encodedField(3, 0, encodeVarint(1)), encodedDoubleField(4, Number(command.replaceFrom))] : []),
+            // Past followFrom, the input follows a state of the model (a controller taking over from the readings).
+            ...(command.followStateId ? [encodedField(5, 0, encodeVarint(command.followStateId)), encodedDoubleField(6, Number(command.followFrom))] : [])
         ]);
         payloadField = 8;
     } else if (command.type === 'restoreCheckpoint') {

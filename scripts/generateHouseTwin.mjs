@@ -55,9 +55,13 @@ function solarGain(time, random) {
     return Math.round(clear * cloud * (0.97 + 0.06 * random()));
 }
 
-const sharedIds = { outdoorTemperature: 101, solarGain: 102, livingRoomHeater: 103, bedroomHeater: 104, kitchenHeater: 105 };
+const sharedIds = { outdoorTemperature: 101, solarGain: 102, livingRoomHeater: 103, bedroomHeater: 104, kitchenHeater: 105, livingRoomSetpoint: 106, bedroomSetpoint: 107, kitchenSetpoint: 108 };
 
-export function houseProject() {
+// `thermostats` adds each room's thermostat to the model (for tests/engine/twinInputForecast.mjs; the shipped demonstration has none):
+// a node whose Heater command follows the generator's own rule, on below the setpoint less 0.4 K, off above it plus 0.4 K, and as it
+// was between, reading its room and its setpoint, a shared parameter the controller's log drives. A twin's
+// forecast can hand each heater to it past now (From the model), and each setpoint to its programme (From a plan).
+export function houseProject({ thermostats = false } = {}) {
     let next = 200;
     const id = () => next++;
     const parameter = (name, symbol, value, unit, extra = {}) => ({ id: id(), name, symbol, value, unit, mode: 'constant', ...extra });
@@ -152,13 +156,48 @@ export function houseProject() {
         flowInto(`${one.room.name} to ${other.room.name.toLowerCase()}`, oneEnd, otherEnd, `${one.room.name} – ${other.room.name.toLowerCase()} wall`, conductance, other.room.capacitance);
         flowInto(`${other.room.name} to ${one.room.name.toLowerCase()}`, otherEnd, oneEnd, `${one.room.name} – ${other.room.name.toLowerCase()} wall`, conductance, one.room.capacitance);
     }
+    if (thermostats) {
+        house.rooms.forEach((room, index) => {
+            const { nodeId: roomNodeId, stateId: roomStateId } = roomNodes[room.key];
+            const nodeId = 20 + 2 * index;
+            const stateId = nodeId + 1;
+            nodes.push({
+                id: nodeId, name: `${room.name} thermostat`, type: 'Controller', position: [room.position[0], room.position[1], 2], appearance: { type: 'primitive', shape: 'box', color: '#8a8f99' },
+                states: [{ id: stateId, name: 'Heater command', symbol: 'heaterCommand', initialValue: 0, unit: 'W' }], sourceTerms: []
+            });
+            // The rule, from the room to its thermostat: the command goes to what the rule asks within one step (its rate the gap over the
+            // step, which explicit Euler closes exactly), so it keeps its value between the two thresholds, the thermostat's memory. (A
+            // state set outright by an equation may not read itself yet; docs/proposals/ratesAndUpdates.md would allow it.)
+            const setpoint = parameter(`${room.name} setpoint`, 'setpoint', kelvin + 20, 'K', { sharedParameterId: sharedIds[`${room.key}Setpoint`] });
+            const rating = parameter(`${room.name} heater rating`, 'rating', room.heater, 'W');
+            const band = parameter(`${room.name} thermostat band`, 'band', 0.4, 'K');
+            const step = parameter(`${room.name} thermostat step`, 'step', house.timeStep, 's');
+            const asked = ['Which', ['Less', 'roomTemperature', ['Add', 'setpoint', ['Negate', 'band']]], 'rating', ['Greater', 'roomTemperature', ['Add', 'setpoint', 'band']], 0, 'True', 'heaterCommand'];
+            const latex = '\\frac{\\begin{cases}\\mathrm{rating} & \\mathrm{roomTemperature}<\\mathrm{setpoint}-\\mathrm{band}\\\\0 & \\mathrm{roomTemperature}>\\mathrm{setpoint}+\\mathrm{band}\\\\\\mathrm{heaterCommand} & \\text{otherwise}\\end{cases}-\\mathrm{heaterCommand}}{\\mathrm{step}}';
+            edges.push({
+                id: id(), name: `${room.name} thermostat rule`, source: { nodeId: roomNodeId, stateId: roomStateId }, target: { nodeId, stateId }, directionality: 'directed',
+                equation: latex,
+                equationModel: {
+                    latex, output: { role: 'target', stateId },
+                    bindings: [
+                        { kind: 'state', role: 'source', nodeId: roomNodeId, stateId: roomStateId, symbol: 'roomTemperature' },
+                        { kind: 'state', role: 'target', nodeId, stateId, symbol: 'heaterCommand' },
+                        binding('parameter', setpoint.id, 'setpoint'), binding('parameter', rating.id, 'rating'), binding('parameter', band.id, 'band'), binding('parameter', step.id, 'step')
+                    ],
+                    mathJson: ['Divide', ['Add', asked, ['Negate', 'heaterCommand']], 'step']
+                },
+                parameters: [setpoint, rating, band, step], appearance: { color: '#8a8f99', offset: 0 }
+            });
+        });
+    }
     const shared = (key, name, value, unit) => ({ id: sharedIds[key], name, symbol: key, value, unit, mode: 'constant' });
     return {
         format: 'konjugate', version: 1, ownership: exampleOwnership('Smart House'), metadata: { units: 'SI' },
         sharedParameters: [
             shared('outdoorTemperature', 'Outdoor temperature', kelvin + 3, 'K'),
             shared('solarGain', 'Solar gain', 0, 'W'),
-            ...house.rooms.map((room) => shared(`${room.key}Heater`, `${room.name} heater`, room.heater, 'W'))
+            ...house.rooms.map((room) => shared(`${room.key}Heater`, `${room.name} heater`, room.heater, 'W')),
+            ...(thermostats ? house.rooms.map((room) => shared(`${room.key}Setpoint`, `${room.name} setpoint`, kelvin + 20, 'K')) : [])
         ],
         runConfigurations: [{ id: 30, name: 'One day', globalTimeStep: house.timeStep, outputInterval: house.timeStep, targetTime: house.duration }],
         activeRunConfigurationId: 30,
@@ -168,7 +207,8 @@ export function houseProject() {
 
 // A day of the house, a reading a minute: the model's own equations with the window's extra loss, the thermostats switching the heaters.
 // `days` runs it on for longer, each day's weather, sun, setpoints and open window as the first's (the shipped recording is one day).
-export function houseDay({ days = 1 } = {}) {
+// `setpoints` has the controller log each room's setpoint as well, an input in °C, when it changes and on the hour.
+export function houseDay({ days = 1, setpoints = false } = {}) {
     const random = mulberry32(house.seed);
     const temperature = Object.fromEntries(house.rooms.map((room) => [room.key, kelvin + 19]));
     let slab = kelvin + 19.5;
@@ -178,7 +218,7 @@ export function houseDay({ days = 1 } = {}) {
     const record = (time, signal, value, digits) => {
         const rounded = Number(value.toFixed(digits));
         // A controller logs an input when it changes; a thermometer every minute.
-        if (signal.endsWith('Heater') || signal === 'solarGain' || signal === 'outdoorTemperature') {
+        if (signal.endsWith('Heater') || signal.endsWith('Setpoint') || signal === 'solarGain' || signal === 'outdoorTemperature') {
             if (last[signal] === rounded && time % 3600 !== 0) return;
             last[signal] = rounded;
         }
@@ -196,6 +236,7 @@ export function houseDay({ days = 1 } = {}) {
         record(time, 'outdoorTemperature', outdoor - kelvin, 1);
         record(time, 'solarGain', sun, 0);
         for (const room of house.rooms) record(time, `${room.key}Heater`, on[room.key] ? room.heater : 0, 0);
+        if (setpoints) for (const room of house.rooms) record(time, `${room.key}Setpoint`, setpoint(room.key, time), 1);
         for (const room of house.rooms) record(time, `${room.key}Temperature`, temperature[room.key] - kelvin + house.noise * gaussianFrom(random), 2);
         // One step on, explicit Euler, as the model is run.
         const rate = {};
@@ -218,6 +259,7 @@ export function houseDay({ days = 1 } = {}) {
         { name: 'outdoorTemperature', role: 'input', unit: '°C' },
         { name: 'solarGain', role: 'input', unit: 'W' },
         ...house.rooms.map((room) => ({ name: `${room.key}Heater`, role: 'input', unit: 'W' })),
+        ...(setpoints ? house.rooms.map((room) => ({ name: `${room.key}Setpoint`, role: 'input', unit: '°C' })) : []),
         ...house.rooms.map((room) => ({ name: `${room.key}Temperature`, role: 'output', unit: '°C' }))
     ];
     return { header: { source: 'Smart house controller (simulated)', epoch: Date.parse('2026-11-09T00:00:00Z'), signals }, observations };

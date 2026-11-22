@@ -7,7 +7,7 @@
 
 import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
-import { forecastChoices, forecastLabels } from '../inputForecast.mjs';
+import { forecastChoices, forecastLabels, parsePlan, planText } from '../inputForecast.mjs';
 import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
 let host = null;
@@ -24,7 +24,7 @@ export function initEngineer(given) {
     $('#refitApply').addEventListener('click', () => applyRefit(false));
     $('#refitKeep').addEventListener('click', () => applyRefit(true));
     $('#alertAmount').addEventListener('change', () => setAlert());
-    for (const field of ['#members', '#timingWindow', '#timingStride', '#timingHorizon', '#timingStep']) $(field).addEventListener('change', () => markDirty());
+    for (const field of ['#members', '#inputUncertainty', '#timingWindow', '#timingStride', '#timingHorizon', '#timingStep']) $(field).addEventListener('change', () => markDirty());
     // The unit the window, the time between moves and the forecast are typed in: what they read is kept, only said in another unit.
     $('#timingUnit').addEventListener('change', () => {
         const from = Number($('#timingUnit').dataset.factor) || 60;
@@ -64,6 +64,7 @@ export function engineerOpened(twin) {
     $('#alertAmount').value = live.alert > 0 ? String(Number(live.alert.toPrecision(2))) : '';
     showTiming(twin);
     $('#members').value = String(live.members);
+    $('#inputUncertainty').checked = live.inputUncertainty !== false;
     renderTunable(twin);
     renderCorrections(twin);
     renderInputForecasts(twin);
@@ -87,7 +88,7 @@ function refreshButtons(twin) {
         : !twin.cycles.length ? 'Wait for the twin\'s first move: a refit is fitted on its latest window'
         : refit?.running ? 'A refit is running' : 'Fit the tunable values to the latest window';
     for (const field of $$('#tunableRows input')) field.disabled = !twin.running || !twin.cycles.length;
-    $('#restartTwin').disabled = !dirty || Boolean(timingProblem(liveFromForm(twin)));
+    $('#restartTwin').disabled = !dirty || Boolean(timingProblem(liveFromForm(twin)) ?? inputsFromForm(twin, Number($('#timingUnit').value) || 60).problem);
     // What a refit found: applied to the twin while it runs. Once it has stopped (a log played to its end while the fit ran) there is
     // no twin to run on with it, so Apply is not offered, and says why; the values can still be kept in the model, for its next run.
     if (refit?.report) {
@@ -109,6 +110,15 @@ function refreshButtons(twin) {
 const spanFields = { span: ['mean', 'trend', 'trend2', 'automatic'], damping: ['trend', 'trend2'], period: ['day'] };
 const spanPlaceholders = { span: 'over: the window', damping: 'levels off: forecast', period: 'period: a day' };
 
+// An input's values as the room reads them: temperatures in °C unless it is set to kelvin, as the model keeps them.
+function inputScale(twin, unit) {
+    return unit === 'K' && twin.layout?.temperature !== 'K'
+        ? { unit: '°C', shown: (value) => value - 273.15, kept: (value) => value + 273.15 }
+        : { unit: unit ?? '', shown: (value) => value, kept: (value) => value };
+}
+// The computer's own time zone, for a plan written here.
+const ownTimeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
 function renderInputForecasts(twin) {
     const live = twin.run.live;
     const factor = Number($('#timingUnit').dataset.factor) || 60;
@@ -120,7 +130,7 @@ function renderInputForecasts(twin) {
         const name = twin.run.nameOf(input.signal);
         const label = input.target?.label.replace(/^Shared · /, '') ?? name;
         const setting = live.inputs?.[name] ?? { forecast: 'hold' };
-        const choice = element('select');
+        const choice = element('select', { className: 'forecastChoice' });
         choice.dataset.input = name;
         choice.setAttribute('aria-label', `What the forecast assumes of ${label}`);
         choice.append(...forecastChoices.map((value) => new Option(forecastLabels[value], value)));
@@ -134,12 +144,39 @@ function renderInputForecasts(twin) {
             field.addEventListener('change', () => markDirty());
             return field;
         });
-        const showFields = () => fields.forEach((field) => { field.hidden = !spanFields[field.dataset.key].includes(choice.value); });
+        // From a plan: daily or weekly, the programme as times and values (in the unit the room reads the input in), and the plant's
+        // time zone (the computer's, for a new plan).
+        const scale = inputScale(twin, input.target?.unit);
+        const repeat = element('select', { className: 'forecastRepeat' });
+        repeat.append(new Option('Daily', 'daily'), new Option('Weekly', 'weekly'));
+        repeat.value = setting.plan?.repeat ?? 'daily';
+        const programme = element('textarea', {
+            className: 'forecastPlan', rows: 3, placeholder: `06:30 ${scale.unit === '°C' ? '21' : '1'}\n23:00 ${scale.unit === '°C' ? '17' : '0'}`,
+            value: setting.plan ? planText(setting.plan, scale.shown) : ''
+        });
+        programme.title = `One time and value to a line${scale.unit ? `, in ${scale.unit}` : ''}; weekly, the day first (Mon 06:30 21). Each value holds until the next.`;
+        const zone = element('input', { type: 'text', className: 'forecastZone', value: setting.plan?.timeZone ?? ownTimeZone(), title: 'The time zone the plan\'s times are in' });
+        // From the model: the state it follows past now (a controller's output), any but those the readings measure.
+        const measured = new Set(twin.tiles.map((tile) => tile.target?.id));
+        const follow = element('select', { className: 'forecastState' });
+        follow.append(...host.states().filter((candidate) => !measured.has(candidate.id)).map((candidate) => new Option(candidate.label, String(candidate.id))));
+        if (setting.state) follow.value = String(setting.state);
+        follow.title = 'The state of the model the input follows past now, from its last reading: a controller\'s output';
+        for (const [element_, label_] of [[repeat, 'How the plan repeats'], [programme, 'The plan'], [zone, 'The plan\'s time zone'], [follow, 'The state it follows']]) {
+            element_.dataset.input = name;
+            element_.setAttribute('aria-label', `${label_}, for ${label}`);
+            element_.addEventListener('change', () => markDirty());
+        }
+        const showFields = () => {
+            fields.forEach((field) => { field.hidden = !spanFields[field.dataset.key].includes(choice.value); });
+            for (const field of [repeat, programme, zone]) field.hidden = choice.value !== 'plan';
+            follow.hidden = choice.value !== 'model';
+        };
         showFields();
         choice.addEventListener('change', () => { showFields(); markDirty(); });
         const score = element('small', { className: 'forecastScore' });
         score.dataset.input = input.signal;
-        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, score);
+        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zone, programme, follow, score);
     }));
     showInputScores(twin, twin.cycles.at(-1));
 }
@@ -164,6 +201,42 @@ function showInputScores(twin, cycle) {
         } else parts.push('Scored once a forecast\'s horizon has passed.');
         score.textContent = parts.join(' ');
     }
+}
+
+// What each input's choice in the form says, for the live settings; `problem` the first thing that cannot be used as written.
+function inputsFromForm(twin, factor) {
+    const inputs = {};
+    let problem = null;
+    for (const choice of $$('#inputForecastRows .forecastChoice')) {
+        const name = choice.dataset.input;
+        if (choice.value === 'hold') continue;
+        const of = (selector) => $(`#inputForecastRows ${selector}[data-input="${CSS.escape(name)}"]`);
+        const setting = { forecast: choice.value };
+        for (const field of $$('#inputForecastRows .forecastSpan').filter((entry) => entry.dataset.input === name && !entry.hidden && Number(entry.value) > 0)) {
+            setting[field.dataset.key] = Number((Number(field.value) * factor).toPrecision(12));
+        }
+        if (choice.value === 'plan') {
+            const input = twin.inputs.find((candidate) => twin.run.nameOf(candidate.signal) === name);
+            const scale = inputScale(twin, input?.target?.unit);
+            const repeat = of('.forecastRepeat').value;
+            const parsed = parsePlan(of('.forecastPlan').value, repeat);
+            let timeZone = of('.forecastZone').value.trim() || ownTimeZone();
+            try {
+                timeZone = new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions().timeZone;
+            } catch {
+                problem ??= `${input?.target?.label.replace(/^Shared · /, '') ?? name}'s plan: "${timeZone}" is not a time zone (Europe/Paris, UTC).`;
+            }
+            if (parsed.error) problem ??= `${input?.target?.label.replace(/^Shared · /, '') ?? name}'s plan: ${parsed.error}`;
+            else setting.plan = { repeat, timeZone, points: parsed.points.map((point) => ({ ...point, value: scale.kept(point.value) })) };
+        }
+        if (choice.value === 'model') {
+            const state = Number(of('.forecastState').value);
+            if (!(state > 0)) problem ??= `${name}: choose the state of the model it follows.`;
+            else setting.state = state;
+        }
+        inputs[name] = setting;
+    }
+    return { inputs, problem };
 }
 
 // ---- Timing ------------------------------------------------------------------------------------------------------------------------
@@ -202,7 +275,7 @@ function timingNote(twin, live) {
 function markDirty() {
     dirty = true;
     const twin = currentTwin();
-    const problem = twin ? timingProblem(liveFromForm(twin)) : null;
+    const problem = twin ? timingProblem(liveFromForm(twin)) ?? inputsFromForm(twin, Number($('#timingUnit').value) || 60).problem : null;
     if (twin) timingNote(twin, liveFromForm(twin));
     $('#restartTwin').disabled = Boolean(problem);
     $('#restartNote').className = problem ? 'status warning' : 'status';
@@ -478,11 +551,8 @@ function liveFromForm(twin) {
         corrections,
         members: Math.round(Number($('#members').value)) || 32,
         untracked: $$('#trackRows input').filter((box) => !box.checked).map((box) => Number(box.dataset.parameterId)),
-        inputs: Object.fromEntries($$('#inputForecastRows select').filter((choice) => choice.value !== 'hold').map((choice) => [choice.dataset.input, {
-            forecast: choice.value,
-            ...Object.fromEntries($$('#inputForecastRows .forecastSpan').filter((field) => field.dataset.input === choice.dataset.input && !field.hidden && Number(field.value) > 0)
-                .map((field) => [field.dataset.key, Number((Number(field.value) * factor).toPrecision(12))]))
-        }])),
+        inputs: inputsFromForm(twin, factor).inputs,
+        inputUncertainty: $('#inputUncertainty').checked,
         drift: Object.fromEntries($$('#driftRows input').filter((field) => Number(field.value) > 0).map((field) => [field.dataset.stateId, Number(field.value)]))
     };
 }
@@ -491,7 +561,7 @@ async function restart() {
     const twin = currentTwin();
     if (!twin || !dirty) return;
     const live = liveFromForm(twin);
-    if (timingProblem(live)) return markDirty();
+    if (timingProblem(live) || inputsFromForm(twin, Number($('#timingUnit').value) || 60).problem) return markDirty();
     dirty = false;
     $('#restartTwin').disabled = true;
     $('#restartNote').textContent = '';

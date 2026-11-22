@@ -825,6 +825,7 @@ private:
     ProviderCheckpointStates restoreState(const protocol::RestoreState& command);
     void retainFrom(double time);
     void appendInputSamples(const protocol::AppendInputSamples& command);
+    void followStates(double time);
     void settleAt(double time);
     void restoreProviderStates(const std::vector<std::pair<EntityId, std::vector<std::byte>>>& providerStates);
     long long checkpointKey(double time) const;
@@ -1710,6 +1711,7 @@ std::uint32_t Simulation::advanceTo(double time, bool takeCheckpoints) {
         const double elapsed = baseTime + static_cast<double>(stepsSinceBase + 1) * globalTimeStep;
         integrateStep(stepCounter++, globalTimeStep, elapsed);
         ++stepsSinceBase;
+        followStates(elapsed);
         if (stepsSinceBase % outputSteps == 0) {
             batch->add_times(elapsed);
             for (const auto index : reportedIndexes) batch->add_values(states[index]);
@@ -1808,6 +1810,10 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
         throw std::runtime_error("Input readings must come in time order; a corrected reading is sent with replace.");
     }
     kept.insert(kept.end(), incoming.begin(), incoming.end());
+    if (command.follow_state_id() && executionPlan.stateIndexes.find(command.follow_state_id()) == executionPlan.stateIndexes.end()) {
+        throw std::runtime_error("An input follows a state that is not in the model.");
+    }
+    if (command.follow_state_id() && !std::isfinite(command.follow_from())) throw std::runtime_error("An input follows a state from a finite time.");
     if (existing == runControl.activeSchedules.end()) {
         if (kept.empty()) return;
         ParameterSchedule schedule;
@@ -1817,6 +1823,8 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
         schedule.input = true;
         schedule.startTime = kept.front().first;
         schedule.samples = std::move(kept);
+        schedule.followStateId = command.follow_state_id();
+        schedule.followFrom = command.follow_from();
         runControl.activeSchedules.push_back(std::move(schedule));
         return;
     }
@@ -1826,6 +1834,21 @@ void Simulation::appendInputSamples(const protocol::AppendInputSamples& command)
     }
     existing->samples = std::move(kept);
     existing->startTime = std::min(existing->startTime, existing->samples.front().first);
+    existing->followStateId = command.follow_state_id();
+    existing->followFrom = command.follow_from();
+}
+
+// Each input that follows a state past its followFrom takes the state's value at the end of this step as its next reading; what a
+// step over these times added before (an earlier pass, before a restore) is dropped first, so the input is what this pass made it.
+void Simulation::followStates(double time) {
+    const auto tolerance = 1e-9 * std::max(1.0, std::abs(time));
+    for (auto& schedule : runControl.activeSchedules) {
+        if (!schedule.input || !schedule.followStateId || !(time > schedule.followFrom + tolerance)) continue;
+        while (!schedule.samples.empty() && schedule.samples.back().first > schedule.followFrom + tolerance && schedule.samples.back().first >= time - tolerance) {
+            schedule.samples.pop_back();
+        }
+        schedule.samples.emplace_back(time, states[executionPlan.stateIndexes.at(schedule.followStateId)]);
+    }
 }
 
 #ifndef __EMSCRIPTEN__

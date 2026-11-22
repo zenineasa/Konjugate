@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticChoice, fitPolynomial, heldAt, projectInput, projectionError, scoredChoice } from '../src/inputForecast.mjs';
+import { automaticChoice, fitPolynomial, heldAt, parsePlan, planText, projectInput, projectionError, scoredChoice } from '../src/inputForecast.mjs';
 
 const context = { now: 3600, horizon: 3600, timeStep: 60 };
 const near = (actual, expected, tolerance, message) => assert.ok(Math.abs(actual - expected) <= tolerance, `${message ?? ''} ${actual} is not within ${tolerance} of ${expected}`);
@@ -116,4 +116,41 @@ test('once scored often enough, automatic goes by the score: the closest choice,
     const switched = [{ time: 0, value: 0 }, { time: 3000, value: 2000 }];
     assert.equal(projectInput(switched, { choice: 'automatic', span: 3600 }, context).using, 'hold');
     assert.equal(projectInput(switched, { choice: 'automatic', span: 3600 }, { ...context, score: { projections: 40, error: { hold: 1000, mean: 612 } } }).using, 'mean');
+});
+
+test('a plan is followed by the plant\'s clock, repeated daily or weekly, from a step after now to the horizon', () => {
+    const { points } = parsePlan('06:30 21\n23:00 17');
+    assert.deepEqual(points, [{ at: 23400, value: 21 }, { at: 82800, value: 17 }]);
+    const plan = { repeat: 'daily', timeZone: 'UTC', points };
+    // The twin's time 0 is midnight UTC on a Monday (9 November 2026); now is 05:00, the horizon three hours.
+    const clock = (time) => Date.parse('2026-11-09T00:00:00Z') / 1000 + time;
+    const projection = projectInput([{ time: 0, value: 17 }], { choice: 'plan', plan }, { now: 5 * 3600, horizon: 3 * 3600, timeStep: 60, clock });
+    assert.equal(projection.using, 'plan');
+    assert.deepEqual(projection.samples, [{ time: 5 * 3600 + 60, value: 17 }, { time: 6.5 * 3600, value: 21 }]);
+    // The same plan in Paris (an hour ahead of UTC in November): 06:30 there is 05:30 UTC.
+    const paris = projectInput([{ time: 0, value: 17 }], { choice: 'plan', plan: { ...plan, timeZone: 'Europe/Paris' } }, { now: 5 * 3600, horizon: 3 * 3600, timeStep: 60, clock });
+    assert.deepEqual(paris.samples.map((sample) => [sample.time / 3600, sample.value]), [[5 + 1 / 60, 17], [5.5, 21]]);
+    // Round midnight: from 22:00 over four hours, 23:00 down to 17 and nothing more till morning.
+    const late = projectInput([{ time: 0, value: 21 }], { choice: 'plan', plan }, { now: 22 * 3600, horizon: 4 * 3600, timeStep: 60, clock });
+    assert.deepEqual(late.samples.map((sample) => [sample.time / 3600, sample.value]), [[22 + 1 / 60, 21], [23, 17]]);
+    // Weekly: a Saturday lie-in.
+    const weekly = { repeat: 'weekly', timeZone: 'UTC', points: parsePlan('Mon 06:30 21\nSat 09:00 21\nMon 23:00 17\nSat 23:00 17\nSun 23:00 17', 'weekly').points };
+    const saturday = projectInput([{ time: 0, value: 17 }], { choice: 'plan', plan: weekly }, { now: 5 * 86400 + 6 * 3600, horizon: 4 * 3600, timeStep: 60, clock });
+    assert.deepEqual(saturday.samples.map((sample) => [(sample.time - 5 * 86400) / 3600, sample.value]), [[6 + 1 / 60, 17], [9, 21]]);
+    // Without a clock (a source that gives no time of day) it holds, and says why.
+    assert.match(projectInput([{ time: 0, value: 17 }], { choice: 'plan', plan }, { now: 3600, horizon: 3600, timeStep: 60 }).reason, /no clock time/);
+});
+
+test('a plan is read as written, and written back the same', () => {
+    assert.match(parsePlan('6:30').error, /is not a time and a value/);
+    assert.match(parsePlan('Mon 06:30 21').error, /choose Weekly/);
+    assert.match(parsePlan('06:30 21', 'weekly').error, /needs its day/);
+    assert.match(parsePlan('25:00 3').error, /not a time of day/);
+    assert.match(parsePlan('').error, /one to a line/);
+    const plan = { repeat: 'weekly', timeZone: 'UTC', points: parsePlan('Sat 09:00 294.15, Mon 06:30 294.15', 'weekly').points };
+    assert.equal(planText(plan, (kelvin) => kelvin - 273.15), 'Mon 06:30 21\nSat 09:00 21');
+});
+
+test('a plan and the model are never what Automatic picks, being set up rather than read from the past', () => {
+    assert.equal(scoredChoice({ projections: 40, error: { hold: 9, plan: 1, model: 1, mean: 5 } }).using, 'mean');
 });

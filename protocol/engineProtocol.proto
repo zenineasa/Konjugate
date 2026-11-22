@@ -166,11 +166,17 @@ message AdvanceTo {
 
 // Readings of an input, driving a shared parameter from the first of them on, held between them; with `replace`, the readings
 // already kept at or after `replace_from` are dropped first, which is how a corrected reading arrives.
+// With `follow_state_id`, past `follow_from` the input follows a state of the model instead: at the end of every step after it, the
+// state's value is added as the input's next reading (a controller in the model taking over from the readings, as a live twin's
+// forecast asks: docs/proposals/predictionActualWindow.md, "From the model"). A step that goes over a time again (after a restore)
+// replaces what it added there before. Every AppendInputSamples sets this afresh: one without a state stops the following.
 message AppendInputSamples {
     uint64 parameter_id = 1;
     repeated ParameterScheduleSample samples = 2;
     bool replace = 3;
     double replace_from = 4;
+    uint64 follow_state_id = 5;
+    double follow_from = 6;
 }
 
 message StateOverride {

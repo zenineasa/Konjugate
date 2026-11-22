@@ -167,6 +167,10 @@ struct ParameterSchedule {
     // An input stream (a session's AppendInputSamples): readings of what was really done, held between them, which drive the
     // parameter from the first of them on whether or not it is live, ahead of every other value it could have.
     bool input = false;
+    // An input stream that, past followFrom, follows a state of the model: the session adds the state's value at the end of every
+    // step after it as the stream's next reading. 0 for none.
+    EntityId followStateId = 0;
+    double followFrom = 0;
 };
 
 double evaluateParameterSchedule(const ParameterSchedule& schedule, double simulationTime);

@@ -13,8 +13,10 @@
 //             reading when not given), an estimate with the readings' `noise` (a standard deviation) when one is given; `members` the
 //             estimator's ensemble; `untracked` the tunable parameters the estimator leaves alone (every other one is tracked when a
 //             signal is estimated); `drift` { stateId: how far it may drift in an hour, beyond what the model says }; `inputs`
-//             { name: { forecast, span, damping, period } } how each input is carried past now in the forecast (src/inputForecast.mjs;
-//             held when not given), spans in seconds
+//             { name: { forecast, span, damping, period, plan, state } } how each input is carried past now in the forecast
+//             (src/inputForecast.mjs; held when not given), spans in seconds, `plan` a programme by the clock, `state` the state the
+//             input follows past now with 'model'; `inputUncertainty` false to leave the inputs' uncertainty out of the
+//             estimator's band
 //   layout    { order, tall, pinned, hidden, temperature, span, bounds }: the control room's strips by measured signal's name, in
 //             order, those drawn taller, pinned to the top, and hidden (`wide`, from when the room was tiles, is kept and unused); temperatures shown in 'C' (the default) or 'K'; how much of
 //             the past the plots show, 'all' or a span in seconds (four times the twin's window when not given); the window's place
@@ -44,6 +46,23 @@ function normalizeEntry(raw) {
     const conversion = raw.conversion && finite(raw.conversion.scale) && raw.conversion.scale !== 0 && finite(raw.conversion.offset)
         ? { scale: raw.conversion.scale, offset: raw.conversion.offset } : null;
     return { source: raw.source, name: raw.name, role: target ? role : null, target, unit: typeof raw.unit === 'string' ? raw.unit : '', conversion };
+}
+
+// A plan for an input in the forecast (src/inputForecast.mjs): { repeat, timeZone, points: [{ day, at, value }] }, each point a time
+// of day in seconds (and, weekly, a day from 0, Monday, to 6) with a value; null when nothing usable is left.
+function normalizePlan(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.points)) return null;
+    const repeat = raw.repeat === 'weekly' ? 'weekly' : 'daily';
+    let timeZone = 'UTC';
+    try {
+        if (text(raw.timeZone)) timeZone = new Intl.DateTimeFormat('en-US', { timeZone: raw.timeZone }).resolvedOptions().timeZone;
+    } catch {
+        timeZone = 'UTC';
+    }
+    const points = raw.points.filter((point) => point && finite(point.at) && point.at >= 0 && point.at < 86400 && finite(point.value)
+        && (repeat !== 'weekly' || (Number.isInteger(point.day) && point.day >= 0 && point.day <= 6)))
+        .slice(0, 500).map((point) => ({ ...(repeat === 'weekly' ? { day: point.day } : {}), at: point.at, value: point.value }));
+    return points.length ? { repeat, timeZone, points } : null;
 }
 
 export function normalizeTwinSetup(raw) {
@@ -78,8 +97,15 @@ export function normalizeTwinSetup(raw) {
         if (mapping.find((entry) => entry.name === name)?.role !== 'input' || !setting || !forecastChoices.includes(setting.forecast)) continue;
         inputs[name] = { forecast: setting.forecast };
         for (const key of ['span', 'damping', 'period']) if (positive(setting[key])) inputs[name][key] = setting[key];
+        const plan = normalizePlan(setting.plan);
+        if (plan) inputs[name].plan = plan;
+        if (Number.isSafeInteger(setting.state) && setting.state > 0) inputs[name].state = setting.state;
+        // A plan with no programme, or the model with no state to follow, cannot be used: the input is held.
+        if ((setting.forecast === 'plan' && !plan) || (setting.forecast === 'model' && !inputs[name].state)) delete inputs[name];
     }
     if (Object.keys(inputs).length) live.inputs = inputs;
+    // The estimator's band takes in the inputs' own uncertainty unless this is false.
+    if (raw.live?.inputUncertainty === false) live.inputUncertainty = false;
     const setup = { source, mapping, live };
     const signalNames = (list) => [...new Set((Array.isArray(list) ? list : []).filter((name) => names.has(name)))];
     if (raw.layout && typeof raw.layout === 'object') {

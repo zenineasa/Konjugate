@@ -109,3 +109,21 @@ test('how each input is carried into the forecast is kept for mapped inputs with
     assert.deepEqual(setup.live.inputs, { heater: { forecast: 'trend', span: 1800 } }, 'Not for a measured signal, nor one not mapped.');
     assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping: [], live: { inputs: { heater: { forecast: 'guess' } } } }).live.inputs, undefined);
 });
+
+test('a plan is kept with its points, repeat and time zone, and the model with the state it follows; without them the input is held', () => {
+    const mapping = [{ source: 'h', name: 'heater', role: 'input', target: { kind: 'parameter', id: 5 } }, { source: 's', name: 'setpoint', role: 'input', target: { kind: 'parameter', id: 7 } }, { source: 'v', name: 'valve', role: 'input', target: { kind: 'parameter', id: 8 } }];
+    const setup = normalizeTwinSetup({
+        source: { kind: 'push' }, mapping,
+        live: { inputs: {
+            heater: { forecast: 'model', state: 12 },
+            setpoint: { forecast: 'plan', plan: { repeat: 'weekly', timeZone: 'Europe/Paris', points: [{ day: 0, at: 23400, value: 294.15 }, { day: 9, at: 0, value: 1 }, { at: 100, value: 2 }] } },
+            valve: { forecast: 'plan', plan: { points: [] } }
+        } }
+    });
+    assert.deepEqual(setup.live.inputs, {
+        heater: { forecast: 'model', state: 12 },
+        setpoint: { forecast: 'plan', plan: { repeat: 'weekly', timeZone: 'Europe/Paris', points: [{ day: 0, at: 23400, value: 294.15 }] } }
+    });
+    assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping, live: { inputs: { heater: { forecast: 'model' } } } }).live.inputs, undefined);
+    assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping, live: { inputs: { setpoint: { forecast: 'plan', plan: { timeZone: 'Nowhere/Else', points: [{ at: 0, value: 1 }] } } } } }).live.inputs.setpoint.plan.timeZone, 'UTC');
+});

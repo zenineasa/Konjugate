@@ -7,6 +7,7 @@
 
 import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
 import { addEvent, baselineTakes, currentTwin } from './room.mjs';
+import { forecastChoices, forecastLabels } from '../inputForecast.mjs';
 import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
 let host = null;
@@ -28,9 +29,9 @@ export function initEngineer(given) {
     $('#timingUnit').addEventListener('change', () => {
         const from = Number($('#timingUnit').dataset.factor) || 60;
         const to = Number($('#timingUnit').value);
-        for (const field of timingFields) {
-            const value = Number($(field).value);
-            if ($(field).value !== '' && Number.isFinite(value)) $(field).value = String(Number((value * from / to).toPrecision(12)));
+        for (const field of [...timingFields.map((selector) => $(selector)), ...$$('.forecastSpan')]) {
+            const value = Number(field.value);
+            if (field.value !== '' && Number.isFinite(value)) field.value = String(Number((value * from / to).toPrecision(12)));
         }
         showTimingUnit(to);
     });
@@ -65,12 +66,14 @@ export function engineerOpened(twin) {
     $('#members').value = String(live.members);
     renderTunable(twin);
     renderCorrections(twin);
+    renderInputForecasts(twin);
     refreshButtons(twin);
 }
 
 export function engineerCycle(twin, cycle) {
     if (!on) return;
     refreshButtons(twin);
+    showInputScores(twin, cycle);
     // A tracked parameter's estimate, shown where its slider would be.
     for (const parameter of cycle?.estimate?.parameters ?? []) {
         const value = $(`#tunableRows [data-parameter-id="${parameter.parameterId}"] .trackedValue`);
@@ -96,6 +99,70 @@ function refreshButtons(twin) {
             $('#refitStatus').className = 'status warning';
             $('#refitStatus').textContent = `The twin has stopped, so it cannot run on with these values${parameters ? '; they can still be kept in the model, for its next run' : ''}.`;
         }
+    }
+}
+
+// ---- Each input, in the forecast ----------------------------------------------------------------------------------------------------
+// How each input is carried past now (src/inputForecast.mjs): the choice, and the spans it reads, in the timing's unit (the span an
+// average or a trend is read over, empty for the window; how long a trend takes to level off, empty for the forecast's length; the
+// period a day is repeated at, empty for a day). Taken when the twin starts again.
+const spanFields = { span: ['mean', 'trend', 'trend2', 'automatic'], damping: ['trend', 'trend2'], period: ['day'] };
+const spanPlaceholders = { span: 'over: the window', damping: 'levels off: forecast', period: 'period: a day' };
+
+function renderInputForecasts(twin) {
+    const live = twin.run.live;
+    const factor = Number($('#timingUnit').dataset.factor) || 60;
+    if (!twin.inputs.length) {
+        $('#inputForecastRows').replaceChildren(element('p', { className: 'hint', textContent: 'No input is mapped.' }));
+        return;
+    }
+    $('#inputForecastRows').replaceChildren(...twin.inputs.map((input) => {
+        const name = twin.run.nameOf(input.signal);
+        const label = input.target?.label.replace(/^Shared · /, '') ?? name;
+        const setting = live.inputs?.[name] ?? { forecast: 'hold' };
+        const choice = element('select');
+        choice.dataset.input = name;
+        choice.setAttribute('aria-label', `What the forecast assumes of ${label}`);
+        choice.append(...forecastChoices.map((value) => new Option(forecastLabels[value], value)));
+        choice.value = setting.forecast;
+        const fields = Object.keys(spanFields).map((key) => {
+            const field = element('input', { type: 'number', min: '0', step: 'any', className: 'forecastSpan', placeholder: spanPlaceholders[key], value: setting[key] ? String(Number((setting[key] / factor).toPrecision(12))) : '' });
+            field.dataset.input = name;
+            field.dataset.key = key;
+            field.title = { span: 'How far back an average or a trend is read', damping: 'How long the trend keeps its pace before it levels off', period: 'How long ago the input is repeated from' }[key];
+            field.setAttribute('aria-label', `${field.title}, for ${label}`);
+            field.addEventListener('change', () => markDirty());
+            return field;
+        });
+        const showFields = () => fields.forEach((field) => { field.hidden = !spanFields[field.dataset.key].includes(choice.value); });
+        showFields();
+        choice.addEventListener('change', () => { showFields(); markDirty(); });
+        const score = element('small', { className: 'forecastScore' });
+        score.dataset.input = input.signal;
+        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, score);
+    }));
+    showInputScores(twin, twin.cycles.at(-1));
+}
+
+// The score beside each input: how its forecasts would have done, by the choice that came closest, against holding it; and what the
+// forecast assumes of it now, and why, when that is not Hold.
+function showInputScores(twin, cycle) {
+    for (const score of $$('#inputForecastRows .forecastScore')) {
+        const input = twin.inputs.find((candidate) => candidate.signal === score.dataset.input);
+        const unit = input?.target?.unit ? ` ${input.target.unit}` : '';
+        const scored = cycle?.inputScores?.[score.dataset.input];
+        const projection = cycle?.projections?.[score.dataset.input];
+        const parts = [];
+        if (projection && projection.choice !== 'hold') parts.push(`Now: ${forecastLabels[projection.using].toLowerCase()}${projection.reason ? ` (${projection.reason})` : ''}.`);
+        if (scored?.projections) {
+            const ranked = Object.entries(scored.error).filter(([choice]) => choice !== 'automatic').sort((a, b) => a[1] - b[1]);
+            const [best, error] = ranked[0];
+            const figure = (value) => `${shown(Number(value.toPrecision(3)))}${unit}`;
+            parts.push(best === 'hold' || !(error < scored.error.hold)
+                ? `Over ${scored.projections} forecasts, holding has been closest (missed by ${figure(scored.error.hold)}).`
+                : `Over ${scored.projections} forecasts, ${forecastLabels[best].toLowerCase()} would have been ${Number((scored.error.hold / Math.max(error, 1e-12)).toPrecision(2))}× closer than holding (${figure(error)} against ${figure(scored.error.hold)}).`);
+        } else parts.push('Scored once a forecast\'s horizon has passed.');
+        score.textContent = parts.join(' ');
     }
 }
 
@@ -411,6 +478,11 @@ function liveFromForm(twin) {
         corrections,
         members: Math.round(Number($('#members').value)) || 32,
         untracked: $$('#trackRows input').filter((box) => !box.checked).map((box) => Number(box.dataset.parameterId)),
+        inputs: Object.fromEntries($$('#inputForecastRows select').filter((choice) => choice.value !== 'hold').map((choice) => [choice.dataset.input, {
+            forecast: choice.value,
+            ...Object.fromEntries($$('#inputForecastRows .forecastSpan').filter((field) => field.dataset.input === choice.dataset.input && !field.hidden && Number(field.value) > 0)
+                .map((field) => [field.dataset.key, Number((Number(field.value) * factor).toPrecision(12))]))
+        }])),
         drift: Object.fromEntries($$('#driftRows input').filter((field) => Number(field.value) > 0).map((field) => [field.dataset.stateId, Number(field.value)]))
     };
 }

@@ -378,3 +378,11 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .tutorialBanner strong { display: block; margin: 2px 0 6px; font-size: 15px; }
 .tutorialBanner p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: #b9ccd4; }
 .tutorialBanner .tutorialBannerNote { display: block; font-size: 11px; color: #7fa3ad; }
+
+/* The engineer's choice of how each input is carried into the forecast: its name, the choice, the spans that choice reads, its score. */
+.forecastRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px 6px; align-items: center; margin-bottom: 10px; font-size: 12.5px; }
+.forecastRow > span:first-child, .forecastRow > select, .forecastRow > .forecastScore { grid-column: 1 / -1; }
+.forecastRow > span:first-child { color: var(--text); }
+.forecastRow select { width: 100%; font-size: 12.5px; }
+.forecastRow input { height: 26px; min-width: 0; }
+.forecastRow .forecastScore { color: var(--faint); font-size: 11.5px; }

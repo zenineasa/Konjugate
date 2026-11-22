@@ -6002,6 +6002,28 @@ export async function runInteractionTests(driver) {
         assert.doesNotMatch(await tileState('Living room · Air temperature'), /\bbad\b/);
         assert.doesNotMatch(await tileState('Kitchen · Air temperature'), /\bbad\b/);
         assert.equal((await twinEvents(twin)).filter((text) => /^bad: .*drifting past the warning/.test(text)).length, 1, 'Only the bedroom.');
+        // Each input in the forecast: held by default, each scored against what then arrived over the day; the outdoor temperature at
+        // its average and the living room's heater on Automatic, taken when the twin starts again, kept with the project, drawn dotted
+        // past now on their strips and said beside their names.
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        assert.deepEqual(await evaluate(twin, `[...document.querySelectorAll('#inputForecastRows select')].map((choice) => [choice.dataset.input, choice.value])`),
+            [['outdoorTemperature', 'hold'], ['solarGain', 'hold'], ['livingRoomHeater', 'hold'], ['bedroomHeater', 'hold'], ['kitchenHeater', 'hold']]);
+        const scoreOf = (name) => evaluate(twin, `[...document.querySelectorAll('#inputForecastRows .forecastRow')].find((row) => row.querySelector('select').dataset.input === ${JSON.stringify(name)}).querySelector('.forecastScore').textContent`);
+        assert.match(await scoreOf('livingRoomHeater'), /^Over \d+ forecasts, (holding has been closest|.+ would have been [\d.]+× closer than holding)/);
+        await setField(twin, '#inputForecastRows select[data-input="outdoorTemperature"]', 'mean');
+        await setField(twin, '#inputForecastRows select[data-input="livingRoomHeater"]', 'automatic');
+        assert.equal(await evaluate(twin, `document.querySelector('#inputForecastRows .forecastSpan[data-input="outdoorTemperature"][data-key="span"]').hidden`), false, 'An average asks over how long.');
+        assert.equal(await evaluate(twin, `document.querySelector('#inputForecastRows .forecastSpan[data-input="outdoorTemperature"][data-key="period"]').hidden`), true);
+        await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+        await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /started again with the engineer's settings/.test(item.textContent) && /ahead, Outdoor temperature hold the average, Living room heater automatic/.test(item.textContent))`, 'The twin was not started again with the inputs\' forecasts.', 30000);
+        await waitFor(opened, `JSON.stringify(window.__debugTwin.setup()?.live?.inputs) === JSON.stringify({ outdoorTemperature: { forecast: 'mean' }, livingRoomHeater: { forecast: 'automatic' } })`, 'The inputs\' forecasts were not kept with the project.');
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 12`, 'The twin did not move on after starting again.', 60000);
+        const kindOf = (name) => evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow')].find((row) => row.querySelector('strong').textContent === ${JSON.stringify(name)}).querySelector('.inputKind').textContent`);
+        assert.equal(await kindOf('Outdoor temperature'), 'input · ahead: hold the average');
+        assert.match(await kindOf('Living room heater'), /^input · ahead: .+ \(automatic\)$/);
+        assert.equal(await kindOf('Solar gain'), 'input');
+        assert.ok(await evaluate(twin, `[...document.querySelectorAll('#inputRows .inputRow')].find((row) => row.querySelector('strong').textContent === 'Outdoor temperature').querySelector('.plot').data.some((trace) => trace.name === 'Assumed' && trace.line.dash === 'dot')`), 'What the forecast assumed is drawn dotted past now.');
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);

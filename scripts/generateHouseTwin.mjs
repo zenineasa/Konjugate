@@ -48,7 +48,7 @@ function setpoint(key, time) {
 // The weather: a cold day, coldest before dawn, and the sun through the living room's south windows with a passing cloud or two.
 const outdoorCelsius = (time) => 3 + 5 * Math.sin(2 * Math.PI * (time / 86400 - 9 / 24));
 function solarGain(time, random) {
-    const hour = time / 3600;
+    const hour = (time / 3600) % 24;
     if (hour < 7.5 || hour > 17.5) return 0;
     const clear = 1600 * Math.sin(Math.PI * (hour - 7.5) / 10) ** 2;
     const cloud = hour > 11.2 && hour < 12.1 ? 0.35 : hour > 15 && hour < 15.6 ? 0.5 : 1;
@@ -167,7 +167,8 @@ export function houseProject() {
 }
 
 // A day of the house, a reading a minute: the model's own equations with the window's extra loss, the thermostats switching the heaters.
-export function houseDay() {
+// `days` runs it on for longer, each day's weather, sun, setpoints and open window as the first's (the shipped recording is one day).
+export function houseDay({ days = 1 } = {}) {
     const random = mulberry32(house.seed);
     const temperature = Object.fromEntries(house.rooms.map((room) => [room.key, kelvin + 19]));
     let slab = kelvin + 19.5;
@@ -183,7 +184,7 @@ export function houseDay() {
         }
         observations.push({ time, signal, value: rounded, quality: 'good', revision: 0 });
     };
-    for (let time = 0; time <= house.duration; time += house.timeStep) {
+    for (let time = 0; time <= days * house.duration; time += house.timeStep) {
         const outdoor = kelvin + outdoorCelsius(time);
         const sun = solarGain(time, random);
         // The thermostats, with half a degree either side, read the room as it is.
@@ -200,7 +201,7 @@ export function houseDay() {
         const rate = {};
         let slabRate = 0;
         for (const room of house.rooms) {
-            const open = room.key === house.window.room && time >= house.window.from && time < house.window.to ? house.window.factor : 1;
+            const open = room.key === house.window.room && time % 86400 >= house.window.from && time % 86400 < house.window.to ? house.window.factor : 1;
             let flow = (on[room.key] ? room.heater : 0) + (room.key === 'livingRoom' ? sun : 0)
                 + room.heatLoss * open * (outdoor - temperature[room.key]) + room.slab * (slab - temperature[room.key]);
             for (const [a, b, conductance] of house.walls) {

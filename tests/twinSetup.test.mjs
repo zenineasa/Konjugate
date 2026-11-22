@@ -99,3 +99,13 @@ test('a model\'s own step is its active run configuration\'s', () => {
     assert.equal(modelTimeStep({ runConfigurations: [{ id: 1, globalTimeStep: 60 }] }), 60);
     assert.equal(modelTimeStep({}), null);
 });
+
+test('how each input is carried into the forecast is kept for mapped inputs with a known choice, and its spans when positive', () => {
+    const setup = normalizeTwinSetup({
+        source: { kind: 'push' },
+        mapping: [{ source: 'h', name: 'heater', role: 'input', target: { kind: 'parameter', id: 5 } }, { source: 't', name: 'temperature', role: 'output', target: { kind: 'state', id: 6 } }],
+        live: { inputs: { heater: { forecast: 'trend', span: 1800, damping: -1, period: 'x' }, temperature: { forecast: 'mean' }, ghost: { forecast: 'hold' }, other: null } }
+    });
+    assert.deepEqual(setup.live.inputs, { heater: { forecast: 'trend', span: 1800 } }, 'Not for a measured signal, nor one not mapped.');
+    assert.equal(normalizeTwinSetup({ source: { kind: 'push' }, mapping: [], live: { inputs: { heater: { forecast: 'guess' } } } }).live.inputs, undefined);
+});

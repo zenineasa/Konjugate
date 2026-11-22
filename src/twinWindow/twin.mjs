@@ -12,6 +12,7 @@ import { suggestSymbol } from '../csvImport.mjs';
 import { describeLoggerCsv, readLoggerCsv } from '../loggerCsv.mjs';
 import { readingNoise } from '../stateEstimator.mjs';
 import { mappingCandidates, rememberMapping, suggestMapping } from '../signalMatching.mjs';
+import { forecastLabels } from '../inputForecast.mjs';
 import { defaultTiming, medianGap, modelTimeStep, normalizeTwinSetup, timingProblem, twinSessionMapping } from '../twinSetup.mjs';
 import { unitConversion } from '../units.mjs';
 import { $, $$, cleanError, formatSpan, shown, sparkline, timingText } from './common.mjs';
@@ -534,7 +535,9 @@ function buildRun(setup) {
         tolerances, corrections: structuredClone(live.corrections), conversions,
         estimator: { members: live.members, parameters: trackable, drift: Object.fromEntries(Object.entries(live.drift ?? {}).map(([id, value]) => [Number(id), value])) },
         alertAt: live.alert > 0 && tolerances[first.signal] > 0 ? live.alert / tolerances[first.signal] : null,
-        ...(fromReadings ? { timingFromReadings: fromReadings } : {})
+        ...(fromReadings ? { timingFromReadings: fromReadings } : {}),
+        // How each input is carried past now in the forecast (src/inputForecast.mjs): held, unless the engineer chose otherwise.
+        inputForecasts: Object.fromEntries(Object.entries(live.inputs ?? {}).map(([name, { forecast, ...spans }]) => [name, { choice: forecast, ...spans }]))
     };
     // A log's readings carry its own names for its signals (another logger's columns, the names they were read under); every other
     // source's readings carry the twin's.
@@ -542,7 +545,7 @@ function buildRun(setup) {
     const byId = state.source.kind === 'file';
     if (byId) {
         const rename = (object) => Object.fromEntries(Object.entries(object).map(([name, value]) => [idOf(name), value]));
-        settings = { ...settings, mapping: mapping.map((entry) => ({ ...entry, signal: idOf(entry.signal) })), conversions: rename(conversions), tolerances: rename(tolerances), corrections: rename(settings.corrections) };
+        settings = { ...settings, mapping: mapping.map((entry) => ({ ...entry, signal: idOf(entry.signal) })), conversions: rename(conversions), tolerances: rename(tolerances), corrections: rename(settings.corrections), inputForecasts: rename(settings.inputForecasts) };
     }
     const names = Object.fromEntries(rows.map((row) => [byId ? row.signal.id : row.name, row.name]));
     const sourceLabel = state.source.kind === 'file' ? `${state.log.fileName}${state.log.speed === 'follow' ? ', followed as it grows' : `, played at ${state.log.speed === 'Infinity' ? 'full speed' : `${state.log.speed}×`}`}` : state.source.url ?? 'the push service';
@@ -616,13 +619,13 @@ initEngineer({
     // The twin started again with the engineer's settings, kept with the setup.
     restartWith: async (live) => {
         const twin = currentTwin();
-        const { window, stride, horizon, timeStep, corrections, members, untracked, drift } = live;
-        state.saved = normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), window, stride, horizon, timeStep, corrections, members, untracked, drift } });
+        const { window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs = {} } = live;
+        state.saved = normalizeTwinSetup({ ...state.saved, live: { ...(state.saved?.live ?? {}), window, stride, horizon, timeStep, corrections, members, untracked, drift, inputs } });
         await api.liveTwin.stop();
         const estimated = Object.entries(corrections).filter(([, correction]) => correction.estimate).map(([name]) => name);
         await startTwin({
             events: twin?.events ?? [],
-            said: ['The twin was started again with the engineer\'s settings', `window ${window / 60} min, moving every ${stride / 60} min, forecast ${horizon / 60} min, time step ${timeStep} s${estimated.length ? `; estimating ${estimated.map((name) => state.rows.find((row) => row.name === name)?.target?.label ?? name).join(', ')}` : ''}`]
+            said: ['The twin was started again with the engineer\'s settings', `${timingText({ window, stride })}, a ${formatSpan(horizon)} forecast, a ${formatSpan(timeStep)} time step${estimated.length ? `; estimating ${estimated.map((name) => state.rows.find((row) => row.name === name)?.target?.label ?? name).join(', ')}` : ''}${Object.keys(inputs).length ? `; ahead, ${Object.entries(inputs).map(([name, setting]) => `${state.rows.find((row) => row.name === name)?.target?.label?.replace(/^Shared · /, '') ?? name} ${forecastLabels[setting.forecast].toLowerCase()}`).join(', ')}` : ''}`]
         });
     }
 });

@@ -9,6 +9,7 @@
 import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, formatSpan, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, timingText, trendFloor, trendOf, valueAt } from './common.mjs';
 import { engineerCycle, engineerOpened, showEngineer, showTiming, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
+import { forecastLabels } from '../inputForecast.mjs';
 import { modelTimeStep } from '../twinSetup.mjs';
 import { createHumanInput } from '../renderer/humanInput.mjs';
 import { createSteering } from '../renderer/inputSteering.mjs';
@@ -579,6 +580,12 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         // What was tried in the sandbox (while following now): the value it started from, each change and when, held to where it has run.
         const sandbox = twin.view === null ? twin.sandbox : null;
         const tried = sandbox ? triedInput(sandbox, input.signal).map(([at, value]) => [at, shownAs.at(value)]) : [];
+        // What the forecast assumed of it past now (src/inputForecast.mjs), drawn dotted to the horizon, and said beside its name.
+        const projection = cycle.projections?.[input.signal] ?? null;
+        const assumed = projection && readings.length ? projectedInput(projection, cycle, readings.at(-1)[1], shownAs) : [];
+        const kind = $('.inputKind', input.element);
+        kind.textContent = projection && projection.choice !== 'hold' ? `input · ahead: ${forecastLabels[projection.using].toLowerCase()}${projection.choice === 'automatic' ? ' (automatic)' : ''}` : 'input';
+        kind.title = projection?.reason ?? '';
         if (!globalThis.Plotly || !readings.length) continue;
         // Within the span, the value held from before it starting at its edge, and the last value held up to now, so a step is drawn
         // to the present.
@@ -586,10 +593,11 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         const within = [...(before ? [[time.start, before[1]]] : []), ...readings.filter(([at]) => at >= time.start)];
         const x = [...within.map(([at]) => at / time.divisor), cycle.now / time.divisor];
         const y = [...within.map(([, value]) => value), within.at(-1)[1]];
-        const low = Math.min(...y, ...tried.map(([, value]) => value));
-        const high = Math.max(...y, ...tried.map(([, value]) => value));
+        const low = Math.min(...y, ...tried.map(([, value]) => value), ...assumed.map(([, value]) => value));
+        const high = Math.max(...y, ...tried.map(([, value]) => value), ...assumed.map(([, value]) => value));
         const pad = (high - low || Math.abs(high) || 1) * 0.15;
         const traces = [{ type: 'scatter', mode: 'lines', name: 'Received', x, y, line: { shape: 'hv', width: 1.5, color: '#9b8cf0' } }];
+        if (assumed.length > 1) traces.push({ type: 'scatter', mode: 'lines', name: 'Assumed', x: assumed.map(([at]) => at / time.divisor), y: assumed.map(([, value]) => value), line: { shape: 'hv', width: 1.5, dash: 'dot', color: '#6f6a9e' } });
         if (tried.length > 1) traces.push({ type: 'scatter', mode: 'lines', name: 'Tried', x: tried.map(([at]) => at / time.divisor), y: tried.map(([, value]) => value), line: { shape: 'hv', width: 2, dash: 'dot', color: '#d6ccff' } });
         globalThis.Plotly.react($('.plot', input.element), traces,
             plotLayout({
@@ -598,6 +606,14 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
                 yaxis: { gridcolor: '#17252f', zeroline: false, fixedrange: true, range: [low - pad, high + pad], tickvals: low === high ? [low] : [low, high], ticktext: (low === high ? [low] : [low, high]).map((value) => `${shown(value)}${unit}`) }
             }), { displayModeBar: false, responsive: true });
     }
+}
+
+// What the forecast assumed of an input past now: [[time, value]] from its last value at now, each projected sample, held to the
+// horizon (the last value held, for Hold).
+function projectedInput(projection, cycle, last, shownAs) {
+    const end = cycle.forecast ? Math.max(cycle.now, ...Object.values(cycle.forecast).map((series) => series.at(-1)?.time ?? cycle.now)) : cycle.now;
+    const points = [[cycle.now, last], ...projection.samples.map((sample) => [sample.time, shownAs.at(sample.value)])];
+    return end > cycle.now ? [...points, [end, points.at(-1)[1]]] : [];
 }
 
 // An input as the sandbox has it: [[time, value]] from its start, each change tried, and the last held to where it has run; empty when

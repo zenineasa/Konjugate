@@ -12,12 +12,16 @@
 //             `corrections` { name: { gain } | { estimate: true } } what a move does with each measured signal (reset to the
 //             reading when not given), an estimate with the readings' `noise` (a standard deviation) when one is given; `members` the
 //             estimator's ensemble; `untracked` the tunable parameters the estimator leaves alone (every other one is tracked when a
-//             signal is estimated); `drift` { stateId: how far it may drift in an hour, beyond what the model says }
+//             signal is estimated); `drift` { stateId: how far it may drift in an hour, beyond what the model says }; `inputs`
+//             { name: { forecast, span, damping, period } } how each input is carried past now in the forecast (src/inputForecast.mjs;
+//             held when not given), spans in seconds
 //   layout    { order, tall, pinned, hidden, temperature, span, bounds }: the control room's strips by measured signal's name, in
 //             order, those drawn taller, pinned to the top, and hidden (`wide`, from when the room was tiles, is kept and unused); temperatures shown in 'C' (the default) or 'K'; how much of
 //             the past the plots show, 'all' or a span in seconds (four times the twin's window when not given); the window's place
 //             and size, { x, y, width, height, maximized }
 //   record    { startedAt, events: [{ at, kind, text, detail }] }: the last run's events, newest first
+
+import { forecastChoices } from './inputForecast.mjs';
 
 const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 const positive = (value) => finite(value) && value > 0;
@@ -69,6 +73,13 @@ export function normalizeTwinSetup(raw) {
     if (ids(raw.live?.untracked).length) live.untracked = ids(raw.live.untracked);
     const drift = Object.fromEntries(Object.entries(raw.live?.drift && typeof raw.live.drift === 'object' ? raw.live.drift : {}).filter(([id, value]) => /^[1-9]\d*$/.test(id) && positive(value)));
     if (Object.keys(drift).length) live.drift = drift;
+    const inputs = {};
+    for (const [name, setting] of Object.entries(raw.live?.inputs && typeof raw.live.inputs === 'object' ? raw.live.inputs : {})) {
+        if (mapping.find((entry) => entry.name === name)?.role !== 'input' || !setting || !forecastChoices.includes(setting.forecast)) continue;
+        inputs[name] = { forecast: setting.forecast };
+        for (const key of ['span', 'damping', 'period']) if (positive(setting[key])) inputs[name][key] = setting[key];
+    }
+    if (Object.keys(inputs).length) live.inputs = inputs;
     const setup = { source, mapping, live };
     const signalNames = (list) => [...new Set((Array.isArray(list) ? list : []).filter((name) => names.has(name)))];
     if (raw.layout && typeof raw.layout === 'object') {

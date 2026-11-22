@@ -20,6 +20,7 @@
 // reaches neither the live session nor its record.
 
 import { EngineSession, EngineSessionError } from './engineSession.mjs';
+import { forecastChoices, projectInput, projectionError } from './inputForecast.mjs';
 import { timingProblem } from './twinSetup.mjs';
 import { interpolate, replayTargets, ReplayError } from './dataLogReplay.mjs';
 import { fitPlanFromLog } from './dataLogFit.mjs';
@@ -85,6 +86,8 @@ export class WindowSession {
     #noise = {}; // signal -> the standard deviation of an estimated signal's readings
     #drift = []; // per state position: how far the model may drift from the truth in an hour, beyond what it says
     #normal = null;
+    #pendingProjections = []; // { now, horizon, inputs: { signal: { last, choices: { choice: samples } } } }, scored once their horizon has passed
+    #scores = {}; // signal -> choice -> { squares, count }: how each choice's projections did against what then arrived
     cycles = [];
 
     // document: the model; header and mapping: the log's description and how its signals map to the model (as replay maps them);
@@ -107,7 +110,10 @@ export class WindowSession {
     // of tunable parameters to estimate with the states, as a slowly changing quantity found from the readings: a heat loss that
     // grows, say] }. A parameter estimated is made live in this twin's copy of the model, within its tuning bounds, so each member can
     // run with its own value; its drift defaults to 20% of its value an hour, its spread at the first move to 10% of it.
-    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {} }) {
+    // inputForecasts: { signal: { choice, span, damping, period } }, how each input is carried past now in the forecast
+    // (src/inputForecast.mjs; held at its last reading when not given). The span an average or a trend is read over defaults to the
+    // window, the damping to the horizon, the period to a day.
+    constructor({ document, header, mapping, window, stride, horizon, timeStep, tolerances = {}, engineOptions, onCycle = null, trendCycles = 6, alertAt = null, keepUp = false, maxBehind = 3, corrections = {}, estimator = {}, inputForecasts = {} }) {
         const timing = timingProblem({ window, stride, horizon, timeStep });
         if (timing) throw new Error(timing);
         this.document = document;
@@ -126,7 +132,10 @@ export class WindowSession {
         const members = estimator.members ?? 32;
         if (!(Number.isInteger(members) && members >= 4 && members <= 1000)) throw new Error('The estimator\'s ensemble has from 4 to 1000 members.');
         this.estimator = { members, seed: estimator.seed ?? 1, drift: estimator.drift ?? {}, spread: estimator.spread ?? {}, parameters: [...new Set(estimator.parameters ?? [])] };
-        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections });
+        for (const [signal, setting] of Object.entries(inputForecasts)) {
+            if (!forecastChoices.includes(setting?.choice)) throw new Error(`How ${signal} is carried into the forecast is one of ${forecastChoices.join(', ')}.`);
+        }
+        Object.assign(this, { window, stride, horizon, timeStep, tolerances, engineOptions, onCycle, trendCycles, alertAt, keepUp, maxBehind, corrections, inputForecasts });
         this.estimated = this.outputs.filter((entry) => corrections[entry.signal]?.estimate);
         if (this.estimator.parameters.length && !this.estimated.length) throw new Error('A parameter is estimated from readings: choose "estimate" for at least one measured signal.');
         this.#useModel(document);
@@ -354,6 +363,64 @@ export class WindowSession {
         return plan;
     }
 
+    // What the forecast assumes of each input past now (src/inputForecast.mjs): its projection by the choice made for it, and every
+    // choice's projection, kept to be scored once the horizon has passed. The projections reach the engine only for the forecast run,
+    // and are taken out again straight after it, so nothing projected is ever held as a reading.
+    #projections(now) {
+        const chosen = {};
+        const all = {};
+        for (const entry of this.inputs) {
+            const readings = this.#inputReadings(entry, now);
+            if (!readings.length) continue;
+            const parameter = (this.document.sharedParameters ?? []).find((candidate) => candidate.id === entry.parameterId);
+            const bounds = parameter?.control ?? parameter?.tuning ?? null;
+            const limits = bounds && Number.isFinite(bounds.minimum) && Number.isFinite(bounds.maximum) ? { minimum: bounds.minimum, maximum: bounds.maximum } : null;
+            const byChoice = this.#scores[entry.signal] ?? {};
+            const score = { projections: Math.max(0, ...Object.values(byChoice).map((tally) => tally.count)), error: Object.fromEntries(Object.entries(byChoice).map(([choice, tally]) => [choice, Math.sqrt(tally.squares / tally.count)])) };
+            const context = { now, horizon: this.horizon, timeStep: this.timeStep, limits, resolution: parameter?.control?.step > 0 ? parameter.control.step : 0, score };
+            const setting = { span: this.window, ...(this.inputForecasts[entry.signal] ?? {}) };
+            const projection = projectInput(readings, { choice: 'hold', ...setting }, context);
+            chosen[entry.signal] = { ...projection, parameterId: entry.parameterId, limits };
+            all[entry.signal] = { last: readings.at(-1).value, choices: Object.fromEntries(forecastChoices.map((choice) => [choice, choice === projection.choice ? projection.samples : projectInput(readings, { ...setting, choice }, context).samples])) };
+        }
+        this.#pendingProjections.push({ now, horizon: this.horizon, inputs: all });
+        return chosen;
+    }
+
+    // The commands that give the engine the projected inputs for a forecast, and those that take them out again after it.
+    #projectionCommands(projections) {
+        const given = Object.values(projections).filter((projection) => projection.samples.length);
+        return {
+            before: given.map((projection) => ({ type: 'appendInputSamples', parameterId: projection.parameterId, samples: projection.samples })),
+            after: given.map((projection) => ({ type: 'appendInputSamples', parameterId: projection.parameterId, samples: [], replaceFrom: projection.samples[0].time }))
+        };
+    }
+
+    // The projections whose horizon has passed by `now`, scored against what arrived; each input's root mean square error by choice, over
+    // every projection scored so far, and how many there have been.
+    #scoreProjections(now) {
+        const due = this.#pendingProjections.filter((pending) => pending.now + pending.horizon <= now + 1e-9);
+        this.#pendingProjections = this.#pendingProjections.filter((pending) => !due.includes(pending));
+        for (const pending of due) {
+            for (const [signal, { last, choices }] of Object.entries(pending.inputs)) {
+                const entry = this.inputs.find((candidate) => candidate.signal === signal);
+                if (!entry) continue;
+                const readings = this.#inputReadings(entry, pending.now + pending.horizon);
+                for (const [choice, samples] of Object.entries(choices)) {
+                    const error = projectionError(readings, samples, { now: pending.now, horizon: pending.horizon, last });
+                    if (error === null) continue;
+                    const score = ((this.#scores[signal] ??= {})[choice] ??= { squares: 0, count: 0 });
+                    score.squares += error * error;
+                    score.count += 1;
+                }
+            }
+        }
+        return Object.fromEntries(Object.entries(this.#scores).map(([signal, byChoice]) => [signal, {
+            projections: Math.max(0, ...Object.values(byChoice).map((score) => score.count)),
+            error: Object.fromEntries(Object.entries(byChoice).map(([choice, score]) => [choice, Math.sqrt(score.squares / score.count)]))
+        }]));
+    }
+
     async #runCycle(index) {
         const anchor = this.#anchor(index);
         const now = anchor + this.window;
@@ -389,6 +456,8 @@ export class WindowSession {
         const started = performance.now();
         const estimating = this.estimated.length > 0 && this.#ensemble !== null && previous !== null;
         const plan = this.#correctionPlan(index, previous, estimating);
+        const projections = this.#projections(now);
+        const projected = this.#projectionCommands(projections);
         let replies;
         let analysis = null;
         let forecastFrom = {};
@@ -412,7 +481,9 @@ export class WindowSession {
                 forecastFrom = this.#correctionsAtNow(toNow, now, computed);
                 const onward = await this.#engine.run([
                     { type: 'restoreCheckpoint', time: now, overrides: Object.values(forecastFrom).filter((entry) => entry.applied !== null).map((entry) => ({ stateId: entry.stateId, value: entry.applied })) },
+                    ...projected.before,
                     { type: 'advanceTo', time: end },
+                    ...projected.after,
                     // The estimator's members run the next stride again from this anchor, so they need its input readings.
                     { type: 'retainCheckpointsFrom', time: this.estimated.length ? anchor : nextAnchor }
                 ]);
@@ -451,6 +522,9 @@ export class WindowSession {
         ].filter((sample, index, all) => index === 0 || sample.time > all[index - 1].time)]));
         const cycle = {
             index, anchor, now, jumps, window, forecast, model, inferred,
+            // What the forecast assumed of each input past now, and how each choice has done against what arrived.
+            projections: Object.fromEntries(Object.entries(projections).map(([signal, { choice, using, reason, samples }]) => [signal, { choice, using, reason, samples }])),
+            inputScores: this.#scoreProjections(now),
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
             wallSeconds, computeSeconds, checkpointsTaken, corrections,
@@ -620,13 +694,15 @@ export class WindowSession {
         const { mean, spread } = ensembleStatistics(members);
         const end = cycle.now + this.horizon;
         const each = 2 + this.estimatedParameters.length;
-        const commands = members.flatMap((member) => [
+        // The members forecast on the inputs the twin's own forecast assumed.
+        const projected = this.#projectionCommands(Object.fromEntries(Object.entries(cycle.projections ?? {}).map(([signal, projection]) => [signal, { ...projection, parameterId: this.inputs.find((entry) => entry.signal === signal).parameterId }])));
+        const commands = [...projected.before, ...members.flatMap((member) => [
             ...this.#parameterCommands(member),
             { type: 'restoreState', time: cycle.anchor, values: member.slice(0, stateIds.length), providerStates: cycle.restored.providerStates },
             { type: 'advanceTo', time: end }
-        ]);
+        ]), ...projected.after];
         const replies = await this.#engine.run(commands);
-        const runs = members.map((_, member) => replies[each * member + each - 1].samples);
+        const runs = members.map((_, member) => replies[projected.before.length + each * member + each - 1].samples);
         // The twin goes on with the parameters at their estimate, not at the last member's values.
         await this.#engine.run(this.#parameterCommands(mean));
         const band = {};
@@ -915,7 +991,8 @@ export class WindowSession {
         const document = structuredClone(this.document);
         for (const entry of this.inputs) {
             const parameter = document.sharedParameters.find((candidate) => candidate.id === entry.parameterId);
-            parameter.schedule = { interpolation: 'hold', samples: cycle.inputs[entry.signal].map(({ time, value }) => [time, value]) };
+            // The readings, and past now what the forecast assumed of the input.
+            parameter.schedule = { interpolation: 'hold', samples: [...cycle.inputs[entry.signal], ...(cycle.projections?.[entry.signal]?.samples ?? [])].map(({ time, value }) => [time, value]) };
             delete parameter.tuning;
         }
         const stateIds = this.#engine.stateIds;

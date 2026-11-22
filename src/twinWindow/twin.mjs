@@ -666,8 +666,25 @@ const tutorialTargets = {
         if (zone && timeZone && zone.value.trim() !== timeZone) return zone;
         const plan = forecastField(input, 'forecastPlan');
         if (plan && !plan.value.trim()) return plan;
-        return $('#restartTwin').disabled ? null : '#restartTwin';
+        // Once started again with the plan, nothing is left to press: the step waits for the forecast to turn. A setting it cannot start
+        // with keeps the button off, and the ring goes to what says why.
+        return !$('#restartTwin').disabled || $('#restartNote').classList.contains('warning') ? '#restartTwin' : null;
     }
+};
+// A control the step points at that cannot be pressed yet is never ringed, as in the project window: the ring goes to the line that says
+// why (what the control is described by), or else to the twin's status, and the banner says the step waits there. The ring moves to the
+// control the moment it can be pressed (the ring is placed again every 300 ms).
+function standIn(target) {
+    if (!target?.matches(':disabled')) return { element: target, waiting: null };
+    const reasons = (target.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean).map((id) => document.getElementById(id));
+    const reason = reasons.find((found) => found && visibleHere(found) && found.textContent.trim()) ?? visibleHere('#healthTwin');
+    const name = target.getAttribute('aria-label') || target.textContent.trim() || 'It';
+    const why = reason?.textContent.trim().replace(/[.:…]+$/, '').replace(/^[A-Z](?=[a-z])/, (first) => first.toLowerCase());
+    return { element: reason ?? null, target, waiting: `${name} cannot be pressed yet${why ? `: ${why}` : ''}. This step waits for it, and the ring moves to it once it can be pressed.` };
+}
+const tutorialPlace = () => {
+    const reference = tutorialTarget ? tutorialTargets[tutorialTarget.name]?.(tutorialTarget) : null;
+    return standIn(reference ? visibleHere(reference) : null);
 };
 // The ring around it, as the project window draws one around its own controls: brought into view once (inside the Engineer view, which
 // scrolls), and moved into a dialog while one is open, which sits above everything else.
@@ -680,11 +697,12 @@ let tutorialTarget = null;
 let tutorialRingTimer = null;
 let tutorialRingScrolledTo = null;
 function placeTutorialRing() {
-    const reference = tutorialTarget ? tutorialTargets[tutorialTarget.name]?.(tutorialTarget) : null;
-    const target = reference ? visibleHere(reference) : null;
+    const { element: target, waiting } = tutorialPlace();
     const host = document.querySelector('dialog[open]') ?? document.body;
     if (tutorialRing.parentElement !== host) host.append(tutorialRing);
     tutorialRing.hidden = !target;
+    $('#tutorialBannerWaiting').hidden = !waiting || $('#tutorialBanner').hidden;
+    if ($('#tutorialBannerWaiting').textContent !== (waiting ?? '')) $('#tutorialBannerWaiting').textContent = waiting ?? '';
     if (!target) return;
     if (tutorialRingScrolledTo !== target) {
         tutorialRingScrolledTo = target;
@@ -696,9 +714,14 @@ function placeTutorialRing() {
     Object.assign(tutorialRing.style, { left: `${rect.left - margin}px`, top: `${rect.top - margin}px`, width: `${rect.width + 2 * margin}px`, height: `${rect.height + 2 * margin}px` });
     tutorialRing.classList.toggle('tutorialRingPulse', target.matches('button, select, input, textarea') && !target.disabled);
 }
+// What waits for the twin changed (its first move came, it stopped): the ring moves now, not at the next tick.
+document.addEventListener('twinwaitschanged', () => { if (tutorialTarget) placeTutorialRing(); });
 // For the tests: the ring as it stands, as the project window's tour reports its own.
 window.__debugTutorialRing = () => {
-    const element = tutorialRing.hidden || !tutorialTarget ? null : visibleHere(tutorialTargets[tutorialTarget.name]?.(tutorialTarget));
+    // Placed now, as the next tick would, so the ring and the banner's note are reported as they stand together.
+    if (tutorialTarget) placeTutorialRing();
+    const place = tutorialTarget ? tutorialPlace() : { element: null, waiting: null };
+    const element = tutorialRing.hidden ? null : place.element;
     const rect = element?.getBoundingClientRect();
     const top = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
     return {
@@ -706,7 +729,12 @@ window.__debugTutorialRing = () => {
         on: top ? `${top.tagName.toLowerCase()}#${top.id}.${String(top.className)}` : null,
         onScreen: Boolean(rect) && rect.left >= -2 && rect.top >= -2 && rect.right <= window.innerWidth + 2 && rect.bottom <= window.innerHeight + 2,
         uncovered: Boolean(element && top && (element.contains(top) || top.contains(element))),
-        banner: !$('#tutorialBanner').hidden, focused: document.hasFocus(), visible: !document.hidden
+        banner: !$('#tutorialBanner').hidden, focused: document.hasFocus(), visible: !document.hidden,
+        // What is ringed can be used: it is not a control that is off. The step's own control, when it is off, is said with the note the
+        // banner shows meanwhile.
+        disabled: Boolean(element?.matches(':disabled')), targetDisabled: Boolean(place.target),
+        offControl: place.target ? `${place.target.tagName.toLowerCase()}#${place.target.id}` : null,
+        waiting: $('#tutorialBannerWaiting').hidden ? null : $('#tutorialBannerWaiting').textContent
     };
 };
 // The project window's tutorial step, when its work is here: shown in a banner of its own, since this window covers the card, with a ring

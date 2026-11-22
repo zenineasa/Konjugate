@@ -6,7 +6,7 @@
 // measured signal, the parameters the estimator tracks, and the twin's timing take effect when it starts again.
 
 import { $, $$, cleanError, dataClock, element, formatSpan, shown, tunableParameters, withValues } from './common.mjs';
-import { addEvent, baselineTakes, currentTwin } from './room.mjs';
+import { addEvent, baselineTakes, currentTwin, notYet } from './room.mjs';
 import { followableStates, forecastChoices, forecastLabels, parsePlan, planText, scoreSentence } from '../inputForecast.mjs';
 import { modelTimeStep, timingProblem } from '../twinSetup.mjs';
 
@@ -82,12 +82,32 @@ export function engineerCycle(twin, cycle) {
     }
 }
 
+// What waits for the twin's first move (a refit, setting a tunable value) says why under it while it cannot be done, and about how long:
+// counted down by the room, and gone the moment the first move comes.
+export function engineerWaits() {
+    if (!on) return;
+    const why = notYet();
+    $('#refitRun').disabled = Boolean(why) || Boolean(refit?.running);
+    $('#refitRun').title = why ?? (refit?.running ? 'A refit is running' : 'Fit the tunable values to the latest window');
+    // (A refit that is running says so in its own status.)
+    $('#refitWhy').hidden = !why;
+    $('#refitWhy').textContent = why ?? '';
+    const fields = $$('#tunableRows input');
+    for (const field of fields) {
+        field.disabled = Boolean(why);
+        field.setAttribute('aria-describedby', 'tunableWhy');
+    }
+    $('#tunableWhy').hidden = !why || !fields.length;
+    $('#tunableWhy').textContent = why ? `Set here ${why.startsWith('Available') ? `once the first move is made · ${why.split(' · ')[1]}` : `only while the twin runs: ${why.replace(/^Not available: /, '')}`}` : '';
+    // Nothing to start again with until a setting here is changed (one it cannot run with says so instead).
+    if (!dirty) {
+        $('#restartNote').className = 'status';
+        $('#restartNote').textContent = 'Change a setting above, then start the twin again with it here.';
+    }
+}
+
 function refreshButtons(twin) {
-    $('#refitRun').disabled = !twin.running || !twin.cycles.length || Boolean(refit?.running);
-    $('#refitRun').title = !twin.running ? 'The twin has stopped: a refit is fitted on its latest window while it runs (Back to the setup, then Start)'
-        : !twin.cycles.length ? 'Wait for the twin\'s first move: a refit is fitted on its latest window'
-        : refit?.running ? 'A refit is running' : 'Fit the tunable values to the latest window';
-    for (const field of $$('#tunableRows input')) field.disabled = !twin.running || !twin.cycles.length;
+    engineerWaits();
     $('#restartTwin').disabled = !dirty || Boolean(timingProblem(liveFromForm(twin)) ?? inputsFromForm(twin, Number($('#timingUnit').value) || 60).problem);
     // What a refit found: applied to the twin while it runs. Once it has stopped (a log played to its end while the fit ran) there is
     // no twin to run on with it, so Apply is not offered, and says why; the values can still be kept in the model, for its next run.

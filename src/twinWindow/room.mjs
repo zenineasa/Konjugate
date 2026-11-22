@@ -7,7 +7,7 @@
 // scenario. A change to the model in the project window is offered to the engineer to apply.
 
 import { $, $$, ago, clock, cleanError, dataClock, dataTime, describeChange, element, formatSpan, plotLayout, plural, readable, sameTwinModel, shown, sparkline, stepOf, timingText, trendFloor, trendOf, valueAt } from './common.mjs';
-import { engineerCycle, engineerOpened, showEngineer, showTiming, engineerOn } from './engineer.mjs';
+import { engineerCycle, engineerOpened, engineerWaits, showEngineer, showTiming, engineerOn } from './engineer.mjs';
 import { liveRange } from '../inputBindings.mjs';
 import { forecastLabels } from '../inputForecast.mjs';
 import { modelTimeStep } from '../twinSetup.mjs';
@@ -175,7 +175,17 @@ export function openRoom(run) {
     engineerOpened(twin);
     refreshScenarios();
     reportStatus();
+    // While the first move is to come, what waits for it says about how long, counted down.
+    clearInterval(waitTimer);
+    waitTimer = setInterval(() => {
+        if (!twin?.running || twin.cycles.length) {
+            clearInterval(waitTimer);
+            waitTimer = null;
+        }
+        refreshWaits();
+    }, 1000);
 }
+let waitTimer = null;
 
 export function closeRoom() {
     $('#room').hidden = true;
@@ -197,10 +207,50 @@ function reportStatus() {
     host.reportStatus({ running: Boolean(twin?.running), moves: twin?.cycles.length ?? 0, alarm: twin?.drift === 'bad', planTurns });
     // Trying something starts from the twin's latest move, while it runs: once the log has been played or the twin stopped, it is not
     // offered, and says why.
-    $('#trySomething').disabled = !twin?.running || Boolean(twin.sandbox);
-    $('#trySomething').title = twin?.running ? trySomethingTitle : 'The twin has stopped: try something while it runs (Back to the setup, then Start).';
+    refreshWaits();
 }
 const trySomethingTitle = 'A copy of the twin from now, to try what an input would do; the twin itself is not changed';
+
+// Why what works from the twin's latest move (trying something, a refit, setting a tunable value) cannot be done yet, in plain words, or
+// null once it can: the twin stopped on an error, or stopped, or its first move is still to come, with about how long that takes. The
+// first move comes once a window of data has arrived, so at the pace the data arrives at, about the window over that pace from the start.
+export function notYet() {
+    if (!twin) return null;
+    if (twin.failed) return 'Not available: the twin stopped on an error (see Events). Setup, then Start, runs it again.';
+    if (!twin.running) return twin.ended === 'played' ? 'Not available: the whole log has been played. Setup, then Start, plays it again.' : 'Not available: the twin was stopped. Setup, then Start, runs it again.';
+    if (twin.cycles.length) return null;
+    return `Available after the twin's first move · ${firstMoveIn()}`;
+}
+function firstMoveIn() {
+    if (twin.settings.timingFromReadings && !twin.timingKnown) return 'once it has read how often the data comes';
+    const speed = arrivingSpeed();
+    if (!Number.isFinite(speed)) return 'in a moment, as the recording plays at full speed';
+    const left = twin.settings.window / speed - (Date.now() - twin.startedAt.getTime()) / 1000;
+    if (left < 5) return 'any moment now';
+    return `about ${about(left)}${speed === 1 ? '' : ` at ${speed}×`}`;
+}
+// A wait, roughly, as a person says it.
+function about(seconds) {
+    if (seconds < 45) return `${Math.max(5, Math.round(seconds / 5) * 5)} seconds`;
+    if (seconds < 90) return 'a minute';
+    if (seconds < 3300) return `${Math.round(seconds / 60)} minutes`;
+    if (seconds < 5400) return 'an hour';
+    return `${Number((seconds / 3600).toFixed(1))} hours`;
+}
+// Each control that waits for the twin says why, beside or under it; the tutorial's ring goes to that line meanwhile.
+function refreshWaits() {
+    const why = notYet();
+    $('#trySomething').disabled = !twin || Boolean(why) || Boolean(twin.sandbox);
+    $('#trySomething').title = why ?? trySomethingTitle;
+    // The sandbox open says itself; otherwise the reason, shorter here in the room's bar.
+    const short = !why || twin?.sandbox ? '' : twin.running ? `Try something: after the first move · ${firstMoveIn()}` : 'Try something: only while the twin runs';
+    $('#tryWhy').hidden = !short;
+    $('#tryWhy').textContent = short;
+    $('#tryWhy').title = why ?? '';
+    if (twin) engineerWaits(twin);
+    // What can be pressed may have changed: a tutorial's ring moves to it at once.
+    document.dispatchEvent(new CustomEvent('twinwaitschanged'));
+}
 
 // The speed the data arrives at: a file played at its pace, a recording replayed as fast as it can go, a live source at one second a
 // second.
@@ -877,7 +927,9 @@ export function handleEvent(update) {
         Object.assign(twin.settings, { window, stride, horizon, timeStep });
         Object.assign(twin.run.live, { window, stride, horizon, timeStep });
         $('#sandboxMinutes').value = String(Math.max(1, Math.round(horizon / 60)));
+        twin.timingKnown = true;
         if (!twin.cycles.length) $('#healthTwin').textContent = 'Starting the twin…';
+        refreshWaits();
         addEvent('info', 'The twin\'s timing follows the readings', `The readings come every ${formatSpan(spacing)}, so the twin uses ${timingText({ window, stride })}, a ${formatSpan(horizon)} forecast and a ${formatSpan(timeStep)} time step. Change it under Engineer, Timing.`);
         if (engineerOn()) showTiming(twin);
     } else if (update.type === 'note') {
@@ -952,6 +1004,7 @@ async function applyModelChange() {
     const model = twin.pending;
     const said = describeChange(twin.baseline, model);
     $('#modelApply').disabled = true;
+    $('#modelBannerText').textContent = 'Applying the change to the twin…';
     try {
         const outcome = await host.api.liveTwin.applyModel(model);
         const takesEffect = Number.isFinite(outcome?.takesEffect) ? outcome.takesEffect : twin.cycles.at(-1).now;
@@ -974,7 +1027,7 @@ async function applyModelChange() {
 async function openSandbox() {
     if (!twin?.running || twin.sandbox) return;
     if (!twin.cycles.length) {
-        $('#roomStatus').textContent = 'Wait for the twin\'s first move, then try something from it.';
+        $('#roomStatus').textContent = notYet() ?? '';
         return;
     }
     try {
@@ -1031,6 +1084,8 @@ async function runSandbox() {
     const sandbox = twin?.sandbox;
     if (!sandbox) return;
     $('#sandboxRun').disabled = true;
+    $('#sandboxStatus').className = 'status';
+    $('#sandboxStatus').textContent = 'Running ahead…';
     try {
         for (const field of $$('#sandboxInputs input')) {
             const value = Number(field.value);
@@ -1140,7 +1195,7 @@ async function followControls() {
                     if (performance.now() - drawnAt > 250) {
                         drawnAt = performance.now();
                         $('#sandboxStatus').className = 'status good';
-                        $('#sandboxStatus').textContent = `Following the controls: ${dataClock(result.time)}${result.tried.length ? `, ${result.tried.length} ${result.tried.length === 1 ? 'change' : 'changes'} tried` : ''}.`;
+                        $('#sandboxStatus').textContent = `Following the controls: ${dataClock(result.time)}${result.tried.length ? `, ${result.tried.length} ${result.tried.length === 1 ? 'change' : 'changes'} tried` : ''}. Pause, then Run ahead for a set time.`;
                         renderView();
                     }
                 }

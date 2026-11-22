@@ -5556,7 +5556,8 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(twin, `document.querySelector('#healthTwin').textContent`), /^The whole log has been played: 31 moves/);
         // Played to its end, the twin is not running: Try something is not offered, and says why.
         assert.equal(await evaluate(twin, `document.querySelector('#trySomething').disabled`), true);
-        assert.match(await evaluate(twin, `document.querySelector('#trySomething').title`), /^The twin has stopped/);
+        assert.match(await evaluate(twin, `document.querySelector('#trySomething').title`), /^Not available: the whole log has been played\. Setup, then Start, plays it again\.$/);
+        assert.equal(await evaluate(twin, `document.querySelector('#tryWhy').textContent`), 'Try something: only while the twin runs', 'Beside it, the room says why it is off.');
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').textContent`), 'In step');
         assert.match(await evaluate(twin, `document.querySelector('#inferredRows').innerText`), /Ambient air · Temperature\s+carried by the model/, 'The room says what the readings do not reach.');
 
@@ -6305,7 +6306,7 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && document.querySelector('#sandboxInputs input') !== null`, 'The sandbox did not open.');
         await evaluate(twin, `(() => { const field = document.querySelector('#sandboxInputs input'); field.value = '0'; })()`);
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/Ran ahead to .* with Heater power 0 W/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000);
+        await waitFor(twin, `/Ran ahead to .* with Heater power 0 W/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000).catch(async (error) => { throw new Error(`${error.message} It said: ${await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`)}`); });
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn on the tile.');
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
@@ -10156,6 +10157,68 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.multiWindow && 'the live twin has its own window, in the desktop app' });
 
+    // "Refit it on the latest readings" before the twin's first move: Refit is off, and says why under it, with about how long at the pace
+    // the data arrives at; the ring is on that line, never on the button that cannot be pressed, and the banner says the step waits. Once
+    // the first move comes, the line is gone and the ring is on Refit. KONJUGATE_INTERACTION_SCREENSHOTS=<folder> keeps a picture of each.
+    await run('the refit tutorial\'s Refit step waits for the twin\'s first move: why under the button, the ring on it, then on Refit once it can be pressed', async () => {
+        const { press, waitForStep, clean } = tutorialHelpers();
+        const keepPicture = async (handle, name) => {
+            const folder = process.env.KONJUGATE_INTERACTION_SCREENSHOTS;
+            if (!folder || !handle._raw?.webContents) return;
+            // A capture lags the drawing: taken a moment later, it shows what was asserted.
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            const image = await handle._raw.webContents.capturePage();
+            await writeFile(join(folder, `${name}.png`), image.toPNG());
+        };
+        await clean();
+        assert.equal(await evaluate(window, `window.__debugTour.startTutorial('refitTwin')`), true);
+        await waitForStep('welcome');
+        await press('.tourFloating .tourPrimary');
+        await waitForStep('openTwin');
+        const beforeTwin = driver.allHandles();
+        await press('#liveTwinButton');
+        const twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
+        await waitForStep('chooseDemo');
+        // The drifting rig at 60×, as the step's skip plays it.
+        await press('.tourFloating .tourSkipStep');
+        await waitForStep('refit', 60000);
+        await waitFor(twin, `document.querySelector('#tutorialBannerTitle').textContent === 'Refit it on the latest readings' && window.__debugTutorialRing().ringed === 'button#engineerToggle'`, 'The step did not ring Engineer first.', 15000);
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        // Before the first move.
+        await waitFor(twin, `window.__debugTutorialRing().ringed === 'p#refitWhy' && Boolean(window.__debugTutorialRing().waiting)`, 'The ring did not go to why Refit is off, with the banner saying the step waits.', 10000);
+        const before = await evaluate(twin, `({ ring: window.__debugTutorialRing(), moves: window.__debugTwinWindow.summary().moves, refitOff: document.querySelector('#refitRun').disabled, why: document.querySelector('#refitWhy').textContent, tryOff: document.querySelector('#trySomething').disabled, tryWhy: document.querySelector('#tryWhy').textContent, tunableWhy: document.querySelector('#tunableWhy').hidden ? null : document.querySelector('#tunableWhy').textContent, status: document.querySelector('#healthTwin').textContent })`);
+        assert.equal(before.moves, 0, 'The twin made its first move before it could be looked at.');
+        assert.equal(before.refitOff, true);
+        const wait = /^Available after the twin's first move · (about (a minute|\d+ seconds) at 60×|any moment now)$/;
+        assert.match(before.why, wait, 'Under Refit, why it is off and for about how long.');
+        assert.equal(before.tryOff, true, 'Try something waits for the first move too.');
+        assert.match(before.tryWhy, /^Try something: after the first move · (about (a minute|\d+ seconds) at 60×|any moment now)$/);
+        assert.match(before.tunableWhy ?? '', /^Set here once the first move is made · /);
+        assert.equal(before.status, 'Starting the twin…');
+        const { ring } = before;
+        assert.ok(ring.shown && ring.onScreen && ring.uncovered && ring.banner, `The ring on why is not usable: ${JSON.stringify(ring)}`);
+        assert.equal(ring.disabled, false, 'A control that is off was ringed.');
+        assert.equal(ring.offControl, 'button#refitRun');
+        assert.match(ring.waiting ?? '', /^Refit cannot be pressed yet: available after the twin's first move · .*\. This step waits for it, and the ring moves to it once it can be pressed\.$/);
+        await keepPicture(twin, 'refit-before-first-move');
+        // The first move: Refit is on, its line gone, and the ring on it; the banner no longer says the step waits.
+        await waitFor(twin, `window.__debugTwinWindow.summary().moves >= 1`, 'The twin made no first move.', 180000);
+        await waitFor(twin, `window.__debugTutorialRing().ringed === 'button#refitRun' && window.__debugTutorialRing().waiting === null`, 'The ring did not move to Refit once it could be pressed, the banner no longer saying the step waits.', 5000);
+        const after = await evaluate(twin, `({ ring: window.__debugTutorialRing(), refitOff: document.querySelector('#refitRun').disabled, whyShown: !document.querySelector('#refitWhy').hidden, tryOff: document.querySelector('#trySomething').disabled, tryWhyShown: !document.querySelector('#tryWhy').hidden, tunableOff: [...document.querySelectorAll('#tunableRows input')].some((field) => field.disabled), waitingShown: !document.querySelector('#tutorialBannerWaiting').hidden })`);
+        assert.deepEqual({ refitOff: after.refitOff, whyShown: after.whyShown, tryOff: after.tryOff, tryWhyShown: after.tryWhyShown, tunableOff: after.tunableOff, waitingShown: after.waitingShown },
+            { refitOff: false, whyShown: false, tryOff: false, tryWhyShown: false, tunableOff: false, waitingShown: false });
+        assert.ok(after.ring.shown && after.ring.onScreen && after.ring.uncovered && !after.ring.disabled && !after.ring.targetDisabled && after.ring.waiting === null, `The ring on Refit is not usable: ${JSON.stringify(after.ring)}`);
+        await keepPicture(twin, 'refit-after-first-move');
+        // Refit pressed: while it runs, the button is off, and the ring is on what it is doing.
+        await evaluate(twin, `document.querySelector('#refitRun').click()`);
+        await waitFor(twin, `document.querySelector('#refitRun').disabled || !document.querySelector('#refitKeep').hidden`, 'Refit did not start.', 10000);
+        const during = await evaluate(twin, `window.__debugTutorialRing()`);
+        if (during.targetDisabled) assert.ok(during.ringed === 'p#refitStatus' && /^Refit cannot be pressed yet: refitting on the window/.test(during.waiting ?? ''), `While refitting, the ring is on what it is doing: ${JSON.stringify(during)}`);
+        await waitFor(twin, `window.__debugTutorialRing().ringed === 'button#refitKeep'`, 'The ring did not go to keeping the refit.', 60000);
+        await evaluate(window, `window.__debugTour.stop()`);
+        await closeTutorialTwin();
+    }, { skip: !driver.capabilities.multiWindow && 'the live twin has its own window, in the desktop app' });
+
     await run('the steering tutorial binds W and S to the joint\'s target angle in Settings and steers it with them in a real-time run', async () => {
         const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         const key = (type, code) => evaluate(window, `window.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, { code: ${JSON.stringify(code)}, bubbles: true, cancelable: true }))`);
@@ -10436,7 +10499,9 @@ export async function runInteractionTests(driver) {
         const { press, clean, readAndGoOn } = tutorialHelpers();
         // After each single skip, the next step can be done as its card says: its ring shown, wholly on screen, and not covered (what is
         // on top at its middle is inside what it rings), and its card in the window in front. A step in the twin window has its ring
-        // there, checked the same way, and that window in front; a step with nothing to do (Next) has no ring.
+        // there, checked the same way, and that window in front; there, a control that is off is never ringed, and while the step's own
+        // control is off (Refit, until the twin's first move) the ring is on what says why and the banner says the step waits. A step with
+        // nothing to do (Next) has no ring.
         const checkNextStep = async (id, skipped) => {
             const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
             const usable = (report) => report.shown && report.onScreen && report.uncovered;
@@ -10449,8 +10514,9 @@ export async function runInteractionTests(driver) {
                 const twin = await driver.waitForNewHandle([], { titleIncludes: 'Live twin' }, 10000);
                 const twinRing = () => evaluate(twin, `window.__debugTutorialRing?.() ?? null`);
                 let shown = await twinRing();
-                for (const until = Date.now() + 30000; !(shown?.banner && usable(shown)) && Date.now() < until; await pause(200)) shown = await twinRing();
-                assert.ok(shown?.banner && usable(shown), `${where}'s ring in the twin window is not usable: ${JSON.stringify(shown)}`);
+                const usableHere = (report) => report?.banner && usable(report) && !report.disabled && (!report.targetDisabled || Boolean(report.waiting));
+                for (const until = Date.now() + 30000; !usableHere(shown) && Date.now() < until; await pause(200)) shown = await twinRing();
+                assert.ok(usableHere(shown), `${where}'s ring in the twin window is not usable: ${JSON.stringify(shown)}`);
                 if (driver.focusedHandle) assert.equal((await driver.focusedHandle())?._raw, twin._raw, `${where} is in the twin window, which is not in front.`);
                 return;
             }

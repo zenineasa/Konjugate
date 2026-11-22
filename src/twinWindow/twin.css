@@ -102,6 +102,9 @@ input:focus, select:focus { border-color: var(--accent); }
 .healthItem::before { content: ""; display: inline-block; width: 9px; height: 9px; margin-right: 8px; vertical-align: 0; border-radius: 50%; background: var(--faint); }
 @media (max-width: 960px) { .health { flex-wrap: wrap; } }
 .healthItem.good::before { background: var(--good); box-shadow: 0 0 8px rgb(79 191 143 / 60%); }
+/* Why Try something cannot be pressed yet, beside it. */
+.health > .healthWhy { flex: 0 2 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 12px; }
+.healthWhy[hidden] { display: none; }
 .healthItem.lean::before { background: var(--lean); box-shadow: 0 0 8px rgb(224 161 76 / 60%); }
 .healthItem.bad::before { background: var(--bad); box-shadow: 0 0 8px rgb(212 112 122 / 60%); }
 .healthItem:empty { display: none; }
@@ -265,6 +268,9 @@ button.small { height: 22px; padding: 0 8px; font-size: 11.5px; font-weight: 400
 .timing input { width: 100%; }
 .engineerFooter { position: sticky; bottom: 0; padding: 10px 0 12px; background: var(--panel); }
 .engineerFooter .status { margin: 0 0 6px; }
+/* Why a control above cannot be pressed yet, right under it. */
+.waitReason { margin: 6px 0 0; font-size: 12px; }
+.waitReason[hidden] { display: none; }
 .driftRows { display: grid; gap: 4px; margin-bottom: 8px; }
 .driftRows .field.inline { justify-content: space-between; font-size: 12px; }
 .fileChoice { display: flex; gap: 10px; align-items: center; }
@@ -379,6 +385,7 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .tutorialBanner p { margin: 0 0 8px; font-size: 13px; line-height: 1.5; color: #b9ccd4; }
 .tutorialBanner .tutorialBannerStatus { padding: 6px 9px; color: #b9ccd4; background: rgb(66 201 188 / 8%); border-left: 2px solid #42c9bc; border-radius: 3px; font-size: 12px; line-height: 1.45; }
 .tutorialBanner .tutorialBannerStatus[hidden] { display: none; }
+.tutorialBanner .tutorialBannerWaiting { border-left-color: var(--lean, #e0a14c); background: rgb(224 161 76 / 8%); }
 .tutorialBanner .tutorialBannerNote { display: block; font-size: 11px; color: #7fa3ad; }
 .tutorialRing { position: fixed; z-index: 9001; box-sizing: border-box; border: 2px solid #42c9bc; border-radius: 8px; box-shadow: 0 0 0 4px rgb(66 201 188 / 22%), 0 0 24px rgb(66 201 188 / 35%); pointer-events: none; transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
 .tutorialRing[hidden] { display: none; }

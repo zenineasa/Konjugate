@@ -153,6 +153,8 @@ input:focus, select:focus { border-color: var(--accent); }
 .inputRow { display: flex; flex-direction: column; padding: 2px 0 0 8px; border-left: 3px solid #9b8cf0; border-bottom: 1px solid var(--line); }
 .inputRow header { display: flex; gap: 8px; align-items: baseline; }
 .inputRow .inputKind { color: var(--faint); font-size: 11px; }
+/* An input the forecast held at its limits (src/twinWindow/room.mjs): said in the warning's colour. */
+.inputRow .inputKind.held { color: var(--lean); }
 .inputRow .latest { margin-left: auto; padding-right: 48px; font-variant-numeric: tabular-nums; }
 .inputRow .plot { height: 46px; }
 .inputRows > .empty { margin: 6px 12px; color: var(--muted); font-size: 12px; }
@@ -405,6 +407,8 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .forecastRow select { width: 100%; font-size: 12.5px; }
 .forecastRow input { height: 26px; min-width: 0; }
 .forecastRow .forecastScore { color: var(--faint); font-size: 11.5px; }
+/* A followed state whose unit could not be checked: said under its list, in the warning's colour (src/twinWindow/engineer.mjs). */
+.forecastRow > .forecastFollowNote { grid-column: 1 / -1; color: var(--lean); font-size: 11.5px; }
 .forecastRow .forecastPlan { grid-column: 1 / -1; width: 100%; box-sizing: border-box; font: 12px ui-monospace, monospace; resize: vertical; }
 .forecastRow .forecastState { grid-column: 1 / -1; }
 .forecastRow .forecastZone { grid-column: 2 / -1; height: 26px; min-width: 0; }

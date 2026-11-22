@@ -166,7 +166,6 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         const margin = 24;
         const obstacles = [...document.querySelectorAll(obstacleSelector)].filter((item) => !card.contains(item) && item.getClientRects().length)
             .map((item) => item.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0);
-        if (targetRect) obstacles.push(targetRect);
         const top = 160;
         const candidates = [
             { left: margin + 70, top: window.innerHeight - height - margin },
@@ -174,13 +173,18 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
             { left: margin + 70, top },
             { left: window.innerWidth - width - margin, top }
         ];
-        const covered = (spot) => obstacles.reduce((sum, rect) => {
+        const overlap = (spot, rect) => {
             const overlapX = Math.min(spot.left + width, rect.right) - Math.max(spot.left, rect.left);
             const overlapY = Math.min(spot.top + height, rect.bottom) - Math.max(spot.top, rect.top);
-            return sum + (overlapX > 0 && overlapY > 0 ? overlapX * overlapY : 0);
-        }, 0);
+            return overlapX > 0 && overlapY > 0 ? overlapX * overlapY : 0;
+        };
+        const overTarget = (spot) => Boolean(targetRect) && overlap(spot, targetRect) > 0;
+        const covered = (spot) => obstacles.reduce((sum, rect) => sum + overlap(spot, rect), overTarget(spot) ? overlap(spot, targetRect) : 0);
+        // Covering the control the step points at is worse than covering any amount of anything else: where every corner is on a large
+        // dialog (Extensions, in a smaller window), the corner least on the dialog could otherwise be the one on its Install button.
         // Stay where it already is while that is still clear, so it does not jump about between steps for nothing.
-        const best = candidates.map((spot) => ({ spot, area: covered(spot) })).sort((a, b) => a.area - b.area)[0];
+        const best = candidates.map((spot) => ({ spot, overTarget: overTarget(spot), area: covered(spot) }))
+            .sort((a, b) => Number(a.overTarget) - Number(b.overTarget) || a.area - b.area)[0];
         const current = card.dataset.spot ? candidates[Number(card.dataset.spot)] : null;
         const chosen = current && covered(current) === 0 ? current : best.spot;
         card.dataset.spot = String(candidates.indexOf(chosen));

@@ -47,8 +47,8 @@ const steps = Object.freeze([
     {
         id: 'switch',
         title: 'Make it a Python program',
-        text: 'Set "Written as" to "Python program". The equation gives way to a program, a list of bindings and an output key: the program reads what the bindings give it, by their keys, and adds its result to the output.',
-        target: '#editEdgeImplementationKind', skip: 'setImplementation', relationship: values.relationship, kind: 'python',
+        text: 'Press "{ } Program" at the top of its equation, with Python chosen beside it. The equation gives way to a program, a list of bindings and an output key: the program reads what the bindings give it, by their keys, and adds its result to the output.',
+        target: '#editEdgeWrittenAs', skip: 'setImplementation', relationship: values.relationship, kind: 'python',
         done: ({ document }) => isPython(document)
     },
     {

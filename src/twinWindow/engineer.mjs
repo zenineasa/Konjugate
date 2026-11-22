@@ -181,9 +181,11 @@ function renderInputForecasts(twin) {
         const zone = element('input', { type: 'text', className: 'forecastZone', value: setting.plan?.timeZone ?? ownTimeZone(), title: 'The time zone the plan\'s times are in' });
         zone.id = `forecastZone-${name.replace(/[^A-Za-z0-9_-]+/g, '-')}`;
         const zoneLabel = element('label', { className: 'forecastZoneLabel', textContent: 'Time zone', htmlFor: zone.id });
-        // From the model: the state it follows past now (a controller's output). Those in the input's unit, then those whose unit is
-        // not stated; never one a signal measures, one an input sets, or one in another unit (src/inputForecast.mjs, followableStates).
-        // With none, the choice says so and cannot be made; one kept from before that it may not follow is shown, and said.
+        // From the model: the state it follows past now (a controller's output). Those in the input's unit, then those whose unit could
+        // not be checked (a controller's output with no unit stated, or any state when the input itself has none), each said so; never
+        // one a signal measures, one an input sets, one in another unit, nor one with no unit that is no controller's output
+        // (src/inputForecast.mjs, followableStates). With none, the choice says so and cannot be made; one kept from before that it
+        // may not follow is shown, and said.
         const states = followableStates(twin.baseline, { parameterId: input.target?.id, measured: twin.tiles.map((tile) => tile.target?.id), inputParameters: twin.inputs.map((other) => other.target?.id) });
         const fitting = states.filter((candidate) => !candidate.why);
         const follow = element('select', { className: 'forecastState' });
@@ -197,8 +199,19 @@ function renderInputForecasts(twin) {
         };
         const unit = input.target?.unit;
         follow.append(...(unit
-            ? [...group(`In ${unit}`, fitting.filter((candidate) => candidate.stated)), ...group('Unit not stated', fitting.filter((candidate) => !candidate.stated))]
-            : options(fitting)));
+            ? [...group(`In ${unit}`, fitting.filter((candidate) => candidate.stated)), ...group(`Controllers, unit not stated: not checked against ${unit}`, fitting.filter((candidate) => !candidate.stated))]
+            : group(`Unit not checked: ${label} has no unit`, fitting)));
+        // Said under the list while a state whose unit could not be checked is chosen, so the person checks it themselves.
+        const followNote = element('small', { className: 'forecastFollowNote' });
+        followNote.dataset.input = name;
+        const showFollowNote = () => {
+            const chosen = states.find((candidate) => candidate.id === Number(follow.value));
+            const unchecked = choice.value === 'model' && chosen && !chosen.why && !chosen.stated;
+            followNote.hidden = !unchecked;
+            followNote.textContent = !unchecked ? ''
+                : unit ? `${chosen.label} has no unit stated, so it was not checked against ${label}'s ${unit}: make sure it is the controller's output in ${unit}. The forecast takes its value as ${label}, within ${label}'s limits.`
+                : `${label} has no unit, so ${chosen.label}${chosen.unit ? ` (in ${chosen.unit})` : ''} was not checked against it: make sure it is the controller's output that drives ${label}.`;
+        };
         const kept = setting.state ? states.find((candidate) => candidate.id === setting.state) : null;
         if (kept?.why) {
             const refused = new Option(`${kept.label} (${kept.why})`, String(kept.id));
@@ -215,9 +228,12 @@ function renderInputForecasts(twin) {
             const model = [...choice.options].find((option) => option.value === 'model');
             model.disabled = true;
             model.textContent = `${forecastLabels.model} (nothing in the model can drive it)`;
-            model.title = `No state of the model is in ${unit ?? 'the input\'s unit'} without a signal measuring it or an input setting it: the model has no controller for ${label}.`;
+            model.title = `No state of the model is in ${unit || 'the input\'s unit'}, or a controller's output whose unit is not stated, without a signal measuring it or an input setting it: the model has no controller for ${label}.`;
         }
-        follow.addEventListener('change', () => { follow.dataset.chosen = '1'; });
+        follow.addEventListener('change', () => {
+            follow.dataset.chosen = '1';
+            showFollowNote();
+        });
         for (const [element_, label_] of [[repeat, 'How the plan repeats'], [programme, 'The plan'], [zone, 'The plan\'s time zone'], [follow, 'The state it follows']]) {
             element_.dataset.input = name;
             element_.setAttribute('aria-label', `${label_}, for ${label}`);
@@ -227,6 +243,7 @@ function renderInputForecasts(twin) {
             fields.forEach((field) => { field.hidden = !spanFields[field.dataset.key].includes(choice.value); });
             for (const field of [repeat, programme, zoneLabel, zone]) field.hidden = choice.value !== 'plan';
             follow.hidden = choice.value !== 'model';
+            showFollowNote();
         };
         showFields();
         choice.addEventListener('change', () => {
@@ -236,7 +253,7 @@ function renderInputForecasts(twin) {
         });
         const score = element('small', { className: 'forecastScore' });
         score.dataset.input = input.signal;
-        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zoneLabel, zone, programme, follow, score);
+        return element('div', { className: 'forecastRow' }, element('span', { textContent: label }), choice, ...fields, repeat, zoneLabel, zone, programme, follow, followNote, score);
     }));
     showInputScores(twin, twin.cycles.at(-1));
 }

@@ -927,7 +927,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .sourceTermOpen { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 0; color: inherit; background: none; border: 0; font-size: 8px; text-align: left; cursor: pointer; }
 .sourceTermPreview { overflow: hidden; color: #b8c7ce; text-overflow: ellipsis; white-space: nowrap; }
 .removeSourceTerm { padding: 0; color: #946b72; background: transparent; border: 0; font-size: 13px; }
-.kindBadge { padding: 3px 7px; color: #83d7cf; background: rgb(66 201 188 / 10%); border: 1px solid #2b4a4a; border-radius: 10px; font-size: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap; }
 .editorParameterRow { display: grid; grid-template-columns: 1fr .6fr .55fr .55fr .75fr 18px; gap: 6px 4px; padding: 8px; margin-bottom: 9px; background: rgb(255 255 255 / 1.5%); border: 1px solid #1f2c33; border-radius: 6px; }
 .providerBindingRow { display: grid; grid-template-columns: 1fr 1fr 18px; gap: 5px 4px; margin-bottom: 9px; }
 .parameterField { display: grid; min-width: 0; gap: 3px; color: #607580; font-size: 6px; }
@@ -2484,7 +2483,6 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .stateKind { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 32px; padding: 3px 8px; color: #cfe0e6; background: transparent; border: 1px dashed #36515c; border-radius: 5px; cursor: pointer; text-align: left; }
 .stateKind:hover, .stateKind[aria-expanded="true"] { border-color: var(--accent); }
 .stateKindMath, .kindOptionMath, .stateTermMath { color: #d5e1e6; font-size: 11px; }
-.stateKind[data-kind="update"] .kindBadge { color: #e3c27a; background: rgb(227 194 122 / 10%); border-color: #4f4630; }
 .kindChooser { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .kindChooser[hidden] { display: none; }
 .kindOption { display: grid; justify-items: center; gap: 3px; padding: 8px 6px; color: #9fb4bd; background: #0a151d; border: 1px solid #2b3d48; border-radius: 5px; cursor: pointer; }
@@ -2507,34 +2505,35 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .addLinkButton:hover { color: #a1e8e2; }
 #nodeEditorStrayTerms { display: grid; gap: 4px; margin-top: 10px; }
 #nodeEditorStrayTerms[hidden] { display: none; }
-/* Where a term lands, written as the left of the equation being edited (a source term's editor and a relationship's). */
+/* Where a part lands, written as the left of the equation being edited (a source term's editor and a relationship's). */
 .termLanding { display: grid; gap: 7px; margin-bottom: 8px; }
-.termLanding[hidden], .landingState[hidden], .equationLhs[hidden], .equationRhs[hidden], .landingReciprocal[hidden] { display: none; }
-.landingHead { display: flex; align-items: center; justify-content: space-between; min-height: 25px; }
-.landsOnLabel { color: #6e828e; font-size: 7px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.termLanding[hidden], .landingState[hidden], .equationLhs[hidden], .equationRhs[hidden] { display: none; }
+/* Its head: a relationship's direction and how its part is written, then Visual · LaTeX at the end, wrapping on a narrow card. */
+.landingHead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 25px; }
+.landingHead .equationHeading { margin-left: auto; }
 /* A relationship's direction, at the top of its equation: one way, or both ways (the other end's row shown below). */
-.landingHead .directionSwitch { margin: 0 6px 0 auto; }
 .directionSwitch[hidden] { display: none; }
 .directionSwitch button { font-weight: 700; }
 .directionSwitch button.active { color: #e6c27a; background: rgb(230 194 122 / 13%); }
 .directionSwitch button:disabled { cursor: not-allowed; opacity: .55; }
+/* Equation · Equations · { } Program, and a program's language beside it. */
+.writtenAsSwitch button { font-weight: 700; white-space: nowrap; }
+.writtenAsSwitch button:disabled { cursor: not-allowed; opacity: .55; }
+.programLanguage { height: 27px; padding: 0 5px; color: #c6d5db; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 7px; font-weight: 600; }
+.programLanguage[hidden] { display: none; }
 /* Its read-only line on the Details tab, which goes to the switch. */
 .directionReadout button { justify-self: start; padding: 2px 0; color: #aab9c1; background: none; border: 0; font-size: 8px; text-align: left; cursor: pointer; }
 .directionReadout button:hover { color: #a1e8e2; }
 .landingState { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+/* "Equation for", the state the part is written for, chosen by name. */
+.equationFor { color: #6e828e; font-size: 7px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .landingState select { flex: 1 1 150px; min-width: 0; height: 29px; padding: 0 7px; color: #c6d5db; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 8px; font-weight: 600; }
-.landingState small { color: #627782; font-size: 7px; }
 .landingOpen { margin-left: auto; padding: 2px 0; color: var(--accent); background: none; border: 0; font-size: 7px; cursor: pointer; }
 .landingOpen:hover { color: #a1e8e2; }
 .equationLine { display: flex; align-items: center; gap: 6px; }
 .equationLine .equationMathField, .equationLine .equationSource { flex: 1 1 0; width: auto; min-width: 0; margin-top: 0; }
 .termLanding, .landingHead, .equationLine { min-width: 0; max-width: 100%; }
 .equationLhs, .equationRhs { flex: none; color: #8fa3ac; font-size: 13px; white-space: nowrap; }
-.landingReciprocal { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; width: 100%; padding: 6px 8px; color: #7d929d; background: #0f1c24; border: 1px solid #243640; border-radius: 5px; font-size: 7px; text-align: left; cursor: pointer; }
-.landingReciprocal:hover { border-color: #3c6670; }
-.landingReciprocal strong { color: #c6d5db; }
-.landingReciprocal small { color: #627782; }
-.landingReciprocal b { margin-left: auto; color: var(--accent); font-weight: 400; }
 .equationFunctions { margin: 2px 0 4px; color: #566b77; font-size: 7px; }
 .equationFunctions[hidden] { display: none; }
 .equationFunctions summary { width: max-content; color: #6c818d; cursor: pointer; }
@@ -2586,6 +2585,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
 /* A relationship's Equations tab, drawn from its side: each state it lands on as a row of that state's equation. */
 #edgeLanding .equationLine { flex-wrap: wrap; align-items: center; gap: 4px; }
+/* The field takes the rest of the line, or a line of its own when the parts before it leave too little; it wraps a long part. */
+#edgeLanding .equationLine .equationMathField { flex: 1 1 180px; }
 /* A part too long for the card's width scrolls inside its chip, and the parts before the field wrap, rather than run off the card. */
 #edgeLanding :is(.equationLhs, .equationRhs) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; white-space: normal; }
 #edgeLanding :is(.equationLhs, .equationRhs)[hidden] { display: none; }

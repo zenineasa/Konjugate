@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { automaticChoice, fitPolynomial, followableStates, heldAt, parsePlan, planText, projectInput, projectionError, scoreSentence, scoredChoice } from '../src/inputForecast.mjs';
+import { automaticChoice, controllerOutputs, fitPolynomial, followableStates, heldAt, parsePlan, planText, projectInput, projectionError, scoreSentence, scoredChoice } from '../src/inputForecast.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { houseProject } from '../scripts/generateHouseTwin.mjs';
 
 const context = { now: 3600, horizon: 3600, timeStep: 60 };
@@ -187,9 +189,28 @@ test('an input from the model may follow a controller\'s output in its unit, not
     const outdoor = options(house(false), 101);
     assert.equal(outdoor.find((state) => state.label === 'Floor slab · Temperature').why, null);
     assert.equal(outdoor.find((state) => state.label === 'Outdoor air · Temperature').why, 'an input sets it');
-    // A state with no unit is not refused for it, and is said to have none.
-    const document = house(true);
-    document.nodes.find((node) => node.name === 'Floor slab').states[0].unit = '';
-    const unstated = options(document, 104).find((state) => state.label === 'Floor slab · Temperature');
-    assert.deepEqual([unstated.why, unstated.stated], [null, false]);
+    // A state with no unit cannot be checked against a heater's watts: it is offered only if it is a controller's output (a thermostat's
+    // command), said to have no unit stated; the floor slab with no unit is no controller's output, and is refused, saying so.
+    const unitless = house(true);
+    for (const node of unitless.nodes) for (const state of node.states) state.unit = '';
+    const unstated = options(unitless, 104);
+    assert.deepEqual(unstated.filter((state) => !state.why).map((state) => [state.label, state.stated, state.controller]),
+        [['Living room thermostat · Heater command', false, true], ['Bedroom thermostat · Heater command', false, true], ['Kitchen thermostat · Heater command', false, true]]);
+    assert.equal(unstated.find((state) => state.label === 'Floor slab · Temperature').why, 'its unit is not stated, so it cannot be checked against the input\'s W, and it is no controller\'s output');
+    // An input with no unit of its own: nothing could be checked, so a state no signal measures and no input sets is offered, unchecked.
+    const noInputUnit = house(true);
+    noInputUnit.sharedParameters.find((parameter) => parameter.id === 104).unit = '';
+    const slabForUnitless = options(noInputUnit, 104).find((state) => state.label === 'Floor slab · Temperature');
+    assert.deepEqual([slabForUnitless.why, slabForUnitless.stated], [null, false]);
+});
+
+test('a controller\'s output is a Controller node\'s state that its program does not read and that is not its error', () => {
+    // The library's PID block: a program reading its Measurement and writing its Control output and its Error, none with a unit.
+    const pid = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'assets', 'componentLibrary', 'pidParallel.json'), 'utf8')).fragment;
+    const document = { nodes: pid.nodes, edges: [], sharedParameters: [{ id: 50, name: 'Heater', unit: 'W' }] };
+    assert.deepEqual([...controllerOutputs(document)], [3]);
+    assert.deepEqual(followableStates(document, { parameterId: 50 }).map((state) => [state.label, state.why === null]),
+        [['PID controller (parallel) · Measurement', false], ['PID controller (parallel) · Control output', true], ['PID controller (parallel) · Error', false]]);
+    // A node of any other type is no controller, whatever its states are called.
+    assert.equal(controllerOutputs({ nodes: [{ ...pid.nodes[0], type: 'Body' }] }).size, 0);
 });

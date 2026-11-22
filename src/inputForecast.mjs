@@ -313,20 +313,44 @@ export function projectionError(readings, samples, { now, horizon, last }) {
 // The states of a model an input may follow past now with 'model' (a controller's output, docs/proposals/predictionActualWindow.md,
 // "From the model"), each with why it may not, or null: one a signal measures (its readings say what it does, not the model), one an
 // input sets (the input would only copy that input), and one in another unit than the input's parameter (the engine gives the input
-// the state's value as it is: a floor's temperature in kelvin is no heater's watts). A state or an input with no unit is not refused
-// for it (`stated` false: offered apart, as one whose unit is not stated). `parameterId` is the input's shared parameter;
-// `inputParameters` every mapped input's.
+// the state's value as it is: a floor's temperature in kelvin is no heater's watts). Where a unit is missing, on the state or on the
+// input, it cannot be checked (`stated` false, offered apart and said so), and the state is offered only when nothing could have been
+// checked anyway (the input has no unit) or it is a controller's output (`controller`, below): a heater in watts is not handed to a
+// floor whose unit nobody wrote down. `parameterId` is the input's shared parameter; `inputParameters` every mapped input's.
 export function followableStates(document, { parameterId, measured = [], inputParameters = [] }) {
     const unit = String((document.sharedParameters ?? []).find((parameter) => parameter.id === parameterId)?.unit ?? '').trim();
     const setByInputs = statesSetByInputs(document, new Set(inputParameters));
     const measuredStates = new Set(measured);
+    const controllers = controllerOutputs(document);
     return (document.nodes ?? []).flatMap((node) => (node.states ?? []).map((state) => {
         const stateUnit = String(state.unit ?? '').trim();
+        const stated = Boolean(unit && stateUnit);
+        const controller = controllers.has(state.id);
         const why = measuredStates.has(state.id) ? 'a signal measures it'
             : setByInputs.has(state.id) ? 'an input sets it'
-            : unit && stateUnit && stateUnit !== unit ? `it is in ${stateUnit}, and the input in ${unit}` : null;
-        return { id: state.id, label: `${node.name} · ${state.name}`, unit: stateUnit, stated: Boolean(unit && stateUnit), why };
+            : stated && stateUnit !== unit ? `it is in ${stateUnit}, and the input in ${unit}`
+            : !stated && unit && !controller ? `its unit is not stated, so it cannot be checked against the input's ${unit}, and it is no controller's output` : null;
+        return { id: state.id, label: `${node.name} · ${state.name}`, unit: stateUnit, stated, controller, why };
     }));
+}
+
+// The states that are a controller's output: those of a node that is a controller (`type` "Controller", as the library's PID blocks and
+// a thermostat are), less what the controller reads (a state its program takes as an input, a PID block's Measurement) and its error
+// (what it measures, not what it asks for). Their ids.
+export function controllerOutputs(document) {
+    const outputs = new Set();
+    for (const node of document.nodes ?? []) {
+        if (String(node.type ?? '').trim().toLowerCase() !== 'controller') continue;
+        const implementation = node.implementation ?? null;
+        const read = new Set((implementation?.bindings ?? []).filter((binding) => binding.kind === 'state').map((binding) => binding.stateId));
+        const errors = new Set((implementation?.outputs ?? []).filter((output) => /error/i.test(output.key ?? '')).map((output) => output.stateId));
+        for (const state of node.states ?? []) {
+            if (read.has(state.id) && !(implementation?.outputs ?? []).some((output) => output.stateId === state.id)) continue;
+            if (errors.has(state.id) || /^error$/i.test(String(state.name ?? '').trim())) continue;
+            outputs.add(state.id);
+        }
+    }
+    return outputs;
 }
 
 // The states a source term sets outright (`setsValue`) to an input's value, as it is (the outdoor air's temperature, the weather

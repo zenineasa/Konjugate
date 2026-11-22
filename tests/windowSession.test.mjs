@@ -445,6 +445,18 @@ test('an input handed to the model follows only a state that could drive it, sai
     assert.throws(() => follow(6), /heater cannot follow Room · Supply past now: an input sets it\./);
     assert.throws(() => follow(99), /name one that is in it/);
     assert.doesNotThrow(() => follow(4));
+    // With no unit stated, a state is followed only if it is a controller's output: the wall is refused, saying why (as a setup kept
+    // from before this check would be), and the command, on a node that is a controller, is taken.
+    const unitless = (controller) => {
+        const document = tankWithController();
+        for (const state of document.nodes[0].states) delete state.unit;
+        if (controller) document.nodes[0].type = 'Controller';
+        return document;
+    };
+    assert.throws(() => session({ document: unitless(false), inputForecasts: { heater: { choice: 'model', state: 3 } } }),
+        /heater cannot follow Tank · Wall past now: its unit is not stated, so it cannot be checked against the input's K\/s, and it is no controller's output\./);
+    assert.throws(() => session({ document: unitless(false), inputForecasts: { heater: { choice: 'model', state: 4 } } }), /Tank · Command past now: its unit is not stated/);
+    assert.doesNotThrow(() => session({ document: unitless(true), inputForecasts: { heater: { choice: 'model', state: 4 } } }));
 });
 
 test('an engine older than the twin is refused for an input handed to the model, in words, as soon as it starts', async (t) => {

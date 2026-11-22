@@ -57,8 +57,15 @@ async function runTwin(days, inputForecasts, more = {}, { thermostats = false, e
         ...Object.keys(setpointIds).filter(() => thermostats).map((name) => [name, { scale: 1, offset: 273.15, unit: 'K' }])
     ]);
     const events = [];
+    // As the app's main process listens: by the twin it holds (src/main.mjs), which an event sent while the twin is still being made
+    // would find unassigned. None is: what the twin says while it is being made reaches the listener once it is made.
+    let made = false;
     const twin = new LiveTwin({ document, mapping, window: 3600, stride: 600, horizon: 3600, timeStep: 60, tolerances: Object.fromEntries(rooms.map((room) => [room, 0.2])), conversions, keepUp: false, inputForecasts, ...more },
-        { kind: 'recording', content: formatDataLog(log), speed: Infinity }, engineOptions, (event) => events.push(event));
+        { kind: 'recording', content: formatDataLog(log), speed: Infinity }, engineOptions, (event) => {
+            assert.ok(made && twin, `The ${event.type} event came while the twin was being made.`);
+            events.push(event);
+        });
+    made = true;
     for (let waited = 0; waited < 600000 && !events.some((event) => event.type === 'ended' || event.type === 'error'); waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
     await twin.stop();
     if (failing) return { events };
@@ -205,17 +212,32 @@ const limitedCourse = limited.cycles.flatMap((cycle) => cycle.projections.living
 assert.ok(limitedCourse.every((sample) => sample.value <= 1500 + 1e-9) && limitedCourse.some((sample) => Math.abs(sample.value - 1500) < 1e-9), 'The heater followed its thermostat within its limits.');
 const saidLimited = limited.cycles.find((cycle) => /held within its limits for \d+% of the forecast, where the state went to 2000/.test(cycle.projections.livingRoomHeater.reason));
 assert.ok(saidLimited, `Said: ${limited.cycles.map((cycle) => cycle.projections.livingRoomHeater.reason).find((reason) => /limits/.test(reason)) ?? 'nothing'}.`);
+// And said as a figure, for the room to put on the heater's strip and in place of "In step" (src/twinWindow/room.mjs).
+const heldAtLimits = limited.cycles.map((cycle) => cycle.projections.livingRoomHeater.held).filter(Boolean);
+assert.ok(heldAtLimits.length && heldAtLimits.every((entry) => entry.share > 0 && entry.share <= 1 && Math.abs(entry.furthest - 2000) < 1e-6 && entry.limits.maximum === 1500), `Held: ${JSON.stringify(heldAtLimits[0])}.`);
+assert.ok(limited.cycles.some((cycle) => !cycle.projections.livingRoomHeater.held), 'A move whose thermostat stayed within the heater\'s limits says nothing.');
 
 // A setup kept from before the engineer's view offered only states that could drive an input: the bedroom's heater following the
 // floor slab (in kelvin), or the outdoor air the weather station sets. The twin stops and says why, at once, instead of sitting at
 // its start with no move made.
-for (const [state, said] of [[10, /bedroomHeater cannot follow Floor slab · Temperature past now: it is in K, and the input in W\./], [2, /bedroomHeater cannot follow Outdoor air · Temperature past now: an input sets it\./]]) {
+// And the floor slab in a model whose states have no unit stated: its unit cannot be checked against the heater's watts, and it is no
+// controller's output, so it is refused too. Each time the twin is stopped after saying why: its end follows, and nothing after it.
+const unitless = (document) => { for (const node of document.nodes) for (const state of node.states ?? []) delete state.unit; };
+for (const [state, said, edit] of [
+    [10, /bedroomHeater cannot follow Floor slab · Temperature past now: it is in K, and the input in W\./, null],
+    [2, /bedroomHeater cannot follow Outdoor air · Temperature past now: an input sets it\./, null],
+    [10, /bedroomHeater cannot follow Floor slab · Temperature past now: its unit is not stated, so it cannot be checked against the input's W, and it is no controller's output\./, unitless]
+]) {
     const started = Date.now();
-    const { events } = await runTwin(1, { bedroomHeater: { choice: 'model', state } }, {}, { failing: true });
+    const { events } = await runTwin(1, { bedroomHeater: { choice: 'model', state } }, {}, { failing: true, edit });
     const error = events.find((event) => event.type === 'error');
     assert.match(error?.message ?? 'no error', said);
     assert.equal(events.filter((event) => event.type === 'cycle').length, 0);
     assert.ok(Date.now() - started < 30000, `Said within ${((Date.now() - started) / 1000).toFixed(1)} s.`);
+    const settled = events.length;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    assert.deepEqual(events.map((event) => event.type), ['error', 'ended'], 'Stopped after saying why, and nothing after.');
+    assert.equal(events.length, settled);
 }
 
 // ---- The inputs' own uncertainty in the estimator's band --------------------------------------------------------------------------

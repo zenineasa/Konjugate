@@ -35,6 +35,50 @@ export class ReferenceChips {
     }
 }
 
+// MathLive lays a formula out on one line and clips what does not fit, so a long part ("conductance · (temperature_HB − t…")
+// was cut off on the right. Every maths field instead wraps, as a line of text does: it grows in height and breaks at the
+// spaces MathLive puts around its operators (+, −, =, ·), inside brackets too, and inside a name only when the name alone is
+// wider than the field. MathLive's styles live in each field's shadow root, so this sheet is adopted into each one: those on
+// the page when it is called, and every field added after (watched for, as a custom element's callbacks are read once, when it
+// is defined, and cannot be added to later).
+// A fraction at the top of the formula (or in brackets there) is laid out as numerator, bar and denominator one above the other in
+// the page's own flow, in place of MathLive's rows at fixed heights, so a numerator that wraps onto two lines pushes the bar down
+// rather than running over it; a fraction inside another keeps MathLive's own layout.
+const outerFraction = ':is(.ML__base, .ML__base > .ML__left-right) > .ML__mfrac';
+let wrappingSheet = null;
+export function letMathFieldsWrap() {
+    if (!wrappingSheet) {
+        wrappingSheet = new CSSStyleSheet();
+        wrappingSheet.replaceSync(`
+            .ML__latex { flex: 1 1 auto; width: auto; min-width: 0; white-space: normal; }
+            .ML__base { display: inline; width: auto; overflow-wrap: anywhere; }
+            .ML__left-right { display: inline; }
+            .ML__toggles { align-self: flex-start; }
+            ${outerFraction} { display: inline-flex; align-items: center; vertical-align: middle; max-width: 100%; }
+            ${outerFraction} > .ML__vlist-t { display: block; min-width: 0; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r { display: block; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r + .ML__vlist-r, ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist-s { display: none; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist { display: flex; flex-direction: column-reverse; height: auto !important; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist > span { position: static; height: auto; top: auto !important; text-align: center; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist > span > .ML__pstrut { display: none; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist > span > span:not(.ML__frac-line) { display: inline !important; height: auto !important; }
+            ${outerFraction} > .ML__vlist-t > .ML__vlist-r > .ML__vlist > span > .ML__frac-line { display: block !important; margin: .12em 0; }`);
+    }
+    const adopt = (field) => {
+        const root = field.shadowRoot;
+        if (root && !root.adoptedStyleSheets.includes(wrappingSheet)) root.adoptedStyleSheets = [...root.adoptedStyleSheets, wrappingSheet];
+    };
+    const adoptWithin = (node) => {
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        if (node.localName === 'math-field') adopt(node);
+        node.querySelectorAll('math-field').forEach(adopt);
+    };
+    new MutationObserver((records) => {
+        for (const record of records) record.addedNodes.forEach(adoptWithin);
+    }).observe(document.body, { childList: true, subtree: true });
+    adoptWithin(document.body);
+}
+
 // Under the line that names a formula's unknown symbols, one plain action for each that can be a parameter: "Add k as a
 // parameter", which `add(symbol)` does. Pressing one leaves the focus in the formula, so the edit is not ended under it.
 export function showAddParameterActions(line, symbols, add) {

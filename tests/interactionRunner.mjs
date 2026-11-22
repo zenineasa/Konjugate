@@ -231,6 +231,15 @@ async function addOwnParameter(window, symbol, fields) {
 }
 
 // What the own field on a state says of what is written in it, and the references it offers.
+// How a relationship's part is written, set as a person sets it at the top of its Equations tab: Equation, Equations or
+// "{ } Program" pressed, then, for a program, its language chosen beside the switch.
+const writeRelationshipAs = (kind) => `(() => {
+    const kind = ${JSON.stringify(kind)};
+    const language = ['cpp', 'python', 'plugin'].includes(kind);
+    document.querySelector('#editEdgeWrittenAs [data-written-as="' + (language ? 'program' : kind) + '"]').click();
+    const select = document.querySelector('#editEdgeProgramLanguage');
+    if (language && select.value !== kind) { select.value = kind; select.dispatchEvent(new Event('change', { bubbles: true })); }
+})()`;
 const ownPartDiagnostics = (symbol) => `document.querySelector('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .ownPartDiagnostics')`;
 const ownPartReferences = (symbol) => `[...document.querySelectorAll('#nodeEditorStates .stateCard[data-symbol="${symbol}"] .ownPartReferences button')]`;
 
@@ -2109,12 +2118,7 @@ export async function runInteractionTests(driver) {
 
     await run('relationship editor authors an inline C++ provider implementation', async () => {
         await freshRelationshipEditor();
-        const kindSelect = `document.querySelector('#editEdgeImplementationKind')`;
-        await evaluate(window, `(() => {
-            const select = ${kindSelect};
-            select.value = 'cpp';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await evaluate(window, writeRelationshipAs('cpp'));
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), false);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), false);
@@ -2156,23 +2160,14 @@ export async function runInteractionTests(driver) {
         assert.match(regeneratedSource, /ScalarPort\{"gradient", "gradient", ""\}/);
 
         // Switch back to Equation so the following equation-editor tests see their expected state.
-        await evaluate(window, `(() => {
-            const select = ${kindSelect};
-            select.value = 'equation';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await evaluate(window, writeRelationshipAs('equation'));
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
     });
 
     await run('provider editor window syntax-highlights, validates and applies C++ source', async () => {
-        const kindSelect = `document.querySelector('#editEdgeImplementationKind')`;
-        await evaluate(window, `(() => {
-            const select = ${kindSelect};
-            select.value = 'cpp';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await evaluate(window, writeRelationshipAs('cpp'));
         const validCpp = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
         const beforeEditorOpen = driver.allHandles();
         await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
@@ -2232,11 +2227,7 @@ export async function runInteractionTests(driver) {
     await run('relationship editor returns to equation mode after a provider-editor session', async () => {
         // Switch back to Equation so the following equation-editor tests see their expected state,
         // whether or not the provider-editor scenario above actually ran (see its own skip reason).
-        await evaluate(window, `(() => {
-            const select = document.querySelector('#editEdgeImplementationKind');
-            select.value = 'equation';
-            select.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
+        await evaluate(window, writeRelationshipAs('equation'));
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
@@ -5372,12 +5363,12 @@ export async function runInteractionTests(driver) {
             'The engine must accept a cases expression using t.');
 
         // Providers get time from their evaluation context, so t is not offered as a provider binding.
-        await evaluate(opened, `(() => { const select = document.querySelector('#editEdgeImplementationKind'); select.value = 'cpp'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(opened, writeRelationshipAs('cpp'));
         await evaluate(opened, `document.querySelector('#editAddProviderBinding').click()`);
         const referenceOptions = await evaluate(opened, `[...document.querySelectorAll('#edgeEditor .providerBindingRow [data-field="reference"] option')].map((option) => option.textContent)`);
         assert.ok(referenceOptions.length > 0, 'The provider binding row must list references.');
         assert.ok(!referenceOptions.some((label) => label.includes('time')), `Provider bindings must not offer t (got ${referenceOptions.join(', ')}).`);
-        await evaluate(opened, `(() => { const select = document.querySelector('#editEdgeImplementationKind'); select.value = 'equation'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(opened, writeRelationshipAs('equation'));
         await waitFor(opened, `!document.querySelector('#editEdgeMathField').hidden || !document.querySelector('#editEdgeEquation').hidden`, 'The edge editor did not return to equation mode.');
         await setEdgeEquation(String.raw`\begin{cases} 1 & t \ge 1.95 \\ 0 & \text{otherwise} \end{cases}`);
         assert.equal(await diagnostics(), 'Valid expression · MathJSON ready');
@@ -5560,7 +5551,8 @@ export async function runInteractionTests(driver) {
         // Played to its end, the twin is not running: Try something is not offered, and says why.
         assert.equal(await evaluate(twin, `document.querySelector('#trySomething').disabled`), true);
         assert.match(await evaluate(twin, `document.querySelector('#trySomething').title`), /^Not available: the whole log has been played\. Setup, then Start, plays it again\.$/);
-        assert.equal(await evaluate(twin, `document.querySelector('#tryWhy').textContent`), 'Try something: only while the twin runs', 'Beside it, the room says why it is off.');
+        assert.equal(await evaluate(twin, `document.querySelector('#tryWhy').textContent`), 'only while the twin runs', 'Beside it, the room says why it is off, in a few words.');
+        assert.match(await evaluate(twin, `document.querySelector('#tryWhy').title`), /^Not available: /, 'The whole sentence is its tooltip.');
         assert.equal(await evaluate(twin, `document.querySelector('#healthDrift').textContent`), 'In step');
         assert.match(await evaluate(twin, `document.querySelector('#inferredRows').innerText`), /Ambient air · Temperature\s+carried by the model/, 'The room says what the readings do not reach.');
 
@@ -6078,6 +6070,105 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `JSON.stringify(window.__debugTwin.setup()?.live?.inputs?.solarGain) === JSON.stringify({ forecast: 'hold', plan: { repeat: 'daily', timeZone: 'UTC', points: [{ at: 27000, value: 0 }, { at: 43200, value: 1500 }, { at: 63000, value: 0 }] } })`, 'The sun\'s plan was not kept with it when held.');
         await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
         await evaluate(twin, `document.querySelector('#roomStop').click()`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
+    await run('an input handed to the model whose controller asks for more than its limits allow is said on its strip, and the room does not call the twin in step', async () => {
+        // The house with its thermostats (scripts/generateHouseTwin.mjs), the living room's heater limited to 500 W and handed to its
+        // thermostat past now, which switches between 0 and 2000 W: while the thermostat is on, the forecast holds the heater at 500 W.
+        const { houseDay, houseProject } = await import('../scripts/generateHouseTwin.mjs');
+        const { formatDataLog } = await import('../src/dataLogFormat.mjs');
+        const document = houseProject({ thermostats: true });
+        const heater = document.sharedParameters.find((parameter) => parameter.id === 103);
+        Object.assign(heater, { value: Math.min(heater.value, 500), tuning: { minimum: 0, maximum: 500 } });
+        const celsius = { scale: 1, offset: 273.15 };
+        const entry = (name, role, kind, id, unit, conversion = null) => ({ source: name, name, role, target: { kind, id }, unit, conversion });
+        document.twin = {
+            source: { kind: 'file', fileName: 'house with thermostats.csv' },
+            mapping: [
+                entry('outdoorTemperature', 'input', 'parameter', 101, '°C', celsius), entry('solarGain', 'input', 'parameter', 102, 'W'),
+                entry('livingRoomHeater', 'input', 'parameter', 103, 'W'), entry('bedroomHeater', 'input', 'parameter', 104, 'W'), entry('kitchenHeater', 'input', 'parameter', 105, 'W'),
+                entry('livingRoomSetpoint', 'input', 'parameter', 106, '°C', celsius), entry('bedroomSetpoint', 'input', 'parameter', 107, '°C', celsius), entry('kitchenSetpoint', 'input', 'parameter', 108, '°C', celsius),
+                entry('livingRoomTemperature', 'output', 'state', 4, '°C', celsius), entry('bedroomTemperature', 'output', 'state', 6, '°C', celsius), entry('kitchenTemperature', 'output', 'state', 8, '°C', celsius)
+            ],
+            live: { inputs: { livingRoomHeater: { forecast: 'model', state: 21 } } }
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-held-'));
+        const projectPath = join(directory, 'house with thermostats.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(document)));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The house with thermostats did not load.');
+        const twin = await openTwinWindow(opened);
+        await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(formatDataLog(houseDay({ days: 1, setpoints: true })))}, 'house with thermostats.csv')`);
+        await waitFor(twin, `!document.querySelector('#openRoom').disabled`, 'The kept mapping did not come back with the log.', 15000);
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed('600')`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        // At a move whose forecast holds the heater at its limits for much of the hour, the chip says so in place of "In step", and the
+        // heater's strip says for how much of it, in the warning's colour.
+        await waitFor(twin, `/^Forecast held at Living room heater's limits$/.test(document.querySelector('#healthDrift').textContent)`, 'The room did not say the forecast was held at the heater\'s limits.', 120000);
+        assert.match(await evaluate(twin, `document.querySelector('#healthDrift').className`), /\blean\b/);
+        assert.match(await evaluate(twin, `document.querySelector('#healthDrift').title`), /^Living room heater follows the model past now, but what it follows went past its limits \(to 2000, against 0 to 500\) for \d+% of the forecast/);
+        const strip = await evaluate(twin, `(() => { const kind = [...document.querySelectorAll('#inputRows .inputRow')].find((row) => row.querySelector('strong').textContent === 'Living room heater').querySelector('.inputKind'); return { text: kind.textContent, held: kind.classList.contains('held') }; })()`);
+        assert.match(strip.text, /^input · ahead: from the model, held at its limits for \d+% of it$/);
+        assert.equal(strip.held, true);
+        await evaluate(twin, `(() => { const stop = document.querySelector('#roomStop'); if (stop && !stop.hidden && !stop.disabled) stop.click(); })()`);
+        await twin.close();
+        await evaluate(opened, `window.confirm = () => true; undefined`);
+        await closeWhenValidated(opened);
+    }, { skip: !driver.capabilities.multiWindow && 'opens its own windows; no web-edition equivalent' });
+
+    await run('a project kept with an input following a state it may no longer follow opens its twin, which stops and says why in words, and runs once it is changed', async () => {
+        // The house as saved before the engineer's view offered only states that could drive an input: its bedroom heater handed, past
+        // now, to the outdoor air's temperature, which the weather station's reading sets. Opened, its log chosen again and its room
+        // opened, the twin stops at once and says why, in the room, rather than failing to start with an error from inside the app.
+        const content = JSON.parse(await decodeProjectFile(await readFile(join(process.cwd(), 'examples', 'dataSources', 'smartHouse.kjt'))));
+        const celsius = { scale: 1, offset: 273.15 };
+        const entry = (name, role, kind, id, unit, conversion = null) => ({ source: name, name, role, target: { kind, id }, unit, conversion });
+        content.twin = {
+            source: { kind: 'file', fileName: 'smartHouse.csv' },
+            mapping: [
+                entry('outdoorTemperature', 'input', 'parameter', 101, '°C', celsius), entry('solarGain', 'input', 'parameter', 102, 'W'),
+                entry('livingRoomHeater', 'input', 'parameter', 103, 'W'), entry('bedroomHeater', 'input', 'parameter', 104, 'W'), entry('kitchenHeater', 'input', 'parameter', 105, 'W'),
+                entry('livingRoomTemperature', 'output', 'state', 4, '°C', celsius), entry('bedroomTemperature', 'output', 'state', 6, '°C', celsius), entry('kitchenTemperature', 'output', 'state', 8, '°C', celsius)
+            ],
+            live: { inputs: { bedroomHeater: { forecast: 'model', state: 2 } } }
+        };
+        const directory = await mkdtemp(join(tmpdir(), 'konjugate-kept-'));
+        const projectPath = join(directory, 'house kept.kjt');
+        await writeFile(projectPath, await encodeProjectFile(JSON.stringify(content)));
+        const before = driver.allHandles();
+        await driver.simulateOsFileOpen(projectPath);
+        const opened = await driver.waitForNewHandle(before);
+        await waitFor(opened, `document.querySelectorAll('.node-label-container').length > 0`, 'The kept house did not load.');
+        assert.deepEqual(await evaluate(opened, `window.__debugTwin.setup()?.live?.inputs`), { bedroomHeater: { forecast: 'model', state: 2 } }, 'The kept choice was read with the project.');
+        const twin = await openTwinWindow(opened);
+        const log = await readFile(join(process.cwd(), 'examples', 'dataSources', 'smartHouse.csv'), 'utf8');
+        await evaluate(twin, `window.__debugTwinWindow.offerLog(${JSON.stringify(log)}, 'smartHouse.csv')`);
+        await waitFor(twin, `!document.querySelector('#openRoom').disabled`, 'The kept mapping did not come back with the log.', 15000);
+        await evaluate(twin, `window.__debugTwinWindow.setSpeed('Infinity')`);
+        await evaluate(twin, `document.querySelector('#openRoom').click()`);
+        const refusal = 'bedroomHeater cannot follow Outdoor air · Temperature past now: an input sets it. Choose a controller\'s output in the input\'s unit, in the engineer\'s view.';
+        await waitFor(twin, `document.querySelector('#healthTwin').textContent === ${JSON.stringify(`Stopped: ${refusal}`)}`, 'The twin did not stop and say why.', 15000);
+        assert.equal(await evaluate(twin, `document.querySelector('#room').hidden`), false, 'The room stays open, saying why.');
+        assert.doesNotMatch(await evaluate(twin, `document.querySelector('#setupStatus').textContent`), /could not start|ReferenceError/);
+        assert.ok(await evaluate(twin, `[...document.querySelectorAll('#eventsList li.bad')].some((item) => item.textContent.includes(${JSON.stringify(refusal)}))`), 'The refusal is an event.');
+        assert.equal(await evaluate(twin, `window.__debugTwinWindow.summary()?.moves ?? 0`), 0);
+        // The engineer's view shows the kept choice as one it may not follow, and why; held instead, the twin starts again and moves.
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        await waitFor(twin, `Boolean(document.querySelector('#inputForecastRows .forecastState[data-input="bedroomHeater"]'))`, 'The engineer\'s view did not list the inputs.');
+        assert.deepEqual(await evaluate(twin, `(() => { const option = document.querySelector('#inputForecastRows .forecastState[data-input="bedroomHeater"]').selectedOptions[0]; return [option.textContent, option.disabled]; })()`),
+            ['Outdoor air · Temperature (an input sets it)', true]);
+        await setField(twin, '#inputForecastRows .forecastChoice[data-input="bedroomHeater"]', 'hold');
+        assert.equal(await evaluate(twin, `document.querySelector('#restartTwin').disabled`), false);
+        await evaluate(twin, `document.querySelector('#restartTwin').click()`);
+        await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The twin did not run once the input was held.', 60000);
+        await waitFor(opened, `!window.__debugTwin.setup()?.live?.inputs?.bedroomHeater`, 'The refused choice was kept with the project.');
+        await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
+        await evaluate(twin, `(() => { const stop = document.querySelector('#roomStop'); if (stop && !stop.hidden && !stop.disabled) stop.click(); })()`);
         await twin.close();
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
@@ -9165,7 +9256,7 @@ export async function runInteractionTests(driver) {
         await openRelationship('Crank drive X');
         assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow').hidden`), true);
         // Written as a program, its part is a chip that opens the program.
-        await evaluate(window, `(() => { const select = document.querySelector('#editEdgeImplementationKind'); select.value = 'cpp'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await evaluate(window, writeRelationshipAs('python'));
         await waitFor(window, `Boolean(document.querySelector('#edgeLanding .partChip.live.program'))`, 'A relationship written as a program has no chip for its part.');
         await undoRedo('undo');
 
@@ -9297,7 +9388,7 @@ export async function runInteractionTests(driver) {
         const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
 
         // The one equation becomes the first of several, setting its state; the relationship becomes directed.
-        await select(`document.querySelector('#editEdgeImplementationKind')`, 'equations');
+        await evaluate(window, writeRelationshipAs('equations'));
         await waitFor(window, `!document.querySelector('#editEdgeEquationsList').hidden`, 'The equations editor did not open.');
         let edge = await several();
         assert.equal(edge.directionality, 'directed');
@@ -9353,7 +9444,7 @@ export async function runInteractionTests(driver) {
         // Back to one equation: the first stays, with the quantity it reads written into it.
         await openRelationship('Sense');
         await evaluate(window, `(() => { window.__confirmAnswer = window.confirm; window.confirm = () => true; })()`);
-        await select(`document.querySelector('#editEdgeImplementationKind')`, 'equation');
+        await evaluate(window, writeRelationshipAs('equation'));
         await evaluate(window, `(() => { window.confirm = window.__confirmAnswer; })()`);
         edge = await several();
         assert.equal(edge.equationModel.outputs, undefined);
@@ -9598,7 +9689,7 @@ export async function runInteractionTests(driver) {
             const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
             const reference = JSON.stringify(['example.helloProvider', '0.1.0', 'example.helloWorld']);
             await openRelationship('Sense');
-            await select(`document.querySelector('#editEdgeImplementationKind')`, 'plugin');
+            await evaluate(window, writeRelationshipAs('plugin'));
             await waitFor(window, `!document.querySelector('#editEdgePluginProviderFields').hidden && document.querySelector('#editEdgePluginProvider').options.length === 2`, 'The installed providers were not offered.');
             assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderCode').hidden`), true, 'A plugin provider has no source to edit.');
             await select(`document.querySelector('#editEdgePluginProvider')`, reference);
@@ -9607,7 +9698,7 @@ export async function runInteractionTests(driver) {
                 kind: 'plugin', providerApiVersion: 1, pluginId: 'example.helloProvider', pluginVersion: '0.1.0', providerId: 'example.helloWorld', bindings: [], output: undefined
             });
             assert.equal(edge.implementation.output.stateId, 6, 'The state it updates carries over.');
-            await select(`document.querySelector('#editEdgeImplementationKind')`, 'python');
+            await evaluate(window, writeRelationshipAs('python'));
             edge = (await savedProject()).edges[0];
             assert.match(edge.implementation.source, /RelationshipProvider/, 'A program starts from a template again.');
             await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
@@ -10222,13 +10313,14 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `document.querySelector('#engineerToggle').click()`);
         // Before the first move.
         await waitFor(twin, `window.__debugTutorialRing().ringed === 'p#refitWhy' && Boolean(window.__debugTutorialRing().waiting)`, 'The ring did not go to why Refit is off, with the banner saying the step waits.', 10000);
-        const before = await evaluate(twin, `({ ring: window.__debugTutorialRing(), moves: window.__debugTwinWindow.summary().moves, refitOff: document.querySelector('#refitRun').disabled, why: document.querySelector('#refitWhy').textContent, tryOff: document.querySelector('#trySomething').disabled, tryWhy: document.querySelector('#tryWhy').textContent, tunableWhy: document.querySelector('#tunableWhy').hidden ? null : document.querySelector('#tunableWhy').textContent, status: document.querySelector('#healthTwin').textContent })`);
+        const before = await evaluate(twin, `({ ring: window.__debugTutorialRing(), moves: window.__debugTwinWindow.summary().moves, refitOff: document.querySelector('#refitRun').disabled, why: document.querySelector('#refitWhy').textContent, tryOff: document.querySelector('#trySomething').disabled, tryWhy: document.querySelector('#tryWhy').textContent, tryWhyTitle: document.querySelector('#tryWhy').title, tunableWhy: document.querySelector('#tunableWhy').hidden ? null : document.querySelector('#tunableWhy').textContent, status: document.querySelector('#healthTwin').textContent })`);
         assert.equal(before.moves, 0, 'The twin made its first move before it could be looked at.');
         assert.equal(before.refitOff, true);
         const wait = /^Available after the twin's first move · (about (a minute|\d+ seconds) at 60×|any moment now)$/;
         assert.match(before.why, wait, 'Under Refit, why it is off and for about how long.');
         assert.equal(before.tryOff, true, 'Try something waits for the first move too.');
-        assert.match(before.tryWhy, /^Try something: after the first move · (about (a minute|\d+ seconds) at 60×|any moment now)$/);
+        assert.equal(before.tryWhy, 'after the first move');
+        assert.match(before.tryWhyTitle, wait, 'The wait, in full, in its tooltip.');
         assert.match(before.tunableWhy ?? '', /^Set here once the first move is made · /);
         assert.equal(before.status, 'Starting the twin…');
         const { ring } = before;

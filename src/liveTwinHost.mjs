@@ -112,7 +112,11 @@ export class LiveTwin {
     #source = null;
     #sandbox = null;
     #recording = null;
-    #onEvent;
+    #listener;
+    // Events said while the twin is still being made (a recording's or a file's header is read at once, and a setup the session refuses
+    // fails the twin there and then), held until it is made: by then the caller holds the twin (src/main.mjs names it in its listener)
+    // and can tell it apart and stop it. null once they are sent.
+    #early = [];
     #stopped = false;
 
     // settings: { document, mapping, window, stride, horizon, timeStep, tolerances, alertAt, corrections, conversions }; source as
@@ -123,7 +127,7 @@ export class LiveTwin {
     constructor(settings, source, engineOptions, onEvent) {
         this.settings = settings;
         this.engineOptions = engineOptions;
-        this.#onEvent = onEvent;
+        this.#listener = onEvent;
         const conversions = settings.conversions ?? {};
         const converting = Object.keys(conversions).length > 0;
         let header = null;
@@ -153,6 +157,8 @@ export class LiveTwin {
         const outputs = new Set((settings.mapping ?? []).filter((entry) => entry.role === 'output').map((entry) => entry.signal));
         const times = Object.fromEntries([...outputs].map((signal) => [signal, []]));
         const onObservations = (observations) => {
+            // A source can hand on readings in the same breath as it is stopped (a recording's first tick, from inside its start).
+            if (this.#stopped) return;
             try {
                 const converted = converting ? observations.map((observation) => {
                     const conversion = conversions[observation.signal];
@@ -176,6 +182,22 @@ export class LiveTwin {
                 this.#fail(error);
             }
         };
+        if (!['file', 'recording', 'mqtt', 'opcua', 'push'].includes(source.kind)) {
+            throw new Error('A live twin reads a followed file, a recording, an MQTT broker, an OPC UA server or the push service.');
+        }
+        if (['mqtt', 'opcua', 'push'].includes(source.kind)) this.recordedTo = source.recordTo ?? null;
+        this.#startSource(source, { onHeader, onObservations });
+        // Stopped while its source was starting (its header refused, read before the source was handed back): that source is stopped too.
+        if (this.#stopped) Promise.resolve(this.#source?.stop()).catch(() => {});
+        // What was said while the twin was being made reaches its caller now, in order, once the caller holds it.
+        queueMicrotask(() => {
+            const early = this.#early;
+            this.#early = null;
+            for (const event of early) this.#listener(event);
+        });
+    }
+
+    #startSource(source, { onHeader, onObservations }) {
         if (source.kind === 'file') {
             this.#source = followDataLog(source.path, { onHeader, onObservations, onError: (error) => this.#fail(error), ...(source.logger ? { reader: new LoggerCsvReader(source.logger) } : {}) });
         } else if (source.kind === 'recording') {
@@ -215,17 +237,25 @@ export class LiveTwin {
                     this.#onEvent({ type: 'note', message: `The server samples these tags every ${slowest} ms or faster: a change quicker than that is not seen by any client.` });
                 }
             });
-        } else {
-            throw new Error('A live twin reads a followed file, a recording, an MQTT broker, an OPC UA server or the push service.');
         }
     }
 
     get session() { return this.#session; }
 
+    #onEvent(event) {
+        if (this.#early) this.#early.push(event);
+        else this.#listener(event);
+    }
+
+    // The twin stops and says why. It is stopped whatever saying it does (a listener that throws must not leave the source and the
+    // engine running).
     #fail(error) {
         if (this.#stopped) return;
-        this.#onEvent({ type: 'error', message: error.message });
-        this.stop().catch(() => {});
+        try {
+            this.#onEvent({ type: 'error', message: error.message });
+        } finally {
+            this.stop().catch(() => {});
+        }
     }
 
     async stop() {

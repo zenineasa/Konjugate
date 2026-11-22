@@ -463,7 +463,10 @@ export class WindowSession {
             const beyond = raw.map((sample, index) => ({ value: sample.value, by: Math.abs(sample.value - course[index].value) })).filter((sample) => sample.by > 0);
             if (beyond.length) {
                 const furthest = beyond.reduce((worst, sample) => (sample.by > worst.by ? sample : worst));
-                projection.reason = `${projection.reason}; held within its limits for ${Math.max(1, Math.round(100 * beyond.length / raw.length))}% of the forecast, where the state went to ${Number(furthest.value.toPrecision(4))}`;
+                // How much of the forecast the input was held at its limits, and the furthest the state went: the room says it on the
+                // input's strip, and in place of "In step" when it is much of the forecast.
+                projection.held = { share: beyond.length / raw.length, furthest: furthest.value, limits: { ...limits } };
+                projection.reason = `${projection.reason}; held within its limits for ${Math.max(1, Math.round(100 * projection.held.share))}% of the forecast, where the state went to ${Number(furthest.value.toPrecision(4))}`;
             }
             projection.samples = course;
             const pending = this.#pendingProjections.at(-1)?.now === now ? this.#pendingProjections.at(-1).inputs[signal] : null;
@@ -615,7 +618,7 @@ export class WindowSession {
         const cycle = {
             index, anchor, now, jumps, window, forecast, model, inferred,
             // What the forecast assumed of each input past now, and how each choice has done against what arrived.
-            projections: Object.fromEntries(Object.entries(projections).map(([signal, { choice, using, reason, samples }]) => [signal, { choice, using, reason, samples }])),
+            projections: Object.fromEntries(Object.entries(projections).map(([signal, { choice, using, reason, samples, held }]) => [signal, { choice, using, reason, samples, ...(held ? { held } : {}) }])),
             inputScores: this.#scoreProjections(now),
             restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),

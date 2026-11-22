@@ -1060,8 +1060,8 @@
                     <option value="plugin">Installed plugin provider</option>
                 </select></label>
                 <div id="termLanding" class="termLanding">
-                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="termEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div></div>
-                    <div class="landingState"><select id="termOutputState"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="landingHead"><div id="termEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-term-equation-mode="visual" type="button">Visual</button><button data-term-equation-mode="latex" type="button">LaTeX</button></div></div></div>
+                    <div class="landingState"><label class="equationFor" for="termOutputState">Equation for</label><select id="termOutputState"></select><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
                     <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="termMathField" class="equationMathField" placeholder="\text{type this node's own term}" aria-label="This node's own part"></math-field><textarea id="termEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
                 </div>
                 <div id="termEquationDiagnostics" class="equationDiagnostics" role="status"></div>
@@ -1087,18 +1087,10 @@
             <div class="resultReadOnlyNotice" data-result-readonly hidden><strong>Results mode · Model locked</strong><span>Close results to make changes.</span></div>
             <div data-editor-panel="equations">
             <section>
-                <label class="editorField"><span>Written as</span><select id="editEdgeImplementationKind">
-                    <option value="equation">Equation</option>
-                    <option value="equations">Equations that set values</option>
-                    <option value="cpp">C++ program</option>
-                    <option value="python">Python program</option>
-                    <option value="plugin">Installed plugin provider</option>
-                </select></label>
                 <div id="edgeLanding" class="termLanding">
-                    <div class="landingHead"><span class="landsOnLabel">Lands on</span><div id="editEdgeDirection" class="equationModes directionSwitch" role="radiogroup" aria-label="Direction"><button data-direction="directed" role="radio" type="button" title="One way: it changes only the node it runs to">One way</button><button data-direction="bidirectional" role="radio" type="button" title="Both ways: the other end gets the same term, negated">Both ways</button></div><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
-                    <div class="landingState"><select id="editEquationOutput"></select><span class="kindBadge" data-landing-kind></span><small data-landing-others></small><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
+                    <div class="landingHead"><div id="editEdgeDirection" class="equationModes directionSwitch" role="radiogroup" aria-label="Direction"><button data-direction="directed" role="radio" type="button" title="One way: it changes only the node it runs to">One way</button><button data-direction="bidirectional" role="radio" type="button" title="Both ways: the other end gets the same term, negated">Both ways</button></div><div id="editEdgeWrittenAs" class="equationModes writtenAsSwitch" role="radiogroup" aria-label="Equation or program"><button data-written-as="equation" role="radio" type="button" title="One equation: this relationship's part of the state's equation">Equation</button><button data-written-as="equations" role="radio" type="button" title="Several equations, each setting a state of either end">Equations</button><button data-written-as="program" role="radio" type="button" title="A program works out this relationship's part">{ } Program</button></div><select id="editEdgeProgramLanguage" class="programLanguage" aria-label="Program language" hidden><option value="cpp">C++</option><option value="python">Python</option><option value="plugin">Installed plugin</option></select><div id="editEdgeEquationHeading" class="equationHeading"><div class="equationModes"><button class="active" data-equation-mode="visual" type="button">Visual</button><button data-equation-mode="latex" type="button">LaTeX</button></div></div></div>
+                    <div class="landingState"><label class="equationFor" for="editEquationOutput">Equation for</label><select id="editEquationOutput"></select><button class="landingOpen" data-landing-open data-navigation type="button" title="Open the node at its equations">Open ↗</button></div>
                     <div class="equationLine"><span class="equationLhs" data-landing-lhs></span><math-field id="editEdgeMathField" class="equationMathField" placeholder="\text{type this relationship's term}" aria-label="Equation expression"></math-field><textarea id="editEdgeEquation" class="equationSource" rows="3" placeholder="LaTeX expression" hidden></textarea><span class="equationRhs" data-landing-rhs></span></div>
-                    <button class="landingReciprocal" data-landing-reciprocal data-navigation type="button" hidden></button>
                 </div>
                 <div id="editEdgeEquationsList" hidden></div>
                 <div id="equationDiagnostics" class="equationDiagnostics" role="status"></div>

@@ -3536,10 +3536,12 @@ ipcMain.handle('liveTwinStart', async (event, settings, source, projectPath = nu
     if (source.kind === 'push' && !pushServiceHost().state().listening) throw new Error('The push service is not listening: start it in Settings › Push service.');
     if (source.kind === 'push') source = { kind: 'push', signals: source.signals, hub: pushServiceHost().hub, recordTo: await recordingPathFor(source, projectPath) };
     if (source.kind === 'mqtt' || source.kind === 'opcua') source = { ...source, recordTo: await recordingPathFor(source, projectPath), ...(source.kind === 'opcua' ? { pkiFolder: opcUaPkiFolder() } : {}) };
-    const twin = new LiveTwin(settings, source, await engineOptions(), (update) => {
+    // The twin is named before it is made, so an event can never find it unassigned (a LiveTwin sends none while it is being made).
+    let twin = null;
+    twin = new LiveTwin(settings, source, await engineOptions(), (update) => {
         if (!owner.isDestroyed()) owner.send('liveTwinEvent', update);
         if (update.type === 'ended' || update.type === 'error') {
-            if (liveTwins.get(owner.id) === twin) liveTwins.delete(owner.id);
+            if (twin && liveTwins.get(owner.id) === twin) liveTwins.delete(owner.id);
         }
     });
     liveTwins.set(owner.id, twin);

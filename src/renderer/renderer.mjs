@@ -10,7 +10,7 @@ import { convertLatexToMarkup } from 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { EntityEditor, resultLockedControls, resultLockedMathFields } from './entityEditor.mjs';
 import { createTour } from './tour.mjs';
-import { bindingInsertTitle, EquationEditor, ReferenceChips, showAddParameterActions } from './equationEditor.mjs';
+import { bindingInsertTitle, EquationEditor, letMathFieldsWrap, ReferenceChips, showAddParameterActions } from './equationEditor.mjs';
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection } from './programSourceSection.mjs';
@@ -360,7 +360,10 @@ function setupVirtualKeyboardLayout() {
     window.addEventListener('resize', updateInset);
 }
 
-customElements.whenDefined('math-field').then(setupVirtualKeyboardLayout);
+customElements.whenDefined('math-field').then(() => {
+    letMathFieldsWrap();
+    setupVirtualKeyboardLayout();
+});
 
 function geometryFromDocument(mesh) {
     if (!mesh?.position?.length) return null;
@@ -3633,42 +3636,34 @@ function renderSourceTermParameters(node, term, container = $('#termParameters')
     });
 }
 
-// Where a term lands, written as the left of the equation being edited: the state it reaches (chosen by name), its kind, the
-// terms beside it, and -- for a relationship running both ways -- the other end, which gets the same term with the opposite
-// sign. One block for a source term's editor and a relationship's; `isThis(entry)` says which of a state's terms is the one
-// being edited, and `writtenAsEquation` whether there is an equation to stand on the right.
+// Where a part lands, written as the left of the equation being edited: the state it reaches, chosen by name under "Equation
+// for", and the state's left side, dx/dt = or x =, which says its order (docs/proposals/unifiedEntityEditors.md: no Rate or
+// Update badge; the order is chosen on the node, which "Open ↗" opens at its equations). One block for a source term's editor
+// and a relationship's; `isThis(entry)` says which of a state's parts is the one being edited, and `writtenAsEquation` whether
+// there is an equation to stand on the right.
 function renderLanding(container, isThis, { writtenAsEquation = true } = {}) {
     const equations = stateEquationContext();
-    const found = [];
+    let main = null;
     for (const [stateId, terms] of equations.reaching) {
         const index = terms.findIndex(isThis);
-        if (index < 0) continue;
+        if (index < 0 || terms[index].reciprocal) continue;
         const owner = equations.nodes.find((candidate) => candidate.states.some((state) => Number(state.id) === stateId));
         const state = owner?.states.find((candidate) => Number(candidate.id) === stateId);
-        if (owner && state) found.push({ entry: terms[index], index, count: terms.length, owner, state, kind: equations.kinds.get(stateId)?.kind ?? 'rate' });
+        if (owner && state) main = { index, count: terms.length, owner, state, kind: equations.kinds.get(stateId)?.kind ?? 'rate' };
     }
-    const main = found.find((landing) => !landing.entry.reciprocal) ?? null;
-    const reciprocal = found.find((landing) => landing.entry.reciprocal) ?? null;
-    const badge = $('[data-landing-kind]', container);
-    const others = $('[data-landing-others]', container);
     const open = $('[data-landing-open]', container);
-    badge.hidden = others.hidden = open.hidden = !main;
-    const openAt = (landing) => {
-        const object = nodeObjects.get(landing.owner.id);
-        if (!object) return;
-        selectNode(object);
-        openNodeEditor(landing.owner);
-        requestAnimationFrame(() => $(`#nodeEditorStates .stateCard[data-state-id="${landing.state.id}"]`)?.scrollIntoView({ block: 'nearest' }));
-    };
+    open.hidden = !main;
     if (main) {
-        const otherCount = main.count - 1;
-        badge.textContent = main.kind === 'update' ? 'Update' : 'Rate';
-        badge.title = main.kind === 'update' ? 'Its terms add up to its value.' : 'Its terms add up to how fast it changes.';
-        others.textContent = otherCount ? `with ${otherCount} other ${otherCount === 1 ? 'term' : 'terms'}` : 'its only term';
-        open.title = `Open ${main.owner.title} at its equations, where its kind is chosen`;
-        open.onclick = () => openAt(main);
+        open.title = `Open ${main.owner.title} at its equations, where its order is chosen`;
+        open.onclick = () => {
+            const object = nodeObjects.get(main.owner.id);
+            if (!object) return;
+            selectNode(object);
+            openNodeEditor(main.owner);
+            requestAnimationFrame(() => $(`#nodeEditorStates .stateCard[data-state-id="${main.state.id}"]`)?.scrollIntoView({ block: 'nearest' }));
+        };
     }
-    // The state's equation around the one being written: d(state)/dt or state, =, the terms before it and after it.
+    // The state's equation around the one being written: d(state)/dt or state, =, the parts before it and after it.
     const lhs = $('[data-landing-lhs]', container);
     const rhs = $('[data-landing-rhs]', container);
     lhs.hidden = rhs.hidden = !main || !writtenAsEquation;
@@ -3676,17 +3671,6 @@ function renderLanding(container, isThis, { writtenAsEquation = true } = {}) {
         lhs.innerHTML = latexMarkup(`${stateKindLatex(main.kind, main.state.symbol)}${main.index > 0 ? '\\cdots+' : ''}`);
         rhs.innerHTML = main.index < main.count - 1 ? latexMarkup('+\\cdots') : '';
         rhs.hidden = main.index >= main.count - 1;
-    }
-    const other = $('[data-landing-reciprocal]', container);
-    if (other) {
-        other.hidden = !reciprocal;
-        if (reciprocal) {
-            const otherCount = reciprocal.count - 1;
-            other.innerHTML = `<span>And the same term, negated, on</span> <strong>${escapeHtml(reciprocal.owner.title)} · ${escapeHtml(reciprocal.state.label ?? reciprocal.state.symbol)}</strong>
-                <span class="kindBadge">${reciprocal.kind === 'update' ? 'Update' : 'Rate'}</span><small>${otherCount ? `with ${otherCount} other ${otherCount === 1 ? 'term' : 'terms'}` : 'its only term'}</small><b>↗</b>`;
-            other.title = `The relationship runs both ways. Open ${reciprocal.owner.title} at its equations`;
-            other.onclick = () => openAt(reciprocal);
-        }
     }
 }
 
@@ -4140,6 +4124,23 @@ function parameterControlError(value, control) {
 // A relationship's direction, at the top of its Equations tab beside where it lands: One way changes only the node it runs to;
 // Both ways gives the other end the same term negated, its row shown below at once. The Details tab says which, and goes there.
 // A relationship with several equations is directed: what it sets on each node is written out, one equation per state.
+// How a relationship's part is written, one switch at the top of its Equations tab (docs/proposals/unifiedEntityEditors.md,
+// "Fewer words"): Equation, Equations (several, each setting a state) or { } Program, the program's language beside it.
+const edgeProgramLanguages = ['cpp', 'python', 'plugin'];
+let lastEdgeProgramLanguage = 'python';
+function renderEdgeWrittenAs(kind) {
+    const isProgram = edgeProgramLanguages.includes(kind);
+    const shown = isProgram ? 'program' : kind;
+    for (const button of $$('#editEdgeWrittenAs [data-written-as]')) {
+        const on = button.dataset.writtenAs === shown;
+        button.classList.toggle('active', on);
+        button.setAttribute('aria-checked', String(on));
+    }
+    const language = $('#editEdgeProgramLanguage');
+    language.hidden = !isProgram;
+    if (isProgram) language.value = lastEdgeProgramLanguage = kind;
+}
+
 function renderEdgeDirection(definition, several = isSeveralEquations(definition.equationModel)) {
     const bothWays = definition.directionality === 'bidirectional';
     const control = $('#editEdgeDirection');
@@ -4315,20 +4316,18 @@ function renderEdgeEditor(definition) {
     });
     const implementationKind = definition.implementation?.kind ?? 'equation';
     const isEquation = implementationKind === 'equation';
-    $('#editEdgeImplementationKind').value = implementationKind;
     // A relationship with several equations, each setting a state of one of the two nodes: edited row by row below.
     const several = isSeveralEquations(definition.equationModel);
+    renderEdgeWrittenAs(several ? 'equations' : implementationKind);
     $('#editEdgeEquationsList').hidden = !several;
-    // Several equations each name the state they set, row by row; one equation or program lands where the block above says.
+    // Several equations each name the state they set, row by row; one equation or program is for the state "Equation for" names.
     $('#edgeLanding .landingState').hidden = several;
-    $('#edgeLanding .landsOnLabel').textContent = several ? 'Equations' : 'Lands on';
     renderLanding($('#edgeLanding'), (entry) => entry.type === 'relationship' && entry.edgeId === definition.id, { writtenAsEquation: isEquation && !several });
-    if (several) {
-        $('#editEdgeImplementationKind').value = 'equations';
-        $('[data-landing-reciprocal]', $('#edgeLanding')).hidden = true;
-    }
     renderEdgeDirection(definition, several);
     if (several) {
+        // Several equations are directed, each naming the state it sets: no other end's row is left from before.
+        const otherEnd = $('#edgeOtherEndRow');
+        if (otherEnd) otherEnd.hidden = true;
         for (const id of ['#equationDiagnostics', '#editEdgeProviderSection', '#editEdgeMathField', '#editEdgeEquation']) $(id).hidden = true;
         for (const id of ['#editEdgeEquationHeading', '#edgeFunctions', '#editEdgeReferencePicker']) $(id).hidden = false;
         renderSeveralEquations(definition);
@@ -4677,9 +4676,14 @@ function pluginOrProgram(kind, previous, bindings, output, title) {
             bindings, output
         };
     }
+    // A program changing language keeps what was written in it, but not the other language's untouched template ("{ } Program"
+    // starts in the language last used, and choosing another beside it should give that one's template).
+    const wasProgram = previous?.kind === 'cpp' || previous?.kind === 'python';
+    const untouched = wasProgram && previous.kind !== kind
+        && previous.source === defaultProviderSource(previous.kind, previous.bindings ?? bindings, previous.output?.key ?? output.key, title);
     return {
         kind, providerApiVersion: 1,
-        source: (previous?.kind === kind || previous?.kind === 'cpp' || previous?.kind === 'python') && previous.source
+        source: (previous?.kind === kind || wasProgram) && previous.source && !untouched
             ? previous.source : defaultProviderSource(kind, bindings, output.key, title),
         bindings, output
     };
@@ -4883,7 +4887,6 @@ function renderRelationshipRows(definition) {
     }
     otherRow.replaceChildren();
     otherRow.hidden = !context.other;
-    $('[data-landing-reciprocal]', landing).hidden = true;
     if (context.other) {
         const owner = context.equations.nodes.find((node) => node.states.some((state) => Number(state.id) === context.other.stateId));
         const state = owner?.states.find((candidate) => Number(candidate.id) === context.other.stateId);
@@ -13735,9 +13738,12 @@ $('#editEquationOutput').addEventListener('change', (event) => {
         else snapshot.equationModel.output = { role, stateId };
     });
 });
-$('#editEdgeImplementationKind').addEventListener('change', (event) => {
-    if (!selectedRelationship) return;
-    const kind = event.target.value;
+// Equation, Equations, or a program in one of its languages: one undoable step. "{ } Program" keeps the language the part was
+// last written in, Python if it was never a program.
+function setEdgeImplementation(kind) {
+    if (!selectedRelationship || activeResult) return;
+    const current = isSeveralEquations(selectedRelationship.equationModel) ? 'equations' : selectedRelationship.implementation?.kind ?? 'equation';
+    if (kind === current) return;
     const wasSeveral = isSeveralEquations(selectedRelationship.equationModel);
     if (kind === 'equations') {
         if (wasSeveral) return;
@@ -13757,7 +13763,7 @@ $('#editEdgeImplementationKind').addEventListener('change', (event) => {
         const { outputs = [], definitions = [] } = selectedRelationship.equationModel;
         if ((outputs.length > 1 || definitions.length) && !window.confirm(
             `Keep only the first equation${definitions.length ? ', with the intermediate quantities it reads written into it' : ''}? The others are removed (Undo brings them back).`)) {
-            event.target.value = 'equations';
+            renderEdgeWrittenAs('equations');
             return;
         }
     }
@@ -13773,6 +13779,15 @@ $('#editEdgeImplementationKind').addEventListener('change', (event) => {
         const output = snapshot.implementation?.output ?? { key: 'output', role, stateId };
         snapshot.implementation = pluginOrProgram(kind, snapshot.implementation, bindings, output, snapshot.title);
     });
+}
+$$('#editEdgeWrittenAs [data-written-as]').forEach((button) => button.addEventListener('click', () => {
+    const shown = button.dataset.writtenAs;
+    const kind = selectedRelationship?.implementation?.kind;
+    setEdgeImplementation(shown !== 'program' ? shown : edgeProgramLanguages.includes(kind) ? kind : lastEdgeProgramLanguage);
+}));
+$('#editEdgeProgramLanguage').addEventListener('change', (event) => {
+    lastEdgeProgramLanguage = event.target.value;
+    setEdgeImplementation(event.target.value);
 });
 edgeProgramSection.onReset(() => {
     if (!selectedRelationship?.implementation) return;
@@ -15011,7 +15026,10 @@ const tour = createTour({
         },
         setImplementation: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
-            setField('#editEdgeImplementationKind', step.kind, 'change');
+            // Equation, Equations or { } Program pressed, then a program's language chosen beside it.
+            const language = edgeProgramLanguages.includes(step.kind);
+            $(`#editEdgeWrittenAs [data-written-as="${language ? 'program' : step.kind}"]`).click();
+            if (language && $('#editEdgeProgramLanguage').value !== step.kind) setField('#editEdgeProgramLanguage', step.kind, 'change');
         },
         // A program's bindings as the + and each row's key and reference set them.
         setProgramBindings: async (step) => {

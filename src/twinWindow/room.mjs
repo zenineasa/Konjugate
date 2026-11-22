@@ -15,6 +15,8 @@ import { createHumanInput } from '../renderer/humanInput.mjs';
 import { createSteering } from '../renderer/inputSteering.mjs';
 
 const keptCycles = 1000;
+// How much of a forecast an input handed to the model may be held at its limits before the room stops calling the twin in step.
+const heldShare = 0.25;
 // A jump or a tolerance to two figures: a difference read at a glance.
 const brief = (value) => (Number.isFinite(value) ? Number(value.toPrecision(2)).toString() : '—');
 let host = null;
@@ -242,8 +244,9 @@ function refreshWaits() {
     const why = notYet();
     $('#trySomething').disabled = !twin || Boolean(why) || Boolean(twin.sandbox);
     $('#trySomething').title = why ?? trySomethingTitle;
-    // The sandbox open says itself; otherwise the reason, shorter here in the room's bar.
-    const short = !why || twin?.sandbox ? '' : twin.running ? `Try something: after the first move · ${firstMoveIn()}` : 'Try something: only while the twin runs';
+    // The sandbox open says itself; otherwise the reason, in a few words beside the button it is about (the bar is crowded), the whole
+    // sentence, with how long until the first move, in its tooltip.
+    const short = !why || twin?.sandbox ? '' : twin.running ? 'after the first move' : 'only while the twin runs';
     $('#tryWhy').hidden = !short;
     $('#tryWhy').textContent = short;
     $('#tryWhy').title = why ?? '';
@@ -640,6 +643,10 @@ function drawInputs(cycle, time = visibleTime(cycle)) {
         const assumed = projection && readings.length ? projectedInput(projection, cycle, readings.at(-1)[1], shownAs) : [];
         const kind = $('.inputKind', input.element);
         kind.textContent = projection && projection.choice !== 'hold' ? `input · ahead: ${forecastLabels[projection.using].toLowerCase()}${projection.choice === 'automatic' ? ' (automatic)' : ''}` : 'input';
+        // Followed past its limits (a controller asking for more than the input can give, or a state that is no controller's output):
+        // said on the strip, not only in its tooltip.
+        if (projection?.held) kind.textContent += `, held at its limits for ${Math.max(1, Math.round(100 * projection.held.share))}% of it`;
+        kind.classList.toggle('held', Boolean(projection?.held));
         kind.title = projection?.reason ?? '';
         if (!globalThis.Plotly || !readings.length) continue;
         // Within the span, the value held from before it starting at its edge, and the last value held up to now, so a step is drawn
@@ -907,10 +914,16 @@ export function handleEvent(update) {
         // says most readings fall outside what the twin expected.
         const narrow = twin.tiles.filter((tile) => tile.estimated && bandOf(tile, twin.cycles)?.word === 'too narrow');
         const leaningNow = cycle.trend?.direction !== 'none';
-        $('#healthDrift').className = `healthItem ${alarm ? 'bad' : leaningNow || narrow.length ? 'lean' : 'good'}`;
-        $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : leaningNow ? 'Leaning' : narrow.length ? 'In step · band too narrow' : 'In step';
+        // An input handed to the model whose state went past the input's limits for much of the forecast: the forecast runs on a course
+        // the input could not take, so the room does not call the twin in step; it says which input, and how much of the forecast.
+        const held = twin.inputs.map((input) => ({ input, held: cycle.projections?.[input.signal]?.held })).filter((entry) => entry.held?.share >= heldShare);
+        const heldName = (entry) => entry.input.target?.label.replace(/^Shared · /, '') ?? entry.input.signal;
+        $('#healthDrift').className = `healthItem ${alarm ? 'bad' : leaningNow || narrow.length || held.length ? 'lean' : 'good'}`;
+        $('#healthDrift').textContent = alarm ? 'Drifting past the warning' : leaningNow ? 'Leaning'
+            : held.length ? `Forecast held at ${heldName(held[0])}'s limits${held.length > 1 ? ', and others' : ''}` : narrow.length ? 'In step · band too narrow' : 'In step';
         const worst = twin.tiles.find((tile) => tile.signal === cycle.trend?.signal);
         $('#healthDrift').title = alarm || leaningNow ? `${worst?.target?.label ?? cycle.trend?.signal}${twin.tiles.filter((tile) => driftOf(trendOfSignal(cycle, tile.signal)) !== 'good').length > 1 ? ', and others' : ''}`
+            : held.length ? held.map((entry) => `${heldName(entry)} follows the model past now, but what it follows went past its limits (to ${Number(entry.held.furthest.toPrecision(4))}, against ${entry.held.limits.minimum} to ${entry.held.limits.maximum}) for ${Math.round(100 * entry.held.share)}% of the forecast: the forecast is not one to trust until the state it follows is a controller's output in its unit, or its limits are right.`).join(' ')
             : narrow.length ? `The model keeps to the readings, but more of ${narrow.map((tile) => tile.target?.label ?? tile.signal).join(', ')}'s readings fall outside the twin's band than an honest band lets through: it is surer than it should be`
             : 'Every measured signal is in step';
         cycleEvents(cycle, stats);

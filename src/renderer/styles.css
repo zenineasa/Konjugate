@@ -180,6 +180,7 @@ input, select, textarea { user-select: text; }
 .tutorialEntryText strong { color: #f0f7f8; font-size: 13px; font-weight: 620; }
 .tutorialsDialog .tutorialEntryText p { margin: 4px 0 6px; color: #9fb1b9; font-size: 12px; line-height: 1.55; }
 .tutorialEntryMeta { color: #5e737e; font-size: 11px; }
+.tutorialEntryWhy { margin: 6px 0 0; color: #e0a458; font-size: 11px; }
 .tutorialDone { padding: 1px 7px; color: #74ddd3; background: rgb(66 201 188 / 12%); border: 1px solid rgb(66 201 188 / 35%); border-radius: 10px; font-size: 10px; font-weight: 700; }
 .tutorialEntry .helpFeedbackPrimary { flex: none; min-height: 34px; padding: 0 16px; font-size: 12px; }
 .tutorialEditionNote { flex: none; max-width: 150px; color: #82959e; font-size: 11px; line-height: 1.45; text-align: right; }
@@ -774,7 +775,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .showNodesDetails .objectLabel .stateCount { display: inline; }
 
 .bundleLabel { width: 112px; color: #b9c8d0; background: rgb(13 24 32 / 68%); border: 1px solid rgb(59 78 89 / 72%); border-radius: 7px; box-shadow: 0 8px 20px rgb(0 0 0 / 22%); backdrop-filter: blur(7px); pointer-events: auto; transition: width .16s, background .16s, border-color .16s, box-shadow .16s; }
-.bundleLabel:hover, .bundleLabel:focus-within, .bundleLabel.pinned { background: rgb(13 24 32 / 95%); border-color: #3b4e59; box-shadow: 0 10px 25px rgb(0 0 0 / 34%); }
+.bundleLabel:hover, .bundleLabel:focus-within, .bundleLabel.pinned, .bundleLabel.tourPinned { background: rgb(13 24 32 / 95%); border-color: #3b4e59; box-shadow: 0 10px 25px rgb(0 0 0 / 34%); }
 .bundleLabel header { display: flex; height: 36px; align-items: center; justify-content: space-between; padding: 0 8px 0 11px; border-bottom: 1px solid #293b46; }
 .bundleLabel header strong, .bundleLabel header span { display: block; }
 .bundleLabel header strong { font-size: 9px; }
@@ -788,16 +789,19 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .relationshipRow.disabled { opacity: .6; }
 .relationshipRow.disabled em { color: #e0a458; }
 .relationColor { width: 5px; height: 5px; border-radius: 50%; }
-.bundleLabel:not(:hover):not(.pinned) header { border: 0; }
-.bundleLabel:not(:hover):not(.pinned) header strong { font-size: 8px; }
+.bundleLabel:not(:hover):not(.pinned):not(.tourPinned) header { border: 0; }
+.bundleLabel:not(:hover):not(.pinned):not(.tourPinned) header strong { font-size: 8px; }
 .bundleLabel:hover,
 .bundleLabel.pinned,
+.bundleLabel.tourPinned,
 .showEdgesDetails .bundleLabel { width: 244px; }
 .bundleLabel:hover header span,
 .bundleLabel.pinned header span,
+.bundleLabel.tourPinned header span,
 .showEdgesDetails .bundleLabel header span { display: block; }
 .bundleLabel:hover .relationshipRow,
 .bundleLabel.pinned .relationshipRow,
+.bundleLabel.tourPinned .relationshipRow,
 .showEdgesDetails .bundleLabel .relationshipRow { display: grid; }
 .showEdgesDetails .bundleLabel header { border-bottom: 1px solid #293b46; }
 
@@ -975,6 +979,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .unitInput { display: grid; grid-template-columns: 1fr 38px; }
 .unitInput input { border-radius: 4px 0 0 4px; }
 .unitInput b { display: grid; place-items: center; color: #647985; background: #172630; border: 1px solid #2b3d48; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; font-weight: 500; }
+/* Above the component library panel (34), which can stay open beside it while the Add menu is used. */
+.contextCard.addPalette { z-index: 35; }
 .addPalette { width: 238px; padding: 8px; }
 .addPalette > label { display: flex; height: 33px; align-items: center; gap: 7px; margin-bottom: 9px; padding: 0 8px; color: #647984; background: #09141b; border: 1px solid #30424d; border-radius: 5px; }
 .addPalette > label input { min-width: 0; flex: 1; color: #d0dde3; background: transparent; border: 0; outline: 0; font-size: 9px; }
@@ -1719,7 +1725,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 
 /* Hidden labels vanish unless they are selected, hovered (.peek), flagged, pinned, or needed to pick an endpoint. */
 .hideNodeLabels:not(.pickingEndpoint) .node-label-container:not(.selected):not(.peek):not(.hasStabilityFinding),
-.hideEdgeLabels .bundleLabel:not(.pinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
+.hideEdgeLabels .bundleLabel:not(.pinned):not(.tourPinned):not(.peek):not(:focus-within) { visibility: hidden; pointer-events: none; }
 /* Subsystem boxes and boundary terminals follow the Nodes label control: compact is the name, expanded adds the detail
    line, and hidden leaves them out unless selected or pointed at. A hidden terminal keeps its diamond on the canvas. */
 #canvas:not(.showNodesDetails) .subsystemLabel small, #canvas:not(.showNodesDetails) .subsystemTerminalEdge small { display: none; }
@@ -1758,6 +1764,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* The guided first-model tour (src/renderer/tour.mjs): a ring around the control a step is about, and the card that says what to do. */
 .tourRing { position: fixed; z-index: 9000; box-sizing: border-box; border: 2px solid #42c9bc; border-radius: 8px; box-shadow: 0 0 0 4px rgb(66 201 188 / 22%), 0 0 24px rgb(66 201 188 / 35%); pointer-events: none; transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
 .tourRing[hidden], .tourFloating[hidden] { display: none; }
+/* The canvas label a tutorial step points at, above the labels beside it (the view orders them frame by frame, inline). */
+.css2dSurface > .tourRaised { z-index: 2147483000 !important; }
 .tourFloating { position: fixed; z-index: 9001; left: 94px; top: 160px; width: min(360px, calc(100vw - 48px)); box-sizing: border-box; padding: 16px 18px; color: #dbe7ec; background: #0f1d27; border: 1px solid #2f6f6a; border-radius: 10px; box-shadow: 0 12px 40px rgb(0 0 0 / 55%); }
 .tourFloating .tourProgress { display: block; color: #7fa3ad; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
 .tourFloating .tourProgress:empty { display: none; }

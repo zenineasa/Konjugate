@@ -14020,6 +14020,8 @@ const tutorialPlotsSeen = new Map();
 // The latest run started during a tutorial: its job, the model it was started from, and whether it has finished with a result. Kept
 // when the results are closed (as they must be to change the model), so a step can still ask what the latest run was run with.
 let tutorialRunModel = null;
+// The tabs each relationship's card has shown while a tutorial ran, as "name\u0000tab" (kept, since the card closes).
+const tutorialEdgeTabsSeen = new Set();
 // Whether a tutorial's objective search has run (kept, since the tuning card resets when it is closed).
 let tutorialObjectiveSearched = false;
 // The code of the validation issue last followed from the list while a tutorial ran (kept: the list closes when one is followed).
@@ -14032,6 +14034,8 @@ let twinWindowOpen = false;
 const tutorialTwin = { windowShown: false, sawRunning: false, movesSeen: 0, sawAlarm: false, sawPlanTurn: false };
 // Whether a tutorial step is shown in the twin window now.
 let tutorialStepInTwin = false;
+// The step on screen, as last told to onStep.
+let tutorialStepShown = null;
 // The live parameters changed by hand during a run while a tutorial ran (kept: the results are closed before the model can change).
 const tutorialSteered = new Set();
 // The components saved to My library while a tutorial ran, by name (the library itself is read asynchronously).
@@ -14086,10 +14090,24 @@ const tourNodeLabel = (name) => {
     const labels = [...document.querySelectorAll('.objectLabel')].filter((label) => label.getClientRects().length);
     return labels.find((label) => label.querySelector('strong')?.textContent === name) ?? labels.find((label) => label.textContent.includes(name)) ?? null;
 };
-const tutorialRelationshipRow = (name) => {
-    const relationship = model.relationships.find((candidate) => candidate.title === name && !candidate.deleted);
-    return relationship ? document.querySelector(`.relationshipRow[data-relationship="${relationship.id}"]`) : null;
+// A relationship's row in the label between its two ends, by its name (the first relationship there is, with none): the label is held
+// open while the step that asks for it is on screen, as its ＋ holds it, since its rows are hidden at the labels' default detail.
+const tutorialRelationshipRow = (name = null) => {
+    const relationship = model.relationships.find((candidate) => !candidate.deleted && (name === null || candidate.title === name));
+    const row = relationship ? document.querySelector(`.relationshipRow[data-relationship="${relationship.id}"]`) : null;
+    const label = row?.closest('.bundleLabel');
+    if (label && !label.classList.contains('tourPinned')) {
+        label.classList.add('tourPinned');
+        refreshLabelObjectVisibility();
+    }
+    return row;
 };
+// The labels held open for a step, let go when the step is over (a label the person pinned with its ＋ stays as they left it).
+function releaseTutorialRelationshipLabels() {
+    const pinned = $$('.bundleLabel.tourPinned');
+    for (const label of pinned) label.classList.toggle('tourPinned', false);
+    if (pinned.length) refreshLabelObjectVisibility();
+}
 $('#resultTimeline').addEventListener('input', () => { if (activeResult) tourTimelineMoved = true; });
 
 const setField = (selector, value, eventName = 'input') => {
@@ -14112,7 +14130,8 @@ async function defineTourNode({ name, temperature }, { state }) {
     const live = () => model.nodes.filter((node) => !node.deleted);
     let definition = live().find((node) => node.title === name)
         ?? (!$('#nodeEditor').classList.contains('hidden') && selectedNode?.userData.definition.title === 'New node' ? selectedNode.userData.definition : null);
-    if (!definition) {
+    const made = !definition;
+    if (made) {
         const count = live().length;
         chooseFromAddMenu('node');
         await waitUntil(() => live().length > count, 3000);
@@ -14138,10 +14157,50 @@ async function defineTourNode({ name, temperature }, { state }) {
         const selector = `#nodeEditorStates .editorStateRow[data-state-id="${stateId}"] input[data-field="${field}"]`;
         if ($(selector) && $(selector).value !== String(value)) setField(selector, String(value), 'change');
     }
+    if (made) await moveTourNodeApart(nodeObjects.get(definition.id));
 }
-// A relationship made as a person makes one: New relationship from the Add menu, then its two ends by their labels.
+// A node moved as a drag of the Move tool's arrows moves it (one undoable step), by `offset` in the world.
+function moveTourNode(node, offset) {
+    selectNode(node);
+    const attached = transformControls.object === node;
+    if (!attached) transformControls.attach(node);
+    transformControls.dispatchEvent({ type: 'mouseDown' });
+    node.position.add(offset);
+    transformControls.dispatchEvent({ type: 'objectChange' });
+    transformControls.dispatchEvent({ type: 'mouseUp' });
+    if (!attached && !(currentTool in transformPropertyForTool)) transformControls.detach();
+}
+// A skip that makes, places, pastes or moves a node leaves it where a person would after dragging it aside: its label clear of the other
+// labels on the canvas. A new node, a part placed from the library and a pasted copy land where the one before them did, and a label
+// under another cannot be clicked, which the steps after need. Moved to the right, by as far as the labels it overlaps reach.
+async function moveTourNodeApart(node) {
+    for (let attempt = 0; node && attempt < 8; attempt += 1) {
+        // The labels are where the last frame put them (a window not drawn has none to wait for).
+        await Promise.race([settleWaiter('frame'), new Promise((resolve) => setTimeout(resolve, 300))]);
+        const label = node.children.find((child) => child.element?.classList.contains('node-label-container'))?.element;
+        const rect = label?.getBoundingClientRect();
+        if (!node.visible || !rect?.width) return;
+        const shown = (other) => other !== label && other.getClientRects().length && getComputedStyle(other).visibility !== 'hidden';
+        const margin = 8;
+        const overlapping = [...label.parentElement.children].filter(shown).map((other) => other.getBoundingClientRect())
+            .filter((other) => other.width && other.left < rect.right + margin && other.right > rect.left - margin && other.top < rect.bottom + margin && other.bottom > rect.top - margin);
+        if (!overlapping.length) return;
+        const pixels = Math.max(...overlapping.map((other) => other.right - rect.left)) + 2 * margin;
+        // How far that is in the world: where one unit along x lands on the screen, from here.
+        const surface = labelRenderer.domElement.getBoundingClientRect();
+        const here = node.position.clone().project(camera);
+        const along = node.position.clone().add(new THREE.Vector3(1, 0, 0)).project(camera);
+        const pixelsPerUnit = Math.abs(along.x - here.x) * 0.5 * surface.width;
+        moveTourNode(node, new THREE.Vector3(pixelsPerUnit > 4 ? Math.min(pixels / pixelsPerUnit, 10) : 2, 0, 0));
+    }
+}
+// A node's object by its name, as the canvas shows it.
+const tourNodeObject = (name) => [...nodeObjects.values()].find((object) => object.visible && !object.userData.definition.deleted && object.userData.definition.title === name) ?? null;
+// A relationship made as a person makes one: New relationship from the Add menu, then its two ends by their labels (the second moved
+// aside first, if it sits on the first, as a person would have dragged it).
 async function connectTourNodes(from, to) {
     await waitUntil(() => tourNodeLabel(from) && tourNodeLabel(to), 5000);
+    if ($('#endpointPickBanner').hidden) await moveTourNodeApart(tourNodeObject(to));
     if ($('#endpointPickBanner').hidden) chooseFromAddMenu('edge');
     await waitUntil(() => !$('#endpointPickBanner').hidden, 3000);
     if (!$('#endpointPickTitle').textContent.toLowerCase().includes('target')) {
@@ -14198,12 +14257,15 @@ const tour = createTour({
         if (nodePlotVisible && $('#editNodeName').value) tutorialPlotsSeen.set($('#editNodeName').value, activeEngineJobId);
         const edgeEditorOpen = !$('#edgeEditor').classList.contains('hidden');
         if (parameterTuningGoal === 'objective' && parameterTuningState?.report) tutorialObjectiveSearched = true;
+        if (edgeEditorOpen && selectedRelationship) tutorialEdgeTabsSeen.add(`${selectedRelationship.title}\u0000${editorCard('edgeEditor').activeTab()}`);
         const documentNow = serializeProjectDocument();
         return {
             document: documentNow,
             ui: {
                 edgeEditorFor: edgeEditorOpen ? selectedRelationship?.title ?? null : null,
                 edgeEditorTab: edgeEditorOpen ? editorCard('edgeEditor').activeTab() : null,
+                // Whether a relationship's card has shown a tab (its Details, say) while the tutorial ran, by the relationship's name: kept.
+                edgeTabSeen: (relationship, tab) => tutorialEdgeTabsSeen.has(`${relationship}\u0000${tab}`),
                 runDialogOpen: $('#runLaunchDialog').open,
                 runDialog: { online: $('#runOnlineMode').checked, pacing: $('#runPacingMode').value, targetTime: $('#runTargetTime').value },
                 closeResultsDialogOpen: $('#closeResultsDialog').open,
@@ -14244,7 +14306,8 @@ const tour = createTour({
                 inferenceOpen: !$('#causalInference').classList.contains('hidden'),
                 inferenceLoaded: !$('#causalInferenceMappingSection').hidden,
                 inferenceCandidates: !$('#causalInferenceCandidatesSection').hidden,
-                anyRelationshipRow: document.querySelector('.relationshipRow'),
+                // Read only by the step that points at it, since reading it holds its label open.
+                get anyRelationshipRow() { return tutorialRelationshipRow(); },
                 twinWindowOpen,
                 twinWindowShown: tutorialTwin.windowShown,
                 twinSawRunning: tutorialTwin.sawRunning,
@@ -14289,6 +14352,7 @@ const tour = createTour({
                 // The subsystem whose card is open, by name; the dialogs and lists the components tutorial points at.
                 subsystemCardFor: currentSubsystemCardId() === null ? null : subsystemById(currentSubsystemCardId())?.name ?? null,
                 templateDialogOpen: $('#templateDialog').open,
+                saveToLibraryReady: !$('#saveTemplateButton').disabled,
                 componentPlaceOpen: $('#componentPlaceDialog').open,
                 libraryTemplateOf: (name) => [...document.querySelectorAll('#componentLibraryResults [data-template-id]')].find((entry) => entry.textContent.includes(name)) ?? null,
                 libraryComponents: [...tutorialLibraryComponents],
@@ -14327,6 +14391,8 @@ const tour = createTour({
                 savedWithResults: tutorialSavedWithResults,
                 saveContentDialogOpen: $('#saveContentDialog').open,
                 saveOwnershipDialogOpen: $('#saveOwnershipDialog').open,
+                // The project's properties (owner, copyright and license), opened from the toolbar.
+                ownershipDialogOpen: $('#ownershipDialog').open,
                 exportDialogOpen: $('#exportCodeDialog').open,
                 extensionsOpen: $('#extensionsDialog').open,
                 assistantOpen: !$('#assistantPanel').hidden,
@@ -14499,6 +14565,7 @@ const tour = createTour({
                 const count = model.nodes.filter((node) => !node.deleted).length;
                 document.querySelector(`[data-template-id="${part.template}"]`)?.click();
                 await waitUntil(() => model.nodes.filter((node) => !node.deleted).length > count, 5000);
+                await moveTourNodeApart(tourNodeObject(part.name));
             }
         },
         // A relationship template applied as a person applies it: the template, then each end's label, which makes it.
@@ -14713,6 +14780,8 @@ const tour = createTour({
                 const count = model.nodes.filter((candidate) => !candidate.deleted).length;
                 $('#pasteSelection').click();
                 await waitUntil(() => model.nodes.filter((candidate) => !candidate.deleted).length > count, 3000);
+                const copy = model.nodes.filter((candidate) => !candidate.deleted).at(-1);
+                if (model.nodes.filter((candidate) => !candidate.deleted).length > count) await moveTourNodeApart(nodeObjects.get(copy.id));
             }
         },
         setStateValue: async (step) => {
@@ -14744,6 +14813,8 @@ const tour = createTour({
             node.position.add(new THREE.Vector3(...step.offset));
             transformControls.dispatchEvent({ type: 'objectChange' });
             transformControls.dispatchEvent({ type: 'mouseUp' });
+            // Beside the tank, as the card says: further, if that left its label among the tank's.
+            await moveTourNodeApart(node);
         },
         applyShape: async (step) => {
             const node = [...nodeObjects.values()].find((object) => object.userData.definition.title === step.node && object.visible);
@@ -15213,7 +15284,11 @@ const tour = createTour({
             await waitUntil(() => !simulationRunning, 60000);
             if (activeResult) await closeResultPlayback({ confirm: false });
         },
-        openRelationship: async (step) => { openTutorialRelationship(step.relationship); },
+        // Opened as a click on its row opens it, then on the tab the step names (`tab`: 'details', say), if it names one.
+        openRelationship: async (step) => {
+            if (!openTutorialRelationship(step.relationship) || !step.tab) return;
+            $(`#edgeEditor [data-editor-tab="${step.tab}"]`)?.click();
+        },
         setParameter: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
             const input = revealEditorControl(`#edgeEditorParameters [data-parameter-id="${step.parameterId}"] input[data-field="value"]`, { focus: false });
@@ -15225,10 +15300,13 @@ const tour = createTour({
     },
     // A step whose work is in the twin window is shown there too, since that window covers this one's card.
     onStep: (step, label, status = '') => {
+        if (step !== tutorialStepShown) releaseTutorialRelationshipLabels();
+        tutorialStepShown = step;
         const inTwin = step?.elsewhere === 'twin';
         if (!inTwin && !tutorialStepInTwin) return;
         tutorialStepInTwin = inTwin;
-        window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition), status } : null);
+        // The tutorial moving on from the twin's steps (to its closing card, say) brings this window, where that card is, to the front.
+        window.engine.liveTwin?.showTutorialStep?.(inTwin ? { label, title: step.title, text: stepText(step, tutorialEdition), status, target: step.twinTarget ?? null } : null, { raiseProject: Boolean(step) && !inTwin });
     },
     onFinish: (outcome, tutorial) => {
         $('#statusText').textContent = outcome === 'completed' ? `Tutorial finished: ${tutorial.title}` : 'Tutorial left · take it again any time from Tutorials';
@@ -15259,20 +15337,45 @@ function resumeTutorialAfterRestart() {
 // Starts a tutorial where it starts: a new, empty project, or a fresh copy of its example (the example's guide is not opened, so the
 // tutorial's card is the one thing saying what to do; its button stays in the toolbar). Either way after the usual question if there is
 // work in this one. A tutorial already running is replaced. Returns whether it started.
+// Why a tutorial cannot start now, in words, or null when it can: a run going holds the project a tutorial would start on.
+const tutorialStartBlocked = () => (simulationRunning ? 'Stop the run first: a tutorial starts on a project of its own, and this run is still using the one open now.' : null);
+// What is left open from before (a tutorial left part-way, or the person's own work) is closed when a tutorial starts, so its first steps
+// are not judged by it and nothing covers what they point at: the editors' cards (a subsystem's too), Parameter tuning and causal
+// inference (with their data), the side panels, and the live twin's window.
+function closeLeftoversForTutorial() {
+    if (!$('#parameterTuning').classList.contains('hidden')) $('#cancelParameterTuning').click();
+    if (!$('#causalInference').classList.contains('hidden')) $('#cancelCausalInference').click();
+    hideCards(null);
+    for (const [panel, close] of [['#componentLibraryPanel', '#closeComponentLibraryPanel'], ['#controlHistoryPanel', '#closeControlHistoryPanel'], ['#validationPanel', '#closeValidationPanel'],
+        ['#liveParameterPanel', '#closeLiveParameterPanel'], ['#branchesPanel', '#closeBranchesPanel'], ['#parametersPanel', '#closeParametersPanel']]) {
+        if (!$(panel).hidden) $(close).click();
+    }
+    if (twinWindowOpen) window.engine.liveTwin?.closeWindow?.();
+}
 async function startTutorial(id, { resumeAt = null } = {}) {
     const tutorial = tutorialById(id);
-    if (!tutorial || simulationRunning || !tutorial.editions.includes(tutorialEdition)) return false;
+    if (!tutorial || !tutorial.editions.includes(tutorialEdition)) return false;
+    const blocked = tutorialStartBlocked();
+    if (blocked) {
+        $('#statusText').textContent = blocked;
+        return false;
+    }
     if (tutorial.start.from === 'example') {
-        const untouched = activeExampleId === tutorial.start.example && !activeResult && exampleAsLoaded === JSON.stringify(serializeProjectDocument());
+        // An example is used as it is only while nothing has been done with it: no results, no change, and nothing loaded into Parameter
+        // tuning or causal inference.
+        const untouched = activeExampleId === tutorial.start.example && !activeResult && exampleAsLoaded === JSON.stringify(serializeProjectDocument())
+            && $('#parameterTuning').classList.contains('hidden') && $('#causalInference').classList.contains('hidden');
         if (!untouched && !await loadExample(tutorial.start.example, { openGuide: false })) return false;
     } else {
         if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) && !await window.projectFiles.confirmDiscard()) return false;
         await loadProjectDocument(structuredClone(emptyProjectDocument), { fileName: tutorial.start.fileName });
     }
+    closeLeftoversForTutorial();
     tourTimelineMoved = false;
     tutorialPlotsSeen.clear();
     tutorialRunModel = null;
     tutorialObjectiveSearched = false;
+    tutorialEdgeTabsSeen.clear();
     tutorialFollowedIssue = null;
     tutorialForkValues.clear();
     Object.assign(tutorialTwin, { windowShown: false, sawRunning: false, movesSeen: 0, sawAlarm: false, sawPlanTurn: false });
@@ -15304,7 +15407,24 @@ const startTour = () => startTutorial('firstModel');
 window.tour?.onStart(startTour);
 window.tutorials?.onStart((id) => startTutorial(id));
 resumeTutorialAfterRestart();
-window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, plotsSeen: [...tutorialPlotsSeen.keys()] }), start: startTour, startTutorial, tutorial: () => tour.tutorial?.id ?? null, step: () => tour.step, active: () => tour.active, stop: () => tour.stop() };
+window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, plotsSeen: [...tutorialPlotsSeen.keys()] }), start: startTour, startTutorial, tutorial: () => tour.tutorial?.id ?? null, step: () => tour.step, active: () => tour.active, stop: () => tour.stop(),
+    // The step on screen and its ring: whether the ring is shown, wholly on screen and not covered (what is on top at its middle is inside
+    // what it rings), and whether this window, where the card is, is shown and focused.
+    ring: () => {
+        const step = tour.shownStep;
+        const element = tour.ringed;
+        const describe = (found) => (found ? `${found.tagName.toLowerCase()}${found.id ? `#${found.id}` : ''}${typeof found.className === 'string' && found.className ? `.${found.className.trim().split(/\s+/).join('.')}` : ''} "${(found.textContent ?? '').trim().slice(0, 40)}"` : null);
+        const rect = element?.getBoundingClientRect();
+        const top = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+        return {
+            step: step?.id ?? null, advance: step?.advance ?? null, elsewhere: step?.elsewhere ?? null,
+            shown: Boolean(element), ringed: describe(element), on: describe(top),
+            onScreen: Boolean(rect) && rect.left >= -2 && rect.top >= -2 && rect.right <= window.innerWidth + 2 && rect.bottom <= window.innerHeight + 2,
+            // A label that lets clicks through to the 3D view (a subsystem's box takes them there) is reached where the view is on top.
+            uncovered: Boolean(element && top && (element.contains(top) || top.contains(element) || (getComputedStyle(element).pointerEvents === 'none' && top === renderer.domElement))),
+            cardShown: !document.querySelector('.tourFloating').hidden, focused: document.hasFocus(), visible: !document.hidden
+        };
+    } };
 
 async function openProject() {
     if (simulationRunning) return;
@@ -16628,6 +16748,15 @@ function tutorialListEntry(tutorial) {
         start.textContent = 'Start';
         start.setAttribute('aria-label', `Start ${tutorial.title}`);
         start.addEventListener('click', () => {
+            // A tutorial that cannot start now says why, here in the list, which stays open.
+            const blocked = tutorialStartBlocked();
+            if (blocked) {
+                const why = row.querySelector('.tutorialEntryWhy') ?? Object.assign(document.createElement('p'), { className: 'tutorialEntryWhy' });
+                why.setAttribute('role', 'status');
+                why.textContent = blocked;
+                text.append(why);
+                return;
+            }
             $('#tutorialsDialog').close();
             startTutorial(tutorial.id);
         });
@@ -16852,7 +16981,7 @@ function relationshipBundleKey(relationship) {
 // renderer then skips them entirely, which is what keeps a model with hundreds of relationships
 // responsive once its labels are hidden. The exceptions are the labels that must stay.
 function bundleLabelAllowed(overlay) {
-    if (overlay.element.classList.contains('pinned') || overlay.element.classList.contains('peek')) return true;
+    if (['pinned', 'tourPinned', 'peek'].some((name) => overlay.element.classList.contains(name))) return true;
     return labelModes.edges !== 'hidden' && !declutteredBundleKeys.has(overlay.key);
 }
 function refreshLabelObjectVisibility() {
@@ -16979,7 +17108,7 @@ function refreshLabelDeclutter() {
             labels.push({
                 id: `b${key}`, left: (labelProbe.x * 0.5 + 0.5) * width - labelWidth / 2, top: (-labelProbe.y * 0.5 + 0.5) * height - labelHeight / 2,
                 width: labelWidth, height: labelHeight, priority: element.querySelectorAll('.relationshipRow').length, shown: !declutteredBundleKeys.has(key),
-                keep: classes.contains('pinned') || classes.contains('peek')
+                keep: classes.contains('pinned') || classes.contains('tourPinned') || classes.contains('peek')
             });
         });
     }

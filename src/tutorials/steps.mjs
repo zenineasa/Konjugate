@@ -10,6 +10,10 @@
 // what the step asked for: that is what lets the controller notice an undone step and offer to go back to it.
 //
 // By convention a tutorial's first step is `welcome` and its last is `finish`; both wait for Next and neither is numbered.
+//
+// A step with `waitForNext: true` has something to do and then something to read (a plot to look at once it is on screen): once it is
+// done, its card offers Next and stays until Next is pressed, even when the steps after it are done already. Its skip does it and moves
+// on, as any skip does.
 
 const counted = (step) => step.id !== 'welcome' && step.id !== 'finish';
 
@@ -26,13 +30,17 @@ export function stepLabel(index, steps) {
 // The text a step shows in an edition (a closing card may end with a sentence about the desktop app's extras).
 export const stepText = (step, edition) => `${step.text}${edition === 'desktop' ? step.desktopText ?? '' : step.webText ?? ''}`;
 
-// The step a person is on, given what they have done: the first one that is not done, never beyond a step that waits for Next, and
-// `reached` (the step the tutorial has got to) is the floor, so a step that is done by a person's own action stays done.
+// The step a person is on, given what they have done: the first one that is not done, never beyond a step that waits for Next (one
+// with nothing to do, or a `waitForNext` one, done or not), and `reached` (the step the tutorial has got to) is the floor, so a step that
+// is done by a person's own action stays done.
 export function currentStepIndex(facts, reached, steps) {
     let index = Math.min(steps.length - 1, Math.max(0, reached));
-    while (index < steps.length - 1 && steps[index].advance !== 'next' && steps[index].done(facts)) index += 1;
+    while (index < steps.length - 1 && steps[index].advance !== 'next' && !steps[index].waitForNext && steps[index].done(facts)) index += 1;
     return index;
 }
+
+// Whether a step's card offers Next now: a step with nothing to do always, a `waitForNext` step once it is done.
+export const offersNext = (step, facts) => step.advance === 'next' || Boolean(step.waitForNext && step.done(facts));
 
 // The earliest step before `index` whose check no longer holds (a node was deleted, say), or null when everything done so far still is.
 // A step the person skipped is left out: "Skip this step" did it for them, and it is not theirs to go back to.

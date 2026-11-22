@@ -220,6 +220,16 @@ export function createElectronDriver(mainWindow) {
         allHandles() {
             return BrowserWindow.getAllWindows().map(wrapWindow);
         },
+        // The app's window in front, the one a person sees and types into. A test's windows are often not in the active app, which
+        // then has no focused window: the app is made active first, which focuses the one in front.
+        async focusedHandle() {
+            if (!BrowserWindow.getFocusedWindow()) {
+                app.focus({ steal: true });
+                await new Promise((resolve) => setTimeout(resolve, 300));
+            }
+            const focused = BrowserWindow.getFocusedWindow();
+            return focused ? wrapWindow(focused) : null;
+        },
         async waitForNewHandle(existingHandles, { titleIncludes, excluding = [] } = {}, timeoutMs = 5000) {
             const excludedRaws = new Set([...existingHandles, ...excluding].map((handle) => handle._raw));
             const startedAt = Date.now();

@@ -10,7 +10,7 @@ import { decodeProjectBundle } from '../src/projectFile.mjs';
 import { calibrateTank, calibrateTankValues } from '../src/tutorials/calibrateTank.mjs';
 import { firstModel, firstModelValues as tourModel } from '../src/tutorials/firstModel.mjs';
 import { exampleTitle, groupTutorials, tutorialModelFiles, searchTutorials, tutorialAreas, tutorialById, tutorialDataFiles, tutorials, tutorialsForExample, tutorialStartLabel } from '../src/tutorials/index.mjs';
-import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, onlineRunTarget, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
+import { brokenStepBefore as brokenStep, currentStepIndex as currentStep, edgeParameterChanged, edgeParameterValue, offersNext, onlineRunTarget, stepLabel as labelOf, stepText } from '../src/tutorials/steps.mjs';
 import { tuneController, tuneControllerValues } from '../src/tutorials/tuneController.mjs';
 import { heatingRecordCsv } from '../scripts/generateHeatingRecord.mjs';
 import { buildFromComponentsValues } from '../src/tutorials/buildFromComponents.mjs';
@@ -94,6 +94,26 @@ test('the step a person is on follows what they have done, and waits at a Next s
     assert.equal(tourSteps[currentStepIndex(facts(built, { hasResult: true, ...blockPlotShown }), 1)].id, 'results');
     assert.equal(tourSteps[currentStepIndex(facts(built, { hasResult: true, ...blockPlotShown, timelineMoved: true }), 1)].id, 'finish');
     assert.equal(currentStepIndex(facts(built, { hasResult: true, ...blockPlotShown, timelineMoved: true }), 99), tourSteps.length - 1, 'It never runs past the last step.');
+});
+
+test('a step that waits for Next once done (a plot to read) stays on screen, offering Next, even when the steps after it are done', () => {
+    const steps = [
+        { id: 'welcome', advance: 'next', done: () => true },
+        { id: 'run', done: ({ ui }) => ui.ran },
+        { id: 'plot', waitForNext: true, done: ({ ui }) => ui.plotted },
+        { id: 'timeline', done: ({ ui }) => ui.moved },
+        { id: 'finish', advance: 'next', done: () => false }
+    ];
+    const at = (ui, reached = 1) => steps[currentStep({ ui }, reached, steps)].id;
+    assert.equal(at({ ran: true, plotted: false, moved: true }), 'plot', 'Not done yet, it is the step on screen.');
+    assert.equal(offersNext(steps[2], { ui: { plotted: false } }), false, 'Until it is done it offers no Next, only its skip.');
+    assert.equal(at({ ran: true, plotted: true, moved: true }), 'plot', 'Done, it is not walked past, though the step after it is done too.');
+    assert.equal(offersNext(steps[2], { ui: { plotted: true } }), true, 'Done, it offers Next.');
+    assert.equal(at({ ran: true, plotted: true, moved: true }, 3), 'finish', 'Next pressed (the tutorial reached the step after), the done steps after it are passed.');
+    assert.equal(at({ ran: true, plotted: true, moved: false }, 3), 'timeline');
+    assert.equal(brokenStep({ ui: { ran: true, plotted: false, moved: true } }, 3, steps), 2, 'Undone later, it is offered to go back to, as any step is.');
+    assert.equal(offersNext(steps[0], { ui: {} }), true, 'A step with nothing to do always offers Next.');
+    assert.equal(offersNext(steps[1], { ui: { ran: true } }), false, 'A step without the flag never does.');
 });
 
 test('a step undone later is found, so the tour can offer to go back', () => {

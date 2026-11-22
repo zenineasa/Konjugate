@@ -33,6 +33,7 @@ const steps = Object.freeze([
         title: 'Choose a demonstration',
         text: 'A twin needs a model and somewhere its readings come from: a file a logger writes, an MQTT broker, an OPC UA server, or a script sending them. This model is empty, so in the twin\'s window press "See a demonstration", then "A rig that drifts". It opens the rig\'s model in the project window, matches the recording\'s signals to it, and starts the twin.',
         elsewhere: 'twin', skip: 'startTwinDemo', variant: values.demonstration,
+        twinTarget: { name: 'chooseDemo', variant: values.demonstration },
         done: ({ document, ui }) => ui.twinSawRunning || demonstrationOpen(document, ui)
     },
     {
@@ -40,6 +41,7 @@ const steps = Object.freeze([
         title: 'The control room',
         text: 'Each tile is a measured signal: the reading, and the model\'s line beside it. Every few minutes of the recording the twin moves: it resets the model to the latest readings and runs it on, and the forecast reaches ahead of them. The recording plays at 600 times real time, so six hours take about half a minute.',
         elsewhere: 'twin', skip: 'waitForTwinMoves', moves: values.moves,
+        twinTarget: { name: 'room' },
         done: ({ ui }) => ui.twinMovesSeen >= values.moves || ui.twinSawAlarm
     },
     {
@@ -47,6 +49,7 @@ const steps = Object.freeze([
         title: 'Watch it drift',
         text: 'This tank loses heat faster than its model says. At first the model is close; then, move by move, the readings fall below it, until the room warns that the real system is drifting. The Live twin button in the project window\'s toolbar turns red too, so a drift is seen from anywhere.',
         elsewhere: 'twin', skip: 'waitForTwinAlarm',
+        twinTarget: { name: 'drift' },
         done: ({ ui }) => ui.twinSawAlarm
     },
     {

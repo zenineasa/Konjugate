@@ -49,7 +49,8 @@ const steps = Object.freeze([
         id: 'fold',
         title: 'Fold the two bodies into a subsystem',
         text: `Select both bodies (⌘A, Ctrl+A on Windows and Linux), press "Create subsystem" in the toolbar, name it "${values.subsystem}" and press Create subsystem.`,
-        target: (ui) => (ui.subsystemDialogOpen ? '#subsystemName' : '#createSubsystem'), skip: 'createSubsystem', name: values.subsystem,
+        // Create subsystem is off until the bodies are selected: until then the ring is on Add, whose menu has Select all.
+        target: (ui) => (ui.subsystemDialogOpen ? '#subsystemName' : ui.selectedCount >= 2 ? '#createSubsystem' : '#addButton'), skip: 'createSubsystem', name: values.subsystem,
         done: ({ document }) => folded(document)
     },
     {
@@ -105,7 +106,10 @@ const steps = Object.freeze([
         id: 'library',
         title: 'Keep it in your library',
         text: `Close the results, click a "${values.subsystem}" box to select it, and press "Save to my library" (⊞) in the toolbar, then Save. It is kept as a component, with its port and parameter, to place in any model.`,
-        target: (ui) => (ui.templateDialogOpen ? '#templateSubmit' : '#saveTemplateButton'), skip: 'saveSubsystemToLibrary', subsystem: values.subsystem,
+        // What can be done next: the results closed, a box selected, then Save to my library (off until both are done).
+        target: (ui) => (ui.templateDialogOpen ? '#templateSubmit' : ui.hasResult ? (ui.closeResultsDialogOpen ? '#confirmCloseResults' : '#closeResults')
+            : ui.saveToLibraryReady ? '#saveTemplateButton' : ui.subsystemLabelOf(values.subsystem)),
+        skip: 'saveSubsystemToLibrary', subsystem: values.subsystem,
         done: ({ ui }) => ui.libraryComponents.includes(values.subsystem)
     },
     {

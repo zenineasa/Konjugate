@@ -6,7 +6,7 @@
 // shared by both editions; what this file knows about the page is only what it is handed: how to read the facts the checks need, and how
 // to fill a step in.
 
-import { brokenStepBefore, currentStepIndex, stepLabel, stepText } from '../tutorials/steps.mjs';
+import { brokenStepBefore, currentStepIndex, offersNext, stepLabel, stepText } from '../tutorials/steps.mjs';
 
 const element = (tag, className, text) => {
     const created = document.createElement(tag);
@@ -74,17 +74,79 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
     document.body.append(ring, card);
 
     const targetOf = (step, facts) => (typeof step.target === 'function' ? step.target(facts.ui) : step.target);
+    const shown = (target) => {
+        const rect = target?.getBoundingClientRect();
+        return rect && rect.width > 0 && rect.height > 0 && !target.closest('[hidden], .hidden') ? rect : null;
+    };
+
+    // A label on the canvas (a node's, a subsystem's, a relationship bundle's) is drawn over the 3D view, in an order the view sets
+    // frame by frame: the one a step points at is raised above the others while it is pointed at, so a label beside it cannot cover it.
+    let raised = null;
+    // The element the ring is around now (the target, or the close button of a card covering it), for the tests.
+    let ringedElement = null;
+    function raise(target) {
+        const label = target?.closest?.('.css2dSurface > *') ?? null;
+        if (raised === label) return;
+        raised?.classList.remove('tourRaised');
+        raised = label;
+        raised?.classList.add('tourRaised');
+    }
+
+    // Brought into view once, when a step first points at it, if a list or panel it is in has scrolled it out of sight (or the page has),
+    // and never again while it stays the target: a person's own scrolling is not fought.
+    let scrolledTo = null;
+    function bringIntoView(target, rect) {
+        if (scrolledTo === target) return rect;
+        scrolledTo = target;
+        if (target.closest('.css2dSurface')) return rect;
+        let clipped = rect.top < 0 || rect.left < 0 || rect.bottom > window.innerHeight || rect.right > window.innerWidth;
+        for (let parent = target.parentElement; parent && !clipped; parent = parent.parentElement) {
+            const { overflowY, overflowX } = getComputedStyle(parent);
+            if (!/(auto|scroll|overlay)/.test(`${overflowY} ${overflowX}`)) continue;
+            const box = parent.getBoundingClientRect();
+            clipped = rect.top < box.top || rect.bottom > box.bottom || rect.left < box.left || rect.right > box.right;
+        }
+        if (!clipped) return rect;
+        target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        return target.getBoundingClientRect();
+    }
+
+    // What is on top at the middle of a target, when it is not the target (nor the card, nor something inside or around the target):
+    // what covers it, so a click there would land on something else.
+    function coverOf(target, rect) {
+        const x = rect.left + rect.width / 2;
+        const y = rect.top + rect.height / 2;
+        if (x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight) return null;
+        const top = document.elementFromPoint(x, y);
+        if (!top || target.contains(top) || top.contains(target) || card.contains(top)) return null;
+        return top;
+    }
+
+    // Where the ring goes for a target: on it, or, when an editor's card (or another card that closes) covers it, on that card's close
+    // button, the one thing to do before the target can be reached.
+    function ringed(target) {
+        let rect = shown(target);
+        if (!rect) return null;
+        raise(target);
+        rect = bringIntoView(target, rect);
+        const cover = coverOf(target, rect);
+        const close = cover?.closest('.contextCard:not(.hidden)')?.querySelector(':scope > header [data-close-card]');
+        const closeRect = close && !close.contains(target) ? shown(close) : null;
+        return closeRect ? { element: close, rect: closeRect } : { element: target, rect };
+    }
 
     function placeRing(step, facts) {
         // A step's target is a selector, or an element where no selector can name it (a node's label, found by its text).
         const reference = step.advance === 'next' ? null : targetOf(step, facts);
         const target = typeof reference === 'string' ? document.querySelector(reference) : reference ?? null;
-        const rect = target?.getBoundingClientRect();
-        const visible = rect && rect.width > 0 && rect.height > 0 && !target.closest('[hidden], .hidden');
-        ring.hidden = !visible;
+        const placed = target ? ringed(target) : null;
+        ringedElement = placed?.element ?? null;
+        if (!placed) raise(null);
+        ring.hidden = !placed;
         // A control to press pulses, to draw the eye; a panel the step is about keeps a still ring.
-        ring.classList.toggle('tourRingPulse', Boolean(visible && target.matches('button, [role="button"], input, select, summary')));
-        if (!visible) return null;
+        ring.classList.toggle('tourRingPulse', Boolean(placed && placed.element.matches('button, [role="button"], input, select, summary') && !placed.element.disabled));
+        if (!placed) return null;
+        const { rect } = placed;
         const margin = 4;
         Object.assign(ring.style, { left: `${rect.left - margin}px`, top: `${rect.top - margin}px`, width: `${rect.width + 2 * margin}px`, height: `${rect.height + 2 * margin}px` });
         return rect;
@@ -164,13 +226,15 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         link.textContent = step.link?.label ?? '';
         link.disabled = filling;
         linkNote.hidden = !linkNote.textContent;
-        next.hidden = step.advance !== 'next';
+        // A step that waits for Next once it is done (a plot to read) offers it then, in place of its skip.
+        const nextOffered = offersNext(step, facts);
+        next.hidden = !nextOffered;
         next.textContent = step.nextLabel ?? 'Next';
         fillButton.hidden = !step.fill || !pageActions[step.fill];
         fillButton.textContent = step.fillLabel ?? 'Fill this in for me';
         fillButton.disabled = filling;
         skip.hidden = step.id === 'finish';
-        skipStep.hidden = step.advance === 'next' || !pageActions[step.skip];
+        skipStep.hidden = nextOffered || !pageActions[step.skip];
         skipStep.disabled = filling;
         if (skipFailed !== reached) skipFailed = null;
         back.hidden = broken === null;
@@ -181,6 +245,7 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
             back.textContent = `Go back to step ${broken}`;
             back.onclick = () => { reached = broken; render(); };
         }
+        if (shownStep !== step) scrolledTo = null;
         if (shownStep !== step || shownStatus !== said) {
             shownStep = step;
             shownStatus = said;
@@ -199,6 +264,8 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         shownStep = null;
         shownStatus = '';
         onStep(null, '');
+        raise(null);
+        scrolledTo = null;
         ring.hidden = true;
         card.hidden = true;
         onFinish(outcome, tutorial);
@@ -251,6 +318,9 @@ export function createTour({ getFacts, actions: pageActions = {}, edition, onFin
         get active() { return active; },
         get step() { return active ? steps[reached].id : null; },
         get tutorial() { return active ? tutorial : null; },
+        // The step on screen (its definition), and what the ring is around (null with no ring).
+        get shownStep() { return active ? steps[reached] : null; },
+        get ringed() { return active && !ring.hidden ? ringedElement : null; },
         // `at` is the step to start on (a tutorial carried on after Konjugate restarted, say); it starts at the beginning otherwise.
         start(played, { start = null, at = null } = {}) {
             tutorial = played;

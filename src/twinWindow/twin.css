@@ -380,6 +380,16 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .tutorialBanner .tutorialBannerStatus { padding: 6px 9px; color: #b9ccd4; background: rgb(66 201 188 / 8%); border-left: 2px solid #42c9bc; border-radius: 3px; font-size: 12px; line-height: 1.45; }
 .tutorialBanner .tutorialBannerStatus[hidden] { display: none; }
 .tutorialBanner .tutorialBannerNote { display: block; font-size: 11px; color: #7fa3ad; }
+.tutorialRing { position: fixed; z-index: 9001; box-sizing: border-box; border: 2px solid #42c9bc; border-radius: 8px; box-shadow: 0 0 0 4px rgb(66 201 188 / 22%), 0 0 24px rgb(66 201 188 / 35%); pointer-events: none; transition: left .2s ease, top .2s ease, width .2s ease, height .2s ease; }
+.tutorialRing[hidden] { display: none; }
+.tutorialRing.tutorialRingPulse { animation: tutorialRingPulse 1.4s ease-in-out infinite; }
+@keyframes tutorialRingPulse {
+    0%, 100% { box-shadow: 0 0 0 4px rgb(66 201 188 / 22%), 0 0 24px rgb(66 201 188 / 35%); }
+    50% { box-shadow: 0 0 0 8px rgb(66 201 188 / 10%), 0 0 32px rgb(66 201 188 / 50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .tutorialRing.tutorialRingPulse { animation: none; }
+}
 
 /* The engineer's choice of how each input is carried into the forecast: its name, the choice, the spans that choice reads, its score. */
 .forecastRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 4px 6px; align-items: center; margin-bottom: 10px; font-size: 12.5px; }

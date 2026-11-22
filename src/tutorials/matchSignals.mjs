@@ -29,6 +29,7 @@ const steps = Object.freeze([
         title: 'Choose "A plant\'s names"',
         text: 'Press "See a demonstration", then "A plant\'s names". It opens the heated tank\'s model in the project window and hands the twin six hours of the tank\'s readings under a plant\'s tag names and units.',
         elsewhere: 'twin', skip: 'startTwinDemo', variant: values.demonstration, waitFor: 'model',
+        twinTarget: { name: 'chooseDemo', variant: values.demonstration },
         done: ({ document, ui }) => demonstrationOpen(document, ui)
     },
     {
@@ -36,6 +37,7 @@ const steps = Object.freeze([
         title: 'Review the matches',
         text: 'Under Mapping, each reading has the model quantity it was matched to, how sure the match is, and its unit conversion: TK1_TT101_PV in °C to the Water tank\'s temperature in K, the heater\'s kW to W. Change a match from its menu if it is wrong; a reading can also be an input that drives the model rather than one it is compared with. When they look right, press "Use every suggestion" if it is offered, then "Open the control room".',
         elsewhere: 'twin', skip: 'useTwinSuggestions',
+        twinTarget: { name: 'review' },
         done: ({ ui }) => ui.twinSawRunning
     },
     {
@@ -43,6 +45,7 @@ const steps = Object.freeze([
         title: 'In step',
         text: 'The control room shows each matched reading in your units beside the model\'s line, and the model is kept in step with them as they arrive. Matches you confirm are remembered, so the next model with the same tags is matched at once.',
         elsewhere: 'twin', skip: 'waitForTwinMoves', moves: 2,
+        twinTarget: { name: 'room' },
         done: ({ ui }) => ui.twinMovesSeen >= 2
     },
     {

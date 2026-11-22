@@ -630,9 +630,95 @@ initEngineer({
     }
 });
 api.liveTwin.onEvent((update) => handleEvent(update));
-// The project window's tutorial step, when its work is here: shown in a banner of its own, since this window covers the card.
+// Where a tutorial's step points in this window (its `twinTarget`, by name): the next thing to press or set here, as this window stands.
+const visibleHere = (selector) => {
+    const found = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    return found && found.getClientRects().length && !found.closest('[hidden]') ? found : null;
+};
+const forecastField = (input, kind) => document.querySelector(`#inputForecastRows .${kind}[data-input="${CSS.escape(input)}"]`);
+const tutorialTargets = {
+    // "See a demonstration", then (when the step names a pace) "Data arrives", then the demonstration's button.
+    chooseDemo: ({ variant, pace }) => {
+        if (!$('#demosDialog').open) return '#openDemos';
+        if (pace && $('#demoPace').value !== pace) return '#demoPace';
+        return `[data-demo="${CSS.escape(variant ?? '')}"]`;
+    },
+    room: () => '#health',
+    drift: () => '#healthDrift',
+    // Every suggestion used, if offered, then the room opened.
+    review: () => visibleHere('#useAllSuggestions') && !$('#useAllSuggestions').disabled ? '#useAllSuggestions' : '#openRoom',
+    // Engineer opened, Refit, then (once it has fitted) keeping it.
+    refit: () => ($('#engineer').hidden ? '#engineerToggle' : visibleHere('#refitKeep') ? '#refitKeep' : '#refitRun'),
+    // The sandbox opened, the heater set to 0, Run ahead, then Back to live.
+    try: () => {
+        if ($('#sandboxBar').hidden) return '#trySomething';
+        if (/Ran ahead/.test($('#sandboxStatus').textContent)) return '#sandboxBack';
+        const input = document.querySelector('#sandboxInputs input');
+        return input && input.value !== '0' ? input : '#sandboxRun';
+    },
+    // Engineer opened, the input's forecast set to a plan, its time zone, the plan typed, then "Start again with these".
+    plan: ({ input, timeZone }) => {
+        if ($('#engineer').hidden) return '#engineerToggle';
+        const choice = forecastField(input, 'forecastChoice');
+        if (!choice || choice.value !== 'plan') return choice;
+        const zone = forecastField(input, 'forecastZone');
+        if (zone && timeZone && zone.value.trim() !== timeZone) return zone;
+        const plan = forecastField(input, 'forecastPlan');
+        if (plan && !plan.value.trim()) return plan;
+        return $('#restartTwin').disabled ? null : '#restartTwin';
+    }
+};
+// The ring around it, as the project window draws one around its own controls: brought into view once (inside the Engineer view, which
+// scrolls), and moved into a dialog while one is open, which sits above everything else.
+const tutorialRing = document.createElement('div');
+tutorialRing.className = 'tutorialRing';
+tutorialRing.hidden = true;
+tutorialRing.setAttribute('aria-hidden', 'true');
+document.body.append(tutorialRing);
+let tutorialTarget = null;
+let tutorialRingTimer = null;
+let tutorialRingScrolledTo = null;
+function placeTutorialRing() {
+    const reference = tutorialTarget ? tutorialTargets[tutorialTarget.name]?.(tutorialTarget) : null;
+    const target = reference ? visibleHere(reference) : null;
+    const host = document.querySelector('dialog[open]') ?? document.body;
+    if (tutorialRing.parentElement !== host) host.append(tutorialRing);
+    tutorialRing.hidden = !target;
+    if (!target) return;
+    if (tutorialRingScrolledTo !== target) {
+        tutorialRingScrolledTo = target;
+        // To the middle: the Engineer view's footer stays at its bottom, over whatever is scrolled only as far as the edge.
+        target.scrollIntoView({ block: 'center', inline: 'nearest' });
+    }
+    const rect = target.getBoundingClientRect();
+    const margin = 4;
+    Object.assign(tutorialRing.style, { left: `${rect.left - margin}px`, top: `${rect.top - margin}px`, width: `${rect.width + 2 * margin}px`, height: `${rect.height + 2 * margin}px` });
+    tutorialRing.classList.toggle('tutorialRingPulse', target.matches('button, select, input, textarea') && !target.disabled);
+}
+// For the tests: the ring as it stands, as the project window's tour reports its own.
+window.__debugTutorialRing = () => {
+    const element = tutorialRing.hidden || !tutorialTarget ? null : visibleHere(tutorialTargets[tutorialTarget.name]?.(tutorialTarget));
+    const rect = element?.getBoundingClientRect();
+    const top = rect ? document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+    return {
+        target: tutorialTarget?.name ?? null, shown: Boolean(element), ringed: element ? `${element.tagName.toLowerCase()}#${element.id}` : null,
+        on: top ? `${top.tagName.toLowerCase()}#${top.id}.${String(top.className)}` : null,
+        onScreen: Boolean(rect) && rect.left >= -2 && rect.top >= -2 && rect.right <= window.innerWidth + 2 && rect.bottom <= window.innerHeight + 2,
+        uncovered: Boolean(element && top && (element.contains(top) || top.contains(element))),
+        banner: !$('#tutorialBanner').hidden, focused: document.hasFocus(), visible: !document.hidden
+    };
+};
+// The project window's tutorial step, when its work is here: shown in a banner of its own, since this window covers the card, with a ring
+// on what to do next here.
 api.onTutorialStep?.((step) => {
     $('#tutorialBanner').hidden = !step;
+    const target = step?.target && tutorialTargets[step.target.name] ? step.target : null;
+    // Sent again whenever the step's status changes: only another target is brought into view afresh.
+    if (JSON.stringify(target) !== JSON.stringify(tutorialTarget)) tutorialRingScrolledTo = null;
+    tutorialTarget = target;
+    clearInterval(tutorialRingTimer);
+    tutorialRingTimer = tutorialTarget ? setInterval(placeTutorialRing, 300) : null;
+    placeTutorialRing();
     if (!step) return;
     $('#tutorialBannerLabel').textContent = step.label || 'Tutorial';
     $('#tutorialBannerTitle').textContent = step.title;

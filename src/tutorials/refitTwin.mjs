@@ -45,6 +45,7 @@ const steps = Object.freeze([
         title: 'A rig that drifts, slowly',
         text: 'Press "See a demonstration". Set "Data arrives" to 60× (a minute a second), so the six hours take six minutes and there is time to work, then choose "A rig that drifts".',
         elsewhere: 'twin', skip: 'startTwinDemo', variant: values.demonstration, pace: values.pace,
+        twinTarget: { name: 'chooseDemo', variant: values.demonstration, pace: values.pace },
         done: ({ ui }) => ui.twinSawRunning
     },
     {
@@ -52,6 +53,7 @@ const steps = Object.freeze([
         title: 'Refit it on the latest readings',
         text: 'Press Engineer at the top of the room: the view for the twin\'s numbers, its timing and its warning. A refit needs the twin\'s first move, about a minute in at this pace. Under "Refit on the latest window", press Refit: the tank\'s tunable numbers are fitted again to the readings of the last few moves. When it is done, press "Apply, and keep in the model": the twin goes on with the new values, and the project\'s model keeps them.',
         elsewhere: 'twin', skip: 'refitTwinAndKeep',
+        twinTarget: { name: 'refit' },
         done: ({ document }) => refitKept(document)
     },
     {
@@ -59,6 +61,7 @@ const steps = Object.freeze([
         title: 'Try something ahead',
         text: 'Press "Try something…": the room opens a sandbox from the latest state, where the inputs can be changed and the model run ahead without touching the twin. Set the heater to 0 and press Run ahead: the tiles draw what would happen, dotted. Press "Back to live": what you tried is kept as a draft scenario in the project.',
         elsewhere: 'twin', skip: 'tryInTwinSandbox',
+        twinTarget: { name: 'try' },
         done: ({ ui }) => ui.scenarios > 0
     },
     {
@@ -66,6 +69,7 @@ const steps = Object.freeze([
         title: 'Tell the forecast the operator\'s plan',
         text: 'The forecast has to assume something about the heater, which nothing has said yet: by default, that it stays as it is. But this rig\'s operator works to a plan, by the rig\'s clock (UTC): heater on at 09:00, off at 11:00, on at 12:00, off at 14:00. The recording starts at 09:00 UTC, so on the room\'s time axis, in hours from its start, 11:00 is 2. In Engineer, under "Each input, in the forecast", set Heater power to "From a plan", set its Time zone to UTC, and type the plan one time and value to a line: 09:00 1000, then 11:00 0, 12:00 1000 and 14:00 0. Press "Start again with these": the recording plays again from its start, and the Heater power strip draws what the forecast now assumes, dotted. Watch it for a few moves: before each switch, the tank\'s forecast turns with it.',
         elsewhere: 'twin', skip: 'planTwinInput', input: values.heater.input, plan: values.heater.plan, timeZone: values.heater.timeZone,
+        twinTarget: { name: 'plan', input: values.heater.input, timeZone: values.heater.timeZone },
         // Done once the twin has forecast with the plan by the rig's clock and a switch was ahead in it: the turn the text promises, seen.
         status: (ui) => {
             const kept = heaterPlan(ui);

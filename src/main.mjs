@@ -967,6 +967,15 @@ ipcMain.handle('twinFocusWindow', (event) => {
     twinWindow.focus();
     return true;
 });
+// A project window's twin window closed, as its own close button closes it (its twin ends with it): a tutorial starting puts away one
+// left from before.
+ipcMain.handle('twinCloseWindow', (event) => {
+    requireProjectWindow(event, 'Only a project window can close its twin.');
+    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    if (!twinWindow || twinWindow.isDestroyed()) return false;
+    twinWindow.close();
+    return true;
+});
 // The push service's page of Settings is in the project window: the twin window asks it to open there.
 ipcMain.handle('twinOpenConnections', (event) => {
     const projectWindow = projectWindowForAuxSender(event, 'twinWindow');
@@ -978,13 +987,25 @@ ipcMain.handle('twinOpenConnections', (event) => {
 });
 // A demonstration's model (the simulated rig), opened in the project window for the twin window that asks for it.
 // A tutorial's step whose work is in the twin window (docs/proposals/tutorials.md), shown there too, since the twin window opens in
-// front of the project window and its card; null when the step is over. Only its text, and what its card says of it now (its status):
-// the tutorial is run from the project window.
-ipcMain.handle('twinTutorialStep', (event, step) => {
+// front of the project window and its card; null when the step is over. Only its text, what its card says of it now (its status), and
+// what in the twin window it points at (a name the twin window knows, with the step's few values: its `twinTarget`): the tutorial is run
+// from the project window. Once the twin's steps are over (`raiseProject`), the project window is brought to the front, where the
+// tutorial's next card is.
+const twinTutorialTargetFields = ['name', 'variant', 'pace', 'input', 'timeZone'];
+ipcMain.handle('twinTutorialStep', (event, step, { raiseProject = false } = {}) => {
     requireProjectWindow(event, 'Only a project window can show its tutorial in its twin window.');
-    const twinWindow = projectWindowState.get(getWindowFromEvent(event))?.twinWindow;
+    const projectWindow = getWindowFromEvent(event);
+    const twinWindow = projectWindowState.get(projectWindow)?.twinWindow;
+    if (raiseProject && !step && projectWindow && !projectWindow.isDestroyed()) {
+        if (projectWindow.isMinimized()) projectWindow.restore();
+        projectWindow.show();
+        projectWindow.focus();
+    }
     if (!twinWindow || twinWindow.isDestroyed()) return false;
-    const shown = step && typeof step === 'object' ? { label: String(step.label ?? ''), title: String(step.title ?? ''), text: String(step.text ?? ''), status: String(step.status ?? '') } : null;
+    const target = step?.target && typeof step.target === 'object'
+        ? Object.fromEntries(twinTutorialTargetFields.filter((field) => step.target[field] !== undefined && step.target[field] !== null).map((field) => [field, String(step.target[field])]))
+        : null;
+    const shown = step && typeof step === 'object' ? { label: String(step.label ?? ''), title: String(step.title ?? ''), text: String(step.text ?? ''), status: String(step.status ?? ''), target } : null;
     const send = () => { if (!twinWindow.isDestroyed()) twinWindow.webContents.send('twinTutorialStep', shown); };
     if (twinWindow.webContents.isLoading()) twinWindow.webContents.once('did-finish-load', send); else send();
     return true;

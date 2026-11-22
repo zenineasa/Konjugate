@@ -263,8 +263,9 @@ contextBridge.exposeInMainWorld('engine', {
         // A tutorial's "Skip this step" done in this window's twin window, as its own buttons do it: 'demo' ({ variant, pace }),
         // 'useSuggestions', 'refitAndKeep', 'tryAndKeep', 'planInput'.
         tutorialAction: (action, argument) => ipcRenderer.invoke('twinTutorialAction', action, argument),
-        // A tutorial's step shown in the twin window too (null: none), since that window covers this one's card.
-        showTutorialStep: (step) => ipcRenderer.invoke('twinTutorialStep', step),
+        // A tutorial's step shown in the twin window too (null: none), since that window covers this one's card; with `raiseProject`,
+        // this window brought to the front as the twin's steps end.
+        showTutorialStep: (step, options) => ipcRenderer.invoke('twinTutorialStep', step, options),
         // The twin's own window (docs/proposals/controlRoom.md): opened with the project's model and the twin's setup; what it
         // changes in the setup comes back to be kept with the project; it may ask for Settings › Push service, or a demonstration's model.
         openWindow: (context) => ipcRenderer.invoke('twinOpenWindow', context),
@@ -273,6 +274,8 @@ contextBridge.exposeInMainWorld('engine', {
         onStatusChanged: (callback) => ipcRenderer.on('twinStatusChanged', (_event, status) => callback(status)),
         onBoundsChanged: (callback) => ipcRenderer.on('twinBoundsChanged', (_event, bounds) => callback(bounds)),
         focusWindow: () => ipcRenderer.invoke('twinFocusWindow'),
+        // The twin's window closed (its twin ends with it): a tutorial starting puts away one left from before.
+        closeWindow: () => ipcRenderer.invoke('twinCloseWindow'),
         // What the twin window asks of this window (values kept in the model, scenarios), answered by id; and this window's model,
         // handed to the twin window when it changes.
         onRequest: (callback) => ipcRenderer.on('twinRequest', (_event, request) => callback(request)),

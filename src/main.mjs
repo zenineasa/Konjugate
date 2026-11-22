@@ -38,9 +38,9 @@ import { createUpdateCoordinator } from './updateCoordinator.mjs';
 import { createUpdateSkipStore } from './updateSkipStore.mjs';
 import { bugReportUrl, formatBugReportEmail } from './bugReport.mjs';
 import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } from './aiRequestTiming.mjs';
-import { fetchWelcomeFeed, parseWelcomeFeed, selectFeatured, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
+import { fetchWelcomeFeed, highlightById, parseWelcomeFeed, selectHighlight, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { suggestedTutorials, welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
-import { createWelcomeStateStore, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
+import { createWelcomeStateStore, withEpisodeOpened, withHighlightShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
 import { groupTutorials, tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
@@ -581,12 +581,12 @@ async function recommendedAddonEntries() {
 
 // ---- The Welcome window's content that comes from the network (docs/proposals/welcomeWindow.md)
 //
-// The Featured slot and "More to watch" come from welcome/featured.json in this repository. The last
+// The highlight and the Watch videos come from welcome/featured.json in this repository. The last
 // good copy is kept on disk, so a launch with no network still shows it, and with neither there is
-// simply nothing featured. Images are fetched by this process and handed over as data: URLs, so the
+// simply nothing to highlight. Images are fetched by this process and handed over as data: URLs, so the
 // page's content-security policy never needs to allow another host.
 const welcomeFeedCachePath = () => join(app.getPath('userData'), 'welcomeFeedCache.json');
-let currentWelcomeFeed = { featured: [], moreToWatch: [], problems: [] };
+let currentWelcomeFeed = { pinned: [], videos: [], problems: [] };
 
 async function readCachedWelcomeFeed() {
     try {
@@ -600,7 +600,7 @@ async function refreshWelcomeFeed() {
     const raw = await fetchWelcomeFeed();
     const feed = parseWelcomeFeed(raw);
     // A file that is not the feed format is treated as "nothing new", and the cached copy is kept.
-    if (feed.problems.length && !feed.featured.length && !feed.moreToWatch.length && raw?.format !== 'konjugate-welcome-feed') return null;
+    if (feed.problems.length && !feed.pinned.length && !feed.videos.length && raw?.format !== 'konjugate-welcome-feed') return null;
     for (const problem of feed.problems) console.warn(`Welcome feed: ${problem}`);
     const temporaryPath = `${welcomeFeedCachePath()}.${randomUUID()}.tmp`;
     await writeFile(temporaryPath, JSON.stringify(raw));
@@ -615,13 +615,13 @@ async function fetchWelcomeImage(url) {
     return { mimeType: identifyRegistryImage(bytes, url), bytes };
 }
 
-// The Featured item as the page needs it: its text, and its image once that has been resolved to a
+// The highlight as the page needs it: its text, and its image once that has been resolved to a
 // data: URL (null until then). The link itself stays here -- the page asks to open an item by id
-// (welcomeOpenFeatured).
+// (welcomeOpenHighlight).
 // A video item that has no image of its own shows its video's thumbnail from YouTube's public thumbnail CDN, loaded by
 // the page the way the On-Ramp cards' are (see the CSP in exampleGuide/index.html), so it needs nothing in the repository.
-const featuredPayload = (item, imageUrl = null) => (item ? {
-    id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl, playlist: item.playlist,
+const highlightPayload = (item, imageUrl = null) => (item ? {
+    id: item.id, kind: item.kind, title: item.title, text: item.text, imageUrl, playlist: item.playlist, rotated: item.rotated === true,
     // The video it shows, so the Watch section below does not show it twice.
     videoId: item.kind === 'video' && !item.playlist ? item.thumbnailVideoId : null,
     thumbnailUrl: item.thumbnailVideoId ? `https://img.youtube.com/vi/${item.thumbnailVideoId}/hqdefault.jpg` : null
@@ -629,10 +629,10 @@ const featuredPayload = (item, imageUrl = null) => (item ? {
 
 // The image, from the on-disk cache or the network, or null. Separate from the payload above so it
 // never holds the window back: it arrives as a patch.
-async function resolveFeaturedImage(item) {
+async function resolveHighlightImage(item) {
     const url = item?.image ? welcomeImageUrl(item.image, welcomeFeedUrl()) : null;
     if (!url) return null;
-    return cachedRegistryImage(`welcome-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`, () => fetchWelcomeImage(url), `Featured image for ${item.id}`);
+    return cachedRegistryImage(`welcome-${createHash('sha256').update(url).digest('hex').slice(0, 16)}`, () => fetchWelcomeImage(url), `Highlight image for ${item.id}`);
 }
 
 // Learn by doing: the next tutorials this person has not completed, with what each needs to be shown and started.
@@ -645,11 +645,12 @@ let welcomeGeneration = 0;
 let whatsNewForThisRun;
 
 // Opens (or refreshes) the Welcome window at once with everything that is local -- the On-Ramp, the
-// footer text, what the person has opened and dismissed, the last good Featured feed -- and then fills
+// footer text, what the person has opened, the last good feed -- and then fills
 // in the rest as it arrives (blog posts, the add-on offer, a fresh feed) by sending the open window
 // patches. Nothing here waits on the network before the window appears, so a slow or absent
 // connection can no longer delay it. `automatic` is true for the launch and dock-reactivation opens,
-// which are what a Featured item's launch cap counts; clicking the Konjugate button is not a launch.
+// which are what a highlight's launch count (its cap, and the videos' turns) counts; clicking the Konjugate
+// button is not a launch, so it shows the same highlight again.
 async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
     const generation = ++welcomeGeneration;
     const version = app.getVersion();
@@ -664,18 +665,20 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
     }
     currentWelcomeFeed = cachedFeed;
 
-    let countedFeaturedId = null;
-    const chooseFeatured = async (feed) => {
+    // Both choices (the cached feed's now, the fresh feed's when it arrives) go by the launch counts from before this
+    // open, so counting the first does not move the videos' turn on and swap the highlight under the person's eyes.
+    let countedHighlightId = null;
+    const chooseHighlight = async (feed) => {
         const current = await welcomeState().get();
-        const item = selectFeatured({ items: feed.featured, now: Date.now(), shown: current.featuredShown, opened: current.openedEpisodes });
-        if (item && automatic && countedFeaturedId !== item.id) {
-            countedFeaturedId = item.id;
-            await welcomeState().update((latest) => withFeaturedShown(latest, item.id));
+        const item = selectHighlight({ pinned: feed.pinned, videos: feed.videos, now: Date.now(), shown: state.highlightShown, opened: current.openedEpisodes });
+        if (item && automatic && countedHighlightId !== item.id) {
+            countedHighlightId = item.id;
+            await welcomeState().update((latest) => withHighlightShown(latest, item.id));
         }
         return item;
     };
 
-    const initialFeatured = await chooseFeatured(cachedFeed);
+    const initialHighlight = await chooseHighlight(cachedFeed);
     await openGuideWindow(projectWindow, {
         title: 'Konjugate',
         version,
@@ -686,8 +689,8 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
         openedEpisodes: state.openedEpisodes,
         learn: welcomeLearn(state.tutorialsCompleted),
         whatsNew: whatsNewForThisRun,
-        featured: featuredPayload(initialFeatured),
-        moreToWatch: cachedFeed.moreToWatch,
+        highlight: highlightPayload(initialHighlight),
+        videos: cachedFeed.videos,
         posts: [],
         recommendedAddons: []
     });
@@ -698,10 +701,10 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
     const alive = () => Boolean(guideWindow) && !guideWindow.isDestroyed() && generation === welcomeGeneration;
 
     // Each of these runs on its own and may fail on its own; none is waited for.
-    const sendFeaturedImage = (item) => resolveFeaturedImage(item).then((imageUrl) => {
-        if (imageUrl && alive()) patch({ featured: featuredPayload(item, imageUrl) });
-    }).catch((error) => console.warn('Welcome featured image:', error.message));
-    if (initialFeatured) sendFeaturedImage(initialFeatured);
+    const sendHighlightImage = (item) => resolveHighlightImage(item).then((imageUrl) => {
+        if (imageUrl && alive()) patch({ highlight: highlightPayload(item, imageUrl) });
+    }).catch((error) => console.warn('Welcome highlight image:', error.message));
+    if (initialHighlight) sendHighlightImage(initialHighlight);
     fetchRecentBlogPosts().then((posts) => {
         patch({ posts: posts.map((post) => ({ title: post.title, url: post.link, thumbnailUrl: post.thumbnailUrl })) });
     }).catch((error) => console.warn('Welcome blog posts:', error.message));
@@ -716,9 +719,9 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
     refreshWelcomeFeed().then(async (feed) => {
         if (!feed || !alive()) return;
         currentWelcomeFeed = feed;
-        const featured = await chooseFeatured(feed);
-        patch({ featured: featuredPayload(featured), moreToWatch: feed.moreToWatch });
-        if (featured) sendFeaturedImage(featured);
+        const highlight = await chooseHighlight(feed);
+        patch({ highlight: highlightPayload(highlight), videos: feed.videos });
+        if (highlight) sendHighlightImage(highlight);
     }).catch((error) => console.warn('Welcome feed:', error.message));
     return true;
 }
@@ -730,8 +733,8 @@ async function openWelcomeWindow(projectWindow, { automatic = false } = {}) {
 async function rememberVideoOpened(videoId) {
     const { episodes } = await welcomeOnRamp();
     const known = episodes.some((episode) => episode.videoId === videoId)
-        || currentWelcomeFeed.moreToWatch.some((video) => video.videoId === videoId)
-        || currentWelcomeFeed.featured.some((item) => item.thumbnailVideoId === videoId);
+        || currentWelcomeFeed.videos.some((video) => video.videoId === videoId)
+        || currentWelcomeFeed.pinned.some((item) => item.thumbnailVideoId === videoId);
     if (typeof videoId !== 'string' || !known) return false;
     await welcomeState().update((current) => withEpisodeOpened(current, videoId));
     return true;
@@ -770,8 +773,8 @@ ipcMain.handle('exampleGuideStartTutorial', (event, id) => {
     projectWindow.focus();
     return true;
 });
-ipcMain.handle('welcomeOpenFeatured', async (_event, id) => {
-    const item = currentWelcomeFeed.featured.find((candidate) => candidate.id === id);
+ipcMain.handle('welcomeOpenHighlight', async (_event, id) => {
+    const item = highlightById(currentWelcomeFeed, id);
     if (!item) return false;
     shell.openExternal(item.url);
     if (item.kind === 'video' && !item.playlist && item.thumbnailVideoId) await rememberVideoOpened(item.thumbnailVideoId);

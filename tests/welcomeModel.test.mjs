@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { featuredLabel, releaseNotesUrl, suggestedTutorialCount, suggestedTutorials, watchLibrary, watchVisibleLimit, welcomeLinks, welcomeSectionOrder, whatsNewFor } from '../src/welcomeModel.mjs';
+import { highlightLabel, releaseNotesUrl, suggestedTutorialCount, suggestedTutorials, watchLibrary, watchVisibleLimit, welcomeLinks, welcomeSectionOrder, whatsNewFor } from '../src/welcomeModel.mjs';
 
 test('the page always has its core sections, in order, and nothing conditional until it has content', () => {
     assert.deepEqual(welcomeSectionOrder(), ['heading', 'status', 'learn', 'community', 'footer']);
@@ -52,31 +52,33 @@ const onRamp = { playlistUrl: 'https://www.youtube.com/watch?v=aaaaaaaaaaa&list=
 const videos = (count) => Array.from({ length: count }, (_, index) => ({ videoId: `video${String(index).padStart(6, '0')}`, title: `Video ${index}` }));
 
 test('Watch lists the videos in the feed\'s order without the highlighted one, then the On-Ramp as one playlist card', () => {
-    const { shown, hidden } = watchLibrary({ moreToWatch: videos(3), onRamp, highlightedVideoId: 'video000000' });
+    const { shown, hidden } = watchLibrary({ videos: videos(3), onRamp, highlightedVideoId: 'video000000' });
     assert.deepEqual(shown.map((card) => card.title), ['Video 1', 'Video 2', 'Konjugate On-Ramp: the 2-episode video series']);
     assert.equal(hidden, 0);
     assert.equal(shown[0].url, 'https://www.youtube.com/watch?v=video000001');
     assert.equal(shown.at(-1).playlist, true);
     assert.equal(shown.at(-1).url, onRamp.playlistUrl);
-    assert.deepEqual(watchLibrary({ moreToWatch: [], onRamp: null }).shown, [], 'nothing to watch');
+    assert.deepEqual(watchLibrary({ videos: [], onRamp: null }).shown, [], 'nothing to watch');
 });
 
 test('Watch shows a handful, with the rest behind Show all, in order', () => {
     assert.equal(watchVisibleLimit, 9);
-    const collapsed = watchLibrary({ moreToWatch: videos(11), onRamp });
+    const collapsed = watchLibrary({ videos: videos(11), onRamp });
     assert.equal(collapsed.shown.length, 9);
     assert.equal(collapsed.hidden, 3);
-    assert.equal(watchLibrary({ moreToWatch: videos(11), onRamp }, { expanded: true }).shown.length, 12);
-    assert.equal(watchLibrary({ moreToWatch: videos(8), onRamp }).hidden, 0, 'exactly the limit needs no Show all');
+    assert.equal(watchLibrary({ videos: videos(11), onRamp }, { expanded: true }).shown.length, 12);
+    assert.equal(watchLibrary({ videos: videos(8), onRamp }).hidden, 0, 'exactly the limit needs no Show all');
 });
 
 test('paid items are labelled as such, and the other kinds get plain labels', () => {
-    assert.equal(featuredLabel('sponsored'), 'Sponsored');
-    assert.equal(featuredLabel('video'), 'New on the channel');
-    assert.equal(featuredLabel('video', { playlist: true }), 'New playlist on the channel');
-    assert.equal(featuredLabel('announcement', { playlist: true }), 'Announcement');
-    assert.equal(featuredLabel('announcement'), 'Announcement');
-    assert.equal(featuredLabel('anything else'), 'Announcement');
+    assert.equal(highlightLabel('sponsored'), 'Sponsored');
+    assert.equal(highlightLabel('video'), 'New on the channel');
+    assert.equal(highlightLabel('video', { playlist: true }), 'New playlist on the channel');
+    assert.equal(highlightLabel('video', { rotated: true }), 'From the channel', 'a video taking its turn may be old');
+    assert.equal(highlightLabel('sponsored', { rotated: true }), 'Sponsored');
+    assert.equal(highlightLabel('announcement', { playlist: true }), 'Announcement');
+    assert.equal(highlightLabel('announcement'), 'Announcement');
+    assert.equal(highlightLabel('anything else'), 'Announcement');
 });
 
 test('What\'s new appears only after an update, once, with the release notes link', () => {

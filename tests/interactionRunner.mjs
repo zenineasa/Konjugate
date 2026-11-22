@@ -710,7 +710,7 @@ export async function runInteractionTests(driver) {
         const page = await evaluate(welcomeWindow, `({
             headings: [...document.querySelectorAll('#content h2')].map((heading) => heading.textContent),
             suggested: [...document.querySelectorAll('[data-start-tutorial]')].map((button) => button.dataset.startTutorial),
-            dismiss: document.querySelectorAll('[data-featured-dismiss], .featuredDismiss').length,
+            dismiss: document.querySelectorAll('[data-highlight-dismiss], .highlightDismiss').length,
             tour: document.querySelectorAll('[data-start-tour]').length,
             onRampCard: [...document.querySelectorAll('.cardTitle')].some((title) => /^Konjugate On-Ramp: the \\d+-episode video series$/.test(title.textContent))
         })`);

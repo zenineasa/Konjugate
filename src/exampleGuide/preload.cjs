@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('exampleGuide', Object.freeze({
     // main process decides what is opened or copied.
     onWelcomePatch: (callback) => ipcRenderer.on('welcomePatch', (_event, patch) => callback(patch)),
     markEpisodeOpened: (videoId) => ipcRenderer.invoke('welcomeEpisodeOpened', videoId),
-    openFeatured: (id) => ipcRenderer.invoke('welcomeOpenFeatured', id),
+    openHighlight: (id) => ipcRenderer.invoke('welcomeOpenHighlight', id),
     // Learn by doing's "See all tutorials": the project window's Tutorials list.
     openTutorials: () => ipcRenderer.invoke('welcomeOpenTutorials'),
     // An example's tutorial (docs/proposals/tutorials.md), by the id the guide's content came with.

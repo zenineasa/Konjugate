@@ -1,16 +1,17 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// The Welcome window's highlight ("New on the channel") and its Watch section come from a small JSON file kept in this
-// repository (welcome/featured.json), reviewed in git like the add-on registry: nothing promotional can
-// appear or change without a commit, and an empty file switches it all off. This module validates that
-// file strictly, picks what to show, and builds the URLs; the main process does the fetching, caching
-// and image handling. See docs/proposals/welcomeWindow.md.
+// The Welcome window's highlight and its Watch section come from a small JSON file kept in this repository
+// (welcome/featured.json), reviewed in git like the add-on registry: nothing promotional can appear or change
+// without a commit, and an empty file switches it all off. The highlight takes turns through the videos, unless
+// a pinned item (the file's `featured` list: an announcement, something sponsored, a playlist) is in its window.
+// This module validates that file strictly, picks what to show, and builds the URLs; the main process does the
+// fetching, caching and image handling. See docs/proposals/welcomeWindow.md.
 //
 // No imports on purpose: everything here is pure, and it is tested without Electron.
 
 export const feedFormat = 'konjugate-welcome-feed';
-export const maxFeaturedItems = 10;
-export const maxMoreToWatch = 24;
+export const maxPinnedItems = 10;
+export const maxVideos = 24;
 const maxFeedBytes = 64 * 1024;
 
 const kinds = ['announcement', 'video', 'sponsored'];
@@ -49,7 +50,7 @@ function videoPresentation(item) {
     return { thumbnailVideoId: watched ? watched[1] : item.thumbnailVideoId, playlist: !watched };
 }
 
-function featuredItem(raw) {
+function pinnedItemProblem(raw) {
     if (!raw || typeof raw !== 'object') return 'is not an object';
     if (typeof raw.id !== 'string' || !idPattern.test(raw.id)) return 'needs an id of letters, digits and dashes (at most 64 characters)';
     if (!kinds.includes(raw.kind)) return `needs a kind of ${kinds.join(', ')}`;
@@ -72,47 +73,49 @@ function featuredItem(raw) {
 }
 
 // Validates the feed. A broken item is dropped with a reason, so one typo cannot take the rest down,
-// and a feed that is not this format at all is treated as empty. Returns { featured, moreToWatch,
-// problems }: normalized items, and a message for everything that was left out.
+// and a feed that is not this format at all is treated as empty. Returns { pinned, videos, problems }:
+// normalized items, and a message for everything that was left out. The file calls the two lists `featured` and
+// `moreToWatch`, names kept because every installed copy reads this file and older ones know the lists by them;
+// problems name them as the file does, since that is where they are fixed.
 export function parseWelcomeFeed(raw) {
     if (!raw || typeof raw !== 'object' || raw.format !== feedFormat || raw.formatVersion !== 1) {
-        return { featured: [], moreToWatch: [], problems: [`The feed is not a ${feedFormat} version 1 file.`] };
+        return { pinned: [], videos: [], problems: [`The feed is not a ${feedFormat} version 1 file.`] };
     }
     const problems = [];
-    const featured = [];
+    const pinned = [];
     const ids = new Set();
     (Array.isArray(raw.featured) ? raw.featured : []).forEach((item, index) => {
-        const problem = featuredItem(item);
+        const problem = pinnedItemProblem(item);
         if (problem) return problems.push(`featured[${index}] ${problem}.`);
         if (ids.has(item.id)) return problems.push(`featured[${index}] repeats the id "${item.id}".`);
-        if (featured.length >= maxFeaturedItems) return problems.push(`featured[${index}] is past the limit of ${maxFeaturedItems} items.`);
+        if (pinned.length >= maxPinnedItems) return problems.push(`featured[${index}] is past the limit of ${maxPinnedItems} items.`);
         ids.add(item.id);
-        featured.push({
+        pinned.push({
             id: item.id, kind: item.kind, title: item.title.trim(), text: item.text === undefined ? null : item.text.trim(),
             image: item.image ?? null, url: item.url, ...videoPresentation(item),
             startsAt: item.startsAt === undefined ? null : instant(item.startsAt), endsAt: item.endsAt === undefined ? null : instant(item.endsAt),
             maxLaunches: item.maxLaunches ?? null, priority: item.priority ?? 0
         });
     });
-    const moreToWatch = [];
-    const videos = new Set();
+    const videos = [];
+    const videoIds = new Set();
     (Array.isArray(raw.moreToWatch) ? raw.moreToWatch : []).forEach((item, index) => {
         if (!item || typeof item.videoId !== 'string' || !videoIdPattern.test(item.videoId)) return problems.push(`moreToWatch[${index}] needs an 11-character YouTube videoId.`);
         if (!text(item.title, 120)) return problems.push(`moreToWatch[${index}] needs a title of at most 120 characters.`);
-        if (videos.has(item.videoId)) return problems.push(`moreToWatch[${index}] repeats the video "${item.videoId}".`);
-        if (moreToWatch.length >= maxMoreToWatch) return problems.push(`moreToWatch[${index}] is past the limit of ${maxMoreToWatch} items.`);
-        videos.add(item.videoId);
-        moreToWatch.push({ videoId: item.videoId, title: item.title.trim() });
+        if (item.text !== undefined && !text(item.text, 400)) return problems.push(`moreToWatch[${index}] text, if present, must be 1 to 400 characters.`);
+        if (videoIds.has(item.videoId)) return problems.push(`moreToWatch[${index}] repeats the video "${item.videoId}".`);
+        if (videos.length >= maxVideos) return problems.push(`moreToWatch[${index}] is past the limit of ${maxVideos} items.`);
+        videoIds.add(item.videoId);
+        videos.push({ videoId: item.videoId, title: item.title.trim(), text: item.text === undefined ? null : item.text.trim() });
     });
-    return { featured, moreToWatch, problems };
+    return { pinned, videos, problems };
 }
 
-// The one item to highlight now, or null. Eligible means: inside its start/end window, shown on fewer launches
+// The pinned item to highlight now, or null. Eligible means: inside its start/end window, shown on fewer launches
 // than its cap, and, for a video, not yet opened. Highest priority wins; among equals, the one listed first.
-// Nothing is dismissed: a highlight ages out by its end date (a new video is given one about a month on), or as
-// soon as the person has watched it, and the same video stays in More to watch for good.
+// Nothing is dismissed: a pinned item ages out by its end date or launch cap, or a video as soon as it is watched.
 // `shown` maps an item id to how many launches it has already been shown on; `opened` lists the video ids opened.
-export function selectFeatured({ items, now, shown = {}, opened = [] }) {
+export function selectPinned({ items, now, shown = {}, opened = [] }) {
     let best = null;
     for (const item of items) {
         if (item.startsAt !== null && now < item.startsAt) continue;
@@ -122,6 +125,37 @@ export function selectFeatured({ items, now, shown = {}, opened = [] }) {
         if (best === null || item.priority > best.priority) best = item;
     }
     return best;
+}
+
+// A video from the list as a highlight, shaped like a pinned item so the page and the opening code need not tell
+// them apart. Its id is prefixed so its launch count in `shown` cannot be mistaken for a pinned item's.
+export const videoHighlightId = (videoId) => `video-${videoId}`;
+const videoHighlight = (video) => ({
+    id: videoHighlightId(video.videoId), kind: 'video', title: video.title, text: video.text, image: null,
+    url: `https://www.youtube.com/watch?v=${video.videoId}`, thumbnailVideoId: video.videoId, playlist: false, rotated: true
+});
+
+// The highlight for this launch, or null: a pinned item while one is eligible, else the next video in turn. The turn
+// goes to the video shown on the fewest launches so far, newest first among equals, so each launch moves on to the
+// next, and a video just added comes up on the very next launch. Videos the person has opened sit out until they have
+// opened them all; then every video takes its turn again.
+export function selectHighlight({ pinned = [], videos = [], now, shown = {}, opened = [] }) {
+    const item = selectPinned({ items: pinned, now, shown, opened });
+    if (item) return item;
+    const unopened = videos.filter((video) => !opened.includes(video.videoId));
+    let next = null;
+    for (const video of unopened.length ? unopened : videos) {
+        if (next === null || (shown[videoHighlightId(video.videoId)] ?? 0) < (shown[videoHighlightId(next.videoId)] ?? 0)) next = video;
+    }
+    return next && videoHighlight(next);
+}
+
+// The highlight with this id, pinned or a video, for opening it; or null.
+export function highlightById({ pinned = [], videos = [] }, id) {
+    const item = pinned.find((candidate) => candidate.id === id);
+    if (item) return item;
+    const video = videos.find((candidate) => videoHighlightId(candidate.videoId) === id);
+    return video ? videoHighlight(video) : null;
 }
 
 // ---- Where the feed and its images come from

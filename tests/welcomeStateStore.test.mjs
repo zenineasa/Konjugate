@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
-    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withDismissed, withEpisodeOpened, withFeaturedShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted
+    createWelcomeStateStore, emptyWelcomeState, normalizeWelcomeState, withEpisodeOpened, withHighlightShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted
 } from '../src/welcomeStateStore.mjs';
 
 async function withDirectory(run) {
@@ -21,9 +21,9 @@ async function withDirectory(run) {
 test('a fresh store is empty, and what is changed survives a restart', async () => {
     await withDirectory(async (directory) => {
         assert.deepEqual(await createWelcomeStateStore({ directory }).get(), emptyWelcomeState());
-        await createWelcomeStateStore({ directory }).update((state) => withDismissed(withLastSeenVersion(state, '1.2.0'), 'launch'));
+        await createWelcomeStateStore({ directory }).update((state) => withHighlightShown(withLastSeenVersion(state, '1.2.0'), 'launch'));
         const reopened = await createWelcomeStateStore({ directory }).get();
-        assert.deepEqual(reopened.dismissedFeatured, ['launch']);
+        assert.deepEqual(reopened.highlightShown, { launch: 1 });
         assert.equal(reopened.lastSeenVersion, '1.2.0');
     });
 });
@@ -33,12 +33,10 @@ test('each change does what it says', () => {
     state = withEpisodeOpened(state, 'eDHksSqKhFs');
     state = withEpisodeOpened(state, 'eDHksSqKhFs');
     assert.deepEqual(state.openedEpisodes, ['eDHksSqKhFs'], 'opening twice is one tick');
-    state = withDismissed(withDismissed(state, 'a'), 'a');
-    assert.deepEqual(state.dismissedFeatured, ['a']);
-    state = withFeaturedShown(withFeaturedShown(withFeaturedShown(state, 'a'), 'a'), 'b');
-    assert.deepEqual(state.featuredShown, { a: 2, b: 1 });
+    state = withHighlightShown(withHighlightShown(withHighlightShown(state, 'a'), 'a'), 'b');
+    assert.deepEqual(state.highlightShown, { a: 2, b: 1 });
     assert.equal(withLastSeenVersion(state, '1.3.0').lastSeenVersion, '1.3.0');
-    assert.deepEqual(emptyWelcomeState(), { version: 1, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] }, 'the original is untouched');
+    assert.deepEqual(emptyWelcomeState(), { version: 1, highlightShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] }, 'the original is untouched');
 });
 
 test('a damaged or wrong-version file means an empty state, never an error', async () => {
@@ -54,13 +52,14 @@ test('a damaged or wrong-version file means an empty state, never an error', asy
 
 test('the valid parts of a partly damaged file are kept', () => {
     const state = normalizeWelcomeState({
-        version: 1, dismissedFeatured: ['a', 42, '', 'a', 'b', null], openedEpisodes: 'oops', featuredShown: { x: 3, y: -1, z: 1.5, w: '2', v: 1 }, lastSeenVersion: 7
+        version: 1, dismissedFeatured: ['a'], openedEpisodes: 'oops', highlightShown: { x: 3, y: -1, z: 1.5, w: '2', v: 1 }, lastSeenVersion: 7
     });
-    assert.deepEqual(state.dismissedFeatured, ['a', 'b']);
+    assert.equal('dismissedFeatured' in state, false, 'a list from when highlights could be dismissed is dropped');
     assert.deepEqual(state.openedEpisodes, []);
-    assert.deepEqual(state.featuredShown, { x: 3, v: 1 });
+    assert.deepEqual(state.highlightShown, { x: 3, v: 1 });
     assert.equal(state.lastSeenVersion, null);
-    assert.deepEqual(normalizeWelcomeState({ version: 1, featuredShown: [1, 2] }).featuredShown, {});
+    assert.deepEqual(normalizeWelcomeState({ version: 1, highlightShown: [1, 2] }).highlightShown, {});
+    assert.deepEqual(normalizeWelcomeState({ version: 1, featuredShown: { launch: 2 } }).highlightShown, { launch: 2 }, 'counts kept under the old name carry over');
 });
 
 test('the lists are capped, keeping the most recent entries', () => {
@@ -74,16 +73,14 @@ test('two changes made together both land, instead of one overwriting the other'
     await withDirectory(async (directory) => {
         const store = createWelcomeStateStore({ directory });
         await Promise.all([
-            store.update((state) => withDismissed(state, 'a')),
             store.update((state) => withEpisodeOpened(state, 'eDHksSqKhFs')),
-            store.update((state) => withFeaturedShown(state, 'a')),
-            store.update((state) => withFeaturedShown(state, 'a')),
+            store.update((state) => withHighlightShown(state, 'a')),
+            store.update((state) => withHighlightShown(state, 'a')),
             store.update((state) => withLastSeenVersion(state, '1.2.0'))
         ]);
         const state = await store.get();
-        assert.deepEqual(state.dismissedFeatured, ['a']);
         assert.deepEqual(state.openedEpisodes, ['eDHksSqKhFs']);
-        assert.deepEqual(state.featuredShown, { a: 2 });
+        assert.deepEqual(state.highlightShown, { a: 2 });
         assert.equal(state.lastSeenVersion, '1.2.0');
     });
 });
@@ -92,17 +89,17 @@ test('a change that throws is reported, and the next change still works', async 
     await withDirectory(async (directory) => {
         const store = createWelcomeStateStore({ directory });
         await assert.rejects(() => store.update(() => { throw new Error('boom'); }), /boom/);
-        await store.update((state) => withDismissed(state, 'a'));
-        assert.deepEqual((await store.get()).dismissedFeatured, ['a']);
+        await store.update((state) => withHighlightShown(state, 'a'));
+        assert.deepEqual((await store.get()).highlightShown, { a: 1 });
     });
 });
 
 test('the file is written whole, owner-only, and no temporary file is left', async () => {
     await withDirectory(async (directory) => {
         const store = createWelcomeStateStore({ directory: join(directory, 'new', 'folder'), uuidFactory: () => 'fixed' });
-        await store.update((state) => withDismissed(state, 'a'));
+        await store.update((state) => withHighlightShown(state, 'a'));
         assert.deepEqual(await readdir(join(directory, 'new', 'folder')), ['welcomeState.json']);
-        assert.deepEqual(JSON.parse(await readFile(join(directory, 'new', 'folder', 'welcomeState.json'), 'utf8')).dismissedFeatured, ['a']);
+        assert.deepEqual(JSON.parse(await readFile(join(directory, 'new', 'folder', 'welcomeState.json'), 'utf8')).highlightShown, { a: 1 });
     });
 });
 

@@ -5,12 +5,11 @@ import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export const welcomeStateVersion = 1;
-const maxDismissed = 200;
 const maxOpenedEpisodes = 100;
 const maxShownEntries = 200;
 const maxTutorials = 200;
 
-export const emptyWelcomeState = () => ({ version: welcomeStateVersion, dismissedFeatured: [], featuredShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] });
+export const emptyWelcomeState = () => ({ version: welcomeStateVersion, highlightShown: {}, openedEpisodes: [], lastSeenVersion: null, tourOffered: false, tourCompleted: false, tutorialsCompleted: [] });
 
 const strings = (value, max) => (Array.isArray(value) ? [...new Set(value.filter((entry) => typeof entry === 'string' && entry !== ''))].slice(-max) : []);
 
@@ -19,11 +18,12 @@ const strings = (value, max) => (Array.isArray(value) ? [...new Set(value.filter
 export function normalizeWelcomeState(raw) {
     const state = emptyWelcomeState();
     if (!raw || typeof raw !== 'object' || raw.version !== welcomeStateVersion) return state;
-    state.dismissedFeatured = strings(raw.dismissedFeatured, maxDismissed);
     state.openedEpisodes = strings(raw.openedEpisodes, maxOpenedEpisodes);
-    if (raw.featuredShown && typeof raw.featuredShown === 'object' && !Array.isArray(raw.featuredShown)) {
-        for (const [id, count] of Object.entries(raw.featuredShown).slice(-maxShownEntries)) {
-            if (Number.isInteger(count) && count > 0) state.featuredShown[id] = count;
+    // Kept as featuredShown before the highlight took turns through the videos; a file from then keeps its counts.
+    const shown = raw.highlightShown ?? raw.featuredShown;
+    if (shown && typeof shown === 'object' && !Array.isArray(shown)) {
+        for (const [id, count] of Object.entries(shown).slice(-maxShownEntries)) {
+            if (Number.isInteger(count) && count > 0) state.highlightShown[id] = count;
         }
     }
     if (typeof raw.lastSeenVersion === 'string' && raw.lastSeenVersion !== '') state.lastSeenVersion = raw.lastSeenVersion;
@@ -37,9 +37,8 @@ export function normalizeWelcomeState(raw) {
 
 // ---- Changes, as pure functions from a state to a new state
 
-export const withDismissed = (state, id) => ({ ...state, dismissedFeatured: strings([...state.dismissedFeatured, id], maxDismissed) });
 export const withEpisodeOpened = (state, videoId) => ({ ...state, openedEpisodes: strings([...state.openedEpisodes, videoId], maxOpenedEpisodes) });
-export const withFeaturedShown = (state, id) => ({ ...state, featuredShown: { ...state.featuredShown, [id]: (state.featuredShown[id] ?? 0) + 1 } });
+export const withHighlightShown = (state, id) => ({ ...state, highlightShown: { ...state.highlightShown, [id]: (state.highlightShown[id] ?? 0) + 1 } });
 export const withLastSeenVersion = (state, version) => ({ ...state, lastSeenVersion: version });
 // The first-model tour (docs/proposals/guidedTour.md): offered once, on the first launch, whether or not it was taken; completed when its last step was reached.
 export const withTourOffered = (state) => ({ ...state, tourOffered: true });
@@ -51,10 +50,9 @@ export function withTutorialCompleted(state, id) {
     return id === 'firstModel' ? { ...next, tourOffered: true, tourCompleted: true } : next;
 }
 
-// What the Welcome window remembers between launches, in one small file in the user data folder: which
-// Featured items were dismissed, how many launches each has been shown on, which tutorial episodes
-// were opened, and the last version whose "What's new" was shown. It stays on this computer and
-// identifies no one. Updates are applied one after another, so two changes made close together cannot
+// What the Welcome window remembers between launches, in one small file in the user data folder: how
+// many launches each highlight has been shown on, which videos were opened, the tutorials completed,
+// and the last version whose "What's new" was shown. It stays on this computer and identifies no one. Updates are applied one after another, so two changes made close together cannot
 // overwrite each other.
 export function createWelcomeStateStore({ directory, uuidFactory = randomUUID } = {}) {
     if (!directory) throw new Error('The Welcome state store requires a directory.');

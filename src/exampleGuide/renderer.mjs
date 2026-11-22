@@ -3,7 +3,7 @@
 import { convertLatexToMarkup } from '../../node_modules/mathlive/mathlive.min.mjs';
 import { guideKindSuffix } from './guideKind.mjs';
 import { describeCheckedAt, describeUpdateStatus } from '../updatePanel.mjs';
-import { featuredLabel, watchLibrary, welcomeLinks, welcomeSectionOrder } from '../welcomeModel.mjs';
+import { highlightLabel, watchLibrary, welcomeLinks, welcomeSectionOrder } from '../welcomeModel.mjs';
 import { escapeHtml, guideTutorialCards, renderGuideMarkdown } from './markdownHtml.mjs';
 
 const renderMarkdown = (markdown) => renderGuideMarkdown(markdown, convertLatexToMarkup);
@@ -28,7 +28,7 @@ function renderCard(card, { opened = false } = {}) {
 // ---- The Welcome window (docs/proposals/welcomeWindow.md)
 //
 // Built from `welcome`, a state object: the content that arrived with the window, the patches that
-// arrive after it (blog posts, the add-on offer, a fresh Featured feed), and the few bits of
+// arrive after it (blog posts, the add-on offer, a fresh feed), and the few bits of
 // interaction state that must survive a re-render (a Show all, an install in progress, "Copied").
 // Every change re-renders the whole page in the order welcomeSectionOrder gives, and the page keeps its
 // scroll position, so nothing that arrives late can jump the page or undo what the person just did.
@@ -63,22 +63,22 @@ function renderWhatsNew(whatsNew) {
     </section>`;
 }
 
-const featuredActionLabel = { video: 'Watch', sponsored: 'Learn more', announcement: 'Read more' };
+const highlightActionLabel = { video: 'Watch', sponsored: 'Learn more', announcement: 'Read more' };
 
 // The picture and the title both open the item, like the button, so the whole card reads as one link; the picture
 // is the item's own image if it has one, else (for a video) the video's thumbnail.
-function renderFeatured(item) {
+function renderHighlight(item) {
     const source = item.imageUrl ?? item.thumbnailUrl;
-    const open = `data-featured-open="${escapeHtml(item.id)}"`;
-    const image = source ? `<button type="button" class="featuredMedia" ${open} tabindex="-1" aria-hidden="true"><img class="featuredImage" src="${escapeHtml(source)}" alt=""></button>` : '';
-    const action = item.kind === 'video' && item.playlist ? 'Watch playlist' : (featuredActionLabel[item.kind] ?? 'Learn more');
-    return `<section class="featured featured-${escapeHtml(item.kind)}${source ? ' featuredWithImage' : ''}">
+    const open = `data-highlight-open="${escapeHtml(item.id)}"`;
+    const image = source ? `<button type="button" class="highlightMedia" ${open} tabindex="-1" aria-hidden="true"><img class="highlightImage" src="${escapeHtml(source)}" alt=""></button>` : '';
+    const action = item.kind === 'video' && item.playlist ? 'Watch playlist' : (highlightActionLabel[item.kind] ?? 'Learn more');
+    return `<section class="highlight highlight-${escapeHtml(item.kind)}${source ? ' highlightWithImage' : ''}">
         ${image}
-        <div class="featuredBody">
-            <div class="featuredLabel">${escapeHtml(featuredLabel(item.kind, { playlist: item.playlist === true }))}</div>
-            <button type="button" class="featuredTitle" ${open}>${escapeHtml(item.title)}</button>
+        <div class="highlightBody">
+            <div class="highlightLabel">${escapeHtml(highlightLabel(item.kind, { playlist: item.playlist === true, rotated: item.rotated === true }))}</div>
+            <button type="button" class="highlightTitle" ${open}>${escapeHtml(item.title)}</button>
             ${item.text ? `<p>${escapeHtml(item.text)}</p>` : ''}
-            <button type="button" class="featuredAction" ${open}>${escapeHtml(action)}</button>
+            <button type="button" class="highlightAction" ${open}>${escapeHtml(action)}</button>
         </div>
     </section>`;
 }
@@ -102,7 +102,7 @@ function renderLearn() {
 
 // Watch: every video, newest first, the highlighted one aside; the On-Ramp series is one card for its playlist.
 function renderWatch() {
-    const { shown, hidden } = watchLibrary({ moreToWatch: welcome.moreToWatch, onRamp: welcome.onRamp, highlightedVideoId: welcome.featured?.videoId ?? null }, { expanded: welcome.watchExpanded });
+    const { shown, hidden } = watchLibrary({ videos: welcome.videos, onRamp: welcome.onRamp, highlightedVideoId: welcome.highlight?.videoId ?? null }, { expanded: welcome.watchExpanded });
     const opened = new Set(welcome.openedEpisodes);
     const cards = shown.map((video) => (video.playlist ? renderCard({ ...video, videoId: undefined }) : renderCard(video, { opened: opened.has(video.videoId) }))).join('');
     const extras = [
@@ -130,7 +130,7 @@ const sectionRenderers = {
     status: () => '<section id="updatesSection" class="updatesSection" aria-live="polite" hidden></section>',
     recommended: () => renderRecommendedAddons(welcome.recommendedAddons, welcome.recommendedStatus),
     whatsNew: () => renderWhatsNew(welcome.whatsNew),
-    highlight: () => renderFeatured(welcome.featured),
+    highlight: () => renderHighlight(welcome.highlight),
     learn: renderLearn,
     watch: renderWatch,
     blog: () => `<h2>Recent from the blog</h2><div class="cardGrid">${welcome.posts.map((post) => renderCard(post)).join('')}</div>`,
@@ -142,8 +142,8 @@ function renderWelcome({ resetScroll = false } = {}) {
     const content = document.querySelector('#content');
     const scroll = content.scrollTop;
     const order = welcomeSectionOrder({
-        hasRecommended: welcome.recommendedAddons.length > 0, hasWhatsNew: Boolean(welcome.whatsNew), hasHighlight: Boolean(welcome.featured),
-        hasVideos: welcome.moreToWatch.length > 0 || Boolean(welcome.onRamp?.playlistUrl), hasPosts: welcome.posts.length > 0
+        hasRecommended: welcome.recommendedAddons.length > 0, hasWhatsNew: Boolean(welcome.whatsNew), hasHighlight: Boolean(welcome.highlight),
+        hasVideos: welcome.videos.length > 0 || Boolean(welcome.onRamp?.playlistUrl), hasPosts: welcome.posts.length > 0
     });
     content.innerHTML = order.map((section) => sectionRenderers[section]()).join('');
     content.scrollTop = resetScroll ? 0 : scroll;
@@ -172,7 +172,7 @@ function wireWelcome() {
     });
     content.querySelectorAll('[data-start-tutorial]').forEach((button) => button.addEventListener('click', () => window.exampleGuide.startTutorial(button.dataset.startTutorial)));
     content.querySelector('[data-open-tutorials]')?.addEventListener('click', () => window.exampleGuide.openTutorials());
-    content.querySelectorAll('[data-featured-open]').forEach((target) => target.addEventListener('click', (event) => window.exampleGuide.openFeatured(event.currentTarget.dataset.featuredOpen)));
+    content.querySelectorAll('[data-highlight-open]').forEach((target) => target.addEventListener('click', (event) => window.exampleGuide.openHighlight(event.currentTarget.dataset.highlightOpen)));
     content.querySelector('[data-help-feedback]')?.addEventListener('click', () => window.exampleGuide.openHelpFeedback());
     content.querySelector('#restartKonjugate')?.addEventListener('click', () => window.exampleGuide.restart());
     content.querySelector('#installRecommendedAddons')?.addEventListener('click', async () => {
@@ -278,7 +278,7 @@ window.exampleGuide.onContent((payload) => {
             generation: payload.generation, version: payload.version, markdown,
             onRamp: payload.onRamp, openedEpisodes: payload.openedEpisodes ?? [], watchExpanded: false,
             learn: payload.learn ?? { suggested: [], total: 0, completed: 0 },
-            whatsNew: payload.whatsNew ?? null, featured: payload.featured ?? null, moreToWatch: payload.moreToWatch ?? [], posts: payload.posts ?? [],
+            whatsNew: payload.whatsNew ?? null, highlight: payload.highlight ?? null, videos: payload.videos ?? [], posts: payload.posts ?? [],
             recommendedAddons: payload.recommendedAddons ?? [], recommendedStatus: { phase: 'idle', text: '' }
         };
         renderWelcome({ resetScroll: true });
@@ -305,8 +305,8 @@ window.exampleGuide.onContent((payload) => {
 // and help guides) is ignored.
 window.exampleGuide.onWelcomePatch((patch) => {
     if (!welcome || patch.generation !== welcome.generation) return;
-    for (const key of ['posts', 'recommendedAddons', 'featured', 'moreToWatch']) {
-        if (key in patch) welcome[key] = patch[key] ?? (key === 'featured' ? null : []);
+    for (const key of ['posts', 'recommendedAddons', 'highlight', 'videos']) {
+        if (key in patch) welcome[key] = patch[key] ?? (key === 'highlight' ? null : []);
     }
     renderWelcome();
 });

@@ -1,7 +1,7 @@
 ---
 type: Proposal
 title: The Welcome window as Konjugate's standing space
-description: Design for the Welcome window as a surface people see at every launch — Learn by doing (the next in-app tutorials), a highlight for the newest video or an announcement that ages out on its own, one Watch library of every video, and the rules that keep it trustworthy and fast.
+description: Design for the Welcome window as a surface people see at every launch — Learn by doing (the next in-app tutorials), a highlight that takes turns through the videos (or shows a pinned announcement while it lasts), one Watch library of every video, and the rules that keep it trustworthy and fast.
 tags: [proposals, welcome, onboarding, content]
 status: stable
 implementation: complete
@@ -11,7 +11,7 @@ implementation: complete
 
 # The Welcome window as Konjugate's standing space
 
-**Status: built, all five steps.** Step 5 replaced the On-Ramp section and the dismissable Featured slot once the tutorials ran inside the app (see below). Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
+**Status: built, all six steps.** Step 5 replaced the On-Ramp section and the dismissable Featured slot once the tutorials ran inside the app; step 6 made the highlight take turns through the videos (see below). Written down before any code, like [How Konjugate gets updated](../updates.md), so the decisions can be reviewed first.
 
 ## The decision this rests on
 
@@ -28,7 +28,7 @@ From top to bottom, with conditional parts only when they apply:
 1. **The heading and a compact status line:** "Konjugate 1.1.8 · up to date · Check for updates · All releases". It expands into the full Updates card only when there is an update, an error, or the Store message ([updates.md](../updates.md)). Today a full card sits here in the most common state, which is nothing to do.
 2. **Recommended for you** — the existing one-time starter-pack offer; it is the only thing on the page that asks for an action, so it moves up.
 3. **What's new in this version** — shown once per version, on the first launch after an update: two or three lines and a link to the release notes.
-4. **New on the channel** — the highlight: one item, usually the newest video, that ages out on its own (below).
+4. **The highlight** — one video, a different one each launch, so someone who never scrolls still meets every video in time; or a pinned announcement while it lasts (below).
 5. **Learn by doing** — the next three in-app tutorials this person has not done, and the whole list one click away (below). Always there.
 6. **Watch** — every video, newest first, with the On-Ramp series as one card for its playlist (below).
 7. **Recent from the blog.**
@@ -46,10 +46,10 @@ The tutorials run inside Konjugate ([tutorials.md](tutorials.md)): the person bu
 
 ## The highlight and the Watch library
 
-- **New on the channel** (the highlight) is one item under What's new. An item has an `id`, a `kind` (`announcement`, `video` or `sponsored`), a title, text, an optional image, a link, optional start and end dates, and optional "show at most N launches". One eligible item is shown at a time, highest priority first.
-- **Nothing is dismissed.** A highlight ages out instead: by its end date (a new video is given one about a month after it was published), by its launch cap, or, for a single video, as soon as the person has opened it. The same video stays under Watch for good, so nothing is ever lost by being shown.
-- **A video item brings its own picture.** A `video` item takes a plain YouTube watch link, and its card shows that video's thumbnail from YouTube's public thumbnail CDN, so nothing needs to be added to `welcome/images/`; an explicit `image` still wins. To highlight a whole playlist, give its `https://www.youtube.com/playlist?list=...` link and a `thumbnailVideoId`, the 11-character id of one of its videos (usually the first); the card is then labelled "New playlist on the channel" with a "Watch playlist" button. The picture and the title open the item, like the button.
-- **Watch** is every video, newest first as `moreToWatch` lists them (up to 24), shorts mixed in, without the one the highlight is showing; then the On-Ramp series as one card for its playlist, from the bundled `assets/welcome/videos.json`. Nine are shown, the rest behind "Show all", then "More on YouTube" for the channel. A video the person has opened gets a quiet "Opened" mark, kept on this computer and sent nowhere; it only knows about clicks, so the wording is "opened", not "watched". A new upload is added to the top of `moreToWatch`, and given a highlight with an end date if it should be announced.
+- **The highlight takes turns through the videos.** Each launch it shows the video from `moreToWatch` that has been highlighted on the fewest launches so far, newest first among equals, so it moves one step on per launch and a video just added comes up on the very next one. It is labelled "From the channel", since the video taking its turn may be any age. Videos the person has opened sit out until they have opened every one; then all of them take turns again. Only launches count (the launch and dock-reactivation opens, kept per video in `welcomeState.json`); opening the window from the Konjugate button shows the same highlight again, and the fresh feed arriving after the window opened does not move it on.
+- **A pinned item goes ahead of the turns.** The feed's `featured` list, left out of the file when there is nothing to pin, is for what is not a video: an announcement, something sponsored, or a whole playlist. A pinned item has an `id`, a `kind` (`announcement`, `video` or `sponsored`), a title, text, an optional image, a link, optional start and end dates, and optional "show at most N launches". While one is eligible it is the highlight, highest priority first; it ages out by its end date or launch cap, or, for a single video, as soon as the person has opened it, and the videos have the slot back. Nothing is dismissed.
+- **A pinned video brings its own picture.** A `video` item takes a plain YouTube watch link, and its card shows that video's thumbnail from YouTube's public thumbnail CDN, so nothing needs to be added to `welcome/images/`; an explicit `image` still wins. To highlight a whole playlist, give its `https://www.youtube.com/playlist?list=...` link and a `thumbnailVideoId`, the 11-character id of one of its videos (usually the first); the card is then labelled "New playlist on the channel" with a "Watch playlist" button. The picture and the title open the item, like the button.
+- **Watch** is every video, newest first as `moreToWatch` lists them (up to 24), shorts mixed in, without the one the highlight is showing; then the On-Ramp series as one card for its playlist, from the bundled `assets/welcome/videos.json`. Nine are shown, the rest behind "Show all", then "More on YouTube" for the channel. A video the person has opened gets a quiet "Opened" mark, kept on this computer and sent nowhere; it only knows about clicks, so the wording is "opened", not "watched". A new upload is added to the top of `moreToWatch`, with a one-sentence `text` (up to 400 characters, optional but given for every video) for when it is the highlight, and comes up in the highlight on the next launch. The list keeps the name `moreToWatch` in the file, though the code calls it the videos, because every installed copy reads this file from the repository and older ones know the list by that name; renaming it would empty their Watch section.
 - **Contextual placement** keeps most videos where they belong as well: a causal-inference video on that feature's help page, a video per add-on in the Explorer (registry entries already support YouTube links), an example's video in its guide, a release demo in What's new.
 
 ## Trust rules for anything promotional
@@ -68,7 +68,7 @@ There is no "Show at startup" opt-out in this design. If it turns out people res
 
 ## What is stored
 
-One small file in the user data folder, `welcomeState.json`, written atomically like the update skip store: how many launches each highlighted item has had, the video ids that were opened (kept as `openedEpisodes`, its name from when only On-Ramp episodes could be), the tutorials completed, and the last version whose What's new was shown. Its `dismissedFeatured` list, from before step 5, is still read so an old file loads, but nothing uses it. Nothing identifies the person and nothing is sent anywhere.
+One small file in the user data folder, `welcomeState.json`, written atomically like the update skip store: how many launches each highlight has been shown on (`highlightShown`; a file from before step 6 has it as `featuredShown`, which is still read), the video ids that were opened (kept as `openedEpisodes`, its name from when only On-Ramp episodes could be), the tutorials completed, and the last version whose What's new was shown. A `dismissedFeatured` list, from before step 5, is dropped when the file is read. Nothing identifies the person and nothing is sent anywhere.
 
 ## Order of work
 
@@ -77,6 +77,7 @@ One small file in the user data folder, `welcomeState.json`, written atomically 
 3. **What's new:** the last-seen version, shown once per release.
 4. **Featured and More to watch:** the feed format and where it is hosted, the repository-hosted images, caching and the bundled fallback, dismiss and launch caps, the Sponsored label.
 5. **Tutorials first, nothing to dismiss:** Learn by doing in place of the On-Ramp section and the tour card; the highlight ages out by date, launch cap or being opened, and cannot be dismissed; one Watch library with the On-Ramp as a playlist card.
+6. **The highlight takes turns:** each launch highlights the next video in `moreToWatch`, opened ones last; `featured` is kept for pinned announcements, sponsored items and playlists.
 
 Each step leaves the window working. The state file arrives with step 2 (opened episodes) and grows from there.
 

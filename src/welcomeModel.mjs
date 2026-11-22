@@ -49,8 +49,8 @@ export function suggestedTutorials(groups, completed = [], count = suggestedTuto
 // The Watch section: the feed's videos, newest first as the feed lists them, without the one the highlight above
 // is showing, and the On-Ramp video series as one card for its playlist at the end. `limit` are shown, the rest
 // behind a "Show all".
-export function watchLibrary({ moreToWatch = [], onRamp = null, highlightedVideoId = null }, { expanded = false, limit = watchVisibleLimit } = {}) {
-    const videos = moreToWatch.filter((video) => video.videoId !== highlightedVideoId)
+export function watchLibrary({ videos: feedVideos = [], onRamp = null, highlightedVideoId = null }, { expanded = false, limit = watchVisibleLimit } = {}) {
+    const videos = feedVideos.filter((video) => video.videoId !== highlightedVideoId)
         .map((video) => ({ title: video.title, videoId: video.videoId, url: `https://www.youtube.com/watch?v=${video.videoId}`, thumbnailUrl: `https://img.youtube.com/vi/${video.videoId}/hqdefault.jpg` }));
     const first = onRamp?.episodes?.[0];
     if (onRamp?.playlistUrl && first) {
@@ -60,9 +60,11 @@ export function watchLibrary({ moreToWatch = [], onRamp = null, highlightedVideo
     return { shown: videos.slice(0, limit), hidden: videos.length - limit };
 }
 
-// The small label on the highlight. Anything paid must say so.
-export function featuredLabel(kind, { playlist = false } = {}) {
+// The small label on the highlight. Anything paid must say so. A video taking its turn may be any age, so it is
+// not called new; a pinned one is there because it is.
+export function highlightLabel(kind, { playlist = false, rotated = false } = {}) {
     if (kind === 'sponsored') return 'Sponsored';
+    if (kind === 'video' && rotated) return 'From the channel';
     if (kind === 'video') return playlist ? 'New playlist on the channel' : 'New on the channel';
     return 'Announcement';
 }

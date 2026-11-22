@@ -1,52 +1,51 @@
 {
     "format": "konjugate-welcome-feed",
     "formatVersion": 1,
-    "featured": [
-        {
-            "id": "digital-twin-in-4-minutes",
-            "kind": "video",
-            "title": "Digital Twin in 4 Minutes: Model, MQTT Data, Drift Detection",
-            "text": "A model running beside the real system, kept in step with its readings over MQTT, and saying when the two part ways.",
-            "url": "https://www.youtube.com/watch?v=sWJJNsbxi6o",
-            "endsAt": "2026-12-18"
-        }
-    ],
     "moreToWatch": [
         {
             "videoId": "sWJJNsbxi6o",
-            "title": "Digital Twin in 4 Minutes: Model, MQTT Data, Drift Detection"
+            "title": "Digital Twin in 4 Minutes: Model, MQTT Data, Drift Detection",
+            "text": "A model running beside the real system, kept in step with its readings over MQTT, and saying when the two part ways."
         },
         {
             "videoId": "1H-26sCmftU",
-            "title": "Find the structure hiding in your time series data"
+            "title": "Find the structure hiding in your time series data",
+            "text": "Recorded data in, equations out: Konjugate works out which variables drive which, and how, from the time series alone."
         },
         {
             "videoId": "-srG_CWzQ4g",
-            "title": "Multiverse of Models: rewind, change one thing, fork"
+            "title": "Multiverse of Models: rewind, change one thing, fork",
+            "text": "Rewind a finished run to any moment, fork it there, change one thing, and compare the futures that follow."
         },
         {
             "videoId": "GM1lWLaIMDs",
-            "title": "I had the model and the data, but not the parameters"
+            "title": "I had the model and the data, but not the parameters",
+            "text": "Fitting a model's unknown parameters to recorded data, so the simulation matches what was measured."
         },
         {
             "videoId": "wJAx5wVzGss",
-            "title": "I changed my simulation while it was still running"
+            "title": "I changed my simulation while it was still running",
+            "text": "Changing a simulation while it runs, and watching the system respond at once."
         },
         {
             "videoId": "DQwQRCGPwWM",
-            "title": "I changed one number and my simulation tore itself apart"
+            "title": "I changed one number and my simulation tore itself apart",
+            "text": "A single changed number, and a steady simulation turns unstable."
         },
         {
             "videoId": "Ur_3iGknlnQ",
-            "title": "Could Your City Run Out of Bread? | Break It Before the World Does Ep. 2"
+            "title": "Could Your City Run Out of Bread? | Break It Before the World Does Ep. 2",
+            "text": "A city's bread supply as a model, pushed until it breaks, to see where it gives first. Episode 2, set in Lugano."
         },
         {
             "videoId": "X8D1G_xipbI",
-            "title": "Hormuz Closed: What About Your Shelves? | Break It Before the World Does Ep. 1"
+            "title": "Hormuz Closed: What About Your Shelves? | Break It Before the World Does Ep. 1",
+            "text": "What a closed Strait of Hormuz would mean for the shelves in the UAE, modelled and pushed until it breaks. Episode 1."
         },
         {
             "videoId": "l-rHUY-JdoY",
-            "title": "Konjugate Fintech: A Transparent Model for Bank Runs, Market and DeFi Risk Analysis"
+            "title": "Konjugate Fintech: A Transparent Model for Bank Runs, Market and DeFi Risk Analysis",
+            "text": "An open model of bank runs, market moves and DeFi risk, where every link in the contagion can be seen and questioned."
         }
     ]
 }

@@ -10,7 +10,7 @@ import { convertLatexToMarkup } from 'mathlive';
 import { DocumentController } from './documentController.mjs';
 import { EntityEditor, resultLockedControls, resultLockedMathFields } from './entityEditor.mjs';
 import { createTour } from './tour.mjs';
-import { bindingInsertTitle, EquationEditor, ReferenceChips } from './equationEditor.mjs';
+import { bindingInsertTitle, EquationEditor, ReferenceChips, showAddParameterActions } from './equationEditor.mjs';
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection } from './programSourceSection.mjs';
@@ -90,7 +90,7 @@ import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '..
 import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
 import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
-import { displaySymbols, displaySymbolsToStored, foldedName, foldStates, mergeOwnParts, readerLatexToStored, relationshipLatexInReaderNames, renameSymbols, shortNames, stateInReaderNames } from '../stateEquations.mjs';
+import { displaySymbols, displaySymbolsToStored, foldedName, foldStates, mergeOwnParts, parameterForSymbol, readerLatexToStored, relationshipLatexInReaderNames, renameSymbols, shortNames, signedPart, stateInReaderNames, symbolsToAddAsParameters } from '../stateEquations.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
@@ -166,21 +166,61 @@ const edgeEquation = new EquationEditor({
     onCommit: () => finishEquationEdit(),
     onModeChange: (mode) => switchSeveralEquationsMode(mode),
     // A relationship whose part is 0 (a new one, until written) adds nothing: said as guidance, not as a pass or an error.
-    hint: (latex) => (String(latex ?? '').trim() === '0' ? 'Write this relationship\'s equation here. Until you do, it is 0 and changes nothing.' : null)
+    hint: (latex) => (String(latex ?? '').trim() === '0' ? 'Write this relationship\'s equation here. Until you do, it is 0 and changes nothing.' : null),
+    addParameter: (symbol) => selectedRelationship && addEdgeParameterFor(selectedRelationship, symbol)
 });
 const sourceTermEquation = new EquationEditor({
     mathField: $('#termMathField'), source: $('#termEquation'), diagnostics: $('#termEquationDiagnostics'),
     modeButtons: $$('[data-term-equation-mode]'), modeKey: 'termEquationMode', references: $('#termStateReferenceChips'),
     canEdit: () => !activeResult,
     onInput: (latex, origin) => previewSourceTermExpression(latex, origin),
-    onCommit: () => finishEquationEdit()
+    onCommit: () => finishEquationEdit(),
+    addParameter: (symbol) => {
+        const node = nodeObjects.get(selectedSourceTermNodeId);
+        if (node) addTermParameterFor(node, selectedSourceTermId, symbol);
+    }
 });
 const groupEquation = new EquationEditor({
     mathField: $('#groupMathField'), source: $('#groupEquation'), diagnostics: $('#groupEquationDiagnostics'),
     modeButtons: $$('[data-group-equation-mode]'), modeKey: 'groupEquationMode',
     onInput: (latex, origin) => previewGroupEquation(latex, origin),
-    onCommit: () => finishEquationEdit()
+    onCommit: () => finishEquationEdit(),
+    canEdit: () => !activeResult,
+    addParameter: (symbol) => {
+        const group = currentEdgeGroup();
+        if (group) changeEdgeGroupModel(group, (snapshot) => addParameterFor(snapshot.definition.parameters, symbol));
+    }
 });
+
+// "Add k as a parameter" under an equation that uses k with nothing defining it: the parameter, named from its symbol and set
+// to 1, added to `parameters` (a relationship's, a node's own part's, a group's) unless one has that symbol already.
+function addParameterFor(parameters, symbol) {
+    if (parameters.some((parameter) => parameter.symbol === symbol)) return;
+    parameters.push({ id: allocateModelEntityId(), ...parameterForSymbol(symbol) });
+}
+
+// A relationship's: what is typed so far is its own undoable step (changeEdgeModel finishes it), the parameter the next, and
+// its equation, read again with it, is valid (several equations are compiled again).
+function addEdgeParameterFor(definition, symbol) {
+    changeEdgeModel(definition, (snapshot) => {
+        addParameterFor(snapshot.parameters, symbol);
+        if (Array.isArray(snapshot.equationModel?.outputs)) compileSeveral(snapshot);
+    });
+}
+
+// A node's own part's (`termId`), from its state's field or its own card, the same way.
+function addTermParameterFor(node, termId, symbol) {
+    if (activeResult) return;
+    finishEquationEdit();
+    changeSourceTermModel(node, termId, (term, snapshot) => {
+        term.parameters ??= [];
+        addParameterFor(term.parameters, symbol);
+        if (!isProgramTerm(term)) {
+            term.expressionModel = normalizeSourceTermExpressionModel(snapshot, term);
+            term.expression = term.expressionModel.latex;
+        }
+    });
+}
 
 // Backstop so any console.error/console.warn -- including ones nobody has wired up to a
 // dedicated UI element -- still reaches the user via the quiet diagnostics badge/panel below,
@@ -2522,8 +2562,8 @@ function stateOrderControl(node, state, equations) {
 }
 
 // One read-only part of a state's equation that belongs to something else: a relationship's, written in this node's names, or a
-// program's. It carries its sign, says whose it is, and opens it.
-function partChip(entry, node, equations, names, { first, reader = node.userData.id, stateId = null }) {
+// program's. It says whose it is and opens it; the + or − before it (`dataset.sign`) is drawn outside it, by appendParts.
+function partChip(entry, node, equations, names, { reader = node.userData.id, stateId = null }) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'partChip';
@@ -2536,6 +2576,7 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
     }
     let label = '';
     let body = '';
+    let sign = entry.reciprocal ? '−' : '+';
     let open = () => {};
     if (entry.type === 'relationship') {
         const edge = equations.edges.find((candidate) => candidate.id === entry.edgeId);
@@ -2549,12 +2590,9 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
             const model = entry.outputIndex !== undefined ? edge?.equationModel?.outputs?.[entry.outputIndex] : edge?.equationModel;
             const latex = relationshipLatexInReaderNames(termLatex(entry, equations), edge?.equationModel?.bindings, edge ?? {}, equations.nodes, reader, names, edge?.parameters);
             // A part that starts with a minus takes it as its sign: "− ω(y − y_A)", not "+ −ω(y − y_A)".
-            let shown = entry.reciprocal ? `-\\left(${latex}\\right)` : latex;
-            if (!first && /^\s*-/.test(shown)) {
-                shown = shown.replace(/^\s*-\s*/, '');
-                chip.dataset.sign = '−';
-            }
-            body = latexMarkup(shown);
+            const shown = signedPart(latex, { negated: entry.reciprocal === true });
+            sign = shown.sign;
+            body = latexMarkup(shown.latex);
             chip.dataset.latex = latex;
             if (!model) body = '';
         }
@@ -2570,7 +2608,9 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
         } else {
             const renames = new Map([...definition.states.map((state) => [state.symbol, stateInReaderNames(state.symbol, definition.id, reader, names)]), ...displaySymbols(term?.parameters)]);
             const latex = renameSymbols(termLatex(entry, equations), renames);
-            body = latexMarkup(latex);
+            const shown = signedPart(latex);
+            sign = shown.sign;
+            body = latexMarkup(shown.latex);
             chip.dataset.latex = latex;
         }
         open = () => {
@@ -2595,11 +2635,30 @@ function partChip(entry, node, equations, names, { first, reader = node.userData
         open = () => revealNodeProgram();
     }
     if (entry.off) chip.classList.add('off');
-    const sign = chip.dataset.sign ?? (entry.reciprocal || first ? '' : '+');
-    chip.innerHTML = `<small>${escapeHtml(label)}${entry.off ? ' · off' : ''} ›</small><span class="partChipBody">${sign ? `<span class="partSign">${sign}</span>` : ''}${body}</span>`;
+    chip.dataset.sign = sign;
+    chip.innerHTML = `<small>${escapeHtml(label)}${entry.off ? ' · off' : ''} ›</small><span class="partChipBody">${body}</span>`;
     chip.title = `${label}: opens it`;
     chip.addEventListener('click', open);
     return chip;
+}
+
+// The + or − between two parts of a state's equation, standing between them rather than inside either.
+function partOperator(sign) {
+    const operator = document.createElement('span');
+    operator.className = 'partOperator';
+    operator.textContent = sign;
+    return operator;
+}
+
+// Parts of a state's equation added to `line` in order, each with the + or − its chip gives before it. `leading` says whether
+// a part already stands before the first (a node's own field always does); with none, a first part shows only a minus.
+function appendParts(line, chips, { leading }) {
+    for (const chip of chips) {
+        if (leading || chip.dataset.sign === '−') line.appendChild(partOperator(chip.dataset.sign ?? '+'));
+        line.appendChild(chip);
+        leading = true;
+    }
+    return line;
 }
 
 function revealNodeProgram() {
@@ -2632,7 +2691,7 @@ function ownPartField(node, state, ownEquations, help) {
     mathField.className = 'ownPart equationMathField';
     mathField.dataset.stateId = String(state.id);
     mathField.setAttribute('aria-label', `${state.label || state.symbol}: this node's own part`);
-    mathField.setAttribute('placeholder', '\\text{type to add}');
+    mathField.setAttribute('placeholder', '\\text{type this node\'s own term}');
     const source = document.createElement('textarea');
     source.className = 'equationSource';
     source.hidden = true;
@@ -2645,7 +2704,13 @@ function ownPartField(node, state, ownEquations, help) {
         references: $('.ownPartReferences', help),
         onInput: (typed) => previewOwnPart(node, state.id, typed, editor),
         onCommit: () => commitOwnPart(node, state.id),
-        canEdit: () => !activeResult
+        canEdit: () => !activeResult,
+        // The field's edit ends first (so a part typed into an empty field exists), then its own term takes the parameter.
+        addParameter: (symbol) => {
+            commitOwnPart(node, state.id);
+            const term = ownParts(node.userData.definition, state, stateEquationContext()).equations[0];
+            if (term) addTermParameterFor(node, term.id, symbol);
+        }
     });
     const parameters = ownEquations.flatMap((term) => term.parameters ?? []);
     mathField.value = latex === '0' && !ownEquations.length ? '' : renameSymbols(latex, displaySymbols(parameters));
@@ -2829,12 +2894,9 @@ function renderStateLine(node, state, index, equations, names) {
             value.hidden = true;
             equation.appendChild(value);
         }
-        let first = !own.equations.length;
-        for (const entry of reaching) {
-            if (entry.type === 'sourceTerm' && !own.programs.some((term) => term.id === entry.termId)) continue;
-            equation.appendChild(partChip(entry, node, equations, names, { first, stateId: state.id }));
-            first = false;
-        }
+        // Every other part after the field, empty or not, with its + or − between: dx/dt = vx − ω·(y − y_A) + k·x.
+        const others = reaching.filter((entry) => entry.type !== 'sourceTerm' || own.programs.some((term) => term.id === entry.termId));
+        appendParts(equation, others.map((entry) => partChip(entry, node, equations, names, { stateId: state.id })), { leading: true });
         if (pluginProvidersOffered && !own.equations.length && !own.programs.length) {
             const plugin = document.createElement('button');
             plugin.type = 'button';
@@ -4451,6 +4513,11 @@ function severalRow(definition, kind, item, index, count, check, sourceNode, tar
     diagnostics.className = 'equationDiagnostics';
     diagnostics.setAttribute('role', 'status');
     showSeveralDiagnostics(diagnostics, check);
+    // A symbol it uses that nothing defines, offered as a parameter -- but not an intermediate quantity's name, defined below it.
+    if (!activeResult && check?.errors?.length) {
+        const quantities = (definition.equationModel.definitions ?? []).map((quantity) => quantity.symbol);
+        showAddParameterActions(diagnostics, symbolsToAddAsParameters(check.unknownSymbols, [...quantities, ...(definition.parameters ?? []).map((parameter) => parameter.symbol)]), (symbol) => addEdgeParameterFor(definition, symbol));
+    }
     row.appendChild(diagnostics);
     row.addEventListener('keydown', (event) => {
         if (!event.altKey || event.ctrlKey || event.metaKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
@@ -4720,7 +4787,7 @@ function relationshipRowChips(landing, context, { before }) {
         if (index === landing.index || (before ? index > landing.index : index < landing.index)) return;
         const owner = nodeObjects.get(entry.nodeId);
         if (!owner) return;
-        chips.push(partChip(entry, owner, context.equations, context.names, { first: index === 0, reader: null, stateId: landing.stateId }));
+        chips.push(partChip(entry, owner, context.equations, context.names, { reader: null, stateId: landing.stateId }));
     });
     return chips;
 }
@@ -4734,7 +4801,10 @@ function relationshipLiveChip(definition, { negated = false, latex = '' } = {}) 
     const program = definition.implementation?.kind;
     const isProgram = program && program !== 'equation';
     if (isProgram) chip.classList.add('program');
-    chip.innerHTML = `<small>this relationship${negated ? ', negated' : ''}${isProgram ? ' · Open program' : ''} ›</small><span class="partChipBody">${negated ? '<span class="partSign">−</span>' : ''}${isProgram ? escapeHtml(programLanguage(program)) : latexMarkup(negated ? `\\left(${latex}\\right)` : latex)}</span>`;
+    // Its sign stands before it (appendParts): on the other end's row, its part taken away whole.
+    const shown = isProgram ? { sign: negated ? '−' : '+', latex: '' } : signedPart(latex, { negated });
+    chip.dataset.sign = shown.sign;
+    chip.innerHTML = `<small>this relationship${negated ? ', negated' : ''}${isProgram ? ' · Open program' : ''} ›</small><span class="partChipBody">${isProgram ? escapeHtml(programLanguage(program)) : latexMarkup(shown.latex)}</span>`;
     chip.addEventListener('click', () => {
         if (program === 'plugin') $('#editEdgePluginProvider')?.focus();
         else if (isProgram) $('#editOpenProviderEditor')?.click();
@@ -4754,18 +4824,20 @@ function renderRelationshipRows(definition) {
     rhs.replaceChildren();
     if (context.main) {
         lhs.insertAdjacentHTML('beforeend', `<span class="rowLeftSide">${relationshipLeftSide(context.main, context)}</span>`);
-        lhs.append(...relationshipRowChips(context.main, context, { before: true }));
-        // The part's own minus, if it starts with one, is its sign: no "+ −".
-        if (context.main.index > 0 && !isProgram && !/^\s*-/.test(definition.equationModel?.latex ?? '')) lhs.insertAdjacentHTML('beforeend', '<span class="partSign">+</span>');
-        if (isProgram) lhs.appendChild(relationshipLiveChip(definition));
-        rhs.append(...relationshipRowChips(context.main, context, { before: false }));
+        const before = relationshipRowChips(context.main, context, { before: true });
+        appendParts(lhs, before, { leading: false });
+        // This relationship's part after them: its field, whose own minus, if it starts with one, is its sign (no "+ −"), or the
+        // chip of its program. Then the parts after it, each with its + or −.
+        if (isProgram) appendParts(lhs, [relationshipLiveChip(definition)], { leading: before.length > 0 });
+        else if (before.length && !/^\s*-/.test(definition.equationModel?.latex ?? '')) lhs.appendChild(partOperator('+'));
+        appendParts(rhs, relationshipRowChips(context.main, context, { before: false }), { leading: true });
     }
     // The other end, for a relationship running both ways.
     let otherRow = $('#edgeOtherEndRow');
     if (!otherRow) {
         otherRow = document.createElement('div');
         otherRow.id = 'edgeOtherEndRow';
-        otherRow.className = 'relationshipRow';
+        otherRow.className = 'otherEndRow';
         $('.equationLine', landing).after(otherRow);
     }
     otherRow.replaceChildren();
@@ -4778,10 +4850,12 @@ function renderRelationshipRows(definition) {
         const line = document.createElement('div');
         line.className = 'relationshipRowLine';
         line.insertAdjacentHTML('beforeend', `<span class="rowLeftSide">${relationshipLeftSide(context.other, context)}</span>`);
-        line.append(...relationshipRowChips(context.other, context, { before: true }));
         const shown = isProgram ? '' : relationshipLatexInReaderNames(definition.equationModel?.latex ?? '', definition.equationModel?.bindings, definition, context.equations.nodes, null, context.names, definition.parameters);
-        line.appendChild(relationshipLiveChip(definition, { negated: true, latex: shown }));
-        line.append(...relationshipRowChips(context.other, context, { before: false }));
+        appendParts(line, [
+            ...relationshipRowChips(context.other, context, { before: true }),
+            relationshipLiveChip(definition, { negated: true, latex: shown }),
+            ...relationshipRowChips(context.other, context, { before: false })
+        ], { leading: false });
         otherRow.appendChild(line);
     }
 }
@@ -6136,7 +6210,7 @@ function applyInspectorReadOnly() {
     $$(resultLockedMathFields).forEach((field) => {
         field.readOnly = locked;
         field.toggleAttribute('read-only', locked);
-        // Nothing to type while results are open: an empty field's invitation ("type to add") is put away, and it looks empty
+        // Nothing to type while results are open: an empty field's invitation ("type this node's own term") is put away, and it looks empty
         // and locked; the placeholder comes back when they close. (A plain field's placeholder is hidden by styles.css.)
         // Emptied, not removed: MathLive draws a removed placeholder as "[object Object]".
         if (locked && field.getAttribute('placeholder')) {
@@ -12810,7 +12884,7 @@ function createPickedRelationship() {
     if (!source || !target || source === target || activeResult) return;
     const sourceNode = model.nodes.find((node) => node.id === source);
     const targetNode = model.nodes.find((node) => node.id === target);
-    const parameters = (template ? template.parameters ?? [] : [{ name: 'Coefficient', symbol: 'k', value: 1, unit: '', mode: 'constant' }]).map((parameter) => ({
+    const parameters = (template?.parameters ?? []).map((parameter) => ({
         id: allocateModelEntityId(), name: parameter.name, symbol: parameter.symbol, value: Number(parameter.value) || 0, unit: parameter.unit ?? '',
         mode: parameter.mode ?? 'constant', ...(parameter.mode === 'live' && parameter.control ? { control: structuredClone(parameter.control) } : {})
     }));
@@ -12825,7 +12899,8 @@ function createPickedRelationship() {
         color: Number.parseInt((template?.color ?? '#9c83c4').replace('#', ''), 16),
         offset: 0, enabled: true,
         // Not from a template: 0, valid from the start and adding nothing, so nothing is flagged and the model runs unchanged
-        // until the person writes it (its card says so, as a hint); k = 1 is there to write it with.
+        // until the person writes it (its card says so, as a hint). It has no parameters: a symbol it is written with that
+        // nothing defines is offered as one under its field ("Add k as a parameter").
         equation: template?.latex ?? '0',
         parameters
     };
@@ -14075,6 +14150,8 @@ async function writeTourRelationshipPart(from, to, typed) {
     field.focus();
     field.setValue(typed);
     field.dispatchEvent(new Event('input', { bubbles: true }));
+    // Each symbol nothing defines (k) made a parameter, as a person does it: by the action under the field.
+    for (const action of $$('#equationDiagnostics .addParameterAction')) action.click();
     field.dispatchEvent(new Event('change', { bubbles: true }));
     await waitUntil(() => String(relationship.equationModel?.latex ?? relationship.equation ?? '').trim() !== '', 3000);
 }

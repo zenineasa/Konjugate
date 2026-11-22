@@ -968,6 +968,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .equationDiagnostics.valid { color: #69b9b2; }
 /* Guidance for a formula that is valid but not yet written (a new relationship's 0): plain, neither an error nor a pass. */
 .equationDiagnostics.valid.hint { color: #8fa3ac; }
+/* "Add k as a parameter": a plain action under the line that names a symbol nothing defines. */
+.equationDiagnostics .addParameterAction { display: block; margin: 3px 0 0; padding: 0; color: #62e1d5; background: none; border: 0; font-size: 9px; text-align: left; cursor: pointer; }
+.equationDiagnostics .addParameterAction:hover { text-decoration: underline; }
+.equationDiagnostics .addParameterAction:disabled { display: none; }
 .unitInput { display: grid; grid-template-columns: 1fr 38px; }
 .unitInput input { border-radius: 4px 0 0 4px; }
 .unitInput b { display: grid; place-items: center; color: #647985; background: #172630; border: 1px solid #2b3d48; border-left: 0; border-radius: 0 4px 4px 0; font-size: 7px; font-weight: 500; }
@@ -2506,7 +2510,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .partChip:hover { border-color: #6b9ac0; }
 .partChip small { color: #8fb2cf; font-size: 7px; letter-spacing: .02em; }
 .partChipBody { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
-.partSign { color: #8fb2cf; }
+.partOperator { flex: none; padding: 0 2px; color: #b9cdd6; font-size: 13px; }
 .partChip.program .partChipBody { font-size: 9px; }
 .partChip.own { color: #dce8ec; background: #0f2a2c; border-color: #2c6a65; }
 .partChip.off, .ownPart.off { opacity: .55; border-style: dashed; }
@@ -2521,7 +2525,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* A relationship's Equations tab, drawn from its side: each state it lands on as a row of that state's equation. */
 #edgeLanding .equationLine { flex-wrap: wrap; align-items: center; gap: 4px; }
 /* A part too long for the card's width scrolls inside its chip, and the parts before the field wrap, rather than run off the card. */
-#edgeLanding .equationLhs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; white-space: normal; }
+#edgeLanding :is(.equationLhs, .equationRhs) { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; white-space: normal; }
+#edgeLanding :is(.equationLhs, .equationRhs)[hidden] { display: none; }
 .partChip { max-width: 100%; overflow-x: auto; }
 /* A part's value at the timeline's point while results are open. */
 .partValue { color: #9fd3c9; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -2539,8 +2544,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .rowLeftSide { color: #d5e1e6; font-size: 11px; }
 .partChip.live { color: #dce8ec; background: #0f2a2c; border-color: #62e1d5; }
 .partChip.live small { color: #62e1d5; }
-.relationshipRow { margin-top: 8px; }
-.relationshipRow[hidden] { display: none; }
+.otherEndRow { margin-top: 8px; }
+.otherEndRow[hidden] { display: none; }
 .relationshipRowHead { display: block; margin-bottom: 4px; color: #7d939c; font-size: 8px; letter-spacing: .08em; text-transform: uppercase; }
 .relationshipRowLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 /* A parameter's display symbol sits on a line of its own, after the rest of its row. */

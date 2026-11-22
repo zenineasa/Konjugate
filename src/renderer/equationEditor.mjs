@@ -7,6 +7,7 @@
 // each owner hands in, never a copy of this. Subclasses change what is checked or what a reference button inserts.
 
 import { latexForBinding, validateEquationLatex } from '../equationModel.mjs';
+import { symbolsToAddAsParameters } from '../stateEquations.mjs';
 
 export function bindingInsertTitle(binding) {
     if (binding.kind === 'time') return 'Insert simulation time (seconds)';
@@ -31,6 +32,21 @@ export class ReferenceChips {
     }
 }
 
+// Under the line that names a formula's unknown symbols, one plain action for each that can be a parameter: "Add k as a
+// parameter", which `add(symbol)` does. Pressing one leaves the focus in the formula, so the edit is not ended under it.
+export function showAddParameterActions(line, symbols, add) {
+    for (const symbol of symbols ?? []) {
+        const action = document.createElement('button');
+        action.type = 'button';
+        action.className = 'addParameterAction';
+        action.dataset.symbol = symbol;
+        action.textContent = `Add ${symbol} as a parameter`;
+        action.addEventListener('mousedown', (event) => event.preventDefault());
+        action.addEventListener('click', () => add(symbol));
+        line.appendChild(action);
+    }
+}
+
 // Elements, all optional but `mathField` and `source`:
 //   mathField, source   the <math-field> and the LaTeX <textarea>
 //   diagnostics         where the validity line is written
@@ -42,11 +58,14 @@ export class ReferenceChips {
 //   canEdit()                false while the formula must not change (results are open); inserting then does nothing
 //   onModeChange(mode)       return true to say the owner handled showing and hiding the fields itself
 //   hint(latex)              guidance for a valid formula not yet written (a new relationship's 0), shown as a hint
+//   addParameter(symbol)     makes a symbol the formula uses but nothing defines a parameter, as one undoable step; given, the
+//                            line that names an unknown symbol offers it ("Add k as a parameter")
 export class EquationEditor {
     #visible = true;
 
-    constructor({ mathField, source, diagnostics = null, modeButtons = [], modeKey = null, references = null, onInput = null, onCommit = null, canEdit = () => true, onModeChange = null, hint = null }) {
+    constructor({ mathField, source, diagnostics = null, modeButtons = [], modeKey = null, references = null, onInput = null, onCommit = null, canEdit = () => true, onModeChange = null, hint = null, addParameter = null }) {
         this.hint = hint;
+        this.addParameter = addParameter;
         this.mathField = mathField;
         this.source = source;
         this.diagnostics = diagnostics;
@@ -152,6 +171,9 @@ export class EquationEditor {
             return validation;
         }
         this.showVerdict(validation.valid, validation.valid ? this.validMessage : validation.errors.join(' '));
+        if (!validation.valid && this.addParameter && this.diagnostics && this.canEdit()) {
+            showAddParameterActions(this.diagnostics, symbolsToAddAsParameters(validation.unknownSymbols, (bindings ?? []).map((binding) => binding.symbol)), this.addParameter);
+        }
         return validation;
     }
 

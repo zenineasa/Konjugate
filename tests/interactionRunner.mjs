@@ -2577,7 +2577,7 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('#endpointPickTitle').textContent`), /target/, 'Connect to did not start with the source chosen.');
         await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module')).click()`);
         assert.equal(await evaluate(window, `document.querySelector('#endpointPickBanner').hidden`), true);
-        // Made at once, its card open on Equations with its part's field, and k = 1 to write with.
+        // Made at once, its card open on Equations with its part's field, and no parameters: one is made from what is typed.
         assert.equal(await evaluate(window, `!document.querySelector('#edgeEditor').classList.contains('hidden')`), true);
         assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
         assert.notEqual(await evaluate(window, `document.querySelectorAll('.modelStatus span')[1].textContent`), relationshipCountBefore);
@@ -2585,7 +2585,7 @@ export async function runInteractionTests(driver) {
         const nodes = (await savedProject()).nodes;
         assert.equal(nodes.find((node) => node.id === made.source.nodeId).name, 'Electrical losses');
         assert.equal(nodes.find((node) => node.id === made.target.nodeId).name, 'Battery module');
-        assert.deepEqual(made.parameters.map((parameter) => [parameter.symbol, parameter.value]), [['k', 1]]);
+        assert.deepEqual(made.parameters, [], 'A new relationship came with a parameter nobody asked for.');
         assert.equal(made.equationModel.output.role, 'target');
         // One undo takes it away.
         await evaluate(window, `document.querySelector('#undoButton').click()`);
@@ -2822,7 +2822,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#endpointPickBanner').hidden`, 'Esc did not end the pick.');
         assert.equal(await relationshipCount(), '3 relationships');
 
-        // From the list: made at once, directed, landing on its target, with k = 1; its card open on Equations.
+        // From the list: made at once, directed, landing on its target, with no parameters; its card open on Equations.
         await newRelationship('Electrical losses', 'Enclosed air');
         assert.equal(await relationshipCount(), '4 relationships');
         assert.equal(await evaluate(window, `document.querySelector('#edgeEditor [data-editor-tab].active').dataset.editorTab`), 'equations');
@@ -2852,8 +2852,24 @@ export async function runInteractionTests(driver) {
         // A constant zero is a part too.
         await typeRelationshipPart('0');
         await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'New relationship').equationModel.latex === '0'`, 'A constant zero was not kept.');
+        // A symbol nothing defines is said once, on the line under the field, with the action that makes it a parameter: named
+        // from its symbol, set to 1, in one undoable step, and the line is clear again.
+        await typeRelationshipPart('k');
+        const addK = `document.querySelector('#equationDiagnostics .addParameterAction[data-symbol="k"]')`;
+        await waitFor(window, `Boolean(${addK})`, 'An unknown symbol is not offered as a parameter.');
+        assert.match(await evaluate(window, `document.querySelector('#equationDiagnostics').firstChild.textContent`), /^Unknown symbol: k\.$/);
+        assert.equal(await evaluate(window, `${addK}.textContent`), 'Add k as a parameter');
+        await evaluate(window, `${addK}.click()`);
+        await waitFor(window, `document.querySelector('#equationDiagnostics').classList.contains('valid') && !${addK}`, 'The equation was not valid once k was a parameter.');
+        assert.deepEqual((await made()).parameters.map((parameter) => [parameter.name, parameter.symbol, parameter.value]), [['Parameter k', 'k', 1]]);
+        assert.equal((await made()).equationModel.latex, 'k');
+        await undoRedo('undo');
+        assert.deepEqual((await made()).parameters, [], 'Undo did not take the parameter away in one step.');
+        assert.equal((await made()).equationModel.latex, 'k', 'Undoing the parameter undid the typing too.');
+        await undoRedo('redo');
+        assert.deepEqual((await made()).parameters.map((parameter) => parameter.symbol), ['k']);
         // Back through the edits to its part (one edit session, while its field was being typed in) to its making.
-        for (let step = 0; step < 4 && await relationshipCount() !== '3 relationships'; step += 1) await undoRedo('undo');
+        for (let step = 0; step < 8 && await relationshipCount() !== '3 relationships'; step += 1) await undoRedo('undo');
         assert.equal(await relationshipCount(), '3 relationships');
     });
 
@@ -9038,6 +9054,10 @@ export async function runInteractionTests(driver) {
         const chip = `document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .partChip[data-term-type="relationship"]')`;
         assert.equal(await evaluate(window, `${chip}.dataset.latex`), String.raw`-\mathrm{angularVelocity} \cdot \left(y - y_{\mathrm{A}}\right)`);
         assert.equal(await evaluate(window, `${chip}.dataset.sign`), '−', 'A part that starts with a minus does not take it as its sign.');
+        // The sign stands between the parts, outside the chip: dx/dt = vx − [ω·(y − y_A)].
+        assert.deepEqual(await evaluate(window, `[...document.querySelector('#nodeEditorStates .stateCard[data-symbol="x"] .stateEquation').children].filter((element) => !element.hidden).map((element) => element.classList.contains('partOperator') ? element.textContent : element.className.split(' ')[0])`),
+            ['stateOrder', 'ownPart', '−', 'partChip'], 'The sign does not stand between the own part and the chip.');
+        assert.doesNotMatch(await evaluate(window, `${chip}.querySelector('.partChipBody').textContent`), /^[−+-]/, 'The chip still carries its sign inside.');
         assert.match(await evaluate(window, `${chip}.querySelector('small').textContent`), /Crank drive X/);
         // A short name given on Details is the one its states go by in others' equations.
         await openNode('Ground pivot A');
@@ -9059,6 +9079,18 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await ownOnX(), ['\\mathrm{vx}+1']);
         await undoRedo('undo');
         assert.deepEqual(await ownOnX(), ['\\mathrm{vx}'], 'Undo did not take the typing back in one step.');
+        // A symbol its own part uses that nothing defines is offered under its field, and made its own part's parameter.
+        await openNode('Crank pin B');
+        await writeOwnPart(window, 'z', '\\mathrm{vz}\\cdot c');
+        const addC = `document.querySelector('#nodeEditorStates .stateCard[data-symbol="z"] .ownPartDiagnostics .addParameterAction[data-symbol="c"]')`;
+        await waitFor(window, `Boolean(${addC})`, 'An unknown symbol in a node\'s own part is not offered as a parameter.');
+        await evaluate(window, `${addC}.click()`);
+        await waitFor(window, `document.querySelector('#nodeEditorStates .stateCard[data-symbol="z"] .ownPartDiagnostics').classList.contains('valid')`, 'The own part was not valid once c was a parameter.');
+        const ownOnZ = async () => (await savedProject()).nodes.find((node) => node.name === 'Crank pin B').sourceTerms.find((term) => term.state === 'z');
+        assert.deepEqual((await ownOnZ()).parameters.map((parameter) => [parameter.name, parameter.symbol, parameter.value]), [['Parameter c', 'c', 1]]);
+        await undoRedo('undo');
+        assert.deepEqual((await ownOnZ()).parameters, [], 'Undo did not take the parameter away in one step.');
+        await undoRedo('undo');
 
         // Several own parts on one state read as one sum, and the first edit makes them one, their parameters with them;
         // a state the node's program sets reads "set by program", saying which output it is.
@@ -9094,6 +9126,8 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `${ownChip}.querySelector('small').textContent`), /Crank pin B/);
         assert.equal(await evaluate(window, `${ownChip}.dataset.latex`), String.raw`\mathrm{vx}_{\mathrm{B}}`);
         assert.match(await evaluate(window, `document.querySelector('#edgeLanding .rowLeftSide').textContent`), /x/);
+        // Its field's part starts with a minus, which is its sign: nothing stands between the chip and the field ("+ −").
+        assert.equal(await evaluate(window, `document.querySelectorAll('#edgeLanding [data-landing-lhs] .partOperator').length`), 0, 'A + stands before a part that starts with a minus.');
         const shown = await evaluate(window, `document.querySelector('#editEdgeMathField').value`);
         assert.ok(shown.includes('y_{\\mathrm{B}}') && shown.includes('y_{\\mathrm{A}}'), `The part is not shown in both ends' names: ${shown}`);
         assert.ok(!shown.includes('targetY'), 'The part is shown in the relationship\'s own names.');
@@ -9119,6 +9153,9 @@ export async function runInteractionTests(driver) {
         await openRelationship((await savedProject()).edges.find((edge) => edge.directionality !== 'directed').name);
         assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow').hidden`), false, 'A relationship running both ways has no row for its other end.');
         assert.match(await evaluate(window, `document.querySelector('#edgeOtherEndRow .partChip.live small').textContent`), /negated/);
+        assert.ok(await evaluate(window, `document.querySelector('#edgeOtherEndRow').getBoundingClientRect().height > 0`), 'The other end\'s row is not on screen.');
+        // Taken away whole, its minus stands before it, outside the chip.
+        assert.equal(await evaluate(window, `document.querySelector('#edgeOtherEndRow .partChip.live').previousElementSibling?.textContent`), '−');
 
         // A node's program writing two states: each of its chips says which output it is.
         const box = { type: 'primitive', shape: 'box', color: '#888888' };
@@ -9312,7 +9349,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.partValue')].every((element) => element.hidden)`), true, 'A value stayed once results were closed.');
         // Closed: the own part invites typing again.
-        await waitFor(window, `${ownPart}?.getAttribute('placeholder')?.includes('type to add') && !${ownPart}.classList.contains('lockedEmpty')`, 'The own part did not invite typing again once results were closed.');
+        await waitFor(window, `${ownPart}?.getAttribute('placeholder')?.includes('type this node\\'s own term') && !${ownPart}.classList.contains('lockedEmpty')`, 'The own part did not invite typing again once results were closed.');
     });
 
     await run('a relationship a toolbox wrote with several equations opens readable, and editing one equation keeps the others exactly', async () => {

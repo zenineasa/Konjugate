@@ -90,3 +90,31 @@ test('a parameter shown by its display symbol is written back by its symbol, and
     assert.equal(shown, String.raw`-\omega\cdot\left(y_{\mathrm{B}}-y_{\mathrm{A}}\right)`);
     assert.equal(readerLatexToStored(shown, bindings, edge, nodes, null, names, parameters), stored);
 });
+
+test('a part of a state\'s equation shows its sign between it and the parts before it, outside the part, and its LaTeX the same', async () => {
+    const { signedPart } = await import('../src/stateEquations.mjs');
+    // One term starting with a minus gives it as its sign; brackets, fractions and exponents keep theirs.
+    assert.deepEqual(signedPart(String.raw`-\omega \cdot \left(y - y_{\mathrm{A}}\right)`), { sign: '−', latex: String.raw`\omega \cdot \left(y - y_{\mathrm{A}}\right)` });
+    assert.deepEqual(signedPart(String.raw`\mathrm{k}\cdot x`), { sign: '+', latex: String.raw`\mathrm{k}\cdot x` });
+    assert.deepEqual(signedPart(String.raw`-\frac{a-b}{c}`), { sign: '−', latex: String.raw`\frac{a-b}{c}` });
+    assert.deepEqual(signedPart('-e^{-x}'), { sign: '−', latex: 'e^{-x}' });
+    // A sum keeps its own signs: −a + b is not −(a + b).
+    assert.deepEqual(signedPart('-a+b'), { sign: '+', latex: '-a+b' });
+    assert.deepEqual(signedPart('a-b'), { sign: '+', latex: 'a-b' });
+    // Taken away whole (the other end of a relationship running both ways): its sign turned, a sum bracketed.
+    assert.deepEqual(signedPart('a', { negated: true }), { sign: '−', latex: 'a' });
+    assert.deepEqual(signedPart('-a', { negated: true }), { sign: '+', latex: 'a' });
+    assert.deepEqual(signedPart('a-b', { negated: true }), { sign: '−', latex: String.raw`\left(a-b\right)` });
+    assert.deepEqual(signedPart('-a+b', { negated: true }), { sign: '−', latex: String.raw`\left(-a+b\right)` });
+});
+
+test('a symbol an equation uses that nothing defines can be made a parameter, named readably, set to 1', async () => {
+    const { parameterForSymbol, symbolsToAddAsParameters } = await import('../src/stateEquations.mjs');
+    // Only what a parameter's symbol may be, and not one already there.
+    assert.deepEqual(symbolsToAddAsParameters(['k', 'K', 'k_2', 'damping', 'k', 'x'], ['x']), ['k', 'damping']);
+    assert.deepEqual(parameterForSymbol('k'), { name: 'Parameter k', symbol: 'k', value: 1, unit: '', mode: 'constant' });
+    assert.equal(parameterForSymbol('k2').name, 'Parameter k2');
+    assert.equal(parameterForSymbol('dampingRatio').name, 'Damping ratio');
+    assert.equal(parameterForSymbol('damping').name, 'Damping');
+    assert.deepEqual(parameterForSymbol('omega'), { name: 'Omega', symbol: 'omega', value: 1, unit: '', mode: 'constant', displaySymbol: '\\omega' });
+});

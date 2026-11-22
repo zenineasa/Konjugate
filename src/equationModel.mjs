@@ -240,6 +240,9 @@ export function validateEquationLatex(latex, bindings = [], { extraOperators = [
         valid: errors.length === 0,
         mathJson: expression.json,
         symbols: expression.symbols,
+        // The names it uses that are none of `bindings` (nor a function): what "Unknown symbol" names, for an owner to offer
+        // to define.
+        unknownSymbols,
         errors: [...new Set(errors)]
     };
 }

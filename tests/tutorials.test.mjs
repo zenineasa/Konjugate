@@ -39,7 +39,7 @@ const brokenStepBefore = (facts, index) => brokenStep(facts, index, tourSteps);
 const stepLabel = (index) => labelOf(index, tourSteps);
 
 const node = (id, name = id === 1 ? 'Heater' : 'Block', initialValue = id === 1 ? 350 : 300) => ({ id, name, states: [{ id: id + 1, symbol: 'temperature', initialValue }] });
-const edge = (from, to, equation = 'k * (sourceT - targetT)', role = 'target') => ({ id: 30, equation, equationModel: { output: { role } }, source: { nodeId: from }, target: { nodeId: to } });
+const edge = (from, to, equation = 'k * (sourceT - targetT)', role = 'target', mathJson = ['Multiply', 'k', ['Subtract', 'sourceT', 'targetT']]) => ({ id: 30, equation, equationModel: { output: { role }, mathJson }, source: { nodeId: from }, target: { nodeId: to } });
 const ui = (extra = {}) => ({
     nodeEditorFor: null, endpointPick: null, edgeEditorFor: null, runDialogOpen: false, hasResult: false, runModel: null, timelineMoved: false,
     nodePlotVisible: false, plotsSeen: [], plotsSeenSinceRun: [], tuningOpen: false, tuningDataLoaded: false, tuningFitted: false,
@@ -76,6 +76,7 @@ test('steps are done by what the model holds, and by the interface where only it
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10)] }, ui: ui() }), true);
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, '0')] }, ui: ui() }), false, 'The 0 a new relationship starts with is not the equation asked for.');
     assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, undefined, 'source')] }, ui: ui() }), false, 'An equation that changes the heater is not the one asked for.');
+    assert.equal(step('equation').done({ document: { ...two, edges: [edge(1, 10, undefined, 'target', null)] }, ui: ui() }), false, 'An equation whose k is not yet a parameter is not valid.');
     assert.equal(step('run').done({ document: two, ui: ui({ hasResult: true }) }), true);
     assert.equal(step('plotBlock').done({ document: two, ui: ui() }), false);
     assert.equal(step('plotBlock').done({ document: two, ui: ui(blockPlotShown) }), true);

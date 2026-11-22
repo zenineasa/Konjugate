@@ -69,7 +69,7 @@ export function checkSeveralEquations(equationModel, candidates, sourceNode, tar
         const { latex, validation } = readItem(definition, readable);
         errors.push(...validation.errors);
         definitionSymbols.push(definition.symbol);
-        return { errors, latex, mathJson: validation.valid ? validation.mathJson : null };
+        return { errors, latex, mathJson: validation.valid ? validation.mathJson : null, unknownSymbols: validation.unknownSymbols ?? [] };
     });
     const readable = [...candidates, ...definitionSymbols.map((symbol) => ({ symbol }))];
     const seen = new Set();
@@ -82,7 +82,7 @@ export function checkSeveralEquations(equationModel, candidates, sourceNode, tar
         seen.add(`${output.role}:${output.stateId}`);
         const { latex, validation } = readItem(output, readable);
         errors.push(...validation.errors);
-        return { errors, latex, mathJson: validation.valid ? validation.mathJson : null };
+        return { errors, latex, mathJson: validation.valid ? validation.mathJson : null, unknownSymbols: validation.unknownSymbols ?? [] };
     });
     if (!outputs.length) return { definitions, outputs, valid: false, errors: ['Add an equation.'] };
     const valid = [...definitions, ...outputs].every((item) => !item.errors.length);

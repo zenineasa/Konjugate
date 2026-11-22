@@ -179,3 +179,49 @@ export function readerLatexToStored(latex, bindings, edge, nodes, reader, names,
         return target ? `\\mathrm{${target}}` : whole;
     });
 }
+
+// Whether LaTeX is a sum or difference: a + or − outside every bracket, after any sign it starts with.
+function isSum(latex) {
+    const text = String(latex).trim().replace(/^[+-]\s*/, '');
+    let depth = 0;
+    for (const character of text) {
+        if ('{(['.includes(character)) depth += 1;
+        else if ('})]'.includes(character)) depth = Math.max(0, depth - 1);
+        else if (depth === 0 && (character === '+' || character === '-')) return true;
+    }
+    return false;
+}
+
+// How one part of a state's equation is shown after the parts before it: the + or − that stands between them, outside the
+// part, and the part's LaTeX without it. A part that is one term starting with a minus gives that minus as its sign
+// (−ω(y − y_A), not + −ω(y − y_A)); a sum keeps its own signs, bracketed when the whole of it is taken away (`negated`, the
+// other end of a relationship running both ways). Only what is shown: nothing stored is read differently.
+export function signedPart(latex, { negated = false } = {}) {
+    let body = String(latex ?? '').trim();
+    let minus = negated;
+    if (/^[+-]/.test(body) && !isSum(body)) {
+        if (body[0] === '-') minus = !minus;
+        body = body.slice(1).trim();
+    }
+    if (negated && minus && (isSum(body) || /^[+-]/.test(body))) body = `\\left(${body}\\right)`;
+    return { sign: minus ? '−' : '+', latex: body };
+}
+
+const greekLetters = new Set(['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'rho', 'sigma', 'tau', 'upsilon', 'phi', 'varphi', 'chi', 'psi', 'omega']);
+const parameterSymbolPattern = /^[a-z][A-Za-z0-9]*$/;
+
+// The symbols an equation uses that nothing defines and that can be made parameters as they are written (k, damping, k2, ω):
+// those a parameter's symbol may be, not already one of `taken`, each once.
+export function symbolsToAddAsParameters(unknownSymbols, taken = []) {
+    const known = new Set(taken);
+    return [...new Set(unknownSymbols ?? [])].filter((symbol) => parameterSymbolPattern.test(symbol) && !known.has(symbol));
+}
+
+// A new parameter for a symbol an equation already uses: a readable name from it (damping ratio → "Damping ratio", one letter
+// → "Parameter k", a Greek letter → its name), the value 1, constant, and a Greek letter written as one (\omega).
+export function parameterForSymbol(symbol) {
+    const greek = greekLetters.has(symbol);
+    const words = symbol.replace(/([a-z])([A-Z0-9])/g, '$1 $2').toLowerCase();
+    const name = !greek && /^[a-z]\d*$/.test(symbol) ? `Parameter ${symbol}` : words[0].toUpperCase() + words.slice(1);
+    return { name, symbol, value: 1, unit: '', mode: 'constant', ...(greek ? { displaySymbol: `\\${symbol}` } : {}) };
+}

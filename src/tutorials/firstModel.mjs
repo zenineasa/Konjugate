@@ -8,8 +8,8 @@ export const firstModelValues = Object.freeze({
     source: { name: 'Heater', temperature: 350 },
     target: { name: 'Block', temperature: 300 },
     state: { name: 'Temperature', symbol: 'temperature', unit: 'K' },
-    // A new relationship comes with a coefficient, `k`, so its part is the only thing to type. Its card writes each end's
-    // state with that node's short name (Heater → H, Block → B), and what is typed in those names is stored in its own.
+    // A new relationship has no parameters: `k` is typed, and made one by the action under the field. Its card writes each
+    // end's state with that node's short name (Heater → H, Block → B), and what is typed in those names is stored in its own.
     typedEquation: String.raw`k\cdot(\mathrm{temperature}_{\mathrm{H}}-\mathrm{temperature}_{\mathrm{B}})`,
     runSeconds: 10
 });
@@ -68,10 +68,10 @@ const steps = Object.freeze([
     {
         id: 'equation',
         title: 'Write the equation',
-        text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it, empty: until it is written, the relationship adds 0. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. k is the Coefficient on the Parameters tab, set to 1; change it to make the heat flow faster or slower.`,
+        text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it, empty: until it is written, the relationship adds 0. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. Nothing defines k yet, so the line under the field says so: press "Add k as a parameter" there. It is set to 1, on the Parameters tab; change it to make the heat flow faster or slower.`,
         target: '#edgeEditor', fill: 'edgeEquation', skip: 'edgeEquation',
-        // Its part reads both ends (a new relationship starts as k times its source's state alone) and lands on the block.
-        done: ({ document }) => edgesBetweenNodes(document).some((edge) => /source/.test(edge.equation ?? '') && /target/.test(edge.equation ?? '') && edge.equationModel?.output?.role === 'target')
+        // Its part reads both ends, lands on the block, and is valid: k is a parameter (its MathJSON is there only then).
+        done: ({ document }) => edgesBetweenNodes(document).some((edge) => /source/.test(edge.equation ?? '') && /target/.test(edge.equation ?? '') && edge.equationModel?.output?.role === 'target' && edge.equationModel?.mathJson != null)
     },
     {
         id: 'run',

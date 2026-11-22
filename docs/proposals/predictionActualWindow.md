@@ -10,7 +10,7 @@ status: draft
 
 # The prediction-actual comparison window
 
-**Status: steps 1 to 6 built: the hold policy over a recording (replaying a data log), the default reset policy over a recording and live, as a live twin ([Live engine session](liveEngineSession.md)), and, per measured signal, a nudge or watching only in place of the reset, with the observed states shown and a state the model computes compared but never set. A node declaring itself conserving is not built (see the open questions). Step 5, a refit over the window with initial states as tunable, is built and proposes what it finds for a person to apply. Step 6, the estimator, is built as a fourth choice per signal ([A state estimator for the live twin](stateEstimator.md)).** The idea comes from the review in [Digital twin connections](digitalTwinConnections.md): once measurements reach a running model, something has to decide how far the model is trusted, when it is corrected, and how. This document gives that a name and a shape. A first draft recommended two different windows at once, a fixed one that resets at every move and one that grows while the model is wrong; this version makes the first the default and keeps the second for monitoring only.
+**Status: steps 1 to 6 built: the hold policy over a recording (replaying a data log), the default reset policy over a recording and live, as a live twin ([Live engine session](liveEngineSession.md)), and, per measured signal, a nudge or watching only in place of the reset, with the observed states shown and a state the model computes compared but never set. A node declaring itself conserving is not built (see the open questions). Step 5, a refit over the window with initial states as tunable, is built and proposes what it finds for a person to apply. Step 6, the estimator, is built as a fourth choice per signal ([A state estimator for the live twin](stateEstimator.md)). Steps 7 to 13, the inputs in the forecast (each input carried past now by a choice of its own instead of held at its last reading), are proposed, not built.** The idea comes from the review in [Digital twin connections](digitalTwinConnections.md): once measurements reach a running model, something has to decide how far the model is trusted, when it is corrected, and how. This document gives that a name and a shape. A first draft recommended two different windows at once, a fixed one that resets at every move and one that grows while the model is wrong; this version makes the first the default and keeps the second for monitoring only.
 
 ## The idea
 
@@ -41,7 +41,7 @@ The window has a fixed length W and moves by a stride S. Each time the data has 
 1. **Record the jump.** Before anything is reset, note how far the model's prediction at the new anchor is from the measurement there. This is the measure of how wrong the model was over the stride it just ran unaided.
 2. **Reset at the new anchor.** Each measured state is set to its measured value (or a short average of it, so one noisy sample does not become a step in the state); every other state keeps the value the model reached there.
 3. **Run the window,** from the new anchor to now, on the actual inputs, and record the difference from the measurements.
-4. **Run the forecast** from now to the horizon, from the state at now with the measured states set toward their latest readings (a checkpoint at now, restored with them set).
+4. **Run the forecast** from now to the horizon, from the state at now with the measured states set toward their latest readings (a checkpoint at now, restored with them set). The inputs are held at their last reading; [The inputs in the forecast](#the-inputs-in-the-forecast) proposes other choices.
 
 Between moves, as each new batch of data arrives, the model only extends: it carries on from where it was to the time of the new data, and no earlier step is repeated. A late or corrected observation from the source for a time inside the window reruns the window from a checkpoint at or before that time. **Built** for inputs (measured signals are read afresh at every move, so a corrected measurement needs nothing more): an input reading corrected, marked bad or good, or arriving late after the twin sent it to the engine is sent again from that reading on, in place of what the engine held (`replaceFrom`). When it falls before the checkpoint the next move starts from, that checkpoint was taken with the reading as it was, so the twin is run again to the move's anchor from the latest state it logged at or before the reading, with every input sent again from there and each later move's reset at its anchor made again on the way; the move then starts where it would have had the correction come in time. A rebuild never reaches back past a refit or a model change, which restarted the twin from a state of its own, nor past the twin's first move; a twin with the estimator does not rebuild, since its members' past is not run again. Each move records what it did about such readings (`inputCorrections`: `resent`, `rebuilt` with the logged state it ran from, or not applied, with the reason). The moves already made keep their record as they were made. Sending the inputs again from the start of a run also fixed the catch-up after skipping a backlog, which had run its first stride on the reading the engine kept for the move after rather than on the readings applied. [tests/engine/windowInputCorrections.mjs](../../tests/engine/windowInputCorrections.mjs) checks that a twin given a correction late makes the moves after it exactly as one given the corrected reading from the start.
 
@@ -111,6 +111,110 @@ The window is what a [sandbox](digitalTwinConnections.md#detaching-to-try-things
 
 Replay is the window run at unlimited speed over a recording, so the logic of a live twin is tested on history before it goes near a lab's equipment, and it is the first thing built. A monitor that only alerts is the hold policy with its limit raising the alert. A walk-forward test, for anyone using Konjugate on price data later, is a refit window moved through history and scored on the stretch after it.
 
+## The inputs in the forecast
+
+**Proposed, not built.** At each move the twin forecasts a horizon past now. The measured states start the forecast where the readings say the system is. The inputs, the shared parameters the source drives, have no readings past now, so each is held at its last reading for the whole horizon (`WindowSession`: the forecast run restores the checkpoint at now and advances to the horizon on the input schedules as the engine holds them, and those hold their last sample).
+
+Holding is a safe default. It never runs away and needs no settings. But it is wrong for three kinds of input:
+
+- **One that is switched back and forth.** The house's heaters are switched by thermostats. A heater that was on when the move was made is forecast on for the whole hour, so the forecast heats the room past the thermostat's setpoint. One that was off is forecast off, so the room cools below it.
+- **One that is ramping.** An operator part-way through raising the motor's voltage, or a heater power being brought up over half an hour, usually finishes the ramp. Holding forecasts that the ramp stops at once.
+- **One with a pattern.** The house's outdoor temperature and sun follow the day. Holding the noon sun for an hour is a fair guess; holding it overnight is not.
+
+The fix is to choose, per input, how it is carried past now. It is also to show, from the twin's own record, how well each choice would have done, so the choice is not a guess either.
+
+### What the input's past can say
+
+Many inputs are not noisy measurements at all. They are commanded: a setpoint, a voltage an operator sets, a valve's position. They change when someone or something changes them. A forecast of such an input is a guess at what will be done next from what was just done. That is sometimes sound (an operator in the middle of a ramp usually finishes it) and sometimes not (an operator who stepped the voltage once will hold it). Where the plan is known, the plan beats any guess. That is why a known future and the model's own controller are in the list below, and why they come after the choices made from the past only because they need more to build.
+
+Two ways of reading a trend from the past were weighed and set aside:
+
+- **Differences between the last few readings.** A slope from the last two readings, or a curvature from the last three, carries any noise forward by the horizon over the spacing, once for a slope and squared for a curvature. Over the tank's hour, read every minute, a curvature from three readings with a thermometer's noise would be off by hundreds of kelvin. A commanded input has no such noise. But it moves in steps, and a difference taken across a step reads as a slope or a curvature that was never there.
+- **A polynomial carried on undamped.** A line keeps going and a parabola speeds up or turns. Real inputs level off, saturate or switch.
+
+So every trend here is **fitted over a span of readings** (least squares, the twin's window by default), which smooths what noise there is and makes the error grow with the horizon over that span rather than over one reading's spacing. It is also **damped**, so it levels off, and **clamped** to the input's limits.
+
+### The choices, per input
+
+Each input gets a setting, **In the forecast**, in the engineer's view, with Hold as the default, so a twin set up before this changes nothing.
+
+| Choice | What it does past now | Suits |
+|---|---|---|
+| **Hold** | The last reading, as now. | An input that changes in steps and is held between them. |
+| **Hold the average** | The mean over the span (the window by default). | An input switched back and forth faster than the horizon is long: a thermostat's heater, whose average is its duty cycle and about the power it will draw over the hour. |
+| **Follow the trend** | A line, or a parabola (**second order**), fitted over the span and carried on from the last reading, damped and clamped. | An input that is ramping. |
+| **Repeat the last day** | What it did one period ago (a day by default), moved to start from where it is now. | Weather, sun, a building's occupancy, a plant's daily schedule. |
+| **Automatic** | Hold, Hold the average or Follow the trend, by what the span shows (below). | Most inputs, once it has been checked on them. |
+| **From a plan** | A schedule kept with the setup, or another signal that carries the input's planned future. | Setpoint programmes, a planned ramp, a weather forecast published on its own topic. |
+| **From the model** | Released from the readings at now: the model's own equation for it decides, such as a thermostat in the model switching the heater. | An input that a controller in the plant sets, where the model has that controller. |
+
+#### Follow the trend, exactly
+
+The fit is least squares over the readings in the span, of degree one or two (`a + bt` or `a + bt + ct²`, `t` the time before now). It is carried on from the last reading, not from the fit's value at now, so the input does not jump at now. It is damped by putting a shortened time in place of the time past now:
+
+```
+d(Δ) = τ · (1 − e^(−Δ/τ))
+value(now + Δ) = last + b·d + c·d²        (c = 0 for a line)
+```
+
+`τ` is how long the trend keeps its pace before it fades. Its default is the horizon, so at the horizon a line has gone 63% of the way it would have gone undamped, and it keeps levelling off past that. It is clamped to the input's limits: its parameter's control range (the motor's voltage, 0 to 12 V) or its tuning bounds. An input with neither is not clamped, and the engineer's view says so beside it.
+
+Second order is offered alongside the line. It is fitted over the span like the line, damped by the same `d`, and clamped. It can follow an input that is rising and levelling off, such as a morning's temperature. It is also the choice the score below is most likely to mark down, and it should be.
+
+#### Repeat the last day
+
+With period `P` (24 h by default; another can be typed), the input's value at `now + Δ` is its reading at `now + Δ − P`, shifted by how far it now stands from where it stood a period ago:
+
+```
+value(now + Δ) = reading(now + Δ − P) + (last − reading(now − P))
+```
+
+Until the twin has a period of the input's readings it holds, and says so. The house's demonstration recording is one day long, so its twin never reaches a full period. To be shown there it needs a two-day recording (see the order of work).
+
+#### Automatic
+
+What the readings over the span look like decides between the first three choices. A change is a reading that differs from the one before it by more than the input's resolution (its control step, else a millionth of its range over the span).
+
+- **Stepping:** at most three changes in the span, flat between them. Hold.
+- **Cycling:** the changes turn back and forth (at least two reversals of direction). Hold the average.
+- **Ramping:** changes at half the readings or more, at least four in five of them in one direction. Follow the trend (a line).
+- Anything else: Hold.
+
+The engineer's view shows which one Automatic is using for each input and why ("cycling: 14 switches in the window, holding the average 640 W"). Automatic decides by rules, not by the score, so that it can be explained. Whether it should later switch to whatever the score favours is an open question (below).
+
+### Scoring the choices against what arrived
+
+The choices can be judged on the inputs' own readings, with no model run. At each move the twin works out, for every input, what each choice would forecast over the horizon. These are cheap: arithmetic on readings it already holds. Once the horizon has passed, it compares each forecast with the readings that arrived over it. The comparison is the root mean square of the difference over the horizon, at the readings' times, kept as a running figure per input per choice.
+
+The engineer's view shows it beside each input's setting, against Hold:
+
+> Outdoor temperature · Hold · *Repeat the last day would have been 3.1× closer over the last 40 moves*
+
+and nothing until a few horizons have passed. It is shown, never applied on its own: a person chooses.
+
+Only the inputs are scored this way, not the states the model forecasts from them. A better input forecast should give a better state forecast, but checking that takes a model run per choice per move. The twin already compares its forecast of the measured states with what then arrives through its jumps, and a choice that helps should show there over time.
+
+### What it changes in the twin
+
+- **The forecast run only.** The projected input values are sent to the engine as input samples past now, before the forecast run (`appendInputSamples` after the checkpoint at now is restored), and taken out at the next move (`replaceFrom` at the previous move's now, where the next real readings start). They never enter the record of readings the twin keeps, the recording, or the readings a refit or a sandbox starts from. `WindowSession`'s record of what the engine holds (`#sent`) marks them as projected, so a late correction and a projection cannot be confused. The checkpoints the next move uses are all taken at or before now, on real inputs, so nothing projected reaches them.
+- **The shape of the samples.** The engine's live input schedules hold between samples. A trend is sent as samples a time step apart up to a few hundred, then more coarsely, and drawn in the room from the same samples. Whether the engine should take a linear schedule for live inputs (its stored schedules already can) is an open question.
+- **The estimator.** Its members forecast on the same projected inputs as the twin's own forecast. Adding the inputs' own uncertainty to the band is part of **A range of futures**, later.
+- **The room.** Each input's strip under **Inputs** draws what the forecast assumed past now, dotted, as the sandbox draws what was tried. Choosing the forecast for an input is the engineer's. The operator sees what it assumed.
+- **What is kept.** The setup's `live` gains `inputs { name: { forecast, span, damping, period, degree } }` (src/twinSetup.mjs, docs/projectSchema.md), each value checked and dropped when it cannot be used, as the rest of the setup is. A choice is taken when the twin starts again (**Start again with these**), like the other settings.
+
+### Later
+
+- **From a plan.** A schedule kept with the setup (times of day and values, repeated daily or weekly) is the simpler half. A signal carrying a planned future needs a form for it: a topic whose message is a list of times and values, say, replaced as each new plan arrives. What a broker, an OPC UA server or a push script would send needs settling with whoever has such a feed.
+- **From the model.** This needs a way to say that a shared parameter is driven by its readings up to now and by an equation of the model after it. That is a model concept, not only a twin setting: an "otherwise" equation for a live parameter, used wherever no reading drives it. The engine would switch a parameter from its schedule to its equation at a given time. It is the biggest gain for the house, whose thermostats are in its generator but not yet in its model. It is the largest piece and should be designed with [Rates and Updates](ratesAndUpdates.md) in view.
+- **A range of futures.** Several forecasts per move (Hold, the trend, the input's limits) drawn as a band of what the inputs could do. The cost is a forecast run per scenario per move: small for the tank, noticeable for the house's five inputs, multiplied by the members with the estimator.
+
+### Open questions about the inputs
+
+1. Should Automatic switch to the choice the score favours once there is enough of a record, or always decide by its rules and leave the score as advice? Proposed: rules, with the score as advice, so the twin's forecast never changes for a reason nobody can see.
+2. Should the engine take linear live input schedules, so a trend is one sample at the horizon rather than many?
+3. The damping's default: the horizon, or the span the trend was fitted over? The horizon keeps the forecast's shape the same whatever the window is. The span says a trend lasts about as long as it has been seen.
+4. Is the span the window (the default here) or its own setting from the start? Proposed: its own setting, defaulting to the window, since a thermostat that cycles every few minutes and a ramp that lasts an hour want different spans in the same twin.
+
 ## Open questions
 
 - How are algebraic ties between states known to the reset: derived from the model's relations, or declared on the node? Answered for states computed outright (derived, by the engine); a tie between two integrated states, such as two masses whose sum is fixed, is not yet known to it.
@@ -130,3 +234,10 @@ These follow the steps of [Digital twin connections](digitalTwinConnections.md#o
 4. **Nudge,** the observed-state marking, and the consistency and conservation guards. **Built,** with these choices: the correction is a gain per measured signal, 1 resetting it to the reading (the default), 0 watching only, with the model running on unaided after the first move (the hold policy, live), and between, nudging it that fraction of the way from the prediction to the reading. The nudge is applied once at each move, at the anchor, not at every step: the window is rerun from the anchor at each move, so a per-step nudge would mean feeding readings into the run itself, which is what the estimator of step 6 is for. The prediction a correction starts from is the model's own value at the anchor, from the last move's run, never one read off at the reading times (a bad reading at the anchor must not shift it). For consistency, the engine says when a session starts which states it computes from others (a source term that sets a value, an algebraic relationship's output, a provider's set output); such a state is compared with its readings at every move and never set, and the move says so rather than failing. Every move records which states the readings reach and which the model carries alone, and the card shows both. For conservation, the per-signal choice is the guard for now: nudge or watch a state where a reset would put energy in or take it out; a node declaring itself conserving, and refusing a reset on its own, waits for a model that needs it. [tests/engine/windowCorrections.mjs](../../tests/engine/windowCorrections.mjs) checks the nudge to the bit, that a wrong model watched only drifts away from the rig (a mean jump of 1.5 K over the last ten moves, against 0.2 K reset), and a computed state measured.
 5. **Initial states as tunable, and refit over the window.** **Built.** A state's initial value is a fitting target when it carries `tuning` bounds, as a parameter does; the engine's fit sets it with the parameters, so any tuning or calibration can find it, and the node editor marks it. A refit takes the latest window as a calibration (the plan made by the session, the fit by the engine's ordinary `fit`, so the same optimisers, limits and progress): time 0 is the anchor, every state starts where the last move left it, a measured state at its reading and not fitted, and the inputs are what was really done. It proposes; nothing moves until a person applies it, which answers the open question below as recommended. Applying starts the twin again from the move the refit was planned on, with the new parameters and the states found at its anchor, and runs it on to where it has got to, because a fit takes seconds and a twin moves on meanwhile; the moves already made keep their record, and the next one records the refit. The parameters can be kept in the model; the states found at an anchor stay with the twin, as they are not the model's start. Two limits: a model whose node programs keep their own state cannot be refitted yet (that state cannot be put into a document), and refitting is on request, not on the drift alarm. [tests/engine/windowRefit.mjs](../../tests/engine/windowRefit.mjs) shows one two-hour window finding the rig's capacitance, heat loss and the unmeasured room within a percent.
 6. **The estimator.** **Built** ([A state estimator for the live twin](stateEstimator.md)): an ensemble Kalman filter, as a fourth correction choice per signal, which corrects the states the data does not measure and tracks tunable parameters as they change, shows each one's spread and the forecast's band, and says how honest the spread has been.
+7. **Hold the average and Follow the trend** (first and second order, fitted over the span, damped, clamped), set per input and kept with the setup, with the projection drawn dotted on the input's strip. Checked by unit tests of the projections on made-up inputs (a step, a ramp, a square wave, noise), including the clamp and that the projection starts at the last reading. Also checked by an engine test that the house's forecast with its heaters held at their average misses the rooms' later readings by less than with them held at their last value, and that a twin left on Hold forecasts exactly as before, to the bit.
+8. **The score**, per input per choice, in the engineer's view. Checked by unit tests in which the right choice is known (a square wave, where the average must win; a ramp, where the trend must) and by the house's twin, where the heaters must favour the average.
+9. **Automatic**, with what it chose and why. Checked by unit tests of each case and of the edges between them, and in the room with the house and the motor (its operator's voltage steps hold, its ramps follow).
+10. **Repeat the last day**, with a two-day recording of the house (scripts/generateHouseTwin.mjs) as a demonstration. Checked by unit tests of the shift and the level, and by the house's second day, where the outdoor temperature and the sun must favour it.
+11. **From a plan**, a schedule first, then a signal.
+12. **From the model**, designed as a model concept first.
+13. **A range of futures.**

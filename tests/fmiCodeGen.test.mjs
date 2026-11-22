@@ -227,3 +227,11 @@ test('a parameter that follows a stored schedule is computed inside the FMU, not
     assert.match(generated.source, /double contributionValue = scheduleValue\(0, stepTime\);/);
     assert.match(generated.source, /inline double scheduleValue\(std::size_t index, double time\)/);
 });
+
+test('FMU export refuses a whole-model method by name, for now', () => {
+    const document = {
+        format: 'konjugate', version: 1, runConfigurations: [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1, method: 'rungeKutta4' }], activeRunConfigurationId: 900,
+        nodes: [], edges: []
+    };
+    assert.throws(() => generateFmiModel(document), /method is Runge–Kutta 4, which FMU export cannot write yet/);
+});

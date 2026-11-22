@@ -12,6 +12,10 @@ status: stable
 
 A relationship or source term can be programmable: instead of an equation, it runs inline C++ or Python source the user authors in the Provider Editor. See [Project schema](projectSchema.md) for the `implementation` field's JSON shape and `engine/include/konjugate/relationshipProvider.hpp` for the C++ authoring API (`RelationshipProvider::describe()`/`evaluate()`). This document covers a different axis from [Parallel execution](parallelExecution.md): that document is about how node work is *scheduled*; this one is about how one programmable contribution's code actually *runs* relative to the engine process, once it has been scheduled.
 
+## Programs under a whole-model method
+
+Under a whole-model method ([Integrators](proposals/integrators.md)) a version 1 program cannot take part in the method's stages, because nothing says it keeps no memory between calls: a term written as a program is evaluated once per global step, at its start, with the global step as its step size, and held through the stages, and a node that is a program of its own is stepped on its own, as under Euler. The Run dialog names them before the run and the result after it. [Program SDK version 2](proposals/programSdkV2.md) is where a program becomes able to take stages, its purity following from its shape. Under Euler node by node, the default, nothing about a program changes.
+
 ## Modes
 
 `ProviderExecutionMode` (`engine/include/providerRuntime.hpp`) selects how `cppProvider` contributions are dispatched. Python providers always use `pipeWorker`; neither faster transport below has a story for an interpreted language.

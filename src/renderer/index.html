@@ -705,8 +705,14 @@
             <label><span>Run until simulation time (s)</span><input id="runTargetTime" type="number" min="0" step="any" value="1" required></label>
             <section class="executionConfiguration">
                 <span class="configurationSectionTitle">Numerics</span>
+                <!-- The integration method (docs/proposals/integrators.md); names and descriptions from src/integrationMethods.mjs. -->
+                <label><span>Method</span><select id="runMethod"></select></label>
+                <p id="runMethodDescription" class="runConfigurationScope"></p>
                 <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
+                <label id="runStepsPerGlobalStepField" hidden><span>Steps per global step</span><input id="runStepsPerGlobalStep" type="number" min="1" max="10000" step="1" value="1" required></label>
+                <p id="runGlobalStepMeaning" class="runConfigurationScope"></p>
                 <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
+                <p id="runMethodParticipation" class="runConfigurationScope" hidden></p>
                 <p id="runConfigurationScope" class="runConfigurationScope"></p>
             </section>
             <label class="runModeSwitch"><span><b><span id="runModeName">Offline</span> simulation</b><small id="runModeDescription">Run at maximum speed without wall-clock synchronization.</small></span><input id="runOnlineMode" type="checkbox" role="switch" aria-label="Use online simulation mode"></label>
@@ -992,6 +998,8 @@
             </div>
             <div data-editor-panel="numerics" hidden>
                 <section>
+                    <!-- Under a whole-model method (docs/proposals/integrators.md) a node's substeps and integration are not used, unless it is stepped on its own. -->
+                    <p id="nodeMethodNote" class="builderHint" hidden>This model is run with <span id="nodeMethodName">Runge–Kutta 4</span> (<button id="nodeMethodRunSettings" class="helpFeedbackLink" type="button">Run settings ›</button>); substeps and the node's integration don't apply, unless it is a program of its own, which is stepped on its own.</p>
                     <label class="editorField"><span>Substeps per global step</span><input id="editNodeSubsteps" type="number" min="1" max="10000" step="1"></label>
                     <label class="editorField"><span>Integration</span><select id="editNodeIntegration">
                         <option value="explicit">Explicit Euler</option>
@@ -1564,6 +1572,7 @@
         <section id="executionSummaryCard" class="contextCard executionSummaryCard hidden" aria-label="Execution summary">
             <header><span><small>Execution summary</small><strong id="executionSummaryTitle">Automatic</strong></span><button id="closeExecutionSummary" type="button" aria-label="Close execution summary">×</button></header>
             <p id="executionSummaryReason"></p>
+            <p id="executionSummaryMethod"></p>
             <dl id="executionSummaryMetrics"></dl>
         </section>
         <section id="stabilityFindingsCard" class="contextCard stabilityFindingsCard hidden" aria-label="Numerical stability findings">

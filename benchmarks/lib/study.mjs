@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { trajectory } from './engine.mjs';
 import { errorMetrics } from './metrics.mjs';
 
-export const methodName = (variant = {}) => variant.integration === 'semiImplicit' ? 'semi-implicit Euler' : 'explicit Euler';
+export const methodName = (variant = {}) => {
+    if (variant.method === 'rungeKutta4') return `Runge–Kutta 4${variant.stepsPerGlobalStep > 1 ? ` (${variant.stepsPerGlobalStep} steps per global step)` : ''}`;
+    return variant.integration === 'semiImplicit' ? 'semi-implicit Euler' : 'explicit Euler';
+};
 
 // Runs the model with a variant and compares the chosen states with the reference at the run's own sample times.
 export async function runAndCompare(engine, modelPath, variant, run, stateIds, reference) {

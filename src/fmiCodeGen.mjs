@@ -14,6 +14,7 @@
 // doStep calls is a real runtime control stream, unlike a standalone program with no host
 // attached), instead of being baked to a constant.
 
+import { integrationMethod, methodOf } from './integrationMethods.mjs';
 import {
     buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, doubleLiteral,
     cppAlgebraicLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
@@ -142,6 +143,12 @@ function cppSettleBlocks(model, providerInfo) {
 export function generateFmiModel(document) {
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
+    // An FMU steps with Euler node by node; a whole-model method inside fmi2DoStep comes in a later stage
+    // (docs/proposals/integrators.md, Order of work), so an FMU is never made with numbers other than the run's.
+    const method = methodOf(runConfiguration);
+    if (method !== 'nodeByNode') {
+        throw new Error(`The run configuration's method is ${integrationMethod(method)?.name ?? `“${method}”`}, which FMU export cannot write yet; choose Euler, node by node in the Run settings to export an FMU.`);
+    }
     const model = buildModel(document);
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
     const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model);

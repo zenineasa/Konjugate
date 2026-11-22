@@ -129,6 +129,7 @@ add_executable(konjugateEngine
     src/dependencyGraph.cpp
     src/executionBackend.cpp
     src/executionPlan.cpp
+    src/wholeModelIntegration.cpp
     src/causalInference.cpp
     src/causalInferenceReport.cpp
     src/finiteDifferenceGradient.cpp
@@ -243,6 +244,7 @@ if(BUILD_TESTING)
         src/dependencyGraph.cpp
         src/executionBackend.cpp
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
         src/taskExecutor.cpp
@@ -267,6 +269,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_SOURCES}
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
@@ -302,6 +305,7 @@ if(BUILD_TESTING)
     add_executable(algebraicRelationshipTests
         tests/algebraicRelationshipTests.cpp
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
     )
@@ -314,6 +318,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_SOURCES}
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
@@ -337,6 +342,7 @@ if(BUILD_TESTING)
     add_executable(stabilityAnalysisTests
         tests/stabilityAnalysisTests.cpp
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/stabilityAnalysis.cpp
     )
     set_target_properties(stabilityAnalysisTests PROPERTIES
@@ -355,6 +361,7 @@ if(BUILD_TESTING)
     add_executable(duringRunStabilityMonitorTests
         tests/duringRunStabilityMonitorTests.cpp
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/stabilityAnalysis.cpp
         src/duringRunStabilityMonitor.cpp
     )
@@ -426,6 +433,7 @@ if(BUILD_TESTING)
         src/dependencyGraph.cpp
         src/executionBackend.cpp
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/finiteDifferenceGradient.cpp
         src/fittingObjective.cpp
         src/runMeasure.cpp
@@ -469,6 +477,7 @@ if(BUILD_TESTING)
         ${PROVIDER_PROTOCOL_SOURCES}
         ${PROVIDER_PROTOCOL_HEADERS}
         src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
         src/cppToolchain.cpp
         src/providerRuntime.cpp
         src/childProcess.cpp

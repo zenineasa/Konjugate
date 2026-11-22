@@ -1717,6 +1717,72 @@ export async function runInteractionTests(driver) {
     // clean. analysisHandle stays null when the add-on scenario is skipped.
     let analysisHandle = null;
 
+    await run('the Run dialog\'s Method runs Runge–Kutta 4, is saved only when chosen, and the result says so', async () => {
+        await freshExample();
+        const activeConfiguration = `(() => { const project = window.__debugProject.serialize(); return project.runConfigurations.find((item) => item.id === project.activeRunConfigurationId); })()`;
+        const before = await evaluate(window, activeConfiguration);
+        assert.equal('method' in before, false, 'The example names no method: Euler, node by node.');
+        // Euler, node by node, by default: no steps per global step, and the line under the choice says what it is.
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runMethod').value`), 'nodeByNode');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runMethod option')].map((option) => option.textContent)`), ['Euler, node by node', 'Runge–Kutta 4']);
+        assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /Each node steps on its own/);
+        assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), true);
+        // Runge–Kutta 4 with two steps per global step, saved with the model.
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'rungeKutta4';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            const steps = document.querySelector('#runStepsPerGlobalStep');
+            steps.value = '2';
+            steps.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), false);
+        assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /evaluated at four points in each step/);
+        assert.match(await evaluate(window, `document.querySelector('#runGlobalStepMeaning').textContent`), /takes 2 steps within it/);
+        await evaluate(window, `document.querySelector('#saveRunConfiguration').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runLaunchDialog').open`), false);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'rungeKutta4', stepsPerGlobalStep: 2 });
+        // A node's Numerics tab says its substeps do not apply, with the way to the run settings.
+        const batteryLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`;
+        await settle(window, 'validation');
+        await waitFor(window, `Boolean(${batteryLabel})`, 'The Battery module label was not on the canvas.');
+        await evaluate(window, `${batteryLabel}.click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-editor-tab="numerics"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
+        await evaluate(window, `document.querySelector('[data-editor-tab="numerics"]').click()`);
+        await waitFor(window, `!document.querySelector('#nodeMethodNote').hidden`, 'The Numerics tab did not say the model is run with Runge–Kutta 4.');
+        assert.match(await evaluate(window, `document.querySelector('#nodeMethodNote').textContent`), /run with Runge–Kutta 4 \(Run settings ›\); substeps and the node's integration don't apply/);
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        // Back to Euler: the run configuration is the one the example had, with neither field.
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runMethod').value`), 'rungeKutta4');
+        assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStep').value`), '2');
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'nodeByNode';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#saveRunConfiguration').click();
+        })()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), before);
+        // A run with Runge–Kutta 4: the execution summary names the method.
+        await openRunDialog(window);
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'rungeKutta4';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#runTargetTime').value = '2';
+            document.querySelector('#runOnlineMode').checked = false;
+            document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#startRun').click();
+        })()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The Runge–Kutta 4 run did not complete.', 30000);
+        await evaluate(window, `document.querySelector('#executionSummaryButton').click()`);
+        // The summary is drawn from the finished result, a moment after the run is shown as finished.
+        await waitFor(window, `document.querySelector('#executionSummaryMethod').textContent.startsWith('Method:')`, 'The execution summary did not name the method.');
+        assert.match(await evaluate(window, `document.querySelector('#executionSummaryMethod').textContent`), /^Method: Runge–Kutta 4 \(classical, four stages, fourth order\)\.$/);
+        await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
+    });
+
     await run('Run invokes the C++ simulation and displays state results', async () => {
         await freshExample();
         // Run is off while the model is validated again after an edit (the scenario before edits it), so it is waited for.

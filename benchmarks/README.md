@@ -8,9 +8,9 @@ The benchmarks measure what Konjugate does today, including where it is weak. Th
 
 ## What is being measured
 
-Konjugate integrates every node with fixed-step Euler: explicit Euler by default, or semi-implicit (symplectic) Euler for a node whose `numerics.integration` is `semiImplicit` (`engine/src/executionPlan.cpp`, `compileExecutionPlan` and `integrateNode`). A semi-implicit node updates its states one after another in the order it lists them, each from contributions evaluated with the states already updated. Both methods are first order. There is no Runge–Kutta, adaptive or stiff method yet.
+By default Konjugate integrates every node with fixed-step Euler: explicit Euler, or semi-implicit (symplectic) Euler for a node whose `numerics.integration` is `semiImplicit` (`engine/src/executionPlan.cpp`, `compileExecutionPlan` and `integrateNode`). A semi-implicit node updates its states one after another in the order it lists them, each from contributions evaluated with the states already updated. Both methods are first order. A run configuration may instead choose Runge–Kutta 4 (`method: "rungeKutta4"`, [Integrators](../docs/proposals/integrators.md)), the classical fourth-order method applied to the whole model at once: at each of its four stages every node is evaluated from every node's stage values, so the coupling between nodes is as accurate as the method. There is no adaptive or stiff method yet.
 
-Each global step, every node takes its own substeps (`numerics.substepsPerGlobalStep`) and reads every other node through a snapshot frozen at the start of the global step ([Parallel execution](../docs/parallelExecution.md)). A relationship's bindings to its own target node read that node's live state; bindings to any other node read the snapshot. Coupling between nodes is therefore first order in the global step, whatever the substeps, and a semi-implicit node's sequential update applies only to its own states, never across nodes.
+Under Euler, each global step, every node takes its own substeps (`numerics.substepsPerGlobalStep`) and reads every other node through a snapshot frozen at the start of the global step ([Parallel execution](../docs/parallelExecution.md)). A relationship's bindings to its own target node read that node's live state; bindings to any other node read the snapshot. Coupling between nodes is therefore first order in the global step, whatever the substeps, and a semi-implicit node's sequential update applies only to its own states, never across nodes.
 
 The problems were chosen to suit these methods: smooth, non-stiff systems where a first-order method converges and its behaviour can be measured cleanly. Stiff problems (Robertson's chemical kinetics, Van der Pol at large μ) and chaotic ones over long horizons (Lorenz) are left for when Konjugate has methods for them; with fixed-step Euler they would measure only that Euler is unsuitable, which is known.
 
@@ -23,8 +23,8 @@ The problems were chosen to suit these methods: smooth, non-stiff systems where 
 | `mechanical/harmonicOscillator` | An undamped mass on a spring, one node | Closed form | Trajectory error; energy over a long run, explicit against semi-implicit |
 | `mechanical/pendulum` | A pendulum released from rest at 2 rad, one node | Jacobi elliptic functions (exact); SciPy `ellipj` and `solve_ivp` | Trajectory error at large amplitude; energy over a long run |
 | `population/lotkaVolterra` | Predator and prey over about 50 cycles, as one node and as two | SciPy `solve_ivp` (DOP853, rtol = atol = 1e-12); the conserved quantity is analytic | Drift of the conserved quantity; trajectory error; one node against two |
-| `verification/convergenceOrder` | The thermal network, both RLC circuits, the oscillator and the pendulum, over six halvings of the step | The problems' own exact references | The observed order of accuracy of each method |
-| `coupling/graphSplit` | Three damped masses on springs, as one node and as three | Matrix exponential (exact) | The error the snapshot coupling adds, against the global step and the node substeps |
+| `verification/convergenceOrder` | The thermal network, both RLC circuits, the oscillator and the pendulum, over six halvings of the step, and Runge–Kutta 4 over halvings of its own | The problems' own exact references | The observed order of accuracy of each method |
+| `coupling/graphSplit` | Three damped masses on springs, as one node and as three | Matrix exponential (exact) | The error the snapshot coupling adds, against the global step and the node substeps; under Runge–Kutta 4, the split model equal to the one-node model and its error fourth order |
 
 Each problem directory holds:
 
@@ -33,7 +33,7 @@ Each problem directory holds:
 - The `.kjt` models, written by `node benchmarks/generateModels.mjs` through the same project encoder the app saves with. They open in Konjugate like any other project. The runner refuses to run if a committed model differs from what its `problem.mjs` builds, so a model and its reference cannot drift apart.
 - `reference.json`, where the problem has numerical reference data: the data, the method, the tolerances and the versions of Python, NumPy and SciPy that made it.
 
-A run may apply a variant to a committed model before running it, and only two kinds, recorded in every result row: the integration method of every node (`explicit` or `semiImplicit`) and the substeps of every node. Everything else is the committed model.
+A run may apply a variant to a committed model before running it, and only three kinds, recorded in every result row: the integration method of every node (`explicit` or `semiImplicit`), the substeps of every node, and the run's method (`rungeKutta4`, set on the run configuration the engine is given, not on the model). Everything else is the committed model.
 
 ## References
 
@@ -60,7 +60,7 @@ Every comparison is made at the run's output samples, which are the same for eve
 - **Relative error**: for each state, its largest absolute error divided by the reference's range over the run (max - min); the largest over the states. The range is used rather than the value, so a temperature near 300 K or a current passing through zero is judged against how much it actually moves.
 - **Conservation error**: the problem's conserved or balanced quantity, from Konjugate's own states. For the thermal network, the energy balance Σ C ΔT against heat supplied less heat lost, relative to heat supplied. For the RLC circuits, the source's work V q against energy stored plus energy dissipated, relative to the source's work. For the oscillator and pendulum, the largest drift of the energy relative to its initial value (for the pendulum, relative to the energy above the bottom of the swing, E(0) + g L). For Lotka–Volterra, the largest drift of V = δx - γ ln x + βy - α ln y relative to V(0) - V*, the orbit's level above the equilibrium.
 - **Steady-state error**: the largest difference between the final state of a long run and the exact equilibrium A x* = -b.
-- **Observed order**: p in error ≈ C hᵖ, from each halving of the step (log₂ of the error ratio) and as the least-squares slope of log error against log h. Euler's methods should show p ≈ 1.
+- **Observed order**: p in error ≈ C hᵖ, from each halving of the step (log₂ of the error ratio) and as the least-squares slope of log error against log h. Euler's methods should show p ≈ 1, Runge–Kutta 4 p ≈ 4. Runge–Kutta 4 is judged over step sizes of its own (`rungeKutta4GlobalSteps` in `verification/convergenceOrder/benchmark.json`), chosen where its error is well above rounding and its step inside its stability region: at Euler's steps its error would reach rounding within a halving or two.
 - **Coupling error**: for the split model, its difference from the one-node model run at the same effective step (the global step divided by the substeps), relative to range.
 - **Work**: the global steps, the node substeps executed and the contributions evaluated, summed over nodes, as the engine reports them (`execution.nodeMetrics`).
 
@@ -71,8 +71,8 @@ Every check is judged against a threshold in its problem's `benchmark.json`, so 
 - An error at a configured step has a ceiling about 25 % above its observed value: a regression guard, not a claim that the error is small.
 - A known weakness of explicit Euler (the growth of an undamped oscillator's energy, the drift of Lotka–Volterra's conserved quantity) has a band on both sides of its observed value, so a change to the integrator that alters it in either direction is noticed and the benchmark updated knowingly.
 - Quantities that should be at rounding level (an energy balance that explicit Euler keeps exactly, a steady state it reaches exactly, the agreement of two exact references) have absolute limits a few orders above rounding.
-- Identities (a split model with one substep against one node, semi-implicit against explicit integration for one-state nodes) must hold exactly, or to 1e-12.
-- Observed orders must lie within 0.95 to 1.10 (fitted over all six steps) and 0.97 to 1.03 (from the finest halving).
+- Identities (a split model with one substep against one node, semi-implicit against explicit integration for one-state nodes, and under Runge–Kutta 4 the split model against one node at any step) must hold exactly, or to 1e-12.
+- Euler's observed orders must lie within 0.95 to 1.10 (fitted over all six steps) and 0.97 to 1.03 (from the finest halving); Runge–Kutta 4's within 3.9 to 4.1, both fitted and from the finest halving.
 
 When a deliberate change to the engine moves a result, the threshold is updated with the change, and the reason recorded in its commit.
 

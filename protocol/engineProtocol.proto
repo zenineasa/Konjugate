@@ -258,6 +258,10 @@ message ResultCheckpoint {
     string solver_kind = 4;
     uint32 solver_version = 5;
     repeated NodeProviderCheckpoint provider_states = 6;
+    // The hidden state the method (solver_kind) needs to continue from this checkpoint to the bit, as a small versioned record
+    // (docs/proposals/integrators.md, Checkpoints and restart): empty, and so absent, for every method that has none --
+    // explicitEuler and rungeKutta4 among them. A reader that does not know it skips it.
+    bytes solver_state = 7;
 }
 
 // docs/proposals/numericalStabilityDiagnostics.md's during-run phase: node_id/state_id are raw

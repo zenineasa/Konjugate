@@ -498,6 +498,111 @@ try {
         compareRowsAgainstEngine(parseCsv(await readFile(csvPath, 'utf8')), label, reference, stateOrder);
     }
 
+    // --- 4. Runge–Kutta 4, the whole model at once (docs/proposals/integrators.md), two steps per global step ---
+    const rungeKutta4 = { method: 'rungeKutta4', stepsPerGlobalStep: 2 };
+    const exportAndCompare = async (doc, reference, stateOrder, label, kind, parallelism = 'serial', options = {}) => {
+        const base = join(directory, `rk4${variantIndex}`);
+        variantIndex += 1;
+        const csvPath = `${base}.csv`;
+        const runArgs = ['--target-time', String(targetTime), '--output', csvPath];
+        if (kind === 'cpp') {
+            const binaryPath = `${base}${process.platform === 'win32' ? '.exe' : ''}`;
+            await writeFile(`${base}.cpp`, generateStandaloneProgram(doc, 'cpp', { parallelism }));
+            const compile = await execute(options.runViaMpi ? (process.env.MPICXX || 'mpic++') : cxx, [...(options.compilerArgs ?? []), '-std=c++20', '-O2', `${base}.cpp`, '-o', binaryPath]);
+            assert.equal(compile.code, 0, `The ${label} program must compile.`);
+            const run = options.runViaMpi
+                ? await execute(process.env.MPIRUN || 'mpirun', ['--oversubscribe', '-n', String(options.runViaMpi), binaryPath, ...runArgs])
+                : await execute(binaryPath, runArgs);
+            assert.equal(run.code, 0, `The ${label} program must run.`);
+        } else {
+            await writeFile(`${base}.py`, generateStandaloneProgram(doc, 'python', { parallelism }));
+            const run = options.runViaMpi
+                ? await execute(process.env.MPIRUN || 'mpirun', ['--oversubscribe', '-n', String(options.runViaMpi), python, `${base}.py`, ...runArgs])
+                : await execute(python, [`${base}.py`, ...runArgs]);
+            assert.equal(run.code, 0, `The ${label} program must run.`);
+        }
+        compareRowsAgainstEngine(parseCsv(await readFile(csvPath, 'utf8')), label, reference, stateOrder);
+    };
+    const rungeKutta4Document = { ...structuredClone(document), runConfigurations: [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }] };
+    await writeFile(configurationPath, JSON.stringify({ name: 'fidelity', targetTime, globalTimeStep, outputInterval, ...rungeKutta4 }));
+    assert.equal((await execute(executable, ['run', inputPath, '--configuration', configurationPath, '--output', enginePath])).code, 0, 'The engine must run the fixture with Runge–Kutta 4.');
+    const rungeKutta4Result = decodeResultFile(await readFile(enginePath));
+    assert.equal(rungeKutta4Result.integration?.method, 'rungeKutta4');
+    const mpiAvailable = await commandExists(process.env.MPICXX || 'mpic++') && await commandExists(process.env.MPIRUN || 'mpirun');
+    await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, serial)', 'cpp');
+    await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, openmp)', 'cpp', 'openmp', { compilerArgs: openmpCompilerArgs });
+    await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, stdThread)', 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
+    if (mpiAvailable) await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, mpi)', 'cpp', 'mpi', { runViaMpi: 5 });
+    await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'Python (Runge–Kutta 4)', 'python');
+    if (await commandExists(process.env.MPIRUN || 'mpirun') && (await execute(python, ['-c', 'import mpi4py'])).code === 0) {
+        await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'Python (Runge–Kutta 4, mpi)', 'python', 'mpi', { runViaMpi: 5 });
+    }
+    // A program adding a rate, held through the step as the engine holds it, in each language.
+    const feedSource = (kind) => (kind === 'cpp' ? `#include <konjugate/relationshipProvider.hpp>
+#include <memory>
+
+class Feed final : public konjugate::sdk::v1::RelationshipProvider {
+public:
+    konjugate::sdk::v1::RelationshipDescription describe() const override {
+        return {"fidelity.feed", "Feed", {{"y", "Y", ""}}, {"rate", "Rate", ""}};
+    }
+    void evaluate(const konjugate::sdk::v1::EvaluationContext& context, konjugate::sdk::v1::OutputCollector& output) override {
+        output.addGradient(2.0 * context.inputs.at("y") + context.simulationTime);
+    }
+};
+
+std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() {
+    return std::make_unique<Feed>();
+}
+` : `from konjugate import RelationshipDescription, RelationshipProvider, ScalarPort
+
+
+class Feed(RelationshipProvider):
+    def describe(self):
+        return RelationshipDescription("fidelity.feed", "Feed", [ScalarPort("y", "Y", "")], ScalarPort("rate", "Rate", ""))
+
+    def evaluate(self, context, inputs, outputs):
+        outputs.add_gradient(2.0 * inputs["y"] + context.simulation_time)
+`);
+    const feedDocument = (kind) => ({
+        format: 'konjugate', version: 1, metadata: { projectName: 'Runge–Kutta 4 programs' },
+        nodes: [
+            { id: 1, name: 'Source', states: [{ id: 11, name: 'Y', symbol: 'y', initialValue: 1, unit: '' }], sourceTerms: [{
+                id: 101, state: 'y', expression: '-0.5 y', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { stateId: 11 }, mathJson: ['Multiply', '-0.5', 'y'] }
+            }] },
+            { id: 2, name: 'Sink', states: [{ id: 21, name: 'Z', symbol: 'z', initialValue: 0, unit: '' }], sourceTerms: [] }
+        ],
+        edges: [{
+            id: 31, name: 'Feed', source: { nodeId: 1, stateId: 11 }, target: { nodeId: 2, stateId: 21 }, directionality: 'directed', parameters: [], equation: '',
+            implementation: { kind, providerApiVersion: 1, source: feedSource(kind), bindings: [{ key: 'y', kind: 'state', nodeId: 1, stateId: 11 }], output: { role: 'target', key: 'rate', stateId: 21 } }
+        }],
+        exportDefaultTargetTime: targetTime,
+        runConfigurations: [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }],
+        activeRunConfigurationId: 900
+    });
+    for (const kind of ['cpp', 'python']) {
+        {
+            const feed = feedDocument(kind);
+            const path = join(directory, `feed${kind}.kjt`);
+            const resultPath = join(directory, `feed${kind}.bin`);
+            await writeFile(path, await encodeProjectFile(JSON.stringify(feed)));
+            const feedConfigurationPath = join(directory, `feed${kind}.json`);
+            await writeFile(feedConfigurationPath, JSON.stringify({
+                name: 'feed', targetTime, globalTimeStep, outputInterval, ...rungeKutta4,
+                providers: { cpp: { sdkPath: join(import.meta.dirname, '..', '..', 'engine') }, python: { sdkPath: join(import.meta.dirname, '..', '..', 'engine', 'sdk', 'python') } }
+            }));
+            assert.equal((await execute(executable, ['run', path, '--configuration', feedConfigurationPath, '--output', resultPath])).code, 0, 'The engine must run the program feed.');
+            const reference = decodeResultFile(await readFile(resultPath));
+            assert.equal(reference.integration.heldTerms.length, 1);
+            await exportAndCompare(feed, reference, [11, 21], `${kind === 'cpp' ? 'C++' : 'Python'} (Runge–Kutta 4, held program)`, kind);
+        }
+    }
+    // A node that is a program of its own is refused by name under a whole-model method, for now.
+    const nodeProgram = providerAlgebraicDocument('python');
+    nodeProgram.runConfigurations = [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }];
+    nodeProgram.activeRunConfigurationId = 900;
+    assert.throws(() => generateStandaloneProgram(nodeProgram, 'python'), /Node "Node provider" is a program of its own, which code export cannot write under Runge–Kutta 4 yet/);
+
     assert.ok(comparisons >= 5 * expectedTimes.length * 3, 'Expected at least 5 states compared at every sampled time across several variants.');
     console.log(`✓ code export fidelity: every generated variant matched the real engine across ${comparisons} state/time comparisons.`);
 } finally {

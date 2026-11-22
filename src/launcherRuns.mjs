@@ -158,7 +158,12 @@ export async function ensureBaseline(workspace, runTime, notify, run) {
     workspace.baseline = null;
     const { document, contentText } = workspace.imported;
     const configuration = document.runConfigurations[0];
-    const config = { name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval };
+    // With the model's own method and steps per global step, when it names them (docs/proposals/integrators.md).
+    const config = {
+        name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval,
+        ...(configuration.method !== undefined ? { method: configuration.method } : {}),
+        ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {})
+    };
     notify({ stage: 'baseline', message: 'Running the baseline…' });
     const entry = { runTime, promise: null };
     entry.promise = (async () => {

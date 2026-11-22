@@ -3,6 +3,7 @@
 #pragma once
 
 #include "executionPlan.hpp"
+#include <complex>
 #include <optional>
 
 namespace konjugate {
@@ -110,6 +111,44 @@ struct NodeStabilityAssessment {
 // state vector). Like those a node's own algebraic tasks set, they are not stepped, so they are left out of the
 // Jacobian: a node a toolbox fills with hundreds of them would otherwise make an eigenproblem hundreds wide of
 // nothing but zero rows.
+// A Runge–Kutta method's stability function R(z) = 1 + z b^T (I - z A)^{-1} 1, from its tableau (an explicit one: A strictly lower
+// triangular, so the solve is a forward substitution). For y' = lambda y a step of h multiplies y by R(h lambda).
+std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z);
+
+// The largest step h for which |R(s lambda)| <= 1 for every s in (0, h], for Runge–Kutta 4: scanned along the ray to the first crossing,
+// since the method's stability region is not a disc. Zero when no step is stable (a mode that grows, Re(lambda) > 0); infinite for
+// lambda = 0.
+double rungeKutta4LargestStableStep(std::complex<double> eigenvalue);
+
+// The stability analysis under a whole-model method (docs/proposals/integrators.md, Stability analysis): the eigenvalues of the
+// whole model's Jacobian -- every integrated state against every other, the coupling between nodes included, which a node's own
+// Jacobian leaves out -- judged by the method's stability function at its step, globalTimeStep / stepsPerGlobalStep. Updates are held
+// through a step's stages, so they are constants here. Above `denseLimit` integrated states each node's own Jacobian is judged
+// instead (perNode), its neighbours held. Returns std::nullopt when the model has no integrated state, or any term written as a
+// program (opaque until run, as for assessNodeStability).
+struct WholeModelStabilityAssessment {
+    std::size_t stateCount = 0;
+    bool perNode = false;
+    std::size_t stepsPerGlobalStep = 1;
+    double stepSize = 0;
+    // The largest |R(h lambda)| over the eigenvalues; stable when it is at most 1 (to a tolerance for the differences' noise).
+    double maxAmplificationFactor = 0;
+    bool stable = true;
+    std::optional<double> stiffnessRatio;
+    // The largest stable step over every eigenvalue, and the steps per global step that keep within it; unset when stable, or
+    // when unconditionallyUnstable (a mode that grows whatever the step).
+    std::optional<double> largestStableStep;
+    std::optional<std::size_t> requiredStepsPerGlobalStep;
+    bool unconditionallyUnstable = false;
+    // The state the dominant mode is concentrated in, and its node.
+    EntityId dominantStateId = 0;
+    EntityId dominantNodeId = 0;
+};
+
+std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
+    const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep,
+    std::size_t denseLimit = 400);
+
 std::optional<NodeStabilityAssessment> assessNodeStability(
     const NodeExecutionPlan& node,
     const StateValues& synchronizationSnapshot,

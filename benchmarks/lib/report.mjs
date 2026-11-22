@@ -141,7 +141,7 @@ for (const figure of document.querySelectorAll('figure.chart')) {
     cross.setAttribute('stroke', 'var(--axis)'); cross.setAttribute('stroke-width', '1'); cross.style.display = 'none';
     svg.appendChild(cross);
     const dots = data.series.map(() => { const dot = document.createElementNS(NS, 'circle'); dot.setAttribute('r', '4'); dot.setAttribute('stroke', 'var(--surface-1)'); dot.setAttribute('stroke-width', '2'); dot.style.display = 'none'; svg.appendChild(dot); return dot; });
-    const colours = { reference: 'var(--series-1)', explicit: 'var(--series-2)', semiImplicit: 'var(--series-3)', extra: 'var(--series-4)', slot1: 'var(--series-1)', slot2: 'var(--series-2)', slot3: 'var(--series-3)', slot4: 'var(--series-4)', guide: 'var(--text-muted)' };
+    const colours = { reference: 'var(--series-1)', explicit: 'var(--series-2)', semiImplicit: 'var(--series-3)', extra: 'var(--series-4)', rungeKutta4: 'var(--series-4)', slot1: 'var(--series-1)', slot2: 'var(--series-2)', slot3: 'var(--series-3)', slot4: 'var(--series-4)', guide: 'var(--text-muted)' };
     const format = (value) => { if (!isFinite(value)) return String(value); const a = Math.abs(value); return a !== 0 && (a >= 1e5 || a < 1e-3) ? value.toExponential(3) : String(Number(value.toPrecision(5))); };
     function hide() { cross.style.display = 'none'; dots.forEach((dot) => { dot.style.display = 'none'; }); tip.hidden = true; }
     function show(event) {
@@ -219,7 +219,7 @@ export function renderReport({ summary, problems, timings }) {
     <button class="theme" type="button">Light / dark</button>
     <h1>Konjugate benchmark report</h1>
     <p>Konjugate ${escapeXml(run.konjugateVersion)} · engine ${escapeXml(run.engineVersion)} · commit <code>${escapeXml(run.gitCommit)}</code>${run.workingTreeChanges ? ' (with uncommitted changes)' : ''} · <code>--${escapeXml(run.mode)}</code> · ${escapeXml(run.startedAt)}</p>
-    <p class="lede">Konjugate is evaluated against established numerical and engineering benchmarks, with reproducible reference comparisons, conservation checks and performance measurements. Each problem below is run headless by the native engine from a committed model and compared with an analytic solution or an independent high-accuracy numerical reference. Konjugate integrates with fixed-step explicit or semi-implicit Euler, both first order; the results show where that is accurate and where it is not. How the numbers are made, and how to reproduce them, is in <code>benchmarks/README.md</code>.</p>
+    <p class="lede">Konjugate is evaluated against established numerical and engineering benchmarks, with reproducible reference comparisons, conservation checks and performance measurements. Each problem below is run headless by the native engine from a committed model and compared with an analytic solution or an independent high-accuracy numerical reference. Konjugate integrates with fixed-step explicit or semi-implicit Euler node by node, both first order, or with Runge–Kutta 4 applied to the whole model at once, fourth order and as accurate across the coupling between nodes as within them; the results show where each is accurate and where it is not. How the numbers are made, and how to reproduce them, is in <code>benchmarks/README.md</code>.</p>
     <div class="tiles">
         <div class="tile"><div class="value">${passed} / ${checks.length}</div><div class="label">checks within their thresholds</div></div>
         <div class="tile"><div class="value">${problems.length}</div><div class="label">problems</div></div>

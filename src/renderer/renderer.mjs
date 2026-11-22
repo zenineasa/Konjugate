@@ -18,6 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
+import { integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -505,11 +506,17 @@ function hydrateProjectDocument(document) {
             name: configuration.name || 'Untitled',
             globalTimeStep: Number(configuration.globalTimeStep) || 0.01,
             outputInterval: Number(configuration.outputInterval) || 0.1,
-            execution: normalizeExecutionConfiguration(configuration.execution)
+            execution: normalizeExecutionConfiguration(configuration.execution),
+            // The integration method (docs/proposals/integrators.md), kept as the file says it: absent, Euler node by node.
+            ...(configuration.method !== undefined ? { method: configuration.method } : {}),
+            ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {})
         }))
         : [defaultRunConfiguration()];
     return {
         metadata: { units: document.metadata?.units || 'SI' },
+        // Features the model needs that change its numbers, which an engine that does not know one refuses by name (see
+        // checkRequiredFeatures in engine/src/wholeModelIntegration.cpp). Kept as the file says them; none is written yet.
+        requires: Array.isArray(document.requires) ? [...document.requires] : [],
         runConfigurations,
         activeRunConfigurationId: runConfigurations.some((item) => item.id === document.activeRunConfigurationId)
             ? document.activeRunConfigurationId : runConfigurations[0].id,
@@ -3158,6 +3165,9 @@ function renderNodeEditorModel(node) {
     $('#editNodeIntegration').value = definition.integration ?? 'explicit';
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#nodeEffectiveTimeStep').textContent = `${(configuration.globalTimeStep / definition.substepsPerGlobalStep).toPrecision(6)} s`;
+    const wholeModelMethod = methodOf(configuration) !== 'nodeByNode' ? integrationMethod(methodOf(configuration)) : null;
+    $('#nodeMethodNote').hidden = !wholeModelMethod;
+    if (wholeModelMethod) $('#nodeMethodName').textContent = wholeModelMethod.name;
     const stateContainer = $('#nodeEditorStates');
     stateContainer.replaceChildren();
     if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
@@ -6572,6 +6582,20 @@ function renderExecutionSummary() {
     $('#executionSummaryBackend').textContent = backendName;
     $('#executionSummaryTitle').textContent = `${backendName} · ${execution.workerThreads} worker${execution.workerThreads === 1 ? '' : 's'}`;
     $('#executionSummaryReason').textContent = reasonDescriptions[execution.selectionReason] ?? 'The engine selected this execution strategy for the current model.';
+    // The method the run integrated with, and what it stepped on its own or held (a result without one ran Euler, node by node).
+    const integration = activeResult.integration;
+    const methodLines = [`Method: ${integrationMethod(integration?.method)?.summaryName ?? integration?.method ?? 'Euler, node by node'}${
+        integration?.stepsPerGlobalStep > 1 ? `, ${integration.stepsPerGlobalStep} steps per global step` : ''}.`];
+    const nodeName = (nodeId) => model.nodes.find((node) => node.id === nodeId)?.name ?? `Node ${nodeId}`;
+    if (integration?.steppedNodeIds?.length) {
+        methodLines.push(`${integration.steppedNodeIds.length === 1 ? '1 node' : `${integration.steppedNodeIds.length} nodes`} stepped on their own, coupled to the rest at first order: ${nameList(integration.steppedNodeIds.map(nodeName))}.`);
+    }
+    if (integration?.heldTerms?.length) {
+        const termName = ({ sourceId }) => model.relationships.find((edge) => edge.id === sourceId)?.name
+            ?? model.nodes.find((node) => node.sourceTerms?.some((term) => term.id === sourceId))?.name ?? `Term ${sourceId}`;
+        methodLines.push(`${integration.heldTerms.length === 1 ? '1 program' : `${integration.heldTerms.length} programs`} evaluated once a step and held, coupled at first order: ${nameList(integration.heldTerms.map(termName))}.`);
+    }
+    $('#executionSummaryMethod').textContent = methodLines.join(' ');
     const communication = execution.partitionCommunication ?? {};
     const selected = partitionPlan.selected ?? partitionPlan.greedy ?? {};
     const algorithmNames = { metisKway: 'METIS k-way', communicationAwareGreedy: 'Built-in greedy' };
@@ -8481,8 +8505,13 @@ function activeRunConfiguration() {
 function fillRunConfigurationFields({ continuing }) {
     const saved = activeRunConfiguration();
     const source = continuing && activeResult
-        ? { ...saved, globalTimeStep: activeResult.globalTimeStep ?? saved.globalTimeStep, outputInterval: activeResult.outputInterval ?? saved.outputInterval }
+        ? withIntegrationMethod({ ...saved, globalTimeStep: activeResult.globalTimeStep ?? saved.globalTimeStep, outputInterval: activeResult.outputInterval ?? saved.outputInterval },
+            // A continued or forked run opens with the method its result ran with.
+            activeResult.integration?.method ?? 'nodeByNode', activeResult.integration?.stepsPerGlobalStep ?? 1)
         : saved;
+    $('#runMethod').value = integrationMethod(methodOf(source)) ? methodOf(source) : 'nodeByNode';
+    $('#runStepsPerGlobalStep').value = stepsPerGlobalStepOf(source);
+    updateRunMethodFields();
     $('#runGlobalTimeStep').value = source.globalTimeStep;
     $('#runOutputInterval').value = source.outputInterval;
     const execution = normalizeExecutionConfiguration(source.execution);
@@ -8502,10 +8531,41 @@ function fillRunConfigurationFields({ continuing }) {
     return source;
 }
 
+// The Run dialog's Method (docs/proposals/integrators.md): its line under the choice, Steps per global step for Runge–Kutta 4,
+// what the global step means for it, and, under a whole-model method, what will be stepped on its own or held, by name.
+for (const method of integrationMethods) $('#runMethod').append(new Option(method.name, method.id));
+function updateRunMethodFields() {
+    const method = integrationMethod($('#runMethod').value) ?? integrationMethods[0];
+    $('#runMethodDescription').textContent = method.description;
+    $('#runStepsPerGlobalStepField').hidden = !method.stepsPerGlobalStep;
+    $('#runStepsPerGlobalStep').disabled = !method.stepsPerGlobalStep;
+    const steps = Number($('#runStepsPerGlobalStep').value);
+    $('#runGlobalStepMeaning').textContent = method.stepsPerGlobalStep
+        ? `Updates, controls and samples happen at every global step; the method takes ${steps > 1 ? `${steps} steps` : 'one step'} within it, every node together.`
+        : 'Updates, controls and samples happen at every global step; each node takes its own substeps within it (Numerics tab).';
+    const participation = method.id === 'nodeByNode' ? { stepped: [], programs: [] } : stageParticipation(serializeProjectDocument());
+    const lines = [];
+    if (participation.stepped.length) {
+        lines.push(`Stepped on their own and read by the rest as they were at each step's start, so coupled at first order: ${nameList(participation.stepped)}.`);
+    }
+    if (participation.programs.length) {
+        lines.push(`Programs are evaluated once a step and held through it, so coupled at first order: ${nameList(participation.programs)}.`);
+    }
+    $('#runMethodParticipation').textContent = lines.join(' ');
+    $('#runMethodParticipation').hidden = !lines.length;
+}
+$('#runMethod').addEventListener('change', updateRunMethodFields);
+$('#runStepsPerGlobalStep').addEventListener('input', updateRunMethodFields);
+
+$('#nodeMethodRunSettings').addEventListener('click', () => openRunDialog());
+
 function readRunConfigurationFields() {
     return {
         globalTimeStep: Number($('#runGlobalTimeStep').value),
         outputInterval: Number($('#runOutputInterval').value),
+        // Always named here, so a continued run's override says Euler too; saving writes it only when it is not the default.
+        method: $('#runMethod').value,
+        stepsPerGlobalStep: Number($('#runStepsPerGlobalStep').value),
         execution: {
             backend: $('#runExecutionBackend').value,
             partitionAlgorithm: $('#runPartitionAlgorithm').value,
@@ -8522,7 +8582,7 @@ function readRunConfigurationFields() {
 // changed. Only ever used for an ordinary run: a result on screen keeps the model locked.
 function saveRunConfigurationFields(values) {
     const before = structuredClone(activeRunConfiguration());
-    const after = { ...before, ...structuredClone(values) };
+    const after = withIntegrationMethod({ ...before, ...structuredClone(values) }, values.method, values.stepsPerGlobalStep);
     if (JSON.stringify(before) === JSON.stringify(after)) return false;
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
@@ -9345,6 +9405,7 @@ function serializeProjectDocument() {
         format: 'konjugate',
         version: 1,
         metadata: { units: model.metadata.units },
+        ...(model.requires?.length ? { requires: [...model.requires] } : {}),
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
         ...serializedSharedParameters(visibleNodeIds),
@@ -9489,6 +9550,7 @@ async function loadProjectDocument(document, {
     hideCards();
     componentLibraryPlacementCount = 0;
     model.metadata = nextModel.metadata;
+    model.requires = nextModel.requires;
     model.runConfigurations = nextModel.runConfigurations;
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
@@ -9551,6 +9613,7 @@ function replaceModelContents(document) {
     const nextModel = hydrateProjectDocument(document);
     clearRenderedModel();
     model.metadata = nextModel.metadata;
+    model.requires = nextModel.requires;
     model.runConfigurations = nextModel.runConfigurations;
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);

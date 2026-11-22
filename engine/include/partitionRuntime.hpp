@@ -3,6 +3,7 @@
 #pragma once
 
 #include "executionPlan.hpp"
+#include "wholeModelIntegration.hpp"
 #include "taskExecutor.hpp"
 #include <chrono>
 #include <cstddef>
@@ -36,6 +37,27 @@ struct PartitionResultMessage {
     std::size_t sourcePartition = 0;
     std::uint64_t boundaryWaitNanoseconds = 0;
     std::vector<PartitionNodeResult> nodes;
+};
+
+// A partition's answer for one stage of a whole-model step: each of its nodes' derivatives at the stage.
+struct PartitionStageMessage {
+    std::size_t version = 1;
+    std::size_t synchronizationIndex = 0;
+    std::size_t sourcePartition = 0;
+    std::uint64_t boundaryWaitNanoseconds = 0;
+    std::vector<std::pair<std::size_t, NodeStageResult>> nodes;
+};
+
+// What every partition is told for one stage of a whole-model step (docs/proposals/integrators.md): the stage's time and step,
+// whether it is the step's first stage (where held programs are evaluated), and where the plan and the held values live. Each
+// partition writes only its own nodes' entries of `held`.
+struct StageRequest {
+    const WholeModelPlan* wholeModel = nullptr;
+    std::vector<std::vector<EvaluatedContribution>>* held = nullptr;
+    double stageTime = 0;
+    double stepSize = 0;
+    bool evaluateHeld = false;
+    double heldStepSize = 0;
 };
 
 class PartitionTransport {
@@ -78,6 +100,16 @@ public:
                                                ProviderEvaluator* providerEvaluator = nullptr,
                                                std::vector<ParameterSchedule> activeSchedules = {},
                                                double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN());
+
+    // One stage of a whole-model step: waits for this stage's boundary message (its stage values), then evaluates each of the
+    // partition's nodes that takes part in stages at those values.
+    std::future<PartitionStageMessage> submitStage(PartitionTransport& transport,
+                                                   std::size_t synchronizationIndex,
+                                                   EntityValues parameterValues,
+                                                   std::vector<ParameterSchedule> activeSchedules,
+                                                   StageRequest request,
+                                                   std::chrono::milliseconds receiveTimeout,
+                                                   ProviderEvaluator* providerEvaluator);
 
 private:
     std::size_t partition_;

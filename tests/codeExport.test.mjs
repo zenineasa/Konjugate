@@ -520,3 +520,39 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     legacy.nodes[0].sourceTerms[0].setsValue = true;
     assert.equal(generateStandaloneProgram(settledConstant, 'python'), generateStandaloneProgram(legacy, 'python'), 'A settling Update exports as a setsValue term does.');
 });
+
+// Runge–Kutta 4 (docs/proposals/integrators.md): the run configuration's method decides how the exported program steps.
+test('the C++ export pastes the engine\'s own Runge–Kutta 4 header, byte for byte', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { rungeKutta4Cpp } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/rungeKutta4.hpp', import.meta.url), 'utf8');
+    assert.equal(rungeKutta4Cpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/rungeKutta4.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'rungeKutta4';
+    document.runConfigurations[0].stepsPerGlobalStep = 3;
+    const source = generateStandaloneProgram(document, 'cpp');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '')), 'The header must be pasted in, less its #pragma once.');
+    assert.match(source, /Reproduces one Runge–Kutta 4 run/);
+    assert.match(source, /constexpr std::size_t stepsPerGlobalStep = 3;/);
+    assert.match(source, /rungeKutta4GlobalStep\(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage\)/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /def runge_kutta_4_global_step\(/);
+    assert.match(python, /steps_per_global_step = 3/);
+    // Euler node by node, named or not, writes the program it always wrote.
+    const euler = singleNodeSourceTermModel();
+    const named = singleNodeSourceTermModel();
+    named.runConfigurations[0].method = 'nodeByNode';
+    assert.equal(generateStandaloneProgram(named, 'cpp'), generateStandaloneProgram(euler, 'cpp'));
+    assert.doesNotMatch(generateStandaloneProgram(euler, 'cpp'), /rungeKutta4GlobalStep/);
+});
+
+test('under Runge–Kutta 4 a node\'s integration does not apply, so a semi-implicit node exports; an unknown method is refused by name', () => {
+    const semi = singleNodeSourceTermModel();
+    semi.nodes[0].numerics = { substepsPerGlobalStep: 4, integration: 'semiImplicit' };
+    semi.runConfigurations[0].method = 'rungeKutta4';
+    assert.match(generateStandaloneProgram(semi, 'cpp'), /rungeKutta4GlobalStep/);
+    const unknown = singleNodeSourceTermModel();
+    unknown.runConfigurations[0].method = 'dormandPrince54';
+    assert.throws(() => generateStandaloneProgram(unknown, 'python'), /method “dormandPrince54” is not one this version of Konjugate can export/);
+});

@@ -280,6 +280,14 @@ public:
     virtual void requestNodeRestore(const NodeProviderTask&, std::span<const std::byte>) {
         throw std::runtime_error("This provider evaluator does not support computational-node restore.");
     }
+    // Whether the program behind a provider process key (providerProcessKey) can be evaluated at every stage of a whole-model method:
+    // its outputs depend only on its inputs, parameters and time, and evaluating it again changes nothing. A version 1 program cannot say
+    // so, and is held (docs/proposals/integrators.md, Programs); this is where a program written against a version 2 SDK, whose purity
+    // follows from its shape, will answer yes (docs/proposals/programSdkV2.md). Only a whole-model method asks.
+    virtual bool declaredPure(const std::string& processKey) const {
+        static_cast<void>(processKey);
+        return false;
+    }
 };
 
 struct NodeExecutionPlan {

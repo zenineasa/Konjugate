@@ -337,6 +337,17 @@ FittingTrialScore scoreFittingTrial(const FittingProblem& problem, const Fitting
     configuration.put("targetTime", length.targetTime);
     configuration.put("globalTimeStep", length.timeStep);
     configuration.put("outputInterval", length.timeStep);
+    // Tuning runs with the model's own method (docs/proposals/integrators.md, decision 8): the active run configuration's method
+    // and steps per global step, when it names them. A model that names none runs Euler node by node, as it always has.
+    if (const auto configurations = document.get_child_optional("runConfigurations")) {
+        const auto activeId = document.get<std::string>("activeRunConfigurationId", "");
+        for (const auto& entry : *configurations) {
+            if (entry.second.get<std::string>("id", "") != activeId) continue;
+            for (const auto* key : {"method", "stepsPerGlobalStep"}) {
+                if (const auto value = entry.second.get_optional<std::string>(key)) configuration.put(key, *value);
+            }
+        }
+    }
     runSimulation(document, configuration, scratchOutputPath);
     const auto samples = readSimulationSamples(scratchOutputPath);
     const TrialRun run(samples, problem, parameterValues);

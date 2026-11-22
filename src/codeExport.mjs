@@ -6,8 +6,10 @@
 // supported subset and docs/projectSchema.md for the document shape this reads.
 //
 // Fidelity contract, confirmed against engine/src/executionPlan.cpp and
-// engine/src/simulationRunner.cpp (the only integrator that exists is fixed-step, multi-rate
-// Explicit Euler -- there is no RK4/implicit solver to consider):
+// engine/src/simulationRunner.cpp, for Euler node by node (the default). Under Runge–Kutta 4 (the run configuration's method,
+// docs/proposals/integrators.md) the program instead steps the whole model at once, stage by stage, through the engine's own
+// stepping code (engine/include/konjugate/integrators/rungeKutta4.hpp, pasted in, or its Python port), every node reading every
+// node's stage values; a term written as a program is evaluated once per global step and held, as the engine holds it:
 //   - each global step takes one frozen copy of the whole state vector ("snapshot"); a node's own
 //     states evolve through a local, substep-updated working copy SEEDED FROM that snapshot, while
 //     a binding into another node's state always reads the frozen snapshot value, for every
@@ -23,6 +25,8 @@
 import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
+import { integrationMethod, methodOf, stepsPerGlobalStepOf } from './integrationMethods.mjs';
+import { rungeKutta4Cpp, rungeKutta4Python } from './integratorSources.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -191,7 +195,8 @@ export function emitExpression(node, symbols, operators) {
 // ---- graph build: mirrors engine/src/executionPlan.cpp's compileExecutionPlan exactly enough to
 // reproduce its numerics, without needing any of its parallel-execution/checkpoint machinery. ----
 
-export function buildModel(sourceDocument) {
+// `options.wholeModel`: the model is run by a whole-model method, under which a node's integration does not apply.
+export function buildModel(sourceDocument, options = {}) {
     // Standalone programs have no runtime notion of sharing: bake each link to its shared value.
     const document = resolveSharedParameters(sourceDocument);
     // Rates and Updates (docs/proposals/ratesAndUpdates.md): the exported loop works values out as a file that says no kind
@@ -249,7 +254,7 @@ export function buildModel(sourceDocument) {
     }
 
     for (const node of enabledNodes) {
-        if (node.numerics?.integration === 'semiImplicit') {
+        if (!options.wholeModel && node.numerics?.integration === 'semiImplicit') {
             throw new Error(`Node "${node.name}" is integrated semi-implicitly, which code export cannot write yet.`);
         }
     }
@@ -524,12 +529,20 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     if (kind === 'python' && parallelism !== 'serial' && parallelism !== 'mpi') {
         throw new Error(`"${parallelism}" has no meaningful Python equivalent -- Python threads are GIL-bound and would not actually run this CPU-bound loop in parallel. Only "serial" and "mpi" are available for a Python export.`);
     }
-    const model = buildModel(document);
-    const providers = collectProviders(model, kind);
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
+    // The run configuration's method, refused by name when this version does not know it.
+    const method = methodOf(runConfiguration);
+    if (!integrationMethod(method)) throw new Error(`The run configuration's method “${method}” is not one this version of Konjugate can export.`);
+    const wholeModel = method !== 'nodeByNode';
+    const model = buildModel(document, { wholeModel });
+    const providers = collectProviders(model, kind);
+    if (wholeModel) {
+        const nodeProvider = model.nodePlans.find((plan) => plan.nodeProvider);
+        if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which code export cannot write under ${integrationMethod(method).name} yet.`);
+    }
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const outputInterval = runConfiguration?.outputInterval ?? globalTimeStep;
-    const meta = { globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1, parallelism };
+    const meta = { globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1, parallelism, method, stepsPerGlobalStep: stepsPerGlobalStepOf(runConfiguration) };
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
 
@@ -855,6 +868,130 @@ function mpiSetupLines(model) {
     ].join('\n');
 }
 
+// ---- Runge–Kutta 4, the whole model at once (docs/proposals/integrators.md) ----
+
+// The node's states a stage adds a rate to (those its Rate terms reach), as local indexes, in order.
+function integratedLocalIndexes(plan) {
+    return [...new Set(plan.contributions.map((contribution) => contribution.outputLocalIndex))].sort((left, right) => left - right);
+}
+
+// Per state of the model, whether the method integrates it: 1, or 0 for a state that holds through the stages.
+function integratedFlags(model) {
+    const flags = new Array(model.globalStateCount).fill(0);
+    for (const plan of model.nodePlans) {
+        for (const local of integratedLocalIndexes(plan)) flags[model.stateRecord.get(plan.node.states[local].id).globalIndex] = 1;
+    }
+    return flags;
+}
+
+// A term written as a program, at a stage: evaluated once, at the global step's start (the first stage of its first step), with the
+// global step as its step, and held through the stages -- as the engine holds a program (docs/proposals/integrators.md, Programs).
+function emitCppStageProviderContribution(contribution, info) {
+    const keys = Array.from(contribution.symbols.keys());
+    const values = keys.map((key) => contribution.symbols.get(key).text).join(', ') || '0.0';
+    const keyLiterals = keys.map((key) => `std::string_view("${key}")`).join(', ') || 'std::string_view("")';
+    return [
+        '        {',
+        ...commentLines(contribution.symbols, '            ', '//'),
+        '            if (stageStep == 0 && stageIndex == 0) {',
+        `                const double inputValues[] = { ${values} };`,
+        `                const std::string_view inputKeys[] = { ${keyLiterals} };`,
+        '                konjugate::sdk::v1::OutputCollector outputCollector;',
+        `                ${info.instanceVariable}->evaluate({stepTime, globalTimeStep, konjugate::sdk::v1::InputView(inputValues, inputKeys)}, outputCollector);`,
+        '                double contributionValue = outputCollector.gradient();',
+        contribution.negate ? '                contributionValue = -contributionValue;' : '',
+        '                if (!std::isfinite(contributionValue)) throw std::runtime_error("A contribution produced a non-finite derivative.");',
+        `                heldValue[${info.index}] = contributionValue;`,
+        '            }',
+        `            derivative[${contribution.outputLocalIndex}] += heldValue[${info.index}];`,
+        '        }'
+    ].filter(Boolean).join('\n');
+}
+
+// Each node's rates at a stage, from the stage's states: its own read as `state`, the others' as `snapshot`, both the same stage values.
+function cppStageLambdas(model, providerInfo) {
+    return model.nodePlans.map((plan, nodeIndex) => {
+        const stateCount = plan.node.states.length;
+        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
+        const contributionLines = plan.contributions.map((contribution) => (
+            contribution.implementation ? emitCppStageProviderContribution(contribution, providerInfo.get(contribution)) : emitCppRegularContribution(contribution)
+        )).join('\n');
+        const rateLines = integratedLocalIndexes(plan).map((local) => (
+            `        rates[${model.stateRecord.get(plan.node.states[local].id).globalIndex}] = derivative[${local}];`
+        )).join('\n');
+        return [
+            `    // Node: ${plan.node.name}`,
+            `    const auto stageNode${nodeIndex} = [&]() {`,
+            '        [[maybe_unused]] const std::vector<double>& snapshot = *stageStates;',
+            '        [[maybe_unused]] std::vector<double>& rates = *stageRates;',
+            `        [[maybe_unused]] double state[${stateCount}] = { ${seed} };`,
+            '        [[maybe_unused]] const double nodeTimeStep = globalTimeStep / static_cast<double>(stepsPerGlobalStep);',
+            `        [[maybe_unused]] double derivative[${stateCount}] = {};`,
+            contributionLines,
+            rateLines,
+            '    };'
+        ].filter(Boolean).join('\n');
+    }).join('\n');
+}
+
+// After the method's steps, as after the engine's: each node's values set from the states it reached, at the step's end.
+function cppWholeModelUpdateLines(model, providerInfo) {
+    return model.nodePlans.filter((plan) => plan.algebraic.length).map((plan) => [
+        `        // Updates: ${plan.node.name}`,
+        '        {',
+        `            double state[${plan.node.states.length}] = { ${plan.node.states.map((state) => `globalState[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')} };`,
+        '            [[maybe_unused]] const double nodeTimeStep = globalTimeStep / static_cast<double>(stepsPerGlobalStep);',
+        cppAlgebraicLines(plan, providerInfo, 'end').split('\n').map((line) => `    ${line}`).join('\n'),
+        ...plan.node.states.map((state, index) => `            globalState[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`),
+        '        }'
+    ].join('\n'));
+}
+
+// Every stage dispatched to the nodes as a step is under Euler, in each parallelism mode; under MPI each rank works out its own nodes'
+// rates and the ranks gather them, so every rank combines the same stages.
+function cppStageDispatchLines(parallelism) {
+    if (parallelism === 'mpi') {
+        return [
+            '        for (int nodeIndex = myNodeStart; nodeIndex < myNodeEnd; ++nodeIndex) nodeIntegrators[static_cast<std::size_t>(nodeIndex)]();',
+            '        MPI_Allgatherv(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, rates.data(), recvCounts.data(), displacements.data(), MPI_DOUBLE, MPI_COMM_WORLD);'
+        ];
+    }
+    return cppDispatchLines(parallelism);
+}
+
+function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
+    const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
+    return [
+        `    // ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
+        '    // stage values. Values set from other states (Updates) hold through the stages and are set at each global step\'s end.',
+        `    constexpr std::size_t stepsPerGlobalStep = ${meta.stepsPerGlobalStep};`,
+        `    const std::vector<unsigned char> integrated = { ${integratedFlags(model).join(', ')} };`,
+        providers.length ? `    double heldValue[${providers.length}] = {};` : null,
+        '    const std::vector<double>* stageStates = nullptr;',
+        '    std::vector<double>* stageRates = nullptr;',
+        '    [[maybe_unused]] std::size_t stageStep = 0;',
+        '    [[maybe_unused]] std::size_t stageIndex = 0;',
+        '    double stepTime = 0;',
+        cppStageLambdas(model, providerInfo),
+        `    std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
+        '    const auto evaluateStage = [&](std::size_t internalStep, std::size_t stage, double time, const std::vector<double>& states, std::vector<double>& rates) {',
+        '        stageStep = internalStep;',
+        '        stageIndex = stage;',
+        '        stepTime = time;',
+        '        stageStates = &states;',
+        '        stageRates = &rates;',
+        cppStageDispatchLines(meta.parallelism).join('\n'),
+        '    };',
+        '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
+        '    for (std::size_t step = 0; step < steps; ++step) {',
+        '        const double currentTime = step * globalTimeStep;',
+        '        konjugate::integrators::rungeKutta4GlobalStep(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage);',
+        ...cppWholeModelUpdateLines(model, providerInfo),
+        '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
+        '    }'
+    ].filter((line) => line !== null);
+}
+
 function generateCpp(model, providers, meta, document) {
     // collectProviders already rejects any node-level computational provider before this function
     // is ever reached (there is no C++ equivalent in the engine), so every entry here is an
@@ -864,7 +1001,7 @@ function generateCpp(model, providers, meta, document) {
     const providerBlocks = providers.map((provider) => {
         const namespaceName = `provider${providerIndex}`;
         providerIndex += 1;
-        providerInfo.set(provider, { namespaceName, instanceVariable: `${namespaceName}Instance` });
+        providerInfo.set(provider, { namespaceName, instanceVariable: `${namespaceName}Instance`, index: providerIndex - 1 });
         return `namespace ${namespaceName} {\n${stripLeadingCppInclude(provider.implementation.source)}\n}\n`;
     });
 
@@ -899,7 +1036,7 @@ function generateCpp(model, providers, meta, document) {
 
     const header = `// Generated by Konjugate's "Export simulation code" feature from "${document.metadata?.projectName ?? 'this project'}".\n`
         + ownershipNotice(document, '// ')
-        + `// Reproduces one Explicit Euler run of the model as it was when exported. See docs/codeExport.md\n`
+        + `// Reproduces one ${meta.method === 'nodeByNode' ? 'Explicit Euler' : integrationMethod(meta.method).name} run of the model as it was when exported. See docs/codeExport.md\n`
         + `// for exactly what is (and is not) reproduced.\n//\n`
         + `${runInstructions('cpp', meta, '// ')}\n//\n${stateIndexComment(model, '// ')}\n`;
 
@@ -936,6 +1073,7 @@ function generateCpp(model, providers, meta, document) {
         providers.length ? `${cppSdkNamespace}\n` : '',
         providerBlocks.join('\n'),
         cppScheduleLines(model),
+        meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
         'int main(int argc, char** argv) {',
         isMpi ? '    MPI_Init(&argc, &argv);' : null,
         `    double targetTime = ${doubleLiteral(meta.defaultTargetTime)};`,
@@ -955,15 +1093,17 @@ function generateCpp(model, providers, meta, document) {
         cppSettleLines(model, providerInfo),
         outputSetupLines.join('\n'),
         '    writeRow(0);',
-        '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
-        '    for (std::size_t step = 0; step < steps; ++step) {',
-        '        const std::vector<double> snapshot = globalState;',
-        '        const double currentTime = step * globalTimeStep;',
-        nodeLambdas.split('\n').map((line) => `    ${line}`).join('\n'),
-        `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
-        dispatchLines.join('\n'),
-        '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
-        '    }',
+        ...(meta.method === 'rungeKutta4' ? cppWholeModelLoopLines(model, providers, providerInfo, meta) : [
+            '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
+            '    for (std::size_t step = 0; step < steps; ++step) {',
+            '        const std::vector<double> snapshot = globalState;',
+            '        const double currentTime = step * globalTimeStep;',
+            nodeLambdas.split('\n').map((line) => `    ${line}`).join('\n'),
+            `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
+            dispatchLines.join('\n'),
+            '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
+            '    }'
+        ]),
         isMpi ? '    if (worldRank == 0) std::cerr << "Wrote " << outputPath << "\\n";' : '    std::cerr << "Wrote " << outputPath << "\\n";',
         isMpi ? '    MPI_Finalize();' : null,
         '    return 0;',
@@ -1165,6 +1305,67 @@ function pythonMpiSetupLines(model) {
     ].join('\n');
 }
 
+// As emitCppStageProviderContribution: a program once a global step, at its start, and held through the stages.
+function emitPythonStageProviderContribution(contribution, info) {
+    return [
+        ...commentLines(contribution.symbols, '        ', '#'),
+        '        if internal_step == 0 and stage == 0:',
+        '            outputs = OutputCollector()',
+        `            ${info.instanceVariable}.evaluate(EvaluationContext(step_time, global_time_step), InputView(${pythonSymbolsDict(contribution.symbols)}), outputs)`,
+        '            contribution_value = outputs.gradient',
+        contribution.negate ? '            contribution_value = -contribution_value' : '',
+        '            if not math.isfinite(contribution_value): raise RuntimeError("A contribution produced a non-finite derivative.")',
+        `            held_value[${info.index}] = contribution_value`,
+        `        derivative[${contribution.outputLocalIndex}] += held_value[${info.index}]`
+    ].filter(Boolean).join('\n');
+}
+
+function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) {
+    const stageBlocks = model.nodePlans.map((plan, nodeIndex) => {
+        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
+        const body = [
+            `        # Node: ${plan.node.name}`,
+            `        state = [${seed}]`,
+            `        derivative = [0.0] * ${plan.node.states.length}`,
+            ...plan.contributions.map((contribution) => (
+                contribution.implementation ? emitPythonStageProviderContribution(contribution, providerInfo.get(contribution)) : emitPythonRegularContribution(contribution)
+            )),
+            ...integratedLocalIndexes(plan).map((local) => `        rates[${model.stateRecord.get(plan.node.states[local].id).globalIndex}] = derivative[${local}]`)
+        ].join('\n');
+        if (!isMpi) return body;
+        return [`        if my_node_start <= ${nodeIndex} < my_node_end:`, body.split('\n').map((line) => `    ${line}`).join('\n')].join('\n');
+    }).join('\n');
+    const updateBlocks = model.nodePlans.filter((plan) => plan.algebraic.length).map((plan) => [
+        `        # Updates: ${plan.node.name}`,
+        `        state = [${plan.node.states.map((state) => `global_state[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')}]`,
+        '        node_time_step = global_time_step / steps_per_global_step',
+        '        algebraic_time = current_time + global_time_step',
+        plan.algebraic.map((task) => emitPythonAlgebraicTask(task, providerInfo.get(task))).join('\n'),
+        ...plan.node.states.map((state, index) => `        global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`)
+    ].join('\n'));
+    return [
+        `    # ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
+        "    # stage values. Values set from other states (Updates) hold through the stages and are set at each global step's end.",
+        `    steps_per_global_step = ${meta.stepsPerGlobalStep}`,
+        `    integrated = [${integratedFlags(model).map((flag) => (flag ? 'True' : 'False')).join(', ')}]`,
+        providers.length ? `    held_value = [0.0] * ${providers.length}` : '',
+        '',
+        '    def evaluate_stage(internal_step, stage, step_time, snapshot, rates):',
+        '        node_time_step = global_time_step / steps_per_global_step',
+        stageBlocks,
+        ...(isMpi ? [
+            '        gathered_chunks = comm.allgather(rates[my_state_start:my_state_end])',
+            '        rates[:] = [value for chunk in gathered_chunks for value in chunk]'
+        ] : []),
+        '',
+        '    steps = math.ceil(target_time / global_time_step - 1e-9)',
+        '    for step in range(steps):',
+        '        current_time = step * global_time_step',
+        '        runge_kutta_4_global_step(current_time, global_time_step, steps_per_global_step, global_state, integrated, evaluate_stage)',
+        ...updateBlocks
+    ];
+}
+
 function generatePython(model, providers, meta, document) {
     let providerIndex = 0;
     const providerInfo = new Map();
@@ -1172,7 +1373,7 @@ function generatePython(model, providers, meta, document) {
         const { className, pattern } = pythonProviderClassName(provider.implementation.source, provider.entityLabel);
         const uniqueName = `${className}Provider${providerIndex}`;
         providerIndex += 1;
-        providerInfo.set(provider, { className: uniqueName, instanceVariable: `${uniqueName.charAt(0).toLowerCase()}${uniqueName.slice(1)}` });
+        providerInfo.set(provider, { className: uniqueName, instanceVariable: `${uniqueName.charAt(0).toLowerCase()}${uniqueName.slice(1)}`, index: providerIndex - 1 });
         const withoutImport = provider.implementation.source.replace(/^from konjugate import\s*(\([^)]*\)|[^\n]*)\n?/m, '');
         return withoutImport.replace(pattern, `class ${uniqueName}(`);
     });
@@ -1191,7 +1392,7 @@ function generatePython(model, providers, meta, document) {
 
     const header = `# Generated by Konjugate's "Export simulation code" feature from "${document.metadata?.projectName ?? 'this project'}".\n`
         + ownershipNotice(document, '# ')
-        + `# Reproduces one Explicit Euler run of the model as it was when exported. See docs/codeExport.md\n`
+        + `# Reproduces one ${meta.method === 'nodeByNode' ? 'Explicit Euler' : integrationMethod(meta.method).name} run of the model as it was when exported. See docs/codeExport.md\n`
         + `# for exactly what is (and is not) reproduced.\n#\n`
         + `${runInstructions('python', meta, '# ')}\n#\n${stateIndexComment(model, '# ')}\n`;
 
@@ -1228,6 +1429,7 @@ function generatePython(model, providers, meta, document) {
         providerBlocks.join('\n\n\n'),
         '',
         pythonScheduleLines(model),
+        meta.method === 'rungeKutta4' ? `${rungeKutta4Python}\n` : '',
         'def run(target_time, output_path):',
         `    global_time_step = ${doubleLiteral(meta.globalTimeStep)}`,
         `    output_interval = ${doubleLiteral(meta.outputInterval)}`,
@@ -1239,12 +1441,14 @@ function generatePython(model, providers, meta, document) {
         pythonSettleLines(model, providerInfo),
         outputSetupLines.join('\n'),
         '    write_row(0)',
-        '    steps = math.ceil(target_time / global_time_step - 1e-9)',
-        '    for step in range(steps):',
-        '        snapshot = list(global_state)',
-        '        current_time = step * global_time_step',
-        nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
-        ...gatherLines,
+        ...(meta.method === 'rungeKutta4' ? pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) : [
+            '    steps = math.ceil(target_time / global_time_step - 1e-9)',
+            '    for step in range(steps):',
+            '        snapshot = list(global_state)',
+            '        current_time = step * global_time_step',
+            nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
+            ...gatherLines
+        ]),
         '        if (step + 1) % output_every_step == 0:',
         '            write_row((step + 1) * global_time_step)',
         '    if output:',

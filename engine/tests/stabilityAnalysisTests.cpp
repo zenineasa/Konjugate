@@ -4,6 +4,7 @@
 #include "stabilityAnalysis.hpp"
 #include <boost/property_tree/json_parser.hpp>
 #include <cmath>
+#include <complex>
 #include <cstdio>
 #include <sstream>
 #include <stdexcept>
@@ -474,6 +475,64 @@ void assessNodeStabilityFlagsUnconditionalInstability() {
     require(!assessment->requiredSubsteps.has_value(), "unconditionallyUnstable and requiredSubsteps are mutually exclusive.");
 }
 
+
+// Runge–Kutta 4's stability function is the degree-4 Taylor polynomial of e^z, and its region reaches about 2.785 along the
+// negative real axis and 2 sqrt(2) along the imaginary axis (Hairer and Wanner, Solving ODEs II, IV.2).
+void rungeKutta4StabilityFunctionIsTheTaylorPolynomial() {
+    using konjugate::rungeKutta4StabilityFunction;
+    for (const std::complex<double> z : {std::complex<double>{-1.0, 0.0}, {0.3, -2.0}, {-2.5, 1.5}}) {
+        const auto expected = 1.0 + z + z * z / 2.0 + z * z * z / 6.0 + z * z * z * z / 24.0;
+        require(std::abs(rungeKutta4StabilityFunction(z) - expected) < 1e-14, "R(z) must be 1 + z + z^2/2 + z^3/6 + z^4/24.");
+    }
+    require(std::abs(konjugate::rungeKutta4LargestStableStep({-1.0, 0.0}) - 2.785293563405282) < 1e-9, "The real-axis bound must be 2.7853.");
+    require(std::abs(konjugate::rungeKutta4LargestStableStep({0.0, 1.0}) - 2.0 * std::sqrt(2.0)) < 1e-9, "The imaginary-axis bound must be 2 sqrt 2.");
+    require(std::abs(konjugate::rungeKutta4LargestStableStep({-10.0, 0.0}) - 0.2785293563405282) < 1e-10, "The bound must scale with 1 / |lambda|.");
+    require(konjugate::rungeKutta4LargestStableStep({0.5, 0.0}) == 0, "A growing mode has no stable step.");
+}
+
+// An undamped oscillator split over two nodes, x' = v and v' = -omega^2 x, each written as a relationship from the other node.
+boost::property_tree::ptree splitOscillatorProject(double omegaSquared) {
+    std::ostringstream json;
+    json << R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {"id": 1, "name": "Position", "states": [{"id": 11, "name": "X", "symbol": "x", "initialValue": 1}], "sourceTerms": []},
+            {"id": 2, "name": "Velocity", "states": [{"id": 21, "name": "V", "symbol": "v", "initialValue": 0}], "sourceTerms": []}
+        ],
+        "edges": [
+            {"id": 31, "name": "Moves", "source": {"nodeId": 2, "stateId": 21}, "target": {"nodeId": 1, "stateId": 11}, "directionality": "directed",
+             "parameters": [], "equationModel": {"latex": "v", "output": {"role": "target", "stateId": 11},
+             "bindings": [{"kind": "state", "nodeId": 2, "stateId": 21, "symbol": "v"}], "mathJson": "v"}},
+            {"id": 32, "name": "Pulls", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 2, "stateId": 21}, "directionality": "directed",
+             "parameters": [], "equationModel": {"latex": "-k x", "output": {"role": "target", "stateId": 21},
+             "bindings": [{"kind": "state", "nodeId": 1, "stateId": 11, "symbol": "x"}], "mathJson": ["Multiply", ")json" << -omegaSquared << R"json(", "x"]}}
+        ]
+    })json";
+    return parseProject(json.str());
+}
+
+// The whole model's Jacobian holds the coupling a node's own leaves out: the split oscillator's eigenvalues +-i omega appear only
+// across the two nodes. Runge–Kutta 4 is stable for h omega up to 2 sqrt 2, and the assessment says how many steps per global step
+// keep within it.
+void assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion() {
+    const auto plan = konjugate::compileExecutionPlan(splitOscillatorProject(4.0));
+    for (const auto& node : plan.nodes) {
+        const auto alone = konjugate::assessNodeStability(node, plan.initialStates, 0.1, plan.algebraicStateIndexes);
+        require(alone && alone->stable, "Each node alone has no dynamics of its own to be unstable.");
+    }
+    const auto stable = konjugate::assessWholeModelStability(plan, plan.initialStates, 1.0, 1);
+    require(stable && stable->stable && !stable->perNode, "h omega = 2 is inside Runge–Kutta 4's region.");
+    require(stable->maxAmplificationFactor < 1, "Runge–Kutta 4 damps an undamped oscillation slightly.");
+    const auto unstable = konjugate::assessWholeModelStability(plan, plan.initialStates, 2.0, 1);
+    require(unstable && !unstable->stable && !unstable->unconditionallyUnstable, "h omega = 4 is outside the region.");
+    require(std::abs(*unstable->largestStableStep - std::sqrt(2.0)) < 1e-6, "The largest stable step must be 2 sqrt 2 / omega.");
+    require(*unstable->requiredStepsPerGlobalStep == 2, "Two steps per global step must be recommended.");
+    const auto split = konjugate::assessWholeModelStability(plan, plan.initialStates, 2.0, 2);
+    require(split && split->stable, "Two steps per global step must make it stable.");
+    const auto judgedApart = konjugate::assessWholeModelStability(plan, plan.initialStates, 2.0, 1, 1);
+    require(judgedApart && judgedApart->perNode && judgedApart->stable, "Above the dense limit, each node is judged on its own.");
+}
+
 }
 
 int main() {
@@ -494,6 +553,8 @@ int main() {
         assessNodeStabilityHandlesANodeThatIsNotFirstInTheDocument();
         assessNodeStabilityComputesRequiredSubsteps();
         assessNodeStabilityFlagsUnconditionalInstability();
+        rungeKutta4StabilityFunctionIsTheTaylorPolynomial();
+        assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());
         return 1;

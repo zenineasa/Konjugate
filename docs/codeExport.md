@@ -14,7 +14,7 @@ The "Export simulation code" button in the title bar (next to "Export results as
 
 ## What is reproduced
 
-The generator targets exact numerical fidelity with the engine's own solver, which is Explicit Euler and nothing else (there is no RK4/implicit integrator in this codebase):
+The generator targets exact numerical fidelity with the engine's own solver, for the method the active run configuration chooses: Explicit Euler node by node (the default), described first, or Runge–Kutta 4 for the whole model, described after the list:
 
 - **Fixed-step, multi-rate integration.** Each node advances at `globalTimeStep / substepsPerGlobalStep`. A binding into a *different* node's state always reads a frozen snapshot taken at the start of the current global step; a binding into the *same* node's own state (or any source-term binding) reads that node's live, substep-updated value.
 - **Contribution order.** Contributions to the same state are summed in the same order the engine uses — a node's own source terms in their JSON order, then edges touching that node in document order — since floating-point addition is not associative.
@@ -25,6 +25,8 @@ The generator targets exact numerical fidelity with the engine's own solver, whi
 - **Scheduled parameters** (a shared parameter with a stored `schedule`, see [Project schema](projectSchema.md)) are emitted as one table per schedule and a `scheduleValue` (C++) / `schedule_value` (Python) lookup, read at the same instants the engine reads them (a derivative at its substep's start, an algebraic term at its algebraic instant), with the same linear or held interpolation and edge-holding. In an FMU, a scheduled parameter is computed the same way inside the FMU and is not exposed as an FMI variable.
 - **Same-language inline providers** (C++ or Python relationship/source-term/computational-node providers) are embedded by pasting their raw source into the generated file, alongside a small vendored copy of the author-facing SDK types (`ScalarPort`, `EvaluationContext`, `OutputCollector`, etc.) that a provider's own source already targets. Provider instances are created once and persist for the whole run — not recreated per step — since a stateful provider (e.g. a PI controller's integral term) depends on that.
 
+**Runge–Kutta 4** (the run configuration's `method: "rungeKutta4"`, see [Integrators](proposals/integrators.md)) steps the whole model at once, as the engine does. The C++ program contains the engine's own stepping code, `engine/include/konjugate/integrators/rungeKutta4.hpp`, pasted in byte for byte (`src/integratorSources.mjs` carries its text, and `tests/codeExport.test.mjs` fails if the copy differs from the header); the Python program contains a line-for-line port of it. At each of the method's four stages every node works out its rates from every node's stage values, its own and its neighbours' alike, and the method combines them state by state in the engine's order; `stepsPerGlobalStep` steps of the method make each global step. A node's substeps and integration do not apply, so a semi-implicit node exports. A term written as a program is evaluated once per global step, at its start, with the global step as its step size, and held through the stages, as the engine holds it. Values set from other states are worked out at each global step's end. In every parallelism mode the nodes' work is dispatched once per stage rather than once per step, and under MPI the ranks gather the stage's rates, each rank then combining the same stages.
+
 ## What is not supported
 
 Export is blocked outright, with an error naming the offending node or edge, when:
@@ -32,6 +34,9 @@ Export is blocked outright, with an error naming the offending node or edge, whe
 - **A provider is implemented in the other language.** A model with a C++ provider cannot be exported to Python, and vice versa — provider source is never auto-translated.
 - **A provider is an installed plugin reference** (`implementation.kind: "plugin"`), which has no embeddable source to paste in.
 - **A computational-node provider is exported to C++.** C++ computational-node execution does not exist in the engine either, so there is no C++ shape to generate.
+- **A node is a program of its own under Runge–Kutta 4.** The engine steps such a node on its own when it is not pure; code export does not write that yet.
+- **The run configuration names a method this version does not know**, refused by name.
+- **An FMU is exported from a run configuration that chooses Runge–Kutta 4.** FMI export steps with Euler node by node; the methods inside `fmi2DoStep` are a later stage of [Integrators](proposals/integrators.md).
 
 Beyond blocking, a few things are deliberately out of scope for the generated program itself:
 

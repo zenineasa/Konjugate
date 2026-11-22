@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "stabilityAnalysis.hpp"
+#include "konjugate/integrators/rungeKutta4.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>
@@ -229,6 +230,162 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
                 }
             }
         }
+    }
+    return assessment;
+}
+
+
+std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z) {
+    using Tableau = integrators::RungeKutta4Tableau;
+    // (I - zA) k = 1, by forward substitution (A is strictly lower triangular); R = 1 + z b^T k.
+    std::complex<double> k[Tableau::stages];
+    std::complex<double> result = 1.0;
+    for (std::size_t row = 0; row < Tableau::stages; ++row) {
+        k[row] = 1.0;
+        for (std::size_t column = 0; column < row; ++column) k[row] += z * Tableau::a[row][column] * k[column];
+        result += z * Tableau::b[row] * k[row];
+    }
+    return result;
+}
+
+double rungeKutta4LargestStableStep(std::complex<double> eigenvalue) {
+    const auto magnitude = std::abs(eigenvalue);
+    if (magnitude == 0) return std::numeric_limits<double>::infinity();
+    if (eigenvalue.real() > 0) return 0;
+    const auto direction = eigenvalue / magnitude;
+    const auto grows = [&](double reach) { return std::abs(rungeKutta4StabilityFunction(reach * direction)) > 1.0 + 1e-12; };
+    // Every explicit method's region is bounded: Runge–Kutta 4's reaches about 2.83 from the origin, so a scan to 8 finds its edge.
+    constexpr double scanStep = 1e-3;
+    double reach = 0;
+    while (reach < 8 && !grows(reach + scanStep)) reach += scanStep;
+    if (reach >= 8) return std::numeric_limits<double>::infinity();
+    double outside = reach + scanStep;
+    for (int iteration = 0; iteration < 60; ++iteration) {
+        const auto middle = 0.5 * (reach + outside);
+        (grows(middle) ? outside : reach) = middle;
+    }
+    return reach / magnitude;
+}
+
+namespace {
+
+bool isEquationOnlyForStages(const NodeExecutionPlan& node) {
+    if (node.nodeProvider) return false;
+    return std::all_of(node.contributions.begin(), node.contributions.end(),
+        [](const ContributionTask& task) { return task.implementation == ContributionImplementation::equation; });
+}
+
+}
+
+std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
+    const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit) {
+    if (!std::all_of(plan.nodes.begin(), plan.nodes.end(), isEquationOnlyForStages)) return std::nullopt;
+    // The integrated states, in plan order, with their nodes: those a node's Rate terms add to.
+    std::vector<std::size_t> integrated;
+    std::vector<std::size_t> nodeOf;
+    for (std::size_t node = 0; node < plan.nodes.size(); ++node) {
+        std::set<std::size_t> written;
+        for (const auto& task : plan.nodes[node].contributions) written.insert(plan.nodes[node].stateIndexes.at(task.outputStateIndex));
+        for (const auto index : written) { integrated.push_back(index); nodeOf.push_back(node); }
+    }
+    if (integrated.empty()) return std::nullopt;
+    WholeModelStabilityAssessment assessment;
+    assessment.stateCount = integrated.size();
+    assessment.perNode = integrated.size() > denseLimit;
+    assessment.stepsPerGlobalStep = stepsPerGlobalStep;
+    assessment.stepSize = globalTimeStep / static_cast<double>(stepsPerGlobalStep);
+    std::vector<NodeParameterValues> parameters;
+    for (const auto& node : plan.nodes) parameters.push_back(resolveParameterValues(node.contributions, {}));
+    // Each node's derivatives at `values` (every state of the plan), as a stage evaluates them: the node's own states and its
+    // neighbours' read alike from the one vector.
+    const auto derivatives = [&](std::size_t node, const StateValues& values) {
+        const auto& compiled = plan.nodes[node];
+        StateValues local(compiled.stateIndexes.size());
+        for (std::size_t index = 0; index < local.size(); ++index) local[index] = values[compiled.stateIndexes[index]];
+        std::vector<double> result(values.size(), 0.0);
+        for (const auto& [localIndex, value] : reduceContributions(evaluateContributionTasks(compiled, local, values, parameters[node]))) {
+            result[compiled.stateIndexes[localIndex]] = value;
+        }
+        return result;
+    };
+    // The groups judged together: the whole model, or each node on its own.
+    std::vector<std::vector<std::size_t>> groups;
+    if (!assessment.perNode) {
+        groups.emplace_back();
+        for (std::size_t index = 0; index < integrated.size(); ++index) groups.back().push_back(index);
+    } else {
+        groups.resize(plan.nodes.size());
+        for (std::size_t index = 0; index < integrated.size(); ++index) groups[nodeOf[index]].push_back(index);
+    }
+    double fastest = 0;
+    double slowest = 0;
+    std::size_t decaying = 0;
+    double largestStable = std::numeric_limits<double>::infinity();
+    double dominantAmplification = -1;
+    for (const auto& group : groups) {
+        if (group.empty()) continue;
+        const auto size = static_cast<Eigen::Index>(group.size());
+        Eigen::MatrixXd jacobian(size, size);
+        for (Eigen::Index column = 0; column < size; ++column) {
+            const auto state = integrated[group[static_cast<std::size_t>(column)]];
+            const auto epsilon = std::max(1e-6, std::abs(states[state]) * 1e-6);
+            auto up = states;
+            up[state] += epsilon;
+            auto down = states;
+            down[state] -= epsilon;
+            // Only the nodes in the group are evaluated; in a whole-model group, that is every node.
+            std::vector<double> rateUp(states.size(), 0.0);
+            std::vector<double> rateDown(states.size(), 0.0);
+            std::set<std::size_t> nodes;
+            for (const auto member : group) nodes.insert(nodeOf[member]);
+            for (const auto node : nodes) {
+                const auto upRates = derivatives(node, up);
+                const auto downRates = derivatives(node, down);
+                for (const auto index : plan.nodes[node].stateIndexes) { rateUp[index] = upRates[index]; rateDown[index] = downRates[index]; }
+            }
+            for (Eigen::Index row = 0; row < size; ++row) {
+                const auto rowState = integrated[group[static_cast<std::size_t>(row)]];
+                jacobian(row, column) = (rateUp[rowState] - rateDown[rowState]) / (2 * epsilon);
+            }
+        }
+        const Eigen::EigenSolver<Eigen::MatrixXd> solver(jacobian, true);
+        double spectralRadius = 0;
+        for (Eigen::Index index = 0; index < size; ++index) spectralRadius = std::max(spectralRadius, std::abs(solver.eigenvalues()(index)));
+        // As assessNodeStability: a rate below a millionth of the fastest is the differences' round-off, taken as neutral.
+        const auto neutral = 1e-6 * spectralRadius;
+        for (Eigen::Index index = 0; index < size; ++index) {
+            auto eigenvalue = solver.eigenvalues()(index);
+            if (std::abs(eigenvalue.real()) <= neutral) eigenvalue = {0.0, std::abs(eigenvalue.imag()) <= neutral ? 0.0 : eigenvalue.imag()};
+            const auto amplification = std::abs(rungeKutta4StabilityFunction(assessment.stepSize * eigenvalue));
+            if (amplification > dominantAmplification) {
+                dominantAmplification = amplification;
+                const Eigen::MatrixXcd vectors = solver.eigenvectors();
+                Eigen::Index largest = 0;
+                for (Eigen::Index row = 0; row < size; ++row) if (std::abs(vectors(row, index)) > std::abs(vectors(largest, index))) largest = row;
+                const auto member = group[static_cast<std::size_t>(largest)];
+                assessment.dominantStateId = 0;
+                for (const auto& [stateId, stateIndex] : plan.stateIndexes) if (stateIndex == integrated[member]) assessment.dominantStateId = stateId;
+                assessment.dominantNodeId = plan.nodes[nodeOf[member]].nodeId;
+            }
+            assessment.maxAmplificationFactor = std::max(assessment.maxAmplificationFactor, amplification);
+            if (eigenvalue.real() < 0) {
+                const auto rate = -eigenvalue.real();
+                if (!decaying || rate > fastest) fastest = rate;
+                if (!decaying || rate < slowest) slowest = rate;
+                ++decaying;
+            }
+            const auto bound = rungeKutta4LargestStableStep(eigenvalue);
+            if (bound == 0) assessment.unconditionallyUnstable = true;
+            largestStable = std::min(largestStable, bound);
+        }
+    }
+    assessment.stable = assessment.maxAmplificationFactor <= 1.0 + 1e-6;
+    if (decaying >= 2 && slowest > 0) assessment.stiffnessRatio = fastest / slowest;
+    if (!assessment.stable) {
+        if (assessment.unconditionallyUnstable) return assessment;
+        assessment.unconditionallyUnstable = false;
+        assessment.largestStableStep = largestStable;
+        assessment.requiredStepsPerGlobalStep = static_cast<std::size_t>(std::ceil(globalTimeStep / largestStable));
     }
     return assessment;
 }

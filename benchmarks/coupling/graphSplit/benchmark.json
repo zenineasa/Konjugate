@@ -1,6 +1,6 @@
 {
     "title": "Graph coupling: one node against three",
-    "summary": "Three damped masses joined by springs, written as one node and as three nodes coupled through the snapshot: the coupling error against the global step and the node substeps.",
+    "summary": "Three damped masses joined by springs, written as one node and as three nodes coupled through the snapshot: the coupling error against the global step and the node substeps, and Runge–Kutta 4, under which the three nodes are the one node and the error is fourth order.",
     "run": { "globalTimeStep": 0.015625, "targetTime": 16, "outputInterval": 0.125 },
     "globalTimeSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625],
     "substeps": [1, 2, 4, 8, 16],
@@ -15,6 +15,9 @@
         "couplingErrorOrder": { "min": 0.9, "max": 1.1 },
         "substepsFloorRatio": { "min": 1, "max": 1.5 },
         "couplingFactorPerSubstepDoubling": { "min": 0.9, "max": 1.25 },
-        "semiImplicitSplitDifference": { "max": 0.075 }
+        "semiImplicitSplitDifference": { "max": 0.075 },
+        "rungeKutta4SplitDifference": { "max": 1e-12 },
+        "rungeKutta4ErrorOrder": { "min": 3.9, "max": 4.1 },
+        "rungeKutta4FinestErrorOrder": { "min": 3.9, "max": 4.1 }
     }
 }

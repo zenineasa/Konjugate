@@ -1,12 +1,12 @@
 {
     "title": "Convergence order",
-    "summary": "Error against global step over six halvings for the thermal network, both RLC circuits, the harmonic oscillator and the pendulum: the observed order of explicit and semi-implicit Euler.",
+    "summary": "Error against global step over six halvings for the thermal network, both RLC circuits, the harmonic oscillator and the pendulum: the observed order of explicit and semi-implicit Euler, and of Runge–Kutta 4 over halvings of its own, before the error reaches rounding.",
     "cases": {
-        "thermal": { "globalTimeSteps": [64, 32, 16, 8, 4, 2], "targetTime": 16384, "outputInterval": 256, "methods": ["explicit"] },
-        "seriesRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit"] },
-        "coupledRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit"] },
-        "oscillator": { "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125], "targetTime": 16, "outputInterval": 0.25, "methods": ["explicit", "semiImplicit"] },
-        "pendulum": { "globalTimeSteps": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625], "targetTime": 8, "outputInterval": 0.0625, "methods": ["explicit", "semiImplicit"] }
+        "thermal": { "globalTimeSteps": [64, 32, 16, 8, 4, 2], "targetTime": 16384, "outputInterval": 256, "methods": ["explicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [64, 32, 16, 8, 4] },
+        "seriesRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125] },
+        "coupledRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125] },
+        "oscillator": { "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125], "targetTime": 16, "outputInterval": 0.25, "methods": ["explicit", "semiImplicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125] },
+        "pendulum": { "globalTimeSteps": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625], "targetTime": 8, "outputInterval": 0.0625, "methods": ["explicit", "semiImplicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [0.00390625, 0.001953125, 0.0009765625] }
     },
     "thresholds": {
         "thermalOrderExplicit": { "min": 0.95, "max": 1.1 },
@@ -26,6 +26,16 @@
         "pendulumOrderExplicit": { "min": 0.95, "max": 1.1 },
         "pendulumFinestOrderExplicit": { "min": 0.97, "max": 1.03 },
         "pendulumOrderSemiImplicit": { "min": 0.95, "max": 1.1 },
-        "pendulumFinestOrderSemiImplicit": { "min": 0.97, "max": 1.03 }
+        "pendulumFinestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
+        "thermalOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "thermalFinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "seriesRlcOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "seriesRlcFinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "coupledRlcOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "coupledRlcFinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "oscillatorOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "oscillatorFinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "pendulumOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "pendulumFinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 }
     }
 }

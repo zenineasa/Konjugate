@@ -3,6 +3,7 @@
 #include "modelValidator.hpp"
 #include "executionPlan.hpp"
 #include "stabilityAnalysis.hpp"
+#include "wholeModelIntegration.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -107,6 +108,38 @@ std::string stateSymbol(const boost::property_tree::ptree& document, EntityId st
         }
     }
     return {};
+}
+
+// The stability pass under a whole-model method (assessWholeModelStability): one finding for the model, on its run settings, where
+// the step is chosen -- a global timestep, or steps per global step, rather than a node's substeps.
+void addWholeModelStability(ValidationResult& result, const boost::property_tree::ptree& document, const ExecutionPlan& plan,
+                            double globalTimeStep, const IntegrationSettings& integration) {
+    const auto assessment = assessWholeModelStability(plan, plan.initialStates, globalTimeStep, integration.stepsPerGlobalStep);
+    if (!assessment) return;
+    const auto configurationId = document.get<std::string>("activeRunConfigurationId", "");
+    const auto symbol = stateSymbol(document, assessment->dominantStateId);
+    const auto judged = assessment->perNode
+        ? " (Judged node by node, each node's neighbours held: the model has " + std::to_string(assessment->stateCount) +
+          " integrated states, more than the whole-model check takes.)" : std::string();
+    std::ostringstream message;
+    if (!assessment->stable) {
+        message << "The model may be unstable with Runge–Kutta 4 at its step of " << assessment->stepSize << " s (amplification factor "
+                << assessment->maxAmplificationFactor << " > 1 per step)";
+        if (assessment->unconditionallyUnstable) {
+            message << " -- " << (symbol.empty() ? "a state" : "'" + symbol + "'") << " has a mode that grows whatever the step, so no step "
+                    << "can stabilize it -- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether this "
+                    << "dynamics is intentionally unstable before adjusting numerics.";
+        } else if (assessment->requiredStepsPerGlobalStep && assessment->largestStableStep) {
+            message << " -- take at least " << *assessment->requiredStepsPerGlobalStep << " steps per global step (Run settings, Steps per "
+                    << "global step), or a global timestep of at most " << *assessment->largestStableStep * static_cast<double>(integration.stepsPerGlobalStep)
+                    << " s" << (symbol.empty() ? "" : " ('" + symbol + "' moves fastest)") << ".";
+        }
+        add(result, "numericsPotentiallyUnstable", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+    } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {
+        message << "The model is stable with Runge–Kutta 4 but stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio
+                << ") -- its fastest dynamics set the step, much smaller than its slowest need.";
+        add(result, "numericsStiffModel", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+    }
 }
 
 void validateProviderOutput(ValidationResult& result,
@@ -513,6 +546,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     // no run configurations at all, or the active one fails to parse -- there is nothing honest to
     // check against in either case.
     std::optional<double> activeGlobalTimeStep;
+    // The active run configuration's method (docs/proposals/integrators.md): the stability pass judges a whole-model method by the
+    // whole model's Jacobian and the method's stability function, not node by node with Euler's.
+    IntegrationSettings activeIntegration;
     if (const auto configurations = document.get_child_optional("runConfigurations")) {
         const auto activeId = value(document, "activeRunConfigurationId");
         for (const auto& configurationEntry : *configurations) {
@@ -530,6 +566,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (configurationId == activeId) activeGlobalTimeStep = globalTimeStep;
             } catch (...) {
                 add(result, "runConfigurationInvalid", "error", "Numerical configuration values must be finite and positive; output interval must be an integer multiple of the global timestep.", "runConfiguration", configurationId, "numerics");
+            }
+            // A method this version does not know, or steps per global step out of range, refused by name.
+            try {
+                const auto integration = integrationSettingsFromTree(configuration);
+                if (configurationId == activeId) activeIntegration = integration;
+            } catch (const std::exception& error) {
+                add(result, "runConfigurationMethodInvalid", "error", error.what(), "runConfiguration", configurationId, "numerics");
             }
         }
         if (!configurations->empty() && !runConfigurationIds.contains(value(document, "activeRunConfigurationId"))) {
@@ -1186,7 +1229,10 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         try {
             if (!compiledPlan) compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
             const auto& plan = *compiledPlan;
-            for (const auto& node : plan.nodes) {
+            if (activeIntegration.method != IntegrationMethod::nodeByNode) {
+                addWholeModelStability(result, document, plan, *activeGlobalTimeStep, activeIntegration);
+            }
+            if (activeIntegration.method == IntegrationMethod::nodeByNode) for (const auto& node : plan.nodes) {
                 const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep, plan.algebraicStateIndexes);
                 if (!assessment) continue;
                 const auto nodeId = std::to_string(assessment->nodeId);

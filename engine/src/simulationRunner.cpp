@@ -10,6 +10,8 @@
 #include "partitionRuntime.hpp"
 #include "providerRuntime.hpp"
 #include "taskExecutor.hpp"
+#include "wholeModelIntegration.hpp"
+#include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
 #include <chrono>
 #include <condition_variable>
@@ -626,6 +628,11 @@ public:
     // run's vector.
     virtual void restore(const Values&) {}
     virtual Communication communication() const { return {}; }
+    // One stage of a whole-model step (docs/proposals/integrators.md): every node that takes part in stages evaluated at
+    // `stageStates`, each reading the same immutable vector, so the derivatives are the same on every backend. Indexed by node;
+    // a stepped node's entry is empty.
+    virtual std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+        ProviderRuntime* providers) = 0;
 
 protected:
     explicit StepExecutor(const ExecutionPlan& plan) : plan_(plan) {}
@@ -643,6 +650,18 @@ public:
             nodeResults[index] = integrateNode(plan_.nodes[index], snapshot, control.parameterValues, time, step, providers, control.activeSchedules, endTime);
         }
         return nodeResults;
+    }
+
+    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+        ProviderRuntime* providers) override {
+        std::vector<NodeStageResult> results(plan_.nodes.size());
+        for (std::size_t index = 0; index < plan_.nodes.size(); ++index) {
+            const auto& wholeNode = request.wholeModel->nodes[index];
+            if (wholeNode.stepped) continue;
+            results[index] = evaluateNodeStage(plan_.nodes[index], wholeNode, stageStates, control.parameterValues, control.activeSchedules,
+                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(index), providers);
+        }
+        return results;
     }
 };
 
@@ -666,6 +685,24 @@ public:
         }
         for (std::size_t index = 0; index < futures.size(); ++index) nodeResults[index] = futures[index].get();
         return nodeResults;
+    }
+
+    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+        ProviderRuntime* providers) override {
+        std::vector<NodeStageResult> results(plan_.nodes.size());
+        std::vector<std::future<NodeStageResult>> futures(plan_.nodes.size());
+        for (const auto index : plan_.taskSubmissionOrder) {
+            const auto* wholeNode = &request.wholeModel->nodes[index];
+            if (wholeNode->stepped) continue;
+            const auto* nodePlan = &plan_.nodes[index];
+            auto* held = &request.held->at(index);
+            futures[index] = taskExecutor_.submit([nodePlan, wholeNode, held, &stageStates, &control, &request, providers] {
+                return evaluateNodeStage(*nodePlan, *wholeNode, stageStates, control.parameterValues, control.activeSchedules,
+                    request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, *held, providers);
+            });
+        }
+        for (std::size_t index = 0; index < futures.size(); ++index) if (futures[index].valid()) results[index] = futures[index].get();
+        return results;
     }
 
 private:
@@ -755,8 +792,49 @@ public:
 
     Communication communication() const override { return communication_; }
 
+    // As integrate(), a stage at a time: each partition is sent its nodes' and their neighbours' stage values, one boundary message
+    // a stage, on a transport of its own so the stages' messages never meet the node-by-node steps'.
+    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+        ProviderRuntime* providers) override {
+        std::vector<NodeStageResult> results(plan_.nodes.size());
+        const auto sequence = stageSequence_++;
+        for (std::size_t partition = 0; partition < partitionRuntimes_.size(); ++partition) {
+            const auto preparationStartedAt = std::chrono::steady_clock::now();
+            PartitionBoundaryMessage message;
+            message.synchronizationIndex = sequence;
+            message.targetPartition = partition;
+            message.states.reserve(partitionSnapshotStateIds_[partition].size());
+            for (const auto& stateId : partitionSnapshotStateIds_[partition]) message.states[stateId] = stageStates.at(plan_.stateIndexes.at(stateId));
+            communication_.messagePreparationNanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - preparationStartedAt).count());
+            communication_.boundaryPayloadBytes += partitionMessagePayloadBytes(message);
+            ++communication_.boundaryMessages;
+            const auto publishStartedAt = std::chrono::steady_clock::now();
+            stageTransport_.publish(std::move(message));
+            communication_.transportPublishNanoseconds += static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - publishStartedAt).count());
+        }
+        std::vector<std::future<PartitionStageMessage>> futures;
+        futures.reserve(partitionRuntimes_.size());
+        for (auto& runtime : partitionRuntimes_) {
+            futures.push_back(runtime->submitStage(stageTransport_, sequence, control.parameterValues, control.activeSchedules, request,
+                std::chrono::milliseconds(receiveTimeout_), providers));
+        }
+        for (std::size_t partition = 0; partition < futures.size(); ++partition) {
+            auto result = futures[partition].get();
+            if (result.version != 1 || result.synchronizationIndex != sequence || result.sourcePartition != partition) {
+                throw std::runtime_error("A partition returned an incompatible result message.");
+            }
+            communication_.boundaryWaitNanoseconds += result.boundaryWaitNanoseconds;
+            for (auto& [nodeIndex, nodeResult] : result.nodes) results[nodeIndex] = std::move(nodeResult);
+        }
+        return results;
+    }
+
 private:
     std::size_t receiveTimeout_;
+    InMemoryPartitionTransport stageTransport_;
+    std::size_t stageSequence_ = 0;
     std::vector<std::vector<std::size_t>> partitionNodeIndexes_;
     std::vector<std::vector<EntityId>> partitionSnapshotStateIds_;
     std::vector<std::unique_ptr<PartitionRuntime>> partitionRuntimes_;
@@ -809,6 +887,8 @@ public:
     // (ringDidNotSettle), one per ring however many steps it fails in, and is said once on standard error.
     void updateStates(double time, bool afterStep, double stepSize);
     void integrateStep(std::size_t step, double synchronizationStep, double elapsed);
+    // integrateStep under a whole-model method (docs/proposals/integrators.md).
+    void integrateWholeModelStep(double synchronizationStep, double elapsed);
     void paceStep(std::chrono::steady_clock::time_point wallStepStarted, double stepStartTime, double stepEndTime);
     // Where real-time and limited-ratio pacing measure from: the wall-clock moment a simulated time was due, at the pace
     // then set. Reset by a pause, a change of pace, and a run falling far behind (see paceStep).
@@ -850,6 +930,13 @@ private:
     EmscriptenControlBuffer emscriptenControlBuffer;
 #endif
     bool timeSettingsChecked;
+    // How the run integrates: Euler node by node (the default), or a whole-model method, read and checked with the time settings,
+    // before the model is compiled.
+    IntegrationSettings integration;
+    // A whole-model method's plan: which nodes are stepped, which programs held, which states integrated; and the held programs'
+    // values for the step in progress, one list per node.
+    WholeModelPlan wholeModel;
+    std::vector<std::vector<EvaluatedContribution>> heldValues;
     std::chrono::steady_clock::time_point planningStartedAt;
     std::shared_ptr<const ExecutionPlan> plan;
     const ExecutionPlan& executionPlan;
@@ -932,6 +1019,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
       controlInbox(startControlReader(controlStream)),
 #endif
       timeSettingsChecked(checkTimeSettings(targetTime, globalTimeStep, outputInterval, session)),
+      integration(integrationSettingsFromTree(configuration)),
       planningStartedAt(std::chrono::steady_clock::now()),
       plan(compiledPlan ? std::move(compiledPlan) : std::make_shared<const ExecutionPlan>(compileExecutionPlan(document))),
       executionPlan(*plan),
@@ -957,6 +1045,18 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     }
     dependencyGraph = buildDependencyGraph(executionPlan);
     executionSettings = executionSettingsFromTree(configuration, executionPlan);
+    if (integration.method != IntegrationMethod::nodeByNode) {
+        wholeModel = buildWholeModelPlan(executionPlan, providerRuntime.get());
+        heldValues.resize(executionPlan.nodes.size());
+        // A node's work a global step is its work an evaluation times the method's evaluations a step, not its substeps.
+        const auto evaluations = integrationMethodStages(integration.method) * integration.stepsPerGlobalStep;
+        executionSettings.estimatedOperationsPerSynchronization = 0;
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            const auto& node = executionPlan.nodes[index];
+            executionSettings.estimatedOperationsPerSynchronization += node.estimatedOperationsPerSubstep *
+                (wholeModel.nodes[index].stepped ? node.substeps : evaluations);
+        }
+    }
     const auto requestedPartitions = configuration.get<std::size_t>("execution.partitionCount", executionSettings.workerThreads);
     if (!requestedPartitions || requestedPartitions > 256) {
         throw std::runtime_error("Partition count must be an integer from 1 through 256.");
@@ -1291,7 +1391,23 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
          << "\",\"lifecycle\":\"" << lifecycle
          << "\",\"simulationTime\":" << simulationTime << ",\"availableResultTime\":" << samples.back().time
          << ",\"pacing\":{\"mode\":\"" << pacingModeName(pacing.mode) << "\",\"simulationSecondsPerWallSecond\":" << pacing.ratio << "}"
-         << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval
+         << ",\"targetTime\":" << targetTime << ",\"globalTimeStep\":" << globalTimeStep << ",\"outputInterval\":" << outputInterval;
+    // A whole-model method, with its settings, the nodes it stepped on their own and the programs it held (docs/proposals/
+    // integrators.md): written only when the run used one, so a node-by-node result says what it always said.
+    if (integration.method != IntegrationMethod::nodeByNode) {
+        json << ",\"integration\":{\"method\":\"" << integrationMethodName(integration.method) << "\",\"stepsPerGlobalStep\":"
+             << integration.stepsPerGlobalStep << ",\"steppedNodeIds\":[";
+        for (std::size_t index = 0; index < wholeModel.steppedNodes.size(); ++index) {
+            json << (index ? "," : "") << executionPlan.nodes[wholeModel.steppedNodes[index]].nodeId;
+        }
+        json << "],\"heldTerms\":[";
+        for (std::size_t index = 0; index < wholeModel.heldTerms.size(); ++index) {
+            json << (index ? "," : "") << "{\"sourceId\":" << wholeModel.heldTerms[index].sourceId << ",\"stateId\":"
+                 << wholeModel.heldTerms[index].stateId << '}';
+        }
+        json << "]}";
+    }
+    json
          << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionBackendName(executionSettings.requestedBackend)
          << "\",\"backend\":\"" << executionBackendName(executionSettings.backend)
          << "\",\"workerThreads\":" << activeWorkerThreads << ",\"planningNanoseconds\":" << planningNanoseconds
@@ -1426,7 +1542,9 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             auto* encoded = result.add_checkpoints();
             encoded->set_uuid(checkpoint.uuid);
             encoded->set_time(checkpoint.time);
-            encoded->set_solver_kind("explicitEuler");
+            // The method that made it. Runge–Kutta 4 has no hidden state, so solver_state stays empty: restarting from the
+            // checkpoint's states with the same method continues to the bit.
+            encoded->set_solver_kind(std::string(solverKindName(integration.method)));
             encoded->set_solver_version(1);
             for (const auto stateId : stateIds) {
                 encoded->add_values(checkpoint.states.at(executionPlan.stateIndexes.at(stateId)));
@@ -1531,6 +1649,10 @@ void Simulation::settleIfParametersChanged() {
 // the state vector, then the algebraic relationships set at the step's end and the stability monitor told. `elapsed` is the
 // time the step ends at, worked out by the caller from the step count rather than by adding steps up.
 void Simulation::integrateStep(std::size_t step, double synchronizationStep, double elapsed) {
+    if (integration.method != IntegrationMethod::nodeByNode) {
+        integrateWholeModelStep(synchronizationStep, elapsed);
+        return;
+    }
     const auto synchronizationStartedAt = std::chrono::steady_clock::now();
     const auto snapshot = states;
     auto synchronizedStates = snapshot;
@@ -1554,6 +1676,67 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     currentTime = elapsed;
     // The states algebraic relationships set, from the states the step reached, at its end: every
     // node reads them from the next step's synchronization snapshot.
+    updateStates(currentTime, true, synchronizationStep);
+    if (!stabilityMonitoredNodeIds.empty()) {
+        auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);
+        stabilityFindings.insert(stabilityFindings.end(),
+            std::make_move_iterator(newFindings.begin()), std::make_move_iterator(newFindings.end()));
+    }
+}
+
+// One global step of a whole-model method (docs/proposals/integrators.md): the stepped nodes integrated node by node from the
+// step's start; every other node's integrated states taken through the method's stages, every stage evaluated by the execution
+// backend from one immutable vector of stage values; every other state held. Then, as node by node, the Updates set at the step's
+// end and the stability monitor told: the global step stays the instant at which Updates, controls, samples and checkpoints happen.
+void Simulation::integrateWholeModelStep(double synchronizationStep, double elapsed) {
+    const auto synchronizationStartedAt = std::chrono::steady_clock::now();
+    const auto snapshot = states;
+    std::vector<NodeIntegrationResult> stepped;
+    stepped.reserve(wholeModel.steppedNodes.size());
+    for (const auto index : wholeModel.steppedNodes) {
+        stepped.push_back(integrateNode(executionPlan.nodes[index], snapshot, runControl.parameterValues, currentTime, synchronizationStep,
+            providerRuntime.get(), runControl.activeSchedules, elapsed));
+    }
+    auto reached = snapshot;
+    const auto steps = integration.stepsPerGlobalStep;
+    const auto internalStep = synchronizationStep / static_cast<double>(steps);
+    StageRequest request{&wholeModel, &heldValues, 0, internalStep, false, synchronizationStep};
+    const auto evaluate = [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+        request.stageTime = time;
+        request.evaluateHeld = step == 0 && stage == 0;
+        const auto results = stepExecutor->evaluateStage(stageStates, runControl, request, providerRuntime.get());
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            const auto& wholeNode = wholeModel.nodes[index];
+            if (wholeNode.stepped) continue;
+            const auto& node = executionPlan.nodes[index];
+            for (const auto state : wholeNode.integratedStates) derivatives[state] = 0;
+            for (const auto& [local, value] : results[index].derivatives) derivatives[node.stateIndexes[local]] = value;
+            auto& metrics = nodeMetrics[index];
+            metrics.evaluatedContributions += results[index].evaluatedContributions;
+            metrics.computeNanoseconds += results[index].computeNanoseconds;
+        }
+    };
+    integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, evaluate);
+    for (std::size_t position = 0; position < wholeModel.steppedNodes.size(); ++position) {
+        const auto index = wholeModel.steppedNodes[position];
+        const auto& node = executionPlan.nodes[index];
+        for (std::size_t stateIndex = 0; stateIndex < node.stateIndexes.size(); ++stateIndex) {
+            reached[node.stateIndexes[stateIndex]] = stepped[position].states.at(stateIndex);
+        }
+        auto& metrics = nodeMetrics[index];
+        metrics.executedSubsteps += node.substeps;
+        metrics.evaluatedContributions += node.substeps * (node.contributions.size() + node.algebraicTasks.size());
+        metrics.computeNanoseconds += stepped[position].computeNanoseconds;
+    }
+    for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+        ++nodeMetrics[index].invocations;
+        if (!wholeModel.nodes[index].stepped) nodeMetrics[index].executedSubsteps += steps;
+    }
+    const auto synchronizationElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - synchronizationStartedAt).count();
+    synchronizationComputeNanoseconds += static_cast<std::uint64_t>(std::max<std::int64_t>(0, synchronizationElapsed));
+    states = std::move(reached);
+    currentTime = elapsed;
     updateStates(currentTime, true, synchronizationStep);
     if (!stabilityMonitoredNodeIds.empty()) {
         auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);

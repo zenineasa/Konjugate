@@ -17,6 +17,10 @@
 // model's difference from the monolithic model run at the same effective step H/n. More substeps shrink the error of each node's own
 // integration, but not the coupling error; a smaller global step shrinks both.
 //
+// Runge–Kutta 4 (docs/proposals/integrators.md) is applied to the whole model at once: at every stage each node reads every node's stage
+// values, the coupling included, so the split model is the one-node model -- the same method on the same equations -- and its error
+// against the exact solution has the method's order, four, rather than the snapshot's one.
+//
 // Reference: the system is linear, so it is exact by the matrix exponential.
 
 import { join } from 'node:path';
@@ -116,7 +120,8 @@ export async function evaluate({ engine, config }) {
     async function monolithic(step, integration = 'explicit') {
         const key = `${integration}:${step}`;
         if (!monolithicCache.has(key)) {
-            const result = await engine.run(monolithicPath, { integration }, engineRun(config.run, { globalTimeStep: step }));
+            const variant = integration === 'rungeKutta4' ? { method: 'rungeKutta4' } : { integration };
+            const result = await engine.run(monolithicPath, variant, engineRun(config.run, { globalTimeStep: step }));
             monolithicCache.set(key, { result, numeric: trajectory(result, monolithicIds) });
         }
         return monolithicCache.get(key);
@@ -165,6 +170,30 @@ export async function evaluate({ engine, config }) {
     rows.push(resultRow({ caseName: 'one node', model: 'monolithic', variant: { integration: 'explicit' }, run, errors: errorMetrics((await monolithic(run.globalTimeStep)).numeric, exact), unit: 'm, m/s' }));
     add('semiImplicitSplitDifference', errorMetrics(semiSplit, semiOne).relativeError, 'Semi-implicit, one substep: split against one node, relative to range (the snapshot makes the coupling explicit)');
 
+    // Runge–Kutta 4, the whole model at once: the split model against the one-node model, and its error's order in H.
+    const rungeKutta4Errors = [];
+    let rungeKutta4Difference = 0;
+    for (const globalStep of config.globalTimeSteps) {
+        const stepRun = engineRun(config.run, { globalTimeStep: globalStep });
+        const split = await engine.run(splitPath, { method: 'rungeKutta4' }, stepRun);
+        const splitNumeric = trajectory(split, splitIds);
+        const one = (await monolithic(globalStep, 'rungeKutta4')).numeric;
+        const total = errorMetrics(splitNumeric, exact);
+        const difference = errorMetrics(splitNumeric, one).relativeError;
+        rungeKutta4Difference = Math.max(rungeKutta4Difference, difference);
+        rungeKutta4Errors.push(total.relativeError);
+        rows.push(resultRow({
+            caseName: 'split, three nodes', model: 'split', variant: { method: 'rungeKutta4' }, run: stepRun, errors: total, work: split.work, unit: 'm, m/s',
+            note: `against one node at the same step ${difference.toExponential(2)}`
+        }));
+    }
+    add('rungeKutta4SplitDifference', rungeKutta4Difference, 'Runge–Kutta 4: the three-node model against the one-node model at the same step, relative to range, largest over every H (the same method on the same equations)');
+    const rungeKutta4Order = observedOrder(config.globalTimeSteps, rungeKutta4Errors);
+    add('rungeKutta4ErrorOrder', rungeKutta4Order.fitted, 'Runge–Kutta 4: observed order of the three-node model\'s error against the exact solution in H (fitted over all H)');
+    add('rungeKutta4FinestErrorOrder', rungeKutta4Order.finest, 'Runge–Kutta 4: observed order of the three-node model\'s error from the finest halving of H');
+    rows.push(resultRow({ caseName: 'error order in H', model: 'split', variant: { method: 'rungeKutta4' }, observedOrder: rungeKutta4Order.fitted,
+        note: `pairwise ${rungeKutta4Order.pairwise.map((value) => value.toFixed(3)).join(', ')}` }));
+
     const log2 = (value) => `2^${Math.log2(value)}`;
     plots.push(linePlot({
         id: 'couplingSubsteps', title: 'Substeps at a fixed global step', subtitle: `Error relative to range against the exact solution, H = ${log2(coarsest)} s`, xLabel: 'Substeps per global step (n)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.substeps,
@@ -179,5 +208,14 @@ export async function evaluate({ engine, config }) {
         series: config.substeps.slice(1).filter((n) => [2, 4, largestSubsteps].includes(n)).map((n, index) => series(`${n} substeps`, ['explicit', 'semiImplicit', 'extra'][index], config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:${n}`].coupling.relativeError)))
             .concat([series('First order (slope 1)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => couplingErrors[0] * step / config.globalTimeSteps[0]))])
     }));
-    return { rows, checks, plots, notes: [] };
+    plots.push(linePlot({
+        id: 'couplingRungeKutta4', title: 'Three nodes under Runge–Kutta 4', subtitle: 'Error of the three-node model against the exact solution, relative to range', xLabel: 'Global step H (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.globalTimeSteps,
+        series: [
+            series('Explicit Euler, one substep', 'explicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:1`].total.relativeError)),
+            series(`Explicit Euler, ${largestSubsteps} substeps`, 'semiImplicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:${largestSubsteps}`].total.relativeError)),
+            series('Runge–Kutta 4, the whole model', 'rungeKutta4', config.globalTimeSteps, rungeKutta4Errors),
+            series('Fourth order (slope 4)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => rungeKutta4Errors[0] * (step / config.globalTimeSteps[0]) ** 4))
+        ]
+    }));
+    return { rows, checks, plots, notes: ['Under Runge–Kutta 4 every node reads every node\'s stage values, so the three-node model gives the one-node model\'s numbers: the coupling error substeps cannot remove is gone, and the error falls sixteen-fold per halving of the global step.'] };
 }

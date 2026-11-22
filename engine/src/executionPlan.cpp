@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "executionPlan.hpp"
+#include "wholeModelIntegration.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
@@ -1048,6 +1049,7 @@ StateKinds scanStateKinds(const boost::property_tree::ptree& document) {
 }
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
+    checkRequiredFeatures(document);
     const auto sharedParameters = collectSharedParameters(document);
     const auto stateKinds = scanStateKinds(document);
     std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>> storedSchedules;

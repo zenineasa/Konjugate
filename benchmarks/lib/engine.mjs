@@ -6,6 +6,8 @@
 // A benchmark model is a committed .kjt. A run may apply a variant to it first, and only these, recorded with every result:
 //   integration  every node's numerics.integration ("explicit" or "semiImplicit")
 //   substeps     every node's numerics.substepsPerGlobalStep
+//   method       the run's method ("rungeKutta4"; docs/proposals/integrators.md), and its stepsPerGlobalStep, set on the run
+//                configuration the engine is given rather than on the model
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -82,7 +84,8 @@ export function createEngine(executable, workDirectory) {
             const index = runIndex++;
             const configurationPath = join(workDirectory, `run${index}.json`);
             const outputPath = join(workDirectory, `run${index}.bin`);
-            await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, execution: { backend: 'serial' } }));
+            const method = variant?.method ? { method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}) } : {};
+            await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial' } }));
             const engineArgs = ['run', await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];
             const wrapper = measure ? memoryWrapper() : null;
             const startedAt = performance.now();

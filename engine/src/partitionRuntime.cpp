@@ -25,6 +25,28 @@ PartitionNodeResult integrateNode(const NodeExecutionPlan& node,
     return {nodeIndex, std::move(result.states), result.computeNanoseconds};
 }
 
+// The states a node reads, from a boundary message into the partition's copy of the snapshot: its own, and the other nodes'
+// states its terms and provider bind.
+void fillNodeSnapshot(const ExecutionPlan& plan, const NodeExecutionPlan& node, const PartitionBoundaryMessage& boundary, StateValues& snapshot) {
+    for (const auto stateId : node.stateIds) {
+        snapshot.at(plan.stateIndexes.at(stateId)) = boundary.states.at(stateId);
+    }
+    for (const auto& task : node.contributions) {
+        for (const auto& binding : task.bindings) {
+            if (binding.source == BindingSource::synchronizationSnapshot) {
+                snapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
+            }
+        }
+    }
+    if (node.nodeProvider) {
+        for (const auto& binding : node.nodeProvider->bindings) {
+            if (binding.source == BindingSource::synchronizationSnapshot) {
+                snapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
+            }
+        }
+    }
+}
+
 }
 
 void InMemoryPartitionTransport::publish(PartitionBoundaryMessage message) {
@@ -96,26 +118,43 @@ std::future<PartitionResultMessage> PartitionRuntime::submit(PartitionTransport&
         result.nodes.reserve(nodeIndexes_.size());
         for (const auto nodeIndex : nodeIndexes_) {
             const auto& node = executionPlan_.nodes[nodeIndex];
-            for (const auto stateId : node.stateIds) {
-                synchronizationSnapshot.at(executionPlan_.stateIndexes.at(stateId)) = boundary.states.at(stateId);
-            }
-            for (const auto& task : node.contributions) {
-                for (const auto& binding : task.bindings) {
-                    if (binding.source == BindingSource::synchronizationSnapshot) {
-                        synchronizationSnapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
-                    }
-                }
-            }
-            if (node.nodeProvider) {
-                for (const auto& binding : node.nodeProvider->bindings) {
-                    if (binding.source == BindingSource::synchronizationSnapshot) {
-                        synchronizationSnapshot.at(binding.valueIndex) = boundary.states.at(binding.valueId);
-                    }
-                }
-            }
+            fillNodeSnapshot(executionPlan_, node, boundary, synchronizationSnapshot);
             result.nodes.push_back(integrateNode(
                 node, nodeIndex, synchronizationSnapshot, parameterValues, simulationTime, synchronizationStep, providerEvaluator,
                 activeSchedules, synchronizationEndTime));
+        }
+        return result;
+    });
+}
+
+std::future<PartitionStageMessage> PartitionRuntime::submitStage(PartitionTransport& transport,
+                                                                std::size_t synchronizationIndex,
+                                                                EntityValues parameterValues,
+                                                                std::vector<ParameterSchedule> activeSchedules,
+                                                                StageRequest request,
+                                                                std::chrono::milliseconds receiveTimeout,
+                                                                ProviderEvaluator* providerEvaluator) {
+    return executor_.submit([this, &transport, synchronizationIndex, parameterValues = std::move(parameterValues),
+                             activeSchedules = std::move(activeSchedules), request, receiveTimeout, providerEvaluator]() {
+        const auto waitStartedAt = std::chrono::steady_clock::now();
+        auto boundary = transport.receive(partition_, synchronizationIndex, receiveTimeout);
+        const auto waitNanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - waitStartedAt).count();
+        if (boundary.version != 1 || boundary.targetPartition != partition_ || boundary.synchronizationIndex != synchronizationIndex) {
+            throw std::runtime_error("A partition received an incompatible boundary message.");
+        }
+        PartitionStageMessage result;
+        result.synchronizationIndex = synchronizationIndex;
+        result.sourcePartition = partition_;
+        result.boundaryWaitNanoseconds = static_cast<std::uint64_t>(std::max<std::int64_t>(0, waitNanoseconds));
+        StateValues stageStates(executionPlan_.initialStates.size());
+        for (const auto nodeIndex : nodeIndexes_) {
+            const auto& wholeNode = request.wholeModel->nodes.at(nodeIndex);
+            if (wholeNode.stepped) continue;
+            const auto& node = executionPlan_.nodes[nodeIndex];
+            fillNodeSnapshot(executionPlan_, node, boundary, stageStates);
+            result.nodes.emplace_back(nodeIndex, evaluateNodeStage(node, wholeNode, stageStates, parameterValues, activeSchedules,
+                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(nodeIndex), providerEvaluator));
         }
         return result;
     });

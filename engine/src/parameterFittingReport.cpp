@@ -2,6 +2,7 @@
 
 #include "parameterFittingReport.hpp"
 #include "engineProtocol.pb.h"
+#include <cmath>
 #include <fstream>
 
 namespace konjugate {
@@ -38,6 +39,16 @@ void writeFittingReport(const std::filesystem::path& path, const FittingReport& 
     message.set_elapsed_seconds(report.elapsedSeconds);
     message.set_stopped(report.stopped);
     message.set_final_violation(report.finalViolation);
+    for (const auto& outcome : report.finalLimits) {
+        auto* entry = message.add_final_limits();
+        entry->set_limit(outcome.limit);
+        entry->set_at_most(outcome.atMost);
+        entry->set_reached(outcome.reached);
+    }
+    if (std::isfinite(report.startObjective)) {
+        message.set_start_objective(report.startObjective);
+        message.set_start_violation(report.startViolation);
+    }
     for (const auto& update : report.iterations) {
         auto* entry = message.add_iterations();
         entry->set_iteration(update.iteration);

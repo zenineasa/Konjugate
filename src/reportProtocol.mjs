@@ -44,8 +44,13 @@ export function decodeInferenceReport(buffer) {
     return InferenceReport.toObject(InferenceReport.decode(buffer), toObjectOptions);
 }
 
+// The starting values' objective and violation are written only when that simulation gave a number, and not at all by an engine from
+// before them: absent is null here, not the 0 `defaults` would make of it, so the review does not report a starting objective of 0.
 export function decodeFittingReport(buffer) {
-    return FittingReport.toObject(FittingReport.decode(buffer), toObjectOptions);
+    const message = FittingReport.decode(buffer);
+    const report = FittingReport.toObject(message, toObjectOptions);
+    for (const field of ['startObjective', 'startViolation']) if (!Object.hasOwn(message, field)) report[field] = null;
+    return report;
 }
 
 export function decodeFittingProgressEvent(buffer) {

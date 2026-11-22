@@ -33,7 +33,7 @@ export function objectiveVocabulary(document, measuredColumns = []) {
         for (const state of node.states ?? []) {
             const name = unique(`${camel(node.name)}${upperFirst(state.symbol || camel(state.name))}`);
             variables.push({ name, kind: 'state', id: state.id });
-            states.push({ name, label: `${node.name} · ${state.name}` });
+            states.push({ name, label: `${node.name} · ${state.name}`, unit: state.unit ?? '' });
         }
     }
 

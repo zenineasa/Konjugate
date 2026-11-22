@@ -12,6 +12,7 @@
 #include <functional>
 #include <filesystem>
 #include <string>
+#include <limits>
 #include <vector>
 
 namespace konjugate {
@@ -139,6 +140,17 @@ struct FittingReport {
     double elapsedSeconds = 0.0;
     bool stopped = false; // ended by a stop request or the time limit, with the best found so far
     double finalViolation = 0.0; // the largest relative constraint violation of the best values, 0 when they all hold
+    // Each limit, in the order the problem gives them, with what the reported values reached against it.
+    struct LimitOutcome {
+        double limit = 0.0;
+        bool atMost = true;
+        double reached = 0.0;
+    };
+    std::vector<LimitOutcome> finalLimits;
+    // The objective as written at the starting values, without any penalty for breaking a limit (NaN when that simulation failed), and
+    // how far those values broke one (relative, as finalViolation).
+    double startObjective = std::numeric_limits<double>::quiet_NaN();
+    double startViolation = 0.0;
 };
 
 // One simulation of a fit, as it finishes: what the app shows while a fit runs (see FittingProgressEvent in the protocol).
@@ -190,6 +202,7 @@ struct FittingTrialScore {
     double objective = 0.0;
     double violationSquares = 0.0;
     double worstViolation = 0.0;
+    std::vector<double> reached; // what each limit's expression came to in this trial, in the limits' order
 };
 FittingTrialScore evaluateFittingTrial(const FittingProblem& problem, const std::vector<double>& parameterValues,
     const std::filesystem::path& scratchOutputPath);

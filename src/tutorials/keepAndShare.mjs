@@ -16,7 +16,9 @@ const steps = Object.freeze([
     {
         id: 'welcome',
         title: 'Keep and share your work',
-        text: 'A model is worth more when it can be picked up again, by you or someone else. You will see whose work this project is and on what terms, run it and carry the run on, export what it computed for a spreadsheet, and save the project with its results inside.',
+        text: 'A model is worth more when it can be picked up again, by you or someone else. You will see whose work this project is and on what terms, ',
+        desktopText: 'run it and carry the run on, export what it computed for a spreadsheet, and save the project with its results inside.',
+        webText: 'run it, export what it computed for a spreadsheet, and save the model.',
         advance: 'next', nextLabel: 'Start', done: () => true
     },
     {
@@ -24,7 +26,8 @@ const steps = Object.freeze([
         title: 'Whose work it is',
         text: 'Press Project properties (the ⓘ in the title bar). An example says who made it, its copyright and its licence; your own projects start from the details set in Settings › New projects, and they travel with the file and into anything exported from it. Close it when you have read it.',
         target: '#ownershipButton', skip: 'openProjectProperties',
-        done: ({ ui }) => ui.propertiesSeen
+        // Done once it has been read and closed again: the next card's Run is behind it while it is open.
+        done: ({ ui }) => ui.propertiesSeen && !ui.ownershipDialogOpen
     },
     {
         id: 'run',
@@ -44,7 +47,9 @@ const steps = Object.freeze([
     {
         id: 'export',
         title: 'Export the results',
-        text: 'Press "Export results as CSV" in the title bar and choose where to save it. The file has a time column and one column for every state, named "Node — State (unit)", ready for a spreadsheet, and Parameter tuning reads it back as measurements.',
+        text: 'Press "Export results as CSV" in the title bar',
+        desktopText: ' and choose where to save it. The file has a time column and one column for every state, named "Node — State (unit)", ready for a spreadsheet, and Parameter tuning reads it back as measurements.',
+        webText: ': your browser downloads it. The file has a time column and one column for every state, named "Node — State (unit)", ready for a spreadsheet, and Parameter tuning reads it back as measurements.',
         target: '#exportCsvButton', skip: 'exportResults',
         done: ({ ui }) => ui.exported
     },
@@ -53,12 +58,23 @@ const steps = Object.freeze([
         title: 'Save it with its results',
         text: 'Press Save in the title bar and keep "Model and results". This is a copy of someone else\'s example, so it asks which details the copy carries: keep them, or put your own. Then choose where to save it. Opened again, the project comes back with this run on its timeline, every branch included, without running anything.',
         target: (ui) => (ui.saveOwnershipDialogOpen ? '#saveOwnershipContinue' : ui.saveContentDialogOpen ? '#saveContentDialog' : '#saveButton'), skip: 'saveWithResults',
+        editions: ['desktop'],
         done: ({ ui }) => ui.savedWithResults
+    },
+    {
+        // The web edition keeps a project's results in the CSV exported before, not in the project file.
+        id: 'saveModel',
+        title: 'Save the model',
+        text: 'Press Save in the title bar to keep the model. In the web edition a project is saved without its results: the CSV you just exported keeps them. This is a copy of someone else\'s example, so it asks which details the copy carries: keep them, or put your own. Press Next when it is saved.',
+        editions: ['web'],
+        advance: 'next', done: () => true
     },
     {
         id: 'finish',
         title: 'You have kept your work',
-        text: 'Save encrypted, beside Save, protects a project with a password: it cannot be opened, or even read, without it. "Model only" saves a smaller file without the results. Export simulation code takes the model itself elsewhere, as a program or an FMU.',
+        text: 'Save encrypted, beside Save, protects a project with a password: it cannot be opened, or even read, without it.',
+        desktopText: ' "Model only" saves a smaller file without the results. Export simulation code takes the model itself elsewhere, as a program or an FMU.',
+        webText: ' Export simulation code takes the model itself elsewhere, as a program. The desktop app also saves a project with its results inside, and carries a run on from where it ended.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);
@@ -66,7 +82,7 @@ const steps = Object.freeze([
 export const keepAndShare = Object.freeze({
     id: 'keepAndShare',
     title: 'Keep and share your work',
-    summary: 'See whose work a project is, carry a run on, export its results as CSV, and save it with its results.',
+    summary: 'See whose work a project is, carry a run on, export its results as CSV, and save it with its results (the model, in the web edition).',
     minutes: 3,
     area: 'results',
     tags: ['save', 'save with results', 'export', 'CSV', 'spreadsheet', 'project properties', 'owner', 'license', 'licence', 'copyright', 'extend', 'continue', 'encrypted', 'share'],

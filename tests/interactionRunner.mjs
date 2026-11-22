@@ -3408,7 +3408,7 @@ export async function runInteractionTests(driver) {
         // hook actually ran, not just that some edge got created. Opens the edge editor (same
         // bundle-label click precedent other tests in this file use) to read it back the same
         // way a real user would see it, rather than reaching into renderer module state. The
-        // bundle label's header shows the connected node names ("Thermal mass ↔ Thermal mass"),
+        // bundle label's header shows the connected node names ("Thermal mass ⇄ Thermal mass", for a relationship acting both ways),
         // not the edge's own title -- clicking anywhere on a single-relationship bundle (not just
         // a specific row) opens that one relationship directly.
         await waitFor(window, `[...document.querySelectorAll('.bundleLabel')].some((l) => l.textContent.includes('Thermal mass'))`, 'The relationship bundle label for the new Conduction edge did not appear.');
@@ -4888,7 +4888,7 @@ export async function runInteractionTests(driver) {
         assert.equal(objectiveReport.finalParameters.length, 2);
         assert.ok(Number.isFinite(objectiveReport.finalLoss), 'The objective ends on a number.');
         assert.match(await evaluate(window, `document.querySelector('#parameterTuningProgress').textContent`), /objective/);
-        assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /^Maximised objective: .*All limits hold\./);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /^Maximised objective: .* Limit: stays at most 1000000000( K)? \(±\d+\): holds, at /);
         assert.equal(await evaluate(window, `document.querySelector('#parameterTuningStatImprovement').previousElementSibling.textContent`), 'Higher by');
         await waitFor(window, `document.querySelector('#parameterTuningComparisonPlot').data?.length === 2`, 'The before-and-after plot was not drawn for the state the objective names.', 60000);
         assert.deepEqual(await evaluate(window, `document.querySelector('#parameterTuningComparisonPlot').data.map((trace) => trace.name)`), ['Before tuning', 'After tuning']);
@@ -5155,7 +5155,7 @@ export async function runInteractionTests(driver) {
         const issueText = await evaluate(diagnosticWindow, `document.querySelector('.validationIssue').textContent`);
         assert.match(issueText, /driven mainly by this node's own 'Decay rate' source-term parameter/,
             'The warning should name the specific parameter, not just the node.');
-        assert.match(issueText, /raising this node's numerics\.substepsPerGlobalStep to at least 2/,
+        assert.match(issueText, /give it at least 2 substeps \(Numerics tab, Substeps per global step\)/,
             'The warning should include a concrete requiredSubsteps recommendation.');
 
         await evaluate(diagnosticWindow, `document.querySelector('.validationIssue').click()`);
@@ -9702,13 +9702,19 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `window.__debugProject.load(${JSON.stringify(emptyDocument)}, 'tutorial.kjt')`);
             await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('0 nodes') && !window.__debugTour.blockers().hasResult && !window.__debugTour.blockers().dirty`, 'The empty project did not load.');
         };
-        return { press, waitForStep, clickLabel, cardOverlaps, clean };
+        // A step with something to read once it is done (a plot, the record of a run) waits for Next, as a person reads it and goes on.
+        const readAndGoOn = async (id, timeout = 30000) => {
+            await waitFor(window, `window.__debugTour.step() === ${JSON.stringify(id)} && !document.querySelector('.tourFloating .tourPrimary').hidden`, `"${id}" did not offer Next once done.`, timeout);
+            await press('.tourFloating .tourPrimary');
+            await waitFor(window, `window.__debugTour.step() !== ${JSON.stringify(id)}`, `Next on "${id}" did not move on.`);
+        };
+        return { press, waitForStep, clickLabel, cardOverlaps, clean, readAndGoOn };
     };
 
     // The list as the dialog shows it with nothing typed: grouped by area, in the areas' order.
     const tutorialListOrder = groupTutorials().flatMap((group) => group.tutorials.map((tutorial) => tutorial.id));
     await run('the Tutorials button lists every tutorial, grouped, searchable, and starts one from its example without opening the guide', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         const handlesBefore = driver.allHandles?.() ?? [];
         await press('#tutorialsButton');
@@ -9748,7 +9754,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the calibration tutorial fits the tank to its measurements, keeps the fit and runs it, and is ticked in the list', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('calibrateTank')`), true);
         await waitForStep('welcome');
@@ -9800,6 +9806,7 @@ export async function runInteractionTests(driver) {
         await waitForStep('plotTank', 60000);
         assert.equal(await evaluate(window, `document.querySelector('#runOnlineMode').checked`), false, 'The skipped run was left online.');
         await clickLabel('Water tank');
+        await readAndGoOn('plotTank');
         await waitForStep('finish');
         await press('.tourFloating .tourPrimary');
         await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
@@ -9811,7 +9818,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the controller tutorial runs the joint, raises the gain in the relationship editor, runs it again and compares', async () => {
-        const { press, waitForStep, clickLabel, cardOverlaps, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, cardOverlaps, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('tuneController')`), true);
         await waitForStep('welcome');
@@ -9824,6 +9831,7 @@ export async function runInteractionTests(driver) {
         await press('#startRun');
         await waitForStep('plotAngle', 60000);
         await clickLabel('Joint link');
+        await readAndGoOn('plotAngle');
         await waitForStep('closeResults');
         // The Joint link's editor is open and covers the end of the timeline, so the step points at its close button first.
         await waitFor(window, `!document.querySelector('.tourRing').hidden && Math.abs(document.querySelector('.tourRing').getBoundingClientRect().top - document.querySelector('#nodeEditor > header [data-close-card]').getBoundingClientRect().top) < 8`, 'The ring did not move to the editor\'s close button.');
@@ -9846,6 +9854,7 @@ export async function runInteractionTests(driver) {
         await press('.tourFloating .tourSkipStep');
         await waitForStep('compare', 60000);
         await clickLabel('Joint link');
+        await readAndGoOn('compare');
         await waitForStep('finish');
         assert.match(await evaluate(window, `document.querySelector('.tourFloating .tourText').textContent`), /unstable/);
         await press('.tourFloating .tourPrimary');
@@ -9853,7 +9862,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the optimisation tutorial writes an objective with the card\'s buttons, maximises it over eight hours and holds it to a limit', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('optimiseObjective')`), true);
         await waitForStep('welcome');
@@ -9880,9 +9889,18 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#runParameterTuning').disabled`, 'The search could not be run.', 15000);
         await press('#runParameterTuning');
         await waitForStep('review', 180000);
-        assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /^Maximised objective: .*All limits hold\./);
+        // The guessed values start past the limit, so the review gives their objective as written and says they break it; the search
+        // ends inside it, and says so with the limit's tolerance and what the water came to.
+        const outcome = await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`);
+        assert.match(outcome, /^Maximised objective: 35\d\.\d at the starting values, which break a limit by [\d.]+%, 3[34]\d(\.\d+)? with the tuned ones\./);
+        assert.match(outcome, /Limit: stays at most 340 K \(±0\.01\): holds, at 3[34]\d\.\d\d K\./);
         const report = await evaluate(window, `window.__debugParameterTuning.report()`);
-        assert.ok(report.finalLoss <= 340.5 && report.finalLoss > 320, `The search settled just under the limit: ${report.finalLoss}.`);
+        assert.ok(report.finalLoss <= 340 && report.finalLoss > 330, `The search settled at the limit, and inside it: ${report.finalLoss}.`);
+        assert.ok(report.finalLimits[0].reached <= 340, `The limit holds: ${report.finalLimits[0].reached}.`);
+        // Raised both, as the card now says: the guessed tank is already past the limit.
+        const capacitance = report.finalParameters.find((entry) => entry.value > 1000)?.value;
+        const heatLoss = report.finalParameters.find((entry) => entry.value <= 1000)?.value;
+        assert.ok(capacitance > 300000 && heatLoss > 10, `The search raised both numbers from 300,000 J/K and 10 W/K: ${capacitance}, ${heatLoss}.`);
         await press('.tourFloating .tourPrimary');
         await waitForStep('finish');
         await press('.tourFloating .tourPrimary');
@@ -9891,7 +9909,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the stability tutorial stiffens a spring, follows the pre-run warning to its cause and fixes it with substeps', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('fixInstability')`), true);
         await waitForStep('welcome');
@@ -9919,16 +9937,17 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `(() => { const input = document.querySelector('#editNodeSubsteps'); input.value = '11'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await waitForStep('run', 15000);
         await press('.tourFloating .tourSkipStep');
-        // The mass's editor is still open from its substeps, so its plot may be on screen as soon as the run ends: the step is then done.
-        await waitFor(window, `['plot', 'finish'].includes(window.__debugTour.step())`, 'The run did not finish.', 60000);
-        if (await evaluate(window, `window.__debugTour.step()`) === 'plot') await clickLabel('Suspended mass');
+        // The mass's editor is still open from its substeps, so its plot is on screen as soon as the run ends: the step is done then, and
+        // waits for Next so that what it says about the plot is read.
+        await waitForStep('plot', 60000);
+        await readAndGoOn('plot');
         await waitForStep('finish');
         await press('.tourFloating .tourPrimary');
         await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
     });
 
     await run('the components tutorial builds a motor and its load from library parts and relationships, and runs it', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('buildFromComponents')`), true);
         await waitForStep('welcome');
@@ -9956,15 +9975,16 @@ export async function runInteractionTests(driver) {
         const saved = await savedProject();
         assert.deepEqual(saved.edges.map((edge) => edge.name).sort(), ['Armature dynamics', 'Shaft dynamics']);
         await press('.tourFloating .tourSkipStep');
-        await waitFor(window, `['plot', 'finish'].includes(window.__debugTour.step())`, 'The run did not finish.', 60000);
-        if (await evaluate(window, `window.__debugTour.step()`) === 'plot') await clickLabel('Motor');
+        await waitForStep('plot', 60000);
+        if (!await evaluate(window, `window.__debugTour.blockers().plotsSeen.includes('Motor')`)) await clickLabel('Motor');
+        await readAndGoOn('plot');
         await waitForStep('finish');
         await press('.tourFloating .tourPrimary');
         await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
     });
 
     await run('the branches tutorial forks a run at 4 s with a new target angle, runs the fork and compares it with the baseline', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('whatIfBranches')`), true);
         await waitForStep('welcome');
@@ -9987,6 +10007,7 @@ export async function runInteractionTests(driver) {
         await waitForStep('plot', 60000);
         assert.equal(await evaluate(window, `document.querySelector('#branchesButtonCount').textContent`), '2');
         await clickLabel('Joint link');
+        await readAndGoOn('plot');
         await waitForStep('compare');
         await press('#branchesButton');
         await waitFor(window, `document.querySelectorAll('#branchTree .branchTreeItem').length === 2`, 'The branch tree did not list both branches.');
@@ -9999,7 +10020,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.forks && 'the web engine keeps no checkpoints to fork from' });
 
     await run('the inference tutorial downloads a heating record, finds the two causes of the room\'s temperature and imports them as a model', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('discoverEquations')`), true);
         await waitForStep('welcome');
@@ -10049,7 +10070,7 @@ export async function runInteractionTests(driver) {
     };
 
     await run('the live twin tutorial follows a person into the twin window, through a demonstration, to the drift warning', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('liveTwin')`), true);
         await waitForStep('welcome');
@@ -10079,7 +10100,7 @@ export async function runInteractionTests(driver) {
     // banner went to a window nobody could see; and the skip only opened a window when none was open. Starting a tutorial now closes a
     // twin window left from before, so the skip brings up a fresh one, in front.
     await run('skipping only "Open the live twin" brings the twin window up, one left minimized from before closed as the tutorial starts, and the next step is done there by hand', async () => {
-        const { waitForStep, clean } = tutorialHelpers();
+        const { waitForStep, clean, readAndGoOn } = tutorialHelpers();
         // A real click at an element's centre, in whichever window it is.
         const clickAt = async (handle, selector) => {
             await waitFor(handle, `(() => { const element = document.querySelector(${JSON.stringify(selector)}); return Boolean(element && element.getClientRects().length && !element.disabled); })()`, `${selector} was not there to press.`, 15000);
@@ -10127,7 +10148,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.multiWindow && 'the live twin has its own window, in the desktop app' });
 
     await run('the steering tutorial binds W and S to the joint\'s target angle in Settings and steers it with them in a real-time run', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         const key = (type, code) => evaluate(window, `window.dispatchEvent(new KeyboardEvent(${JSON.stringify(type)}, { code: ${JSON.stringify(code)}, bubbles: true, cancelable: true }))`);
         await clean();
         await evaluate(window, `window.__debugSteering.steering.save({ bindings: [] })`);
@@ -10168,6 +10189,7 @@ export async function runInteractionTests(driver) {
             assert.ok(record.length > 0 && record.every((change) => change.parameterId === 21), 'The steering was recorded against the target angle.');
             await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The real-time run did not end.', 60000);
             await clickLabel('Joint link');
+            await readAndGoOn('plot');
             await waitForStep('finish');
             await press('.tourFloating .tourPrimary');
             await waitFor(window, `!window.__debugTour.active()`, 'Finishing did not end the tutorial.');
@@ -10177,7 +10199,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.multiWindow && 'the steering tutorial is for the desktop app' });
 
     await run('the organising tutorial copies a body into three, meshes them with an edge group, folds them into a subsystem and runs inside it', async () => {
-        const { press, waitForStep, clickLabel, clean } = tutorialHelpers();
+        const { press, waitForStep, clickLabel, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('organiseModel')`), true);
         await waitForStep('welcome');
@@ -10215,8 +10237,9 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `[...document.querySelectorAll('.subsystemLabel')].find((label) => label.textContent.includes('Bodies')).querySelector('.subsystemOpen').click()`);
         await waitForStep('run');
         await press('.tourFloating .tourSkipStep');
-        await waitFor(window, `['plot', 'leave'].includes(window.__debugTour.step())`, 'The run did not finish.', 60000);
-        if (await evaluate(window, `window.__debugTour.step()`) === 'plot') await clickLabel('Thermal mass');
+        await waitForStep('plot', 60000);
+        if (!await evaluate(window, `window.__debugTour.blockers().plotsSeen.includes('Thermal mass')`)) await clickLabel('Thermal mass');
+        await readAndGoOn('plot');
         await waitForStep('leave');
         await press('[data-subsystem-parent]');
         await waitForStep('finish');
@@ -10229,7 +10252,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the reuse tutorial makes a component with a port and a parameter, places it twice, connects and runs them, and keeps it in my library', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         assert.equal(await evaluate(window, `window.__debugTour.startTutorial('reuseComponent')`), true);
         await waitForStep('welcome', 20000);
@@ -10260,7 +10283,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('the joystick tutorial binds two joysticks\' four axes to an excavator and digs with them in a real-time run', async () => {
-        const { press, waitForStep, clean } = tutorialHelpers();
+        const { press, waitForStep, clean, readAndGoOn } = tutorialHelpers();
         const left = 'Left joystick (simulated)';
         const right = 'Right joystick (simulated)';
         const axis = (pad, index, value) => evaluate(window, `(() => { const devices = window.__debugSteering.devices; devices.moveAxis(${JSON.stringify(pad)}, ${index}, ${value}); devices.poll(); })()`);
@@ -10401,7 +10424,7 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.multiWindow && 'the joystick tutorial is for the desktop app' });
 
     await run('every tutorial can be skipped step by step to its end, each skip doing the step so the next one works', async () => {
-        const { press, clean } = tutorialHelpers();
+        const { press, clean, readAndGoOn } = tutorialHelpers();
         // After each single skip, the next step can be done as its card says: its ring shown, wholly on screen, and not covered (what is
         // on top at its middle is inside what it rings), and its card in the window in front. A step in the twin window has its ring
         // there, checked the same way, and that window in front; a step with nothing to do (Next) has no ring.
@@ -10511,7 +10534,7 @@ export async function runInteractionTests(driver) {
                 assert.equal(await evaluate(window, `document.querySelector('#validationIssues').textContent.includes('unstable')`), false, 'The warning is gone.');
             } else if (id === 'optimiseObjective') {
                 // The search lands at its limit: held, or a whisker over it (the report says by how much).
-                assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /All limits hold|The limit (holds|does not hold: the best values go above 340 by)/, 'The skipped search was not reported against its limit.');
+                assert.match(await evaluate(window, `document.querySelector('#parameterTuningComparisonStatus').textContent`), /Limit: stays at most 340 K \(±0\.01\): holds, at 3[34]\d\.\d\d K\./, 'The skipped search was not reported against its limit.');
                 await evaluate(window, `document.querySelector('#cancelParameterTuning').click()`);
             } else if (id === 'driveWithJoysticks') {
                 assert.ok((await evaluate(window, `window.__debugSteering.result().interventions`)).some((change) => change.kind !== 'restart'), 'The skipped dig was recorded.');
@@ -10557,7 +10580,7 @@ export async function runInteractionTests(driver) {
     });
 
     await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
-        const { waitForStep, clean } = tutorialHelpers();
+        const { waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();
         const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#exampleButton').click()`);

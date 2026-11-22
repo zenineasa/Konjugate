@@ -14,7 +14,9 @@ export function bindingInsertTitle(binding) {
     return binding.kind === 'parameter' ? 'Insert parameter' : 'Insert state reference';
 }
 
-// A row of buttons drawn from a list of { label, title, onClick }.
+// A row of buttons drawn from a list of { label, title, onClick }. Pressing one leaves the focus in the formula being written, as
+// "Add k as a parameter" does: a formula that lost it would end its edit under the press, and a node's own field, drawn again when its
+// edit ends, would take this row away before the click could insert anything.
 export class ReferenceChips {
     constructor(container) {
         this.container = container;
@@ -26,6 +28,7 @@ export class ReferenceChips {
             button.type = 'button';
             button.textContent = item.label;
             button.title = item.title ?? '';
+            button.addEventListener('mousedown', (event) => event.preventDefault());
             button.addEventListener('click', item.onClick);
             return button;
         }));

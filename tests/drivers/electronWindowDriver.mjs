@@ -222,8 +222,9 @@ export function createElectronDriver(mainWindow) {
         },
         // The app's window in front, the one a person sees and types into. A test's windows are often not in the active app, which
         // then has no focused window: the app is made active first, which focuses the one in front.
+        // The system can take a moment to hand the app the front (longer while another app is busy in front of it), so it is asked again.
         async focusedHandle() {
-            if (!BrowserWindow.getFocusedWindow()) {
+            for (let attempt = 0; attempt < 8 && !BrowserWindow.getFocusedWindow(); attempt += 1) {
                 app.focus({ steal: true });
                 await new Promise((resolve) => setTimeout(resolve, 300));
             }

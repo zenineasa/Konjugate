@@ -23,6 +23,33 @@ const edgesBetweenNodes = (document) => {
     return (document?.edges ?? []).filter((edge) => edge.source?.nodeId !== edge.target?.nodeId && ids.has(edge.source?.nodeId) && ids.has(edge.target?.nodeId));
 };
 
+// What a relationship's formula gives, from its MathJSON, with each symbol's value from `valueOf(symbol)`; undefined for anything this
+// small reader does not know, so a formula written some other way is never turned down for it.
+const evaluate = (expression, valueOf) => {
+    if (typeof expression === 'number') return expression;
+    if (typeof expression === 'string') return valueOf(expression);
+    if (expression && typeof expression === 'object' && !Array.isArray(expression) && 'num' in expression) return Number(expression.num);
+    if (!Array.isArray(expression)) return undefined;
+    const [operator, ...operands] = expression;
+    const values = operands.map((operand) => evaluate(operand, valueOf));
+    if (values.some((value) => value === undefined || Number.isNaN(value))) return undefined;
+    switch (operator) {
+        case 'Add': return values.reduce((sum, value) => sum + value, 0);
+        case 'Subtract': return values.length === 1 ? -values[0] : values.slice(1).reduce((difference, value) => difference - value, values[0]);
+        case 'Multiply': return values.reduce((product, value) => product * value, 1);
+        case 'Divide': return values[0] / values[1];
+        case 'Negate': return -values[0];
+        case 'Delimiter': return values.length === 1 ? values[0] : undefined;
+        default: return undefined;
+    }
+};
+// The tour's formula is k·(T_H − T_B), whatever it is written like: checked at two points, where k·T_H − T_B and the like differ from it.
+// A formula this reader cannot follow is taken as written (the engine has already said it is valid).
+const movesHeatAsAsked = (mathJson) => [[1, 350, 300], [2, 300, 350]].every(([k, source, target]) => {
+    const value = evaluate(mathJson, (symbol) => (/^source/i.test(symbol) ? source : /^target/i.test(symbol) ? target : symbol === 'k' ? k : undefined));
+    return value === undefined || Math.abs(value - k * (source - target)) < 1e-9;
+});
+
 // `target` is the selector the step points at (or a function of the interface facts, for a step whose target moves); `fill` names
 // the action the "Fill this in for me" button performs, which the renderer supplies.
 const steps = Object.freeze([
@@ -71,7 +98,7 @@ const steps = Object.freeze([
         text: `Its card shows ${firstModelValues.target.name}'s ${firstModelValues.state.name.toLowerCase()} and, in the field, what this relationship adds to it, empty: until it is written, the relationship adds 0. Enter k·(${firstModelValues.state.symbol}_H − ${firstModelValues.state.symbol}_B): the block warms at a rate proportional to how much hotter the heater is. ${firstModelValues.state.symbol}_H is the heater's ${firstModelValues.state.name.toLowerCase()} and ${firstModelValues.state.symbol}_B the block's: choose them from the buttons under the field instead of typing them. Nothing defines k yet, so the line under the field says so: press "Add k as a parameter" there. It is set to 1, on the Parameters tab; change it to make the heat flow faster or slower.`,
         target: '#edgeEditor', fill: 'edgeEquation', skip: 'edgeEquation',
         // Its part reads both ends, lands on the block, and is valid: k is a parameter (its MathJSON is there only then).
-        done: ({ document }) => edgesBetweenNodes(document).some((edge) => /source/.test(edge.equation ?? '') && /target/.test(edge.equation ?? '') && edge.equationModel?.output?.role === 'target' && edge.equationModel?.mathJson != null)
+        done: ({ document }) => edgesBetweenNodes(document).some((edge) => /source/.test(edge.equation ?? '') && /target/.test(edge.equation ?? '') && edge.equationModel?.output?.role === 'target' && edge.equationModel?.mathJson != null && movesHeatAsAsked(edge.equationModel.mathJson))
     },
     {
         id: 'run',

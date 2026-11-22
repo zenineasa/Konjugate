@@ -40,7 +40,7 @@ const steps = Object.freeze([
     {
         id: 'share',
         title: 'Make the mass a shared parameter',
-        text: `Click "${values.spring.relationship}" in the table's "Belongs to" column to open it. On its Parameters tab, in the Mass row, set Shared to "New shared parameter from this row…". The mass is now one parameter the relationship uses.`,
+        text: `Click "${values.spring.relationship}" in the table's "Belongs to" column to open it. On its Parameters tab, in the Mass row, set "Shared parameter" to "New shared parameter from this row…". The mass is now one parameter the relationship uses.`,
         target: (ui) => (ui.edgeEditorFor === values.spring.relationship ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-editor-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.spring.parameterId}"] [data-shared-select]` : '#parametersPanel'),
         skip: 'shareParameter', relationship: values.spring.relationship, parameterId: values.spring.parameterId, choice: 'new',
         done: ({ document }) => linked(document, values.spring.relationship)
@@ -48,7 +48,7 @@ const steps = Object.freeze([
     {
         id: 'linkSecond',
         title: 'Use it in the damper too',
-        text: `Open "${values.damper.relationship}" and, on its Parameters tab, set its Mass row's Shared to the new "Mass (mass)". Both relationships now read the same mass.`,
+        text: `Open "${values.damper.relationship}": click it in the label between the mass and the support, or in the table's "Belongs to" column. On its Parameters tab, set its Mass row's "Shared parameter" to the new "Mass (mass)". Both relationships now read the same mass.`,
         target: (ui) => (ui.edgeEditorFor === values.damper.relationship ? ui.edgeEditorTab !== 'parameters' ? '#edgeEditor [data-editor-tab="parameters"]' : `#edgeEditorParameters [data-parameter-id="${values.damper.parameterId}"] [data-shared-select]` : ui.relationshipRowOf(values.damper.relationship)),
         skip: 'shareParameter', relationship: values.damper.relationship, parameterId: values.damper.parameterId, choice: 'mass',
         done: ({ document }) => bothLinked(document)
@@ -77,9 +77,12 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'A heavier bounce',
-        text: `Click the ${values.node} to plot it: twice the mass on the same spring bounces √2 times slower, about every 4.4 s instead of 3.1 s, and dies away more slowly too.`,
-        target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.node)), skip: 'plotNode', node: values.node,
+        text: `Close the Parameters table with its ×, which can cover the canvas, and click the ${values.node} to plot it: twice the mass on the same spring bounces √2 times slower, about every 4.4 s instead of 3.1 s, and dies away more slowly too.`,
+        // The table opened at the start sits over the canvas, the mass's label among what it can cover: its × first.
+        target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.parametersOpen ? '#closeParametersPanel' : ui.labelOf(values.node)), skip: 'plotNode', node: values.node,
         done: ({ ui }) => ui.plotsSeenSinceRun.includes(values.node)
     },
     {

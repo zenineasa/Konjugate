@@ -7,6 +7,7 @@
 // with the result. With no joystick at hand, skipping the first step binds four pairs of keys instead, and skipping the dig has the
 // excavator do it by itself. Steering needs a run that takes commands while it goes, so this tutorial is for the desktop app.
 
+import { latch } from './latches.mjs';
 import { onlineRunTarget } from './steps.mjs';
 
 export const driveWithJoysticksValues = Object.freeze({
@@ -56,7 +57,7 @@ const steps = Object.freeze([
     {
         id: 'connect',
         title: 'Connect the joysticks',
-        text: 'Plug in two joysticks, or one gamepad (its two sticks do as well), and press a button on each so Konjugate sees it: a browser shows a controller only once it has been used. Settings › Controllers draws every one it sees, its sticks and buttons moving as you move them, and "Not seeing your controller?" says how to connect one. No joystick at hand? Skip this step, and the four functions are bound to keys instead: A and D swing, W and S the stick, I and K the boom, J and L the bucket.',
+        text: 'Plug in two joysticks, or one gamepad (its two sticks do as well), and press a button on each so Konjugate sees it: a browser shows a controller only once it has been used. Settings › Controllers draws every one it sees, its sticks and buttons moving as you move them, and "Not seeing your controller?" says how to connect one. No joystick at hand? Skip this step, and the four functions are bound to keys instead: I lowers the boom and K raises it, J curls the bucket and L opens it, W and S move the stick, A and D swing the cab.',
         target: (ui) => (ui.controllersShown ? '#controllerDevices' : ui.settingsOpen ? '[data-settings-target="controllers"]' : '#settingsButton'),
         status: (ui) => (ui.gamepadNames.length
             ? `Konjugate sees ${ui.gamepadNames.length === 1 ? 'one controller' : `${ui.gamepadNames.length} controllers`} (${ui.gamepadNames.join(', ')}), with ${ui.gamepadAxes} ${ui.gamepadAxes === 1 ? 'axis' : 'axes'} in all${ui.gamepadAxes >= 4 ? '.' : ui.controllersNotSeen?.length ? `: four are needed, and ${ui.controllersNotSeen.join(' and ')} is connected too, so press one of its buttons.` : ': four are needed, so connect the second joystick.'}`
@@ -93,9 +94,10 @@ const steps = Object.freeze([
     {
         id: 'startRun',
         title: 'Start a run in real time',
-        text: `Close Settings and press Run. Turn on "Online", set the pacing to "Real time", set "Run until" to ${values.runSeconds} s, and press Start. The joysticks drive the excavator for as long as it runs.`,
+        text: `Close Settings if it is open, and press Run. Turn on "Online", set the pacing to "Real time", set "Run until" to ${values.runSeconds} s, and press Start. The joysticks (or the keys) drive the excavator for as long as it runs.`,
         target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
-        done: ({ ui }) => ui.steerable || dug(ui)
+        // Kept once the run could be steered: a real-time run ends by itself, and that is not the step undone.
+        done: latch(({ ui }) => ui.steerable || dug(ui))
     },
     {
         id: 'watch3d',
@@ -117,7 +119,7 @@ const steps = Object.freeze([
     {
         id: 'dig',
         title: 'Dig',
-        text: `Watch the ${values.tip}'s height on the canvas, or the machine in the 3D view. Push the right joystick forward to lower the boom, and work the left one to reach out, until the tip touches the ground (a height of 0 m). Then pull the boom back up and curl the bucket until the tip is above ${values.lift} m. Each function keeps moving while its stick is held and stops when it is let go.`,
+        text: `Watch the ${values.tip}'s height on the canvas, or the machine in the 3D view. Push the right joystick forward to lower the boom, and work the left one to reach out, until the tip touches the ground (a height of 0 m). Then pull the boom back up and curl the bucket until the tip is above ${values.lift} m. Each function keeps moving while its stick is held and stops when it is let go. On the keys: hold I until the tip touches the ground, then hold K and J together until it is above ${values.lift} m.`,
         target: (ui) => ui.labelOf(values.tip), skip: 'digByItself', dig: { ground: values.ground, lift: values.lift },
         done: ({ ui }) => dug(ui)
     },
@@ -130,7 +132,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have driven a machine with two joysticks',
-        text: 'A binding\'s Change… sets how its axis maps: inverted, or with a curve that is finer near the centre for careful work. Buttons can step a value or hold it while pressed, and MIDI controllers bind the same way. The four bindings stay in Settings › Controllers, for any model with these commands; remove them there if you do not want them.',
+        text: 'A binding\'s Options… sets how its axis maps: inverted, or with a curve that is finer near the centre for careful work. Buttons can step a value or hold it while pressed, and MIDI controllers bind the same way. The four bindings stay in Settings › Controllers, for any model with these commands; remove them there if you do not want them.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

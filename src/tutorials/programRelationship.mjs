@@ -21,9 +21,14 @@ const bound = (document) => {
     const bindings = conduction(document)?.implementation?.bindings ?? [];
     return values.bindings.every(({ key, reference }) => bindings.some((binding) => binding.key === key && binding.kind === 'state' && binding.role === reference.split('.')[0]));
 };
-// The program adds something computed from both keys (the template's own lines that mention them are comments).
-const written = (document) => String(conduction(document)?.implementation?.source ?? '').split('\n')
-    .some((line) => !line.trim().startsWith('#') && line.includes('add_gradient(') && line.includes('inputs["hot"]') && line.includes('inputs["cold"]'));
+// The program declares both keys (as the template writes them, ScalarPort("hot", …)), and adds something computed from both (the
+// template's own lines that mention them are comments): one that reads a key it does not declare fails when it is run.
+const written = (document) => {
+    const lines = String(conduction(document)?.implementation?.source ?? '').split('\n').filter((line) => !line.trim().startsWith('#'));
+    const declares = (key) => lines.some((line) => line.includes(`ScalarPort("${key}"`));
+    return values.bindings.every(({ key }) => declares(key))
+        && lines.some((line) => line.includes('add_gradient(') && line.includes('inputs["hot"]') && line.includes('inputs["cold"]'));
+};
 
 const steps = Object.freeze([
     {
@@ -35,28 +40,28 @@ const steps = Object.freeze([
     {
         id: 'open',
         title: 'Open the relationship',
-        text: `Click the "${values.relationship}" relationship between the two bodies to open it.`,
+        text: `Click "${values.relationship}" in the label between the two bodies to open it.`,
         target: (ui) => ui.relationshipRowOf(values.relationship), skip: 'openRelationship', relationship: values.relationship,
         done: ({ document, ui }) => ui.edgeEditorFor === values.relationship || isPython(document)
     },
     {
         id: 'switch',
         title: 'Make it a Python program',
-        text: 'Set Implementation to "Python program". The equation gives way to a program, a list of bindings and an output: the program reads what the bindings give it, by their keys, and adds its result to the output.',
+        text: 'Set "Written as" to "Python program". The equation gives way to a program, a list of bindings and an output key: the program reads what the bindings give it, by their keys, and adds its result to the output.',
         target: '#editEdgeImplementationKind', skip: 'setImplementation', relationship: values.relationship, kind: 'python',
         done: ({ document }) => isPython(document)
     },
     {
         id: 'bind',
         title: 'Bind the two temperatures',
-        text: `Press + beside the bindings twice. Give the first the key "${values.bindings[0].key}" and the reference ${values.bindings[0].reference}, the second "${values.bindings[1].key}" and ${values.bindings[1].reference}.`,
+        text: `Press ＋ beside Bindings twice. Give the first the key "${values.bindings[0].key}" and the reference ${values.bindings[0].reference}, the second "${values.bindings[1].key}" and ${values.bindings[1].reference}. The program under Provider source is written again from its template as you go, so it declares the keys you give.`,
         target: () => '#editAddProviderBinding', skip: 'setProgramBindings', relationship: values.relationship, bindings: values.bindings,
         done: ({ document }) => bound(document)
     },
     {
         id: 'write',
         title: 'Write the program',
-        text: 'Press "Insert template": it writes a program that already declares both keys. In its evaluate method, replace outputs.add_gradient(0) with outputs.add_gradient(0.05 * (inputs["hot"] - inputs["cold"])): the conductance over the capacitance, times the difference. "Open code editor" opens it in a larger editor that checks it as you type.',
+        text: 'The program already declares both keys. In its evaluate method, replace outputs.add_gradient(0) with outputs.add_gradient(0.05 * (inputs["hot"] - inputs["cold"])): the conductance over the capacitance, times the difference. "Open code editor" opens it in a larger editor that checks it as you type; "Reset template" writes the template again, from the bindings as they are.',
         target: () => '#editEdgeProviderSource', skip: 'writeProgram', relationship: values.relationship, line: values.line,
         done: ({ document }) => written(document)
     },
@@ -69,6 +74,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'The same answer',
         text: `Click the ${values.cold} to plot it: it warms to 319.93 K in the minute while the hot body cools to 320.07 K, exactly as with the equation. The relationship still acts both ways: what the program adds to one body is taken from the other.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.cold)), skip: 'plotNode', node: values.cold,

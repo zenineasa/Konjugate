@@ -15,7 +15,9 @@ const steps = Object.freeze([
     {
         id: 'welcome',
         title: 'Take a model elsewhere',
-        text: 'A model built here does not have to stay here. It can be written out as an ordinary program, to run on a server or inside other code without Konjugate, or as an FMU, the package other simulation tools take as a component.',
+        text: 'A model built here does not have to stay here. It can be written out as an ordinary program, to run on a server or inside other code without Konjugate',
+        desktopText: ', or as an FMU, the package other simulation tools take as a component.',
+        webText: '. The desktop app also writes it as an FMU, the package other simulation tools take as a component.',
         advance: 'next', nextLabel: 'Start', done: () => true
     },
     {
@@ -28,7 +30,9 @@ const steps = Object.freeze([
     {
         id: 'program',
         title: 'Export it as a program',
-        text: 'Keep the format "Standalone program", choose Python and Serial, press Export and choose where to save it. The file is the whole model, with its equations, values and run settings, in plain Python with nothing to install: "python3" and the file\'s name runs it and prints every state over time. C++ can also be split across threads with OpenMP, or across machines with MPI.',
+        text: 'Keep the format "Standalone program", choose Python and Serial, and press Export.',
+        desktopText: ' Choose where to save it. The file is the whole model, with its equations, values and run settings, in plain Python with nothing to install: "python3" and the file\'s name runs it, and it writes every state over time to results.csv in the folder it is run from. C++ can also be split across threads with OpenMP, or across machines with MPI.',
+        webText: ' Your browser downloads it. The file is the whole model, with its equations, values and run settings, in plain Python with nothing to install: "python3" and the file\'s name runs it, and it writes every state over time to results.csv in the folder it is run from. C++ can also be split across threads with OpenMP, or across machines with MPI.',
         target: (ui) => (ui.exportDialogOpen ? '#exportCodeLanguage' : '#exportCodeButton'), skip: 'exportProgram', language: values.language, parallelism: values.parallelism,
         done: ({ ui }) => ui.exportedKinds.includes(values.language)
     },

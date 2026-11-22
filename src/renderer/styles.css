@@ -1038,7 +1038,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .endpointPickBanner button { height: 27px; padding: 0 8px; color: #89a1aa; background: #152630; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
 .endpointPickBanner select { height: 27px; max-width: 180px; padding: 0 6px; color: #aab9c1; background: #0f1d26; border: 1px solid #324853; border-radius: 4px; font-size: 8px; }
 .endpointPickBanner kbd { margin-left: 5px; color: #607781; font-family: inherit; font-size: 7px; }
-.validationPanel { position: absolute; z-index: 33; top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow: auto; color: #aebfc7; background: rgb(13 24 32 / 96%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 45%); backdrop-filter: blur(12px); }
+/* Above the docked editor cards (34): the list is opened on purpose, over the card at the right, and following an issue in it opens that card. */
+.validationPanel { position: absolute; z-index: 35; top: 12px; right: 12px; width: 340px; max-height: calc(100% - 24px); overflow: auto; color: #aebfc7; background: rgb(13 24 32 / 96%); border: 1px solid #3a4d58; border-radius: 8px; box-shadow: 0 16px 38px rgb(0 0 0 / 45%); backdrop-filter: blur(12px); }
 .validationPanel[hidden] { display: none; }
 .validationPanel header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 13px; background: rgb(13 24 32 / 98%); border-bottom: 1px solid #293a45; }
 .validationPanel header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 11px; }

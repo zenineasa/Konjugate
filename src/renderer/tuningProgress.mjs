@@ -24,6 +24,44 @@ export function formatLoss(value) {
     return Number.isFinite(value) ? Number(value.toPrecision(4)).toString() : '—';
 }
 
+// A share as a percentage, with as many figures as it needs to be more than nothing: 12%, 5.2%, 0.029%.
+export function formatShare(fraction) {
+    const percent = fraction * 100;
+    if (percent >= 10) return `${percent.toFixed(0)}%`;
+    if (percent >= 0.1) return `${percent.toFixed(1)}%`;
+    return `${Number(percent.toPrecision(2))}%`;
+}
+
+// The tolerance a limit is judged to: four significant figures of the limit (340 is judged to ±0.01, 2 to ±0.0001), so that a value
+// that only rounding takes past it is not called a break, and how many decimals a value judged against it is written with.
+export function limitTolerance(limit) {
+    const size = Math.abs(Number(limit));
+    const tolerance = size > 0 && Number.isFinite(size) ? 10 ** (Math.floor(Math.log10(size)) - 4) : 1e-4;
+    return { tolerance, decimals: Math.max(0, -Math.floor(Math.log10(tolerance) + 1e-9)) };
+}
+
+// What an objective's review says about its limits, one sentence for each: what it is, to what tolerance, whether it holds and what it
+// came to ("Limit: stays at most 340 K (±0.01): holds, at 339.99 K."), from the engine's report of each limit (`finalLimits`:
+// { limit, atMost, reached }, in the limits' order). `unitOf(index)` gives a limit's unit, when what it limits has one. Without that
+// report (an engine from before it), from the largest relative violation alone.
+export function limitOutcomeText(report, constraints = [], unitOf = () => '') {
+    if (!constraints.length) return '';
+    const limits = report?.finalLimits ?? [];
+    if (limits.length === constraints.length) {
+        return limits.map((outcome, index) => {
+            const { tolerance, decimals } = limitTolerance(outcome.limit);
+            const unit = unitOf(index) ? ` ${unitOf(index)}` : '';
+            const excess = outcome.atMost ? outcome.reached - outcome.limit : outcome.limit - outcome.reached;
+            const reached = Number.isFinite(outcome.reached) ? `${outcome.reached.toFixed(decimals)}${unit}` : 'not finite';
+            const verdict = Number.isFinite(excess) && excess <= tolerance ? 'holds' : `does not hold, ${outcome.atMost ? 'over' : 'under'} by ${Number.isFinite(excess) ? `${excess.toFixed(decimals)}${unit}` : 'an amount that is not finite'}`;
+            return ` Limit${limits.length > 1 ? ` ${index + 1}` : ''}: stays ${outcome.atMost ? 'at most' : 'at least'} ${formatLoss(outcome.limit)}${unit} (±${tolerance.toFixed(decimals)}): ${verdict}, at ${reached}.`;
+        }).join('');
+    }
+    const violation = report?.finalViolation ?? 0;
+    if (!(violation > 0)) return constraints.length === 1 ? ' The limit holds.' : ' All limits hold.';
+    return ` Not every limit holds: the best values pass one by up to ${formatShare(violation)}.`;
+}
+
 // The cost of one simulation is how long the starting values took, which the engine reports as the first event. `limits` are what the
 // person chose: at most `simulations`, and/or `seconds`. Says only what is known: with no limit it does not guess an end.
 export function estimateText(events, { simulations = null, seconds = null } = {}) {
@@ -89,8 +127,8 @@ export function tuningWarnings(summary) {
     if (summary.failedTrials > 0) {
         warnings.push(`${summary.failedTrials} simulation${summary.failedTrials === 1 ? '' : 's'} failed: the model was unstable or errored with those values. They count as the worst result and the search goes on.`);
     }
-    if (summary.bestViolation > 1e-3) {
-        warnings.push(`The best so far still breaks a limit by ${(summary.bestViolation * 100).toFixed(summary.bestViolation >= 0.1 ? 0 : 1)}%. Breaking one is penalised, so the search is working to bring it back inside.`);
+    if (summary.bestViolation > 0) {
+        warnings.push(`The best so far still breaks a limit by ${formatShare(summary.bestViolation)}. Breaking one is penalised, so the search is working to bring it back inside.`);
     }
     if (summary.sinceImprovement >= noImprovementWindow) {
         warnings.push(`No improvement in the last ${summary.sinceImprovement} simulations. It may have found the best it can: you can stop and use the best so far.`);

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { convergenceTraces, estimateText, formatDuration, formatLoss, noImprovementWindow, summarizeTuning, tuningWarnings } from '../src/renderer/tuningProgress.mjs';
+import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, limitTolerance, noImprovementWindow, summarizeTuning, tuningWarnings } from '../src/renderer/tuningProgress.mjs';
 
 let failedSoFar = 0;
 const event = (iteration, loss, bestLoss, { failed = false, elapsed = iteration * 0.5, baseline = iteration === 1 } = {}) => {
@@ -89,4 +89,31 @@ test('maximising counts a rise as progress and says so in the numbers', () => {
     assert.ok(Math.abs(maximising.improvement - 3 / 11) < 1e-12, 'a rise from 11 to 14 is 27% better');
     const minimising = summarizeTuning(events, { simulations: 10 });
     assert.ok(minimising.improvement < 0 && minimising.sinceImprovement === 3, 'the same values read as worse when minimising');
+});
+
+test('each limit is said with its tolerance, whether it holds, and what it came to; a limit passed by more than its tolerance does not hold', () => {
+    const atMost340 = [{ relation: '<=', limit: 340 }];
+    assert.equal(limitOutcomeText({ finalLimits: [] }, []), '');
+    assert.deepEqual(limitTolerance(340), { tolerance: 0.01, decimals: 2 });
+    assert.deepEqual(limitTolerance(2), { tolerance: 0.0001, decimals: 4 });
+    // The tank tutorial: held to 340 K, ending just inside it.
+    assert.equal(limitOutcomeText({ finalLimits: [{ limit: 340, atMost: true, reached: 339.987 }] }, atMost340, () => 'K'),
+        ' Limit: stays at most 340 K (±0.01): holds, at 339.99 K.');
+    // Past by less than its tolerance is rounding, not a break; past by more is said, with by how much.
+    assert.match(limitOutcomeText({ finalLimits: [{ limit: 340, atMost: true, reached: 340.004 }] }, atMost340), /: holds, at 340.00\.$/);
+    assert.equal(limitOutcomeText({ finalLimits: [{ limit: 340, atMost: true, reached: 340.1627 }] }, atMost340, () => 'K'),
+        ' Limit: stays at most 340 K (±0.01): does not hold, over by 0.16 K, at 340.16 K.');
+    assert.equal(limitOutcomeText({ finalLimits: [{ limit: 20, atMost: false, reached: 19 }, { limit: 340, atMost: true, reached: 300 }] }, [{}, {}]),
+        ' Limit 1: stays at least 20 (±0.001): does not hold, under by 1.000, at 19.000. Limit 2: stays at most 340 (±0.01): holds, at 300.00.');
+    // From an engine that reports only the largest violation.
+    assert.equal(limitOutcomeText({ finalViolation: 0 }, atMost340), ' The limit holds.');
+    assert.match(limitOutcomeText({ finalViolation: 0.2 }, [{}, {}]), /^ Not every limit holds: the best values pass one by up to 20%\.$/);
+    assert.equal(formatShare(0.123), '12%');
+    assert.equal(formatShare(0.0523), '5.2%');
+    assert.equal(formatShare(0.000294), '0.029%');
+});
+
+test('the warning during a search says any limit broken, however little', () => {
+    const summary = { failedTrials: 0, sinceImprovement: 0, bestViolation: 0.0003 };
+    assert.deepEqual(tuningWarnings(summary), ['The best so far still breaks a limit by 0.03%. Breaking one is penalised, so the search is working to bring it back inside.']);
 });

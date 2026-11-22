@@ -65,14 +65,14 @@ const steps = Object.freeze([
     {
         id: 'makeGroup',
         title: 'Join them with a relationship group',
-        text: 'Press "Create relationship group" in the toolbar. It joins every pair of the selected nodes both ways, six relationships for three nodes, all sharing one definition: change it once and all six change.',
+        text: 'Press "Create relationship group" in the toolbar. It joins every pair of the selected nodes both ways, six relationships for three nodes, all sharing one definition: change it once and all six change. Until that definition is written, the status at the top right counts each of the six as an error.',
         target: '#createEdgeGroup', skip: 'createGroup',
         done: ({ document }) => group(document) !== null
     },
     {
         id: 'groupEquation',
         title: 'Write the shared equation',
-        text: 'In the group\'s editor, set Updates to temperature and enter 0.1·(sourceTemperature − targetTemperature), with the reference buttons for the names: each body warms by a tenth of a degree a second for every degree its neighbour is hotter.',
+        text: 'In the group\'s editor, set Updates to temperature and enter 0.1·(sourceTemperature − targetTemperature). The line under the field lists the names the equation can use: sourceTemperature is the temperature of the node each relationship runs from, targetTemperature of the one it runs to. Each body warms by a tenth of a degree a second for every degree its neighbour is hotter.',
         target: '#groupMathField', skip: 'writeGroupEquation', latex: values.groupLatex, output: values.mass.symbol,
         done: ({ document }) => groupWritten(document)
     },
@@ -99,6 +99,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Heat spreads',
         text: `Click the warm ${values.mass.name} to plot it: it cools from ${values.mass.warm} K as its two neighbours warm, and the three settle together at about 329 K.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.mass.name)), skip: 'plotNode', node: values.mass.name,

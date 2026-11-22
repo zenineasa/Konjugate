@@ -53,6 +53,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Plot the fork',
         text: `Click the ${values.joint} to plot this branch: up to ${values.forkSeconds} s it is the baseline, then it turns back towards ${values.setpoint.to} rad.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.joint)), skip: 'plotNode', node: values.joint,

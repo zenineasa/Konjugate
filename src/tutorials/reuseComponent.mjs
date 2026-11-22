@@ -48,7 +48,7 @@ const steps = Object.freeze([
     {
         id: 'fold',
         title: 'Fold the two bodies into a subsystem',
-        text: `Select both bodies (⌘A, Ctrl+A on Windows and Linux), press "Create subsystem" in the toolbar, name it "${values.subsystem}" and press Create subsystem.`,
+        text: `Select both bodies (⌘A, Ctrl+A on Windows and Linux, or Select all from the Add menu), press "Create subsystem" in the toolbar, name it "${values.subsystem}" and press Create subsystem.`,
         // Create subsystem is off until the bodies are selected: until then the ring is on Add, whose menu has Select all.
         target: (ui) => (ui.subsystemDialogOpen ? '#subsystemName' : ui.selectedCount >= 2 ? '#createSubsystem' : '#addButton'), skip: 'createSubsystem', name: values.subsystem,
         done: ({ document }) => folded(document)
@@ -98,7 +98,7 @@ const steps = Object.freeze([
     {
         id: 'run',
         title: 'Run them',
-        text: `Press Run, set "Run until" to ${values.runSeconds} s and press Start. The engine runs both copies, and the link between them, as one model.`,
+        text: `Press Run, set "Run until" to ${values.runSeconds} s and press Start. The engine runs both copies, and the link between them, as one model. The Stability button beside the timeline may list early checks for a body that keeps warming through the run: hollow dots, which ordinary behaviour raises too.`,
         target: (ui) => (ui.runDialogOpen ? '#startRun' : '#runButton'), skip: 'runModel', runSeconds: values.runSeconds,
         done: ({ ui }) => connected(ui.runModel)
     },

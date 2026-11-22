@@ -15,7 +15,7 @@ import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection } from './programSourceSection.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
-import { convergenceTraces, estimateText, formatDuration, formatLoss, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
+import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
@@ -3512,20 +3512,20 @@ function renderSourceTermProviderBindingRows(node, term) {
         select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, sourceTermReferenceValue(candidate))));
         select.value = sourceTermReferenceValue(binding);
         $('[data-field="key"]', row).addEventListener('change', (event) => {
-            changeSourceTermModel(node, term.id, (snapshotTerm) => {
-                snapshotTerm.implementation.bindings[index] = { ...snapshotTerm.implementation.bindings[index], key: event.target.value.trim() };
-            });
+            changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
+                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
+            }));
         });
         select.addEventListener('change', (event) => {
             const candidate = candidates.find((option) => sourceTermReferenceValue(option) === event.target.value);
             if (!candidate) return;
-            changeSourceTermModel(node, term.id, (snapshotTerm) => {
-                snapshotTerm.implementation.bindings[index] = sourceTermReferenceToBinding(snapshotTerm.implementation.bindings[index].key, candidate);
-            });
+            changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
+                implementation.bindings[index] = sourceTermReferenceToBinding(implementation.bindings[index].key, candidate);
+            }));
         });
-        $(':scope > button', row).addEventListener('click', () => changeSourceTermModel(node, term.id, (snapshotTerm) => {
-            snapshotTerm.implementation.bindings.splice(index, 1);
-        }));
+        $(':scope > button', row).addEventListener('click', () => changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
+            implementation.bindings.splice(index, 1);
+        })));
         container.appendChild(row);
     });
 }
@@ -4653,6 +4653,15 @@ function pluginOrProgram(kind, previous, bindings, output, title) {
     };
 }
 
+// A change to a program's bindings or output key (`change(implementation)`), with its source written again from the template when it
+// was still the template as generated: a program nobody has edited declares the keys it is bound to, and one somebody has is left alone.
+function changeProgramBindings(implementation, title, change) {
+    const generated = (program) => defaultProviderSource(program.kind, program.bindings ?? [], program.output?.key, title);
+    const untouched = (implementation?.kind === 'cpp' || implementation?.kind === 'python') && implementation.source === generated(implementation);
+    change(implementation);
+    if (untouched) implementation.source = generated(implementation);
+}
+
 async function fillPluginProviders(select, implementation) {
     let choices = [];
     try {
@@ -4734,20 +4743,20 @@ function renderProviderBindingRows(definition) {
         select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
         select.value = providerReferenceValue(providerBindingToReference(binding));
         $('[data-field="key"]', row).addEventListener('change', (event) => {
-            changeEdgeModel(definition, (snapshot) => {
-                snapshot.implementation.bindings[index] = { ...snapshot.implementation.bindings[index], key: event.target.value.trim() };
-            });
+            changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
+                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
+            }));
         });
         select.addEventListener('change', (event) => {
             const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
             if (!candidate) return;
-            changeEdgeModel(definition, (snapshot) => {
-                snapshot.implementation.bindings[index] = referenceToProviderBinding(snapshot.implementation.bindings[index].key, candidate);
-            });
+            changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
+                implementation.bindings[index] = referenceToProviderBinding(implementation.bindings[index].key, candidate);
+            }));
         });
-        $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
-            snapshot.implementation.bindings.splice(index, 1);
-        }));
+        $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
+            implementation.bindings.splice(index, 1);
+        })));
         container.appendChild(row);
     });
 }
@@ -5576,9 +5585,10 @@ function applyNodeTemplate(template) {
         // library sidebar docks over the left side of the canvas while it's open, so placing new
         // nodes there would put them behind it on screen, and successive drops need to not land
         // exactly on top of each other. Y/Z still follow whatever plane the rest of the model is
-        // already in, the same as the "Add node" builder.
+        // already in, the same as the "Add node" builder. A step of 3.5 keeps their labels (about that wide at the default zoom) apart, and
+        // four of them stay in a project's opening view; the count starts again with each project.
         position: [
-            1.5 + ((componentLibraryPlacementCount - 1) % 5) * 1.6,
+            1.5 + ((componentLibraryPlacementCount - 1) % 4) * 3.5,
             sharedVisibleNodeAxisValue(1) ?? -0.7,
             sharedVisibleNodeAxisValue(2) ?? 0
         ],
@@ -9161,7 +9171,14 @@ function createRelationshipBundleOverlay(key) {
 function renderRelationshipBundle(overlay, bundle) {
     const source = model.nodes.find((node) => node.id === bundle.source);
     const target = model.nodes.find((node) => node.id === bundle.target);
-    $('header strong', overlay.element).textContent = `${source.title} ↔ ${target.title}`;
+    // Its arrow says which way what it holds acts, as each row's does: one way (→, from the node it runs from), both ways (⇄), or a mix.
+    const directed = bundle.relationships.filter((relationship) => relationship.directionality === 'directed');
+    const forward = directed.every((relationship) => relationship.source === bundle.source);
+    const backward = directed.every((relationship) => relationship.source === bundle.target);
+    const header = directed.length === 0 ? `${source.title} ⇄ ${target.title}`
+        : directed.length < bundle.relationships.length ? `${source.title} ↔ ${target.title}`
+            : forward ? `${source.title} → ${target.title}` : backward ? `${target.title} → ${source.title}` : `${source.title} ↔ ${target.title}`;
+    $('header strong', overlay.element).textContent = header;
     $('header span', overlay.element).textContent = `${bundle.relationships.length} ${bundle.relationships.length === 1 ? 'relationship' : 'relationships'}`;
     const signature = JSON.stringify(bundle.relationships.map((relationship) => ({
         id: relationship.id,
@@ -9396,6 +9413,10 @@ async function loadProjectDocument(document, {
     confidentialHostedAssistantConfirmed = false;
     addonDataUnsaved = false;
     clearRenderedModel();
+    // Every card at the canvas belongs to the project before: a node's, a relationship's or a subsystem's card left open would edit
+    // what is no longer there (a subsystem's over an empty project), and a tuning or inference card would hold its data.
+    hideCards();
+    componentLibraryPlacementCount = 0;
     model.metadata = nextModel.metadata;
     model.runConfigurations = nextModel.runConfigurations;
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
@@ -12159,13 +12180,20 @@ async function renderParameterTuningObjectiveOutcome(run, objective) {
     const first = run.events[0]?.loss;
     const last = parameterTuningState.report.finalLoss;
     status.className = 'equationDiagnostics';
-    status.textContent = `${objective.direction === 'maximise' ? 'Maximised' : 'Minimised'} objective: ${formatLoss(first)} at the starting values, ${last === null ? 'not finite' : formatLoss(last)} with the tuned ones.`;
-    const violation = parameterTuningState.report.finalViolation ?? 0;
-    if (objective.constraints.length) {
-        status.textContent += violation > 1e-3
-            ? ` The best values still break a limit by up to ${(violation * 100).toFixed(violation >= 0.1 ? 0 : 1)}%: the limits may not be reachable together with the parameters' bounds.`
-            : ' All limits hold.';
-    }
+    const report = parameterTuningState.report;
+    // The objective as written at the starting values, as the engine reports it without the penalty for a limit they break (the first
+    // event's value counts that penalty: a maximised water temperature of 358 K past its limit would read as a negative number).
+    // An engine from before it reports no such value (absent, not 0): the first event's value is all there is then.
+    const start = typeof report.startObjective === 'number' && Number.isFinite(report.startObjective) ? report.startObjective : first;
+    const direction = objective.direction === 'maximise' ? 'Maximised' : 'Minimised';
+    const tuned = last === null ? 'not finite' : formatLoss(last);
+    status.textContent = `${direction} objective: ${formatLoss(start)} at the starting values${report.startViolation > 0 ? `, which break a limit by ${formatShare(report.startViolation)}` : ''}, ${tuned} with the tuned ones.`;
+    // A limit's unit: that of the one state it names, when it names one.
+    const unitOf = (index) => {
+        const named = parameterTuningState.vocabulary.states.filter((state) => new RegExp(`\\b${state.name}\\b`).test(objective.constraints[index]?.expression ?? ''));
+        return named.length === 1 ? named[0].unit ?? '' : '';
+    };
+    status.textContent += limitOutcomeText(report, objective.constraints, unitOf);
     plotElement.hidden = true;
     const summary = status.textContent;
     try {
@@ -13747,17 +13775,17 @@ edgeProgramSection.sourceField.addEventListener('change', () => {
 });
 edgeProgramSection.onOutputKeyChange((event) => {
     if (!selectedRelationship) return;
-    changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.implementation.output = { ...snapshot.implementation.output, key: event.target.value.trim() };
-    });
+    changeEdgeModel(selectedRelationship, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
+        implementation.output = { ...implementation.output, key: event.target.value.trim() };
+    }));
 });
 edgeProgramSection.onAddBinding(() => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         const candidates = providerReferenceCandidates(snapshot);
         if (!candidates.length) return;
-        snapshot.implementation.bindings.push(
-            referenceToProviderBinding(`input${snapshot.implementation.bindings.length + 1}`, candidates[0]));
+        changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => implementation.bindings.push(
+            referenceToProviderBinding(`input${implementation.bindings.length + 1}`, candidates[0])));
     });
 });
 $('#termOutputState').addEventListener('change', (event) => {
@@ -13812,8 +13840,8 @@ termProgramSection.onAddBinding(() => {
     changeSourceTermModel(node, selectedSourceTermId, (term) => {
         const candidates = sourceTermBindingCandidates(node.userData.definition);
         if (!candidates.length) return;
-        term.implementation.bindings.push(
-            sourceTermReferenceToBinding(`input${term.implementation.bindings.length + 1}`, candidates[0]));
+        changeProgramBindings(term.implementation, node.userData.definition.title, (implementation) => implementation.bindings.push(
+            sourceTermReferenceToBinding(`input${implementation.bindings.length + 1}`, candidates[0])));
     });
 });
 termProgramSection.onOpenEditor(() => {
@@ -13838,9 +13866,9 @@ termProgramSection.sourceField.addEventListener('change', () => {
 termProgramSection.onOutputKeyChange((event) => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
-    changeSourceTermModel(node, selectedSourceTermId, (term) => {
-        term.implementation.output = { ...term.implementation.output, key: event.target.value.trim() };
-    });
+    changeSourceTermModel(node, selectedSourceTermId, (term) => changeProgramBindings(term.implementation, node.userData.definition.title, (implementation) => {
+        implementation.output = { ...implementation.output, key: event.target.value.trim() };
+    }));
 });
 $('[data-delete-source-term]').addEventListener('click', () => {
     if (!selectedSourceTermNodeId || !selectedSourceTermId) return;
@@ -15380,6 +15408,8 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     tutorialForkValues.clear();
     Object.assign(tutorialTwin, { windowShown: false, sawRunning: false, movesSeen: 0, sawAlarm: false, sawPlanTurn: false });
     tutorialSteered.clear();
+    // The components saved to My library in an earlier play are not this play's: "Keep it in your library" is done by saving now.
+    tutorialLibraryComponents.clear();
     tutorialEnteredSubsystem = false;
     tutorialSeriesSeen.clear();
     tutorialExecutionSummaryShown = false;
@@ -15489,7 +15519,8 @@ function requestSaveContentChoice() {
 async function saveProject(saveAs = false, password = currentProjectPassword, { rename = false } = {}) {
     try {
         await waitForLauncherProjects();
-        const hasEmbeddableResult = Boolean(activeResult && activeEngineJobId && !simulationRunning);
+        // The web edition saves a project without its results (they are exported as CSV there): it is not offered "Model and results".
+        const hasEmbeddableResult = Boolean(activeResult && activeEngineJobId && !simulationRunning) && !document.documentElement.hasAttribute('data-web-edition');
         const contentChoice = hasEmbeddableResult ? await requestSaveContentChoice() : 'model';
         if (!contentChoice) return false;
         const includeResults = contentChoice === 'modelAndResults';
@@ -17536,13 +17567,19 @@ function insertGraphFragment(remapped, { sharedParameters = [] } = {}) {
     return nodes.length;
 }
 
+// How many times in a row the copy on the clipboard has been pasted: each paste of the same copy lands a step further on than the one
+// before, rather than all of them on one spot (where only the last one's label could be seen).
+let repeatedPaste = { key: null, count: 0 };
 function pasteGraph() {
     if (activeResult) return false;
     const fragment = window.modelClipboard.read();
     if (fragment?.format === componentClipboardFormat) return pasteComponent(fragment);
     if (!validateGraphFragment(fragment)) return false;
     try {
-        const count = insertGraphFragment(remapGraphFragment(fragment, nextModelEntityId, pasteOffsetForCurrentView()));
+        const key = JSON.stringify(fragment);
+        repeatedPaste = { key, count: repeatedPaste.key === key ? repeatedPaste.count + 1 : 1 };
+        const offset = pasteOffsetForCurrentView().map((value) => value * 2 * repeatedPaste.count);
+        const count = insertGraphFragment(remapGraphFragment(fragment, nextModelEntityId, offset));
         $('#statusText').textContent = `${count} node${count === 1 ? '' : 's'} pasted`;
         return true;
     } catch (error) {
@@ -17719,20 +17756,20 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
             if (state) select.value = providerReferenceValue({ kind: 'state', role: binding.role, nodeId: node.id, stateId: state.id });
         }
         $('[data-field="key"]', row).addEventListener('change', (event) => {
-            changeEdgeGroupModel(group, (snapshot) => {
-                snapshot.definition.implementation.bindings[index] = { ...snapshot.definition.implementation.bindings[index], key: event.target.value.trim() };
-            });
+            changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
+                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
+            }));
         });
         select.addEventListener('change', (event) => {
             const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
             if (!candidate) return;
-            changeEdgeGroupModel(group, (snapshot) => {
-                snapshot.definition.implementation.bindings[index] = candidateToGroupBinding($('[data-field="key"]', row).value.trim(), candidate, previewSource, previewTarget);
-            });
+            changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
+                implementation.bindings[index] = candidateToGroupBinding($('[data-field="key"]', row).value.trim(), candidate, previewSource, previewTarget);
+            }));
         });
-        row.querySelector('.removeBuilderRow').addEventListener('click', () => changeEdgeGroupModel(group, (snapshot) => {
-            snapshot.definition.implementation.bindings = snapshot.definition.implementation.bindings.filter((candidate, i) => i !== index);
-        }));
+        row.querySelector('.removeBuilderRow').addEventListener('click', () => changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
+            implementation.bindings = implementation.bindings.filter((candidate, i) => i !== index);
+        })));
         container.appendChild(row);
     });
 }
@@ -19515,7 +19552,7 @@ groupProgramSection.sourceField.addEventListener('change', () => finishEquationE
 groupProgramSection.onOutputKeyChange((event) => {
     const group = currentEdgeGroup();
     if (group) changeEdgeGroupModel(group, (snapshot) => {
-        if (snapshot.definition.implementation) snapshot.definition.implementation.output = { key: event.target.value.trim() };
+        if (snapshot.definition.implementation) changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => { implementation.output = { key: event.target.value.trim() }; });
     });
 });
 groupProgramSection.onOpenEditor(() => {
@@ -19537,8 +19574,8 @@ groupProgramSection.onAddBinding(() => {
             source: previewSource?.id, target: previewTarget?.id, parameters: snapshot.definition.parameters
         });
         if (!candidates.length) return;
-        snapshot.definition.implementation.bindings.push(
-            candidateToGroupBinding(`input${snapshot.definition.implementation.bindings.length + 1}`, candidates[0], previewSource, previewTarget));
+        changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => implementation.bindings.push(
+            candidateToGroupBinding(`input${implementation.bindings.length + 1}`, candidates[0], previewSource, previewTarget)));
     });
 });
 

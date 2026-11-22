@@ -73,6 +73,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Watch it spin up',
         text: 'Click the Motor to plot it. Its current jumps to about 10 A as the supply is switched on, then its speed climbs to 44 rad/s in about two seconds, where its torque balances friction and the load.',
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf('Motor')), skip: 'plotNode', node: 'Motor',

@@ -5,6 +5,8 @@
 // a 290 K room; and a state that is an Update rather than a Rate, a Celsius reading of the hot body whose term is its value, worked out
 // afresh after each step instead of integrated (docs/proposals/ratesAndUpdates.md). Without the leak the pair meets at 320 K (the example's own result); with it, both drift down towards 290 K.
 
+import { latch } from './latches.mjs';
+
 export const equationsThatDoMoreValues = Object.freeze({
     relationship: 'Conduction',
     hot: 'Hot body',
@@ -15,10 +17,11 @@ export const equationsThatDoMoreValues = Object.freeze({
 const values = equationsThatDoMoreValues;
 
 const hot = (document) => (document?.nodes ?? []).find((node) => node.name === values.hot);
-// The hot body's source terms that update a state, by its symbol, whose equation has `mark` in it (a new term starts as 0).
+// The hot body's own parts on a state, by its symbol, whose equation has `mark` in it and reads as an equation (its MathJSON is there
+// only then): a part typed half-way, which the model reports as an error and which stops a run, is not the step done.
 const termsFor = (document, symbol, mark) => (hot(document)?.sourceTerms ?? []).filter((term) => {
     const state = hot(document).states.find((candidate) => candidate.id === term.expressionModel?.output?.stateId || candidate.symbol === term.state);
-    return state?.symbol === symbol && String(term.expression ?? term.expressionModel?.latex ?? '').includes(mark);
+    return state?.symbol === symbol && String(term.expression ?? term.expressionModel?.latex ?? '').includes(mark) && term.expressionModel?.mathJson != null;
 });
 const leaking = (document) => termsFor(document, 'temperature', '290').some((term) => !term.setsValue);
 const hasCelsius = (document) => (hot(document)?.states ?? []).some((state) => state.symbol === values.celsius.symbol);
@@ -37,10 +40,11 @@ const steps = Object.freeze([
     {
         id: 'bothWays',
         title: 'A relationship that acts both ways',
-        text: `Click the "${values.relationship}" relationship between the two bodies. Its Direction is Both ways: one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made. A one-way relationship changes only the node it runs to.`,
-        target: (ui) => (ui.edgeEditorFor === values.relationship ? '#editEdgeDirectionality' : ui.relationshipRowOf(values.relationship)),
-        skip: 'openRelationship', relationship: values.relationship,
-        done: ({ document, ui }) => ui.edgeEditorFor === values.relationship || leaking(document)
+        text: `Click "${values.relationship}" in the label between the two bodies, and open its Details tab. Its Direction is "Both ways": one equation, worked out once, adds to the cold body exactly what it takes from the hot one, so no heat is lost or made. "One way" changes only the node it runs to.`,
+        target: (ui) => (ui.edgeEditorFor === values.relationship ? (ui.edgeEditorTab === 'details' ? '#editEdgeDirectionality' : '#edgeEditor [data-editor-tab="details"]') : ui.relationshipRowOf(values.relationship)),
+        skip: 'openRelationship', relationship: values.relationship, tab: 'details',
+        // Kept once Direction has been on screen: the next step opens the Hot body, which closes this card.
+        done: latch(({ document, ui }) => (ui.edgeEditorFor === values.relationship && ui.edgeEditorTab === 'details') || leaking(document))
     },
     {
         id: 'sourceTerm',
@@ -61,7 +65,7 @@ const steps = Object.freeze([
     {
         id: 'setValue',
         title: 'Make it an update',
-        text: `Nothing changes ${values.celsius.symbol} yet, so its line says it stays at 0: click it to open its equation. Click its left side and choose ${values.celsius.symbol} =: its parts add up to its value, not to how fast it changes. Then type temperature − 273.15 in its field. It is not moved forward in time: it is worked out afresh after every step from the temperature the step reached, so it can never drift from it.`,
+        text: `Its equation is under its line, empty: nothing changes ${values.celsius.symbol} yet. Click its left side, d${values.celsius.symbol}/dt =, and choose ${values.celsius.symbol} =: its parts add up to its value, not to how fast it changes. Then type temperature − 273.15 in its field. It is not moved forward in time: it is worked out afresh after every step from the temperature the step reached, so it can never drift from it.`,
         target: (ui) => (ui.nodeEditorFor === values.hot ? `${card(values.celsius.symbol)} .ownPart, #nodeEditorStates .stateFold[data-symbols~="${values.celsius.symbol}"] .stateSummary` : ui.labelOf(values.hot)),
         skip: 'addSourceTerm', node: values.hot, state: values.celsius.symbol, latex: values.celsius.latex, setsValue: true,
         done: ({ document }) => setsCelsius(document)
@@ -75,6 +79,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Read the result',
         text: `Click the ${values.hot} to plot it. Without the leak the two bodies meet at 320 K; with it, they meet lower and keep falling towards the room's 290 K. The Celsius line follows the temperature exactly, 273.15 below it.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.hot)), skip: 'plotNode', node: values.hot,

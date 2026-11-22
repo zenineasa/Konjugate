@@ -6,6 +6,7 @@
 // which the closing card says. Steering needs a run that takes commands while it goes; the web edition's threaded build has one and its
 // other build does not, so this tutorial is for the desktop app.
 
+import { latch } from './latches.mjs';
 import { onlineRunTarget } from './steps.mjs';
 
 export const steerByHandValues = Object.freeze({
@@ -52,7 +53,8 @@ const steps = Object.freeze([
         title: 'Start a run in real time',
         text: `Close Settings and press Run. Turn on "Online", set the pacing to "Real time" so a second of the model takes a second, set "Run until" to ${values.runSeconds} s, and press Start.`,
         target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
-        done: ({ ui }) => ui.steerable || ui.steered.includes(values.setpoint.parameterId)
+        // Kept once the run could be steered: a real-time run ends by itself, and that is not the step undone.
+        done: latch(({ ui }) => ui.steerable || ui.steered.includes(values.setpoint.parameterId))
     },
     {
         id: 'steer',
@@ -63,6 +65,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'See what you did',
         text: `When the run has ended, click the ${values.joint} to plot it: its angle follows the target you steered. Every change you made is in the result, by its size and time, and Changes beside the timeline lists them.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.joint)), skip: 'plotNode', node: values.joint,

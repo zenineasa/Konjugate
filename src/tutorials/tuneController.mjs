@@ -34,6 +34,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plotAngle',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Look at the angle',
         text: `Click the "${values.joint}" to open its editor, which plots its angle over the run. It rises smoothly to 1.2 rad without overshooting, but slowly: it takes about 6 seconds to get close.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.joint)), skip: 'plotNode', node: values.joint,
@@ -69,6 +71,8 @@ const steps = Object.freeze([
     },
     {
         id: 'compare',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'Compare',
         text: `Click the "${values.joint}" again. With twice the gain the angle gets close to 1.2 rad in about a second instead of six, but it now overshoots, to about 1.28 rad, before it settles back.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.joint)), skip: 'plotNode', node: values.joint,

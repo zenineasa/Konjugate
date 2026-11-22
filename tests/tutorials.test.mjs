@@ -223,6 +223,8 @@ test('an example is named in the list as the Examples dialog names it', () => {
     for (const tutorial of tutorials.filter((candidate) => candidate.start.from === 'example')) assert.equal(exampleTitle(tutorial.start.example), exampleLabel(tutorial.start.example.split('/').at(-1)));
     assert.equal(tutorialStartLabel(calibrateTank), 'Starts from the Tank Calibration example');
     assert.equal(tutorialStartLabel(firstModel), 'From an empty canvas');
+    // A model beside the examples, which the Examples dialog does not list, is not called an example.
+    assert.equal(tutorialStartLabel(tutorialById('replayLog')), 'Starts from the Lab Vessel model');
 });
 
 test('the list is searched by title, tags, sentence and starting example, every word counting, best match first', () => {
@@ -273,11 +275,14 @@ test('a parameter\'s value is read through its relationship, following a link to
     assert.equal(edgeParameterChanged(null, tank, 'Heater input', 'waterThermalCapacitance'), false, 'No model (no run yet) is no change.');
 });
 
-// Plays a tutorial's checks over a sequence of situations, as the controller would, and returns the step it is on after each.
+// Plays a tutorial's checks over a sequence of situations, as the controller would, and returns the step it is on after each. A step
+// that waits for Next once done (a plot to read) is read and moved on from, as a person does.
 const play = (tutorial, start, situations) => {
     let reached = 1;
     return situations.map(({ document = start, ui: extra = {} }) => {
-        reached = Math.max(reached, currentStep({ document, start, ui: ui(extra) }, reached, tutorial.steps));
+        const facts = { document, start, ui: ui(extra) };
+        reached = Math.max(reached, currentStep(facts, reached, tutorial.steps));
+        while (tutorial.steps[reached].waitForNext && tutorial.steps[reached].done(facts)) reached = currentStep(facts, reached + 1, tutorial.steps);
         return tutorial.steps[reached].id;
     });
 };
@@ -494,4 +499,50 @@ test('a twin tutorial\'s "Open the live twin" is done by the window brought up f
     assert.equal(plan.status({ twinInputs: {} }), '');
     assert.match(plan.status({ twinInputs: inZone('Asia/Calcutta') }), /in Asia\/Calcutta: the rig's clock is UTC/);
     assert.match(plan.status({ twinInputs: inZone('UTC') }), /^The plan is kept/);
+});
+
+test('a step that asks to look at something stays done for the rest of that play once seen, and a new play judges it afresh', async () => {
+    const { latch } = await import('../src/tutorials/latches.mjs');
+    let open = true;
+    const seen = latch(() => open);
+    const play = {};
+    assert.equal(seen({ start: play }), true);
+    open = false;
+    assert.equal(seen({ start: play }), true, 'Closing what was looked at does not undo the step.');
+    assert.equal(seen({ start: {} }), false, 'Another play of the tutorial starts afresh.');
+    // The relationship tutorial's first step: Direction seen on the Details tab, then the next step opens the Hot body.
+    const bothWays = tutorialById('equationsThatDoMore').steps.find((step) => step.id === 'bothWays');
+    const start = {};
+    const facts = (ui) => ({ document: { nodes: [] }, start, ui: { edgeEditorFor: null, edgeEditorTab: null, ...ui } });
+    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'equations' })), false, 'Opening the card is not seeing its Direction.');
+    assert.equal(bothWays.done(facts({ edgeEditorFor: 'Conduction', edgeEditorTab: 'details' })), true);
+    assert.equal(bothWays.done(facts({ nodeEditorFor: 'Hot body' })), true, 'Going on to the Hot body is not undoing it.');
+});
+
+test('the first-model tour\'s equation is the one its card asks for, however it is written', () => {
+    const equation = firstModel.steps.find((step) => step.id === 'equation');
+    const documentWith = (mathJson) => ({ nodes: [{ id: 1 }, { id: 2 }], edges: [{ source: { nodeId: 1 }, target: { nodeId: 2 }, equation: 'k*(sourceTemperature-targetTemperature)', equationModel: { output: { role: 'target' }, mathJson } }] });
+    assert.equal(equation.done({ document: documentWith(['Multiply', 'k', ['Subtract', 'sourceTemperature', 'targetTemperature']]) }), true);
+    assert.equal(equation.done({ document: documentWith(['Multiply', 'k', ['Delimiter', ['Add', 'sourceTemperature', ['Negate', 'targetTemperature']]]]) }), true);
+    assert.equal(equation.done({ document: documentWith(['Subtract', ['Multiply', 'k', 'sourceTemperature'], 'targetTemperature']) }), false, 'k·T_H − T_B reads both ends but is not the heat flow asked for.');
+});
+
+test('a program relationship is written only when it declares the keys it reads, and an own part only when it reads as an equation', () => {
+    const write = tutorialById('programRelationship').steps.find((step) => step.id === 'write');
+    const line = programRelationshipValues.line;
+    const programWith = (source) => ({ edges: [{ name: 'Conduction', implementation: { kind: 'python', source } }] });
+    const declared = '            [\n                ScalarPort("hot", "hot", ""),\n                ScalarPort("cold", "cold", ""),\n            ],';
+    assert.equal(write.done({ document: programWith(`${declared}\n${line}`) }), true);
+    assert.equal(write.done({ document: programWith(`            [\n                # No bindings declared yet\n            ],\n${line}`) }), false, 'A template from before the bindings reads keys it does not declare, and fails when run.');
+    const leak = tutorialById('equationsThatDoMore').steps.find((step) => step.id === 'sourceTerm');
+    const hotWith = (expressionModel) => ({ nodes: [{ name: 'Hot body', states: [{ id: 2, symbol: 'temperature' }], sourceTerms: [{ state: 'temperature', expression: expressionModel.latex, expressionModel }] }] });
+    assert.equal(leak.done({ document: hotWith({ latex: '-0.01\\cdot(\\mathrm{temperature}-290)', mathJson: ['Multiply', -0.01, ['Subtract', 'temperature', 290]], output: { stateId: 2 } }) }), true);
+    assert.equal(leak.done({ document: hotWith({ latex: '-0.01\\cdot(-290', mathJson: null, output: { stateId: 2 } }) }), false, 'A part that does not read is not the leak.');
+});
+
+test('the record of changes is read once the run has ended, though it opens by itself when the wave starts', () => {
+    const changes = tutorialById('scheduleChanges').steps.find((step) => step.id === 'changes');
+    assert.equal(changes.done({ ui: { changesShown: true, simulationRunning: true, repeated: false } }), false);
+    assert.equal(changes.done({ ui: { changesShown: true, simulationRunning: false, repeated: false } }), true);
+    assert.match(changes.status({ simulationRunning: true }), /still going/);
 });

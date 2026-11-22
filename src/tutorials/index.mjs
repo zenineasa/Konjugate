@@ -60,9 +60,12 @@ export const exampleTitle = (fileName) => {
     return `${stem.charAt(0).toUpperCase()}${stem.slice(1)}`.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 };
 
-// How a tutorial says where it starts, in the list.
-export const tutorialStartLabel = (tutorial, exampleLabel = exampleTitle) => (tutorial.start.from === 'example'
-    ? `Starts from the ${exampleLabel(tutorial.start.example)} example` : 'From an empty canvas');
+// How a tutorial says where it starts, in the list: an example by the name the Examples dialog gives it; a model beside the examples
+// (dataSources/labVessel.kjt), which that dialog does not list, as a model.
+export const tutorialStartLabel = (tutorial, exampleLabel = exampleTitle) => {
+    if (tutorial.start.from !== 'example') return 'From an empty canvas';
+    return tutorial.start.example.includes('/') ? `Starts from the ${exampleTitle(tutorial.start.example)} model` : `Starts from the ${exampleLabel(tutorial.start.example)} example`;
+};
 
 const normalize = (text) => String(text ?? '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
 

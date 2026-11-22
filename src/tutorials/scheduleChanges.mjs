@@ -5,6 +5,7 @@
 // seconds), the run's record of changes, and the run repeated from that record, the wave at the same steps and the same result. Repeating
 // forks the run from its start, which needs the engine's checkpoints, so this tutorial is for the desktop app.
 
+import { latch } from './latches.mjs';
 import { onlineRunTarget } from './steps.mjs';
 
 export const scheduleChangesValues = Object.freeze({
@@ -27,7 +28,8 @@ const steps = Object.freeze([
         title: 'Start a run in real time',
         text: `Press Run, turn on "Online", set the pacing to "Real time", set "Run until" to ${values.runSeconds} s, and press Start.`,
         target: (ui) => onlineRunTarget(ui, values.runSeconds), skip: 'startOnlineRun', runSeconds: values.runSeconds,
-        done: ({ ui }) => ui.steerable || ui.waveformScheduled
+        // Kept once the run could be steered: a real-time run ends by itself, and that is not the step undone.
+        done: latch(({ ui }) => ui.steerable || ui.waveformScheduled)
     },
     {
         id: 'openControls',
@@ -39,16 +41,20 @@ const steps = Object.freeze([
     {
         id: 'wave',
         title: 'Give the target a wave',
-        text: `In the ${values.setpoint.name} row, choose Sine from the menu, set Amplitude to ${values.wave.amplitude} and Frequency to ${values.wave.frequency} Hz, and press Start. The preview draws the wave before it starts; the target now swings ${values.wave.amplitude} rad either side of where it was, once every ${1 / values.wave.frequency} seconds, and the joint chases it.`,
+        text: `In the ${values.setpoint.name} row, choose Sine from the menu, set Amplitude to ${values.wave.amplitude} and Frequency to ${values.wave.frequency} Hz, and press Start. The preview draws the wave before it starts; the target now swings ${values.wave.amplitude} rad either side of where it was, once every ${1 / values.wave.frequency} seconds, and the joint chases it. The Stability button beside the timeline lists early checks as the joint is driven back and forth (a state that keeps rising for a few steps): hollow dots, which a wave like this raises in ordinary behaviour.`,
         target: (ui) => ui.liveControlsRowOf(values.setpoint.parameterId), skip: 'startWaveform', parameterId: values.setpoint.parameterId, wave: values.wave,
         done: ({ ui }) => ui.waveformScheduled
     },
     {
         id: 'changes',
+        // The record is read: once the run has ended, the card waits for Next.
+        waitForNext: true,
         title: 'Read the record',
-        text: 'When the run has ended, press Changes beside the timeline. It lists every change made during the run, when, and how: here, the wave you started.',
+        text: 'The Changes panel opened beside the timeline when the wave started (Changes, beside the timeline, opens and closes it). It lists every change made during the run, when, and how: here, the wave you started. Wait for the run to end: the record is complete then.',
         target: '#controlHistoryButton', skip: 'openChanges',
-        done: ({ ui }) => ui.changesShown
+        status: (ui) => (ui.simulationRunning ? 'The run is still going: the card moves on when it has ended.' : ''),
+        // Read once the run has ended, with the record on screen: it opens by itself mid-run, when the wave starts.
+        done: ({ ui }) => (ui.changesShown && !ui.simulationRunning) || ui.repeated
     },
     {
         id: 'repeat',
@@ -59,6 +65,8 @@ const steps = Object.freeze([
     },
     {
         id: 'plot',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'See the joint chase the wave',
         text: `Click the ${values.joint} to plot it: its angle swings with the target, a little behind it and short of its peaks, since the controller needs time to turn it.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.joint)), skip: 'plotNode', node: values.joint,

@@ -64,8 +64,10 @@ const steps = Object.freeze([
     },
     {
         id: 'plotTank',
+        // Its text says what the plot shows: it waits for Next once the plot is on screen.
+        waitForNext: true,
         title: 'See it warm',
-        text: `Click the "${values.tank}" to plot its temperature: it now warms from 293 K to about 340 K over the eight hours, as the measurements did, where the guessed values warmed too slowly and settled too high.`,
+        text: `Click the "${values.tank}" to plot its temperature: it now warms from 293 K to about 340 K over the eight hours, as the measurements did, where the guessed values warmed too slowly at first and were heading far too high.`,
         target: (ui) => (ui.nodePlotVisible ? '#nodeResultPlot' : ui.labelOf(values.tank)), skip: 'plotNode', node: values.tank,
         done: ({ ui }) => ui.plotsSeenSinceRun.includes(values.tank)
     },

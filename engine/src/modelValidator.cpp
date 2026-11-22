@@ -1204,10 +1204,13 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                                 << "-- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether "
                                 << "this dynamics is intentionally unstable before adjusting numerics.";
                     } else {
-                        message << " -- consider raising this node's numerics.substepsPerGlobalStep to at least " << *assessment->requiredSubsteps;
+                        // In the words of the node's card: its Numerics tab's "Substeps per global step", and a state whose equation sets its
+                        // value (an Update) rather than how fast it changes.
+                        message << " -- give it at least " << *assessment->requiredSubsteps
+                                << " substeps (Numerics tab, Substeps per global step)";
                         if (!symbol.empty()) message << " ('" << symbol << "' needs that many to stabilize)";
-                        message << ", converting " << (symbol.empty() ? "a fast state" : "'" + symbol + "'") << " to setsValue, or moving "
-                                << (symbol.empty() ? "fast dynamics" : "its dynamics") << " onto their own node.";
+                        message << ", make " << (symbol.empty() ? "a fast state" : "'" + symbol + "'") << " an Update, or move "
+                                << (symbol.empty() ? "fast dynamics" : "its dynamics") << " onto a node of their own.";
                     }
                     auto& issue = add(result, "numericsPotentiallyUnstable", "warning", message.str(), "node", nodeId, "numerics");
                     if (resolved) issue.attributedParameter = resolved->location;

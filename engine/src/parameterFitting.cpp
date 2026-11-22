@@ -346,6 +346,7 @@ FittingTrialScore scoreFittingTrial(const FittingProblem& problem, const Fitting
     score.objective = problem.maximize ? -value : value;
     for (const auto& [constraint, measure] : measures.limits) {
         const double reached = measure->evaluate(run);
+        score.reached.push_back(reached);
         const double excess = constraint.atMost ? reached - constraint.limit : constraint.limit - reached;
         // Relative to the limit; against the size of the value itself when the limit is zero, which has no size to be relative to.
         const double scale = constraint.limit != 0.0 ? std::abs(constraint.limit) : std::max(1.0, std::abs(reached));
@@ -373,8 +374,22 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
     const auto backend = createOptimizerBackend(problem.optimizerBackendId);
     // An objective that cannot be read is the person's to fix, so it ends the fit before any simulation instead of scoring every trial as failed.
     checkFittingObjective(problem);
-    // What scores a trial, made once for the whole fit rather than read again for every simulation.
-    const auto measures = makeFittingMeasures(problem);
+    // What scores a trial, made once for the whole fit rather than read again for every simulation. Its limits may be drawn in a little
+    // in the rounds that bring the best values back inside them (below); what a limit is judged against is always the one written.
+    auto measures = makeFittingMeasures(problem);
+    std::vector<FittingConstraint> writtenLimits;
+    for (const auto& [constraint, measure] : measures.limits) writtenLimits.push_back(constraint);
+    // How far a trial's reached values pass the written limits, the largest, relative to each limit as the penalty measures it.
+    const auto violationOf = [&](const std::vector<double>& reached) {
+        double worst = 0.0;
+        for (std::size_t index = 0; index < writtenLimits.size() && index < reached.size(); ++index) {
+            const auto& limit = writtenLimits[index];
+            const double excess = limit.atMost ? reached[index] - limit.limit : limit.limit - reached[index];
+            const double scale = limit.limit != 0.0 ? std::abs(limit.limit) : std::max(1.0, std::abs(reached[index]));
+            worst = std::max(worst, std::isnan(excess) ? std::numeric_limits<double>::infinity() : std::max(0.0, excess) / scale);
+        }
+        return worst;
+    };
     // The search always minimises; maximising searches for the smallest negative. What is reported is the objective as written.
     const auto shown = [&](double loss) { return problem.maximize ? -loss : loss; };
     const auto scratchPath = std::filesystem::temp_directory_path() /
@@ -402,6 +417,14 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
     // breaking a limit by 1% costs about a tenth of it, and any real violation outweighs the objective's own changes.
     double penaltyScale = 0.0;
     double bestViolation = 0.0;
+    std::vector<double> bestReached;
+    // The best values that keep every written limit, by the objective alone: what is reported when there are limits and any trial kept
+    // them, so a limit reported as holding holds (the penalty alone lets the best values settle a little past a limit).
+    double bestFeasibleObjective = std::numeric_limits<double>::infinity();
+    std::vector<double> bestFeasibleValues;
+    std::vector<double> bestFeasibleReached;
+    double startObjective = std::numeric_limits<double>::quiet_NaN();
+    double startViolation = 0.0;
 
     // Every simulation goes through here: it asks whether to go on, runs it, keeps the best, and tells the monitor.
     const auto score = [&](const std::vector<double>& values, bool baseline) {
@@ -419,12 +442,23 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
         double loss = 0.0;
         double violation = 0.0;
         bool failed = false;
+        std::vector<double> reached;
         try {
             const auto trial = scoreFittingTrial(problem, measures, values, scratchPath);
             if (baseline) penaltyScale = std::isfinite(trial.objective) ? 1e3 * std::max(1.0, std::abs(trial.objective)) : 1e6;
             loss = trial.objective + penaltyScale * trial.violationSquares;
-            violation = trial.worstViolation;
+            reached = trial.reached;
+            violation = violationOf(reached);
             failed = !std::isfinite(loss);
+            if (baseline) {
+                startObjective = shown(trial.objective);
+                startViolation = violation;
+            }
+            if (!failed && !writtenLimits.empty() && violation == 0.0 && trial.objective < bestFeasibleObjective) {
+                bestFeasibleObjective = trial.objective;
+                bestFeasibleValues = values;
+                bestFeasibleReached = reached;
+            }
         } catch (const std::exception&) {
             failed = true;
         }
@@ -438,6 +472,7 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
                 bestLoss = loss;
                 bestValues = values;
                 bestViolation = violation;
+                bestReached = reached;
             }
         }
         if (monitor.onTrial) {
@@ -470,7 +505,29 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
         if (onProgress) onProgress(update);
     };
 
-    const auto outcome = backend->optimize(loss, initialValues, bounds, problem.options, captureProgress);
+    auto outcome = backend->optimize(loss, initialValues, bounds, problem.options, captureProgress);
+
+    // A limit the best values still pass: the penalty grows with the square of how far, so it settles a little past a limit when the
+    // objective pulls that way (a tank held to 340 K ending at 340.16 K). Each round draws the limits that are passed in by half as much
+    // again as they were passed, and searches on from the best so far, until the best values keep them (at most three rounds; what was
+    // found is kept, and a fit stopped or out of time is not carried on).
+    for (int round = 0; round < 3 && stopReason.empty() && std::isfinite(bestLoss) && bestViolation > 0.0; ++round) {
+        for (std::size_t index = 0; index < measures.limits.size() && index < bestReached.size(); ++index) {
+            const auto& written = writtenLimits[index];
+            const double excess = written.atMost ? bestReached[index] - written.limit : written.limit - bestReached[index];
+            if (!(excess > 0.0)) continue;
+            auto& drawnIn = measures.limits[index].first.limit;
+            drawnIn += (written.atMost ? -1.0 : 1.0) * 1.5 * excess;
+        }
+        // The penalty is measured from the drawn-in limits now: the best so far is scored again against them.
+        bestLoss = std::numeric_limits<double>::infinity();
+        try {
+            outcome = backend->optimize(loss, bestValues.empty() ? initialValues : bestValues, bounds, problem.options, captureProgress);
+        } catch (const FittingStopped&) {
+            break;
+        }
+        if (bestFeasibleValues.size()) break;
+    }
 
     std::error_code removeError;
     std::filesystem::remove(scratchPath, removeError);
@@ -484,11 +541,20 @@ FittingReport runParameterFit(const FittingProblem& problem, const FittingProgre
     report.evaluations = evaluations;
     report.failedTrials = failedTrials;
     report.elapsedSeconds = elapsedSeconds();
-    // The best values actually simulated, unless every simulation failed, when the optimizer's own answer is all there is.
-    const bool haveBest = std::isfinite(bestLoss);
-    report.finalLoss = shown(haveBest ? bestLoss : outcome.loss);
-    report.finalViolation = haveBest ? bestViolation : 0.0;
-    const auto& finalValues = haveBest ? bestValues : outcome.parameterValues;
+    // The best values actually simulated, unless every simulation failed, when the optimizer's own answer is all there is; with limits,
+    // the best values that keep them all when any did (their objective is the one reported, with no penalty in it).
+    const bool feasible = !bestFeasibleValues.empty();
+    const bool haveBest = feasible || std::isfinite(bestLoss);
+    report.finalLoss = feasible ? shown(bestFeasibleObjective) : shown(haveBest ? bestLoss : outcome.loss);
+    report.finalViolation = feasible ? 0.0 : haveBest ? bestViolation : 0.0;
+    const auto& finalValues = feasible ? bestFeasibleValues : haveBest ? bestValues : outcome.parameterValues;
+    const auto& finalReached = feasible ? bestFeasibleReached : bestReached;
+    for (std::size_t index = 0; index < writtenLimits.size(); ++index) {
+        report.finalLimits.push_back({ writtenLimits[index].limit, writtenLimits[index].atMost,
+            index < finalReached.size() ? finalReached[index] : std::numeric_limits<double>::quiet_NaN() });
+    }
+    report.startObjective = startObjective;
+    report.startViolation = startViolation;
     report.finalParameters.reserve(problem.tunableParameters.size());
     for (std::size_t index = 0; index < problem.tunableParameters.size(); ++index) {
         report.finalParameters.emplace_back(problem.tunableParameters[index].parameterId, finalValues[index]);

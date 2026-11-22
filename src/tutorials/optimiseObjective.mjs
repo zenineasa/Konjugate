@@ -2,8 +2,10 @@
 
 // "Optimise towards a goal" (docs/proposals/tutorials.md), starting from the Tank Calibration example: Parameter tuning searching for the
 // parameter values that maximise a number from the run (the water's final temperature) instead of matching data, then the same search
-// held to a limit (the water may never pass 340 K). As the example's guide says, the search drives both parameters to their lower bounds,
-// since a smaller thermal mass warms faster and a smaller loss coefficient leaks less heat, and with the limit it settles just under it.
+// held to a limit (the water may never pass 340 K). Left alone, the search would drive both parameters to their lower bounds, since a
+// smaller thermal mass warms faster and a smaller loss coefficient leaks less heat; but the example's guessed values already take the
+// water to about 355 K, past the limit, so the search raises both (a larger heat capacity, a larger heat loss) until the hottest the water
+// gets is the limit, and ends inside it: with this example and these settings, 362,649 J/K and 14.93 W/K, the water at 339.97 K.
 
 export const optimiseObjectiveValues = Object.freeze({
     state: 'Water tank · Water temperature',
@@ -59,7 +61,7 @@ const steps = Object.freeze([
     {
         id: 'addLimit',
         title: 'Add a limit',
-        text: `Left alone, the search heats the water as much as it can. Real goals come with limits: press the + beside Limits, click "max" under Summaries and then "${values.state}", keep "at most", and enter ${values.limit}. The water may then never pass ${values.limit} K.`,
+        text: `Left alone, the search heats the water as much as it can. Real goals come with limits: press the ＋ beside Limits, click "max" under Summaries and then "${values.state}", keep "stays at most", and enter ${values.limit}. The water may then never pass ${values.limit} K.`,
         target: '#addParameterTuningConstraint', skip: 'addObjectiveLimit', state: values.state, limit: values.limit,
         done: ({ ui }) => limitHeld(ui) || searched(ui)
     },
@@ -73,13 +75,13 @@ const steps = Object.freeze([
     {
         id: 'review',
         title: 'Where it went',
-        text: `The search lowered both numbers as far as the limit allowed: a smaller heat capacity warms faster, and a smaller heat loss keeps more of the heat in. Without the limit it would have driven both to the bottom of their ranges; with it, the hottest the water gets settles just under ${values.limit} K. The card says the limit holds, and the plot compares the water's temperature before and after.`,
+        text: `The search raised both numbers: the heat capacity from 300,000 to 362,649 J/K, so the water warms more slowly, and the heat loss from 10 to 14.93 W/K, so it keeps less of the heat. With the guessed values the water ends at about 355 K, past the limit; with these, the hottest it gets is 339.97 K, just under ${values.limit} K: the warmest water the limit allows. Without the limit it would have gone the other way, both to the bottom of their ranges. The card gives the limit with its tolerance, says it holds, and what the water came to; the plot compares its temperature before and after.`,
         advance: 'next', done: () => true
     },
     {
         id: 'finish',
         title: 'You have optimised a model',
-        text: 'Apply a result only if you want to keep it: these values make the hottest tank, not the real one. The objective can also be a Python or C++ program, for goals that are not a formula, such as how long the water takes to settle; the example guide shows how.',
+        text: 'Apply a result only if you want to keep it: these values make the hottest tank the limit allows, not the real one. The objective can also be a Python or C++ program, for goals that are not a formula, such as how long the water takes to settle; the example guide shows how.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

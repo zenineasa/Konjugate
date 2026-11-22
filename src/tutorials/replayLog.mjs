@@ -53,7 +53,7 @@ const steps = Object.freeze([
     {
         id: 'describe',
         title: 'Describe its columns',
-        text: `The card has guessed the semicolons, the decimal commas, the date and time columns and their format. Set the time zone to ${values.zone}, where the lab is. Then say what each column is: TC1 (°C) is an output, waterTemperature, in K with an offset of 273.15; Heizung (%) an input, heaterPower, in W with a scale of 30 (100 % is 3 kW); Ventil an input, inflowRate, in kg/s, with the values OPEN=0.015, CLOSED=0; Raum (°C) an input, roomTemperature, in K with an offset of 273.15. Leave TC2 out, and press "Read the file". The card says what it left out: failed readings, a restart, a gap, the night the clocks went back.`,
+        text: `The card has guessed the semicolons, the decimal commas, the date and time columns and their format. Set the time zone to ${values.zone}, where the lab is. Then say what each column is: TC1 (°C) is Measured, waterTemperature, in K with an offset of 273.15; Heizung (%) an Input (what was done), heaterPower, in W with a scale of 30 (100 % is 3 kW); Ventil an Input, inflowRate, in kg/s, with the values OPEN=0.015, CLOSED=0; Raum (°C) an Input, roomTemperature, in K with an offset of 273.15. Leave TC2 out, and press "Read the file". The card says what it left out: failed readings, a restart, a gap, the night the clocks went back.`,
         target: (ui) => (ui.loggerOffered ? '#loggerColumns' : '#parameterTuningFileChooser'), skip: 'describeLogger', zone: values.zone, columns: values.columns,
         done: ({ document, ui }) => ui.replayRead || calibrated(document)
     },

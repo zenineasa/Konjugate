@@ -36,7 +36,7 @@ const steps = Object.freeze([
     {
         id: 'install',
         title: 'Install it',
-        text: 'Press Install. It is downloaded from its publisher\'s release, which needs the internet, and checked before it is installed.',
+        text: 'Press Install ("Trust publisher and install" the first time you install from this publisher). It is downloaded from its publisher\'s release, which needs the internet, and checked before it is installed.',
         target: '#extensionsDiscoverInstall', skip: 'installExtension', prefix: values.prefix,
         done: ({ ui }) => ui.installed.includes(values.prefix)
     },

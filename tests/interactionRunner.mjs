@@ -10235,8 +10235,10 @@ export async function runInteractionTests(driver) {
     // "Skip this step" on "Open the live twin" alone, pressed as a person presses it, then the next step done by hand in the twin window.
     // A twin window left open from before (minimized here) once made the step count as done without being brought up, so the next step's
     // banner went to a window nobody could see; and the skip only opened a window when none was open. Starting a tutorial now closes a
-    // twin window left from before, so the skip brings up a fresh one, in front.
+    // twin window left from before, so the skip brings up a fresh one, in front. Where the display cannot minimize a window (Linux CI's
+    // Xvfb has no window manager), the window from before is hidden instead: as much out of sight, by another way.
     await run('skipping only "Open the live twin" brings the twin window up, one left minimized from before closed as the tutorial starts, and the next step is done there by hand', async () => {
+        const minimizes = await driver.canMinimize();
         const { waitForStep, clean, readAndGoOn } = tutorialHelpers();
         // A real click at an element's centre, in whichever window it is.
         const clickAt = async (handle, selector) => {
@@ -10246,13 +10248,14 @@ export async function runInteractionTests(driver) {
         };
         for (const id of ['liveTwin', 'refitTwin']) {
             await clean();
-            // A twin window from before, left minimized.
+            // A twin window from before, left minimized (or hidden, where minimizing does nothing).
             const beforeTwin = driver.allHandles();
             await evaluate(window, `document.querySelector('#liveTwinButton').click()`);
             let twin = await driver.waitForNewHandle(beforeTwin, { titleIncludes: 'Live twin' }, 15000);
             await waitFor(twin, `!document.hidden`, 'The twin window did not open.');
-            await evaluate(twin, `window.windowControls.minimize()`);
-            await waitFor(twin, `document.hidden`, 'The twin window was not minimized.');
+            if (minimizes) await evaluate(twin, `window.windowControls.minimize()`);
+            else await twin.hide();
+            await waitFor(twin, `document.hidden`, minimizes ? 'The twin window was not minimized.' : 'The twin window was not hidden.');
             await window.focus();
             assert.equal(await evaluate(window, `window.__debugTour.startTutorial(${JSON.stringify(id)})`), true);
             await waitForStep('welcome');

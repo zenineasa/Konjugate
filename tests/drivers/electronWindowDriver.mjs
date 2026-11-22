@@ -81,6 +81,10 @@ function wrapWindow(win) {
             win.show();
             win.focus();
         },
+        // Takes the window out of sight without minimizing it, for where minimizing does nothing (see canMinimize).
+        async hide() {
+            win.hide();
+        },
         async close() {
             await windowCoverage?.take(win);
             win.close();
@@ -98,6 +102,29 @@ function wrapWindow(win) {
     };
     handlesByWindow.set(win, handle);
     return handle;
+}
+
+// Whether a window can be minimized here, found once by minimizing a throwaway window: minimizing is the window manager's to do, and a
+// display with none (Linux CI's bare Xvfb) leaves the window as it was. Said in the run's output, so a run shows what it found.
+let minimizeProbe = null;
+function probeMinimize() {
+    minimizeProbe ??= (async () => {
+        const probe = new BrowserWindow({ width: 200, height: 120, show: false, title: 'Minimize probe' });
+        try {
+            await probe.loadURL('about:blank');
+            probe.showInactive();
+            await new Promise((resolve) => setTimeout(resolve, 200));
+            probe.minimize();
+            // macOS animates the window into the Dock: about half a second.
+            for (const until = Date.now() + 3000; !probe.isMinimized() && Date.now() < until;) await new Promise((resolve) => setTimeout(resolve, 100));
+            const minimizes = probe.isMinimized();
+            console.log(`  (this display ${minimizes ? 'minimizes windows' : 'does not minimize windows (no window manager?): a window is hidden instead where a test would minimize it'}; ${process.platform})`);
+            return minimizes;
+        } finally {
+            if (!probe.isDestroyed()) probe.destroy();
+        }
+    })();
+    return minimizeProbe;
 }
 
 // The operating system's own dialogs (save, open, a message box) cannot be clicked by a test, and one left open stays on the
@@ -291,6 +318,8 @@ export function createElectronDriver(mainWindow) {
         async simulateOsFileOpen(path) {
             app.emit('open-file', { preventDefault() {} }, path);
         },
+        // Whether minimizing a window does anything on this display (probed once, see probeMinimize).
+        canMinimize: probeMinimize,
         capabilities: {
             multiWindow: true,
             osFileOpen: true,

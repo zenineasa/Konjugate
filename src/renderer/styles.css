@@ -2527,6 +2527,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .partValue { color: #9fd3c9; font-size: 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .partChip > .partValue { align-self: flex-end; }
 .partValue[hidden] { display: none; }
+/* While results are open nothing in an editor can be typed into: a placeholder inviting input is hidden, and an empty equation
+   field looks empty and locked. A placeholder that shows the value in effect (a derived short name, a parameter shown by its
+   symbol) stays, as it says what is there. */
+.resultModeLocked [data-entity-editor] :is(input, textarea):not([data-default-placeholder])::placeholder { color: transparent; }
+.resultModeLocked [data-entity-editor] math-field.lockedEmpty { opacity: .45; border-style: dashed; }
 /* The captions over a state's fields, so a new state's "x x 0" reads as its name, symbol, start and unit. */
 .stateFieldHead { color: #6e828e; font-size: 7px; letter-spacing: .04em; text-transform: uppercase; }
 #edgeLanding [data-landing-lhs], #edgeLanding [data-landing-rhs] { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }

@@ -9254,6 +9254,16 @@ export async function runInteractionTests(driver) {
         const badge = `document.querySelector('#nodeEditorStates .partChip[data-term-type="relationship"] .partValue')`;
         await waitFor(window, `Boolean(${badge}) && !${badge}.hidden && /^= /.test(${badge}.textContent)`, 'A chip gave no value while results are open.');
         const atEnd = await evaluate(window, `${badge}.textContent`);
+        // Nothing to type while results are open: the air's empty own part invites nothing, and looks empty and locked; no plain
+        // field of an editor shows an invitation either, only a placeholder that says what is in effect.
+        const ownPart = `document.querySelector('#nodeEditorStates .stateCard[data-symbol="temperature"] .ownPart')`;
+        assert.equal(await evaluate(window, `${ownPart}.getAttribute('placeholder') ?? ''`), '', 'An empty own part invites typing while results are open.');
+        // And it draws nothing in its place: with the attribute removed, MathLive's placeholder is an object, drawn as "[object Object]".
+        assert.equal(await evaluate(window, `${ownPart}.placeholder === ''`), true, 'An empty own part draws text of its own while results are open.');
+        assert.equal(await evaluate(window, `${ownPart}.classList.contains('lockedEmpty')`), true);
+        const invitations = `[...document.querySelectorAll('[data-entity-editor] :is(input, textarea)[placeholder]:not([data-default-placeholder])')].filter((field) => !field.value && getComputedStyle(field, '::placeholder').color !== 'rgba(0, 0, 0, 0)').map((field) => field.id || field.dataset.field || field.className)`;
+        assert.deepEqual(await evaluate(window, invitations), [], 'A field of an editor invites typing while results are open.');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('[data-entity-editor] math-field[placeholder]:not([placeholder=""])')].map((field) => field.id || field.className)`), [], 'An equation field invites typing while results are open.');
         await evaluate(window, `(() => { const slider = document.querySelector('#resultTimeline'); slider.value = slider.min; slider.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await waitFor(window, `${badge}.textContent !== ${JSON.stringify(atEnd)}`, 'A chip\'s value did not follow the timeline.');
 
@@ -9263,6 +9273,8 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click()`);
         await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
         assert.equal(await evaluate(window, `[...document.querySelectorAll('.partValue')].every((element) => element.hidden)`), true, 'A value stayed once results were closed.');
+        // Closed: the own part invites typing again.
+        await waitFor(window, `${ownPart}?.getAttribute('placeholder')?.includes('type to add') && !${ownPart}.classList.contains('lockedEmpty')`, 'The own part did not invite typing again once results were closed.');
     });
 
     await run('a relationship a toolbox wrote with several equations opens readable, and editing one equation keeps the others exactly', async () => {

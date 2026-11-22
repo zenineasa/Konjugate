@@ -3496,7 +3496,7 @@ function renderSourceTermParameters(node, term, container = $('#termParameters')
                 ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
-            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
+            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" data-default-placeholder value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
@@ -4110,7 +4110,7 @@ function renderEdgeEditor(definition) {
                 ${liveRangeFields(control)}
                 <span class="parameterControlError" role="status"></span>
             </div>
-            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
+            <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" data-default-placeholder value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
             <label class="parameterField" title="Link this parameter to a project-level shared parameter so one value (or one live control) drives every parameter linked to it.">
                 <span>Shared parameter</span>
                 <select data-shared-select>${sharedParameterOptions()}</select>
@@ -6136,6 +6136,17 @@ function applyInspectorReadOnly() {
     $$(resultLockedMathFields).forEach((field) => {
         field.readOnly = locked;
         field.toggleAttribute('read-only', locked);
+        // Nothing to type while results are open: an empty field's invitation ("type to add") is put away, and it looks empty
+        // and locked; the placeholder comes back when they close. (A plain field's placeholder is hidden by styles.css.)
+        // Emptied, not removed: MathLive draws a removed placeholder as "[object Object]".
+        if (locked && field.getAttribute('placeholder')) {
+            field.dataset.lockedPlaceholder = field.getAttribute('placeholder');
+            field.setAttribute('placeholder', '');
+        } else if (!locked && field.dataset.lockedPlaceholder !== undefined) {
+            field.setAttribute('placeholder', field.dataset.lockedPlaceholder);
+            delete field.dataset.lockedPlaceholder;
+        }
+        field.classList.toggle('lockedEmpty', locked && !String(field.value ?? '').trim());
     });
 }
 
@@ -17400,7 +17411,7 @@ function addGroupParameterRow(container, parameter, group) {
         <label class="parameterField"><span>Initial value</span><input data-field="value" type="number" value="${escapeHtml(parameter.value ?? '')}"></label>
         <label class="parameterField"><span>Unit</span><input data-field="unit" value="${escapeHtml(parameter.unit ?? '')}"></label>
         <label class="parameterField"><span>Mode</span><select data-field="mode"><option value="constant">Constant</option><option value="live">Live</option></select></label>
-        <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
+        <label class="parameterField" title="How it is written in equations, as LaTeX (\\omega for ω); left empty, its symbol"><span>Shown as</span><input data-field="displaySymbol" data-default-placeholder value="${escapeHtml(parameter.displaySymbol ?? '')}" placeholder="${escapeHtml(parameter.symbol ?? '')}"></label>
         <button class="removeBuilderRow" type="button" title="Remove">×</button>
         <div class="parameterControlFields" ${parameter.mode === 'live' ? '' : 'hidden'}>
             ${liveRangeFields(control)}

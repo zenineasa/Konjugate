@@ -83,6 +83,13 @@ std::vector<DuringRunStabilityFinding> DuringRunStabilityMonitor::observeGlobalS
         const auto assessment = assessNodeStability(*node, synchronizedStates, globalTimeStep_, plan_.algebraicStateIndexes);
         if (assessment && !assessment->stable) {
             std::ostringstream message;
+            if (assessment->undampedOscillation) {
+                // Its own code, so the findings list can offer semi-implicit Euler for the node (docs/proposals/integrators.md, decision 1).
+                message << "This node oscillates without damping, and Explicit Euler is making the oscillation grow (amplification factor "
+                        << assessment->maxAmplificationFactor << " per global step). Semi-implicit Euler keeps its energy bounded.";
+                findings.push_back({nodeId, 0, "duringRunUndampedOscillation", message.str(), globalTime});
+                continue;
+            }
             message << "This node's growth trend was confirmed by a re-check of its current dynamics: amplification factor "
                     << assessment->maxAmplificationFactor << " > 1 per global step at its current state.";
             findings.push_back({nodeId, 0, "duringRunPotentiallyUnstable", message.str(), globalTime});

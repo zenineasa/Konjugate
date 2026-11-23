@@ -32,6 +32,17 @@ struct ProviderConfiguration {
 
 class ProviderBackend;
 
+// A hazard of the older program format that changes no number but is worth saying (docs/proposals/programSdkV2.md,
+// decision 8). "inputUnbound": a declared input of the program at entityIds[0] (an edge, a source term or a node) has no
+// binding, so it reads 0; `port` names it. "sharedCheckpoint": a Python node program serves the nodes in entityIds from one
+// object and returned a non-empty checkpoint(), so they share its memory. The engine knows only ids; the app names them.
+struct ProgramWarning {
+    std::string code;
+    std::vector<EntityId> entityIds;
+    std::string port;
+    ContributionImplementation implementation = ContributionImplementation::pythonProvider;
+};
+
 class ProviderRuntime final : public ProviderEvaluator {
 public:
     explicit ProviderRuntime(ProviderConfiguration configuration);
@@ -56,7 +67,25 @@ public:
 
     void shutdown() noexcept;
 
+    // The warnings found so far: unbound inputs once the programs have started, a shared checkpoint once one is taken.
+    const std::vector<ProgramWarning>& warnings() const noexcept { return warnings_; }
+
 private:
+    void recordInstance(EntityId entityId, const std::string& processKey, ContributionImplementation implementation,
+                        const std::vector<CompiledBinding>& bindings);
+    void noteUnboundInputs();
+
+    struct InstanceRecord {
+        EntityId entityId = 0;
+        std::string processKey;
+        ContributionImplementation implementation = ContributionImplementation::pythonProvider;
+        std::vector<std::string> boundKeys;
+    };
+    std::vector<InstanceRecord> instanceRecords_;
+    std::unordered_map<std::string, std::vector<EntityId>> nodesByProcess_;
+    std::vector<std::string> sharedCheckpointWarned_;
+    std::vector<ProgramWarning> warnings_;
+
     ProviderConfiguration configuration_;
     std::unordered_map<std::string, std::unique_ptr<ProviderBackend>> processes_;
     std::unordered_map<EntityId, std::uint64_t> taskInstanceIds_;

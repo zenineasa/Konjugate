@@ -68,6 +68,8 @@ export class WindowSession {
     #normal = null;
     #memberProjections = null; // the move's projections, with their parameters and limits, for the estimator's members
     #inputNormal = null; // draws for the inputs' uncertainty in the members' forecasts, apart from the estimator's own, so turning it on or off changes nothing else
+    #aheadNormal = null; // draws of the readings' noise for the bands forecast ahead, apart from the estimator's own, so judging them changes nothing else
+    #forecastsAhead = []; // { now, bands: { signal: { lows, highs } } }: the readings each move expected ahead of its now, until its horizon has passed
     #pendingProjections = []; // { now, horizon, inputs: { signal: { last, choices: { choice: samples } } } }, scored once their horizon has passed
     #scores = {}; // signal -> choice -> { squares, count }: how each choice's projections did against what then arrived
     cycles = [];
@@ -781,7 +783,11 @@ export class WindowSession {
     // What a move says about the estimate: each state's mean and spread at the anchor; the forecast as a band, the members'
     // 10th to 90th percentile, from each member run on to the horizon; and how many of its last stride's readings fell outside the
     // 10th to 90th percentile of the readings the twin expected (each member's value plus its sensor's noise), which for honest
-    // noise and drift settings is about one in five: far fewer says they are too cautious, far more too sure.
+    // noise and drift settings is about one in five: far fewer says they are too cautious, far more too sure. Two such counts:
+    // `outside`, against this move's band behind its now, where the inputs are what was really done, so it is the model's and the
+    // readings' uncertainty alone; and `ahead`, against the band each earlier move forecast for that reading, at whatever lead up to
+    // the horizon it was, so it is the band as it was drawn ahead of now, the inputs' uncertainty in it (when on). The room shows
+    // `ahead`, the band a person reads the forecast by.
     async #estimateFigures(cycle, analysis) {
         const stateIds = this.#engine.stateIds;
         const computed = new Set(this.#engine.algebraicStateIds);
@@ -829,6 +835,7 @@ export class WindowSession {
             }).length;
             outside[entry.signal] = { outside: count, total: readings.length };
         });
+        const ahead = this.#judgeAhead(cycle.now, runs);
         return {
             members: members.length,
             states: stateIds.flatMap((stateId, position) => (computed.has(stateId) ? [] : [{ stateId, mean: mean[position], spread: spread[position], drift: this.#drift[position] }])),
@@ -838,8 +845,46 @@ export class WindowSession {
             throughParameters: analysis?.throughParameters ?? {},
             noise: { ...this.#noise },
             through: analysis?.through ?? {},
-            band, outside
+            band, outside, ahead
         };
+    }
+
+    // `ahead` above: this move's last stride of readings, each judged against every band an earlier move forecast for it (10th to 90th
+    // percentile of each member's value plus a draw of the readings' noise); then this move's own band ahead, kept until its horizon
+    // has passed. A move made again at the same now (a correction) replaces the band it made before.
+    #judgeAhead(now, runs) {
+        this.#aheadNormal ??= seededNormal((this.estimator.seed ^ 0x27d4eb2d) >>> 0);
+        const ahead = {};
+        this.outputs.forEach((entry) => {
+            const readings = this.#goodReadings(entry.signal, now).filter((reading) => reading.time > now - this.stride + 1e-9);
+            let count = 0;
+            let total = 0;
+            for (const forecast of this.#forecastsAhead) {
+                const band = forecast.bands[entry.signal];
+                if (!band || forecast.now >= now) continue;
+                for (const reading of readings) {
+                    if (reading.time <= forecast.now + 1e-9 || reading.time > forecast.now + this.horizon + 1e-9) continue;
+                    total += 1;
+                    if (reading.value < interpolate(band.lows, reading.time) || reading.value > interpolate(band.highs, reading.time)) count += 1;
+                }
+            }
+            ahead[entry.signal] = { outside: count, total };
+        });
+        const bands = {};
+        this.outputs.forEach((entry, outputIndex) => {
+            const noise = this.#noise[entry.signal] ?? 0;
+            const lows = [];
+            const highs = [];
+            runs[0].forEach((sample, sampleIndex) => {
+                if (sample.time < now - 1e-9) return;
+                const values = runs.map((samples) => samples[sampleIndex].values[outputIndex] + noise * this.#aheadNormal()).sort((a, b) => a - b);
+                lows.push({ time: sample.time, value: quantile(values, 0.1) });
+                highs.push({ time: sample.time, value: quantile(values, 0.9) });
+            });
+            if (lows.length) bands[entry.signal] = { lows, highs };
+        });
+        this.#forecastsAhead = [...this.#forecastsAhead.filter((forecast) => forecast.now < now - 1e-9 && forecast.now + this.horizon > now - this.stride), { now, bands }];
+        return ahead;
     }
 
     // The commands giving the engine a member's (or the mean's) values of the estimated parameters, which follow its states in it.

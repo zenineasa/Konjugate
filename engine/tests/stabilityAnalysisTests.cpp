@@ -707,8 +707,58 @@ void rodas4IsFourthOrderAtFixedSteps() {
 
 }
 
+// An undamped oscillator on one node, x' = v and v' = -omega^2 x, with its speed listed first or second.
+boost::property_tree::ptree oneNodeOscillatorProject(double omegaSquared, const std::string& integration, bool speedFirst) {
+    const std::string position = R"json({"id": 11, "name": "X", "symbol": "x", "initialValue": 1})json";
+    const std::string speed = R"json({"id": 12, "name": "V", "symbol": "v", "initialValue": 0})json";
+    std::ostringstream json;
+    json << R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [{
+            "id": 1, "name": "Oscillator", "states": [)json" << (speedFirst ? speed + "," + position : position + "," + speed) << R"json(],
+            "sourceTerms": [
+                {"id": 21, "state": "x", "expression": "v", "expressionModel": {"latex": "v", "output": {"stateId": 11},
+                 "bindings": [{"kind": "state", "stateId": 12, "symbol": "v", "label": "v"}], "mathJson": "v"}},
+                {"id": 22, "state": "v", "expression": "-k x", "expressionModel": {"latex": "-k x", "output": {"stateId": 12},
+                 "bindings": [{"kind": "state", "stateId": 11, "symbol": "x", "label": "x"}], "mathJson": ["Multiply", ")json" << -omegaSquared << R"json(", "x"]}}
+            ],
+            "numerics": {"substepsPerGlobalStep": 1, "integration": ")json" << integration << R"json("}
+        }],
+        "edges": []
+    })json";
+    return parseProject(json.str());
+}
+
+// Explicit Euler grows an undamped oscillation at every step and says it is one (docs/proposals/integrators.md, decision 1);
+// semi-implicit Euler is judged by its own amplification matrix, (I - hL)^-1 (I + h(D + U)): neutral up to h omega = 2 in either
+// order of the two states, and beyond it the substeps that bring it back.
+void assessNodeStabilityJudgesASemiImplicitNodeByItsOwnAmplification() {
+    {
+        const auto plan = konjugate::compileExecutionPlan(oneNodeOscillatorProject(4.0, "explicit", false));
+        const auto assessment = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
+        require(assessment && !assessment->stable && assessment->unconditionallyUnstable, "Explicit Euler grows an undamped oscillation at every step.");
+        require(assessment->undampedOscillation, "An undamped oscillation must be told from a growing mode.");
+    }
+    for (const bool speedFirst : {false, true}) {
+        const auto plan = konjugate::compileExecutionPlan(oneNodeOscillatorProject(4.0, "semiImplicit", speedFirst));
+        const auto inside = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.5);
+        require(inside && inside->stable && !inside->undampedOscillation, "Semi-implicit Euler keeps an undamped oscillation at h omega = 1.");
+        require(std::abs(inside->maxAmplificationFactor - 1.0) < 1e-6, "Semi-implicit Euler is neutral on an undamped oscillation.");
+        const auto outside = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 2.5);
+        require(outside && !outside->stable && !outside->unconditionallyUnstable, "h omega = 5 is beyond semi-implicit Euler's bound of 2.");
+        require(outside->requiredSubsteps && *outside->requiredSubsteps == 3, "Three substeps bring h omega to 5/3, within 2.");
+    }
+    {
+        const auto plan = konjugate::compileExecutionPlan(oneNodeOscillatorProject(-4.0, "semiImplicit", false));
+        const auto growing = konjugate::assessNodeStability(plan.nodes.at(0), plan.initialStates, 0.1);
+        require(growing && !growing->stable && growing->unconditionallyUnstable && !growing->undampedOscillation,
+            "A truly growing mode stays unconditionally unstable under semi-implicit Euler.");
+    }
+}
+
 int main() {
     try {
+        assessNodeStabilityJudgesASemiImplicitNodeByItsOwnAmplification();
         assessNodeStabilityFlagsAnObviouslyUnstableDecay();
         assessNodeStabilityCountsAStateNothingContributesToAsAZero();
         assessNodeStabilityAcceptsTheSameDecayOnceSubsteppedEnough();

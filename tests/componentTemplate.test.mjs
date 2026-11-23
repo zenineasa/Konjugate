@@ -214,3 +214,19 @@ test('every bundled template explains each of its states, parameters and edges i
         }
     }
 });
+
+// docs/proposals/integrators.md, decision 1: the library's mechanical and electrical parts place nodes integrated with semi-implicit
+// Euler, saying so in the template; nothing else does, and a template may say only explicit or semiImplicit.
+test('the bundled mechanical and electrical node templates say semi-implicit Euler, and only a known integration is accepted', async () => {
+    const directory = new URL('../assets/componentLibrary/', import.meta.url);
+    for (const name of await readdir(directory)) {
+        const template = JSON.parse(await readFile(new URL(name, directory), 'utf8'));
+        if (template.kind !== 'node') continue;
+        const physical = template.domains.some((domain) => domain === 'mechanical' || domain === 'electrical');
+        assert.equal(template.numerics?.integration ?? 'explicit', physical ? 'semiImplicit' : 'explicit', template.id);
+        validateComponentTemplate(template);
+    }
+    const node = { id: 'swing', kind: 'node', name: 'Swing', domains: ['mechanical'], states: [{ symbol: 'x', label: 'X' }] };
+    assert.throws(() => validateComponentTemplate({ ...node, numerics: { integration: 'implicit' } }), /must be "explicit" or "semiImplicit"/);
+    assert.equal(validateComponentTemplate({ ...node, numerics: { integration: 'explicit' } }).numerics.integration, 'explicit');
+});

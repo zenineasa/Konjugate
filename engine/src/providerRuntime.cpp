@@ -185,6 +185,9 @@ public:
         std::uint64_t sequence, double simulationTime, double stepSize,
         const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) = 0;
     virtual void shutdown() noexcept = 0;
+    // The input keys the program's describe() declares, once it has started (after sendInitialization()); empty when the
+    // transport cannot tell, which only means no warning about an unbound input is given for it.
+    virtual std::vector<std::string> declaredInputKeys() const { return {}; }
 
     // Throwing defaults: only PipeProviderBackend (the transport Python computational-node
     // providers always use) overrides these. SharedMemoryProviderBackend/InProcessProviderBackend
@@ -228,6 +231,7 @@ public:
     ProviderControlChannel& operator=(const ProviderControlChannel&) = delete;
 
     const std::string& processKey() const noexcept { return processKey_; }
+    const std::vector<std::string>& declaredInputKeys() const noexcept { return declaredInputKeys_; }
 
     void sendInitialize(const InitializeRequest& request) {
         if (request.instances_size() == 0) return;
@@ -392,6 +396,7 @@ private:
         if (!resp.has_handshake()) {
             throw std::runtime_error("Unexpected response to handshake from provider process " + processKey_);
         }
+        for (const auto& key : resp.handshake().input_keys()) declaredInputKeys_.emplace_back(key);
     }
 
     void send(const google::protobuf::MessageLite& message) {
@@ -431,6 +436,7 @@ private:
     ContributionImplementation implementation_;
     std::string sourcePath_;
     std::unique_ptr<ChildProcess> process_;
+    std::vector<std::string> declaredInputKeys_;
 };
 
 class PipeProviderBackend final : public ProviderBackend {
@@ -446,6 +452,7 @@ public:
     }
 
     void sendInitialization() override { channel_.sendInitialize(initializeReq_); }
+    std::vector<std::string> declaredInputKeys() const override { return channel_.declaredInputKeys(); }
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
@@ -506,6 +513,7 @@ public:
     }
 
     void sendInitialization() override { channel_.sendInitialize(initializeReq_); }
+    std::vector<std::string> declaredInputKeys() const override { return channel_.declaredInputKeys(); }
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
@@ -698,6 +706,13 @@ public:
         pendingInstances_.emplace_back(instanceId, std::move(keys));
     }
 
+    std::vector<std::string> declaredInputKeys() const override {
+        std::vector<std::string> keys;
+        const auto count = vtable_->inputCount(instance_);
+        for (std::uint32_t index = 0; index < count; ++index) keys.emplace_back(vtable_->inputKey(instance_, index));
+        return keys;
+    }
+
     void sendInitialization() override {
         for (const auto& [instanceId, keys] : pendingInstances_) {
             std::vector<const char*> keyPointers;
@@ -824,6 +839,13 @@ public:
         keys.reserve(bindings.size());
         for (const auto& binding : bindings) keys.push_back(binding.symbol);
         pendingInstances_.emplace_back(instanceId, std::move(keys));
+    }
+
+    std::vector<std::string> declaredInputKeys() const override {
+        std::vector<std::string> keys;
+        const auto count = vtable_->inputCount(instance_);
+        for (std::uint32_t index = 0; index < count; ++index) keys.emplace_back(vtable_->inputKey(instance_, index));
+        return keys;
     }
 
     void sendInitialization() override {
@@ -1030,9 +1052,14 @@ public:
         request.put("kind", "initialize");
         request.put("processKey", processKey_);
         request.add_child("instances", pendingInstances_);
-        dispatch(request);
+        const auto response = dispatch(request);
         pendingInstances_.clear();
+        if (const auto keys = response.get_child_optional("inputKeys")) {
+            for (const auto& [unused, key] : *keys) { static_cast<void>(unused); declaredInputKeys_.push_back(key.get_value<std::string>()); }
+        }
     }
+
+    std::vector<std::string> declaredInputKeys() const override { return declaredInputKeys_; }
 
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t sequence, double simulationTime, double stepSize,
@@ -1199,6 +1226,7 @@ private:
 
     std::string processKey_;
     boost::property_tree::ptree pendingInstances_;
+    std::vector<std::string> declaredInputKeys_;
 };
 
 extern "C" {
@@ -1307,7 +1335,10 @@ public:
         if (!resp.has_handshake()) {
             throw std::runtime_error("Unexpected response to handshake from web C++ provider '" + processKey_ + "'");
         }
+        for (const auto& key : resp.handshake().input_keys()) declaredInputKeys_.emplace_back(key);
     }
+
+    std::vector<std::string> declaredInputKeys() const override { return declaredInputKeys_; }
 
     void addInstance(std::uint64_t instanceId, const std::vector<CompiledBinding>& bindings) override {
         auto* inst = initializeReq_.add_instances();
@@ -1392,6 +1423,7 @@ private:
     std::string processKey_;
     InitializeRequest initializeReq_;
     std::mutex mutex_;
+    std::vector<std::string> declaredInputKeys_;
 };
 #endif
 
@@ -1495,6 +1527,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             taskInstanceIds_[task.sourceId] = instanceId;
 
             proc->addInstance(instanceId, task.bindings);
+            recordInstance(task.sourceId, key, task.implementation, task.bindings);
         }
 
         // A programmable ("sets the value") algebraic task is evaluated through the exact same
@@ -1515,6 +1548,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             taskInstanceIds_[task.sourceId] = instanceId;
 
             proc->addInstance(instanceId, task.bindings);
+            recordInstance(task.sourceId, key, task.implementation, task.bindings);
         }
 
         if (node.nodeProvider) {
@@ -1533,14 +1567,40 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             taskInstanceIds_[task.nodeId] = instanceId;
 
             proc->addInstance(instanceId, task.bindings);
+            recordInstance(task.nodeId, key, task.implementation, task.bindings);
+            nodesByProcess_[key].push_back(task.nodeId);
         }
     }
 
     for (auto& [key, proc] : processes_) {
         proc->sendInitialization();
     }
+    noteUnboundInputs();
 
     initialized_ = true;
+}
+
+void ProviderRuntime::recordInstance(EntityId entityId, const std::string& processKey, ContributionImplementation implementation,
+                                     const std::vector<CompiledBinding>& bindings) {
+    InstanceRecord record{entityId, processKey, implementation, {}};
+    for (const auto& binding : bindings) record.boundKeys.push_back(binding.symbol);
+    instanceRecords_.push_back(std::move(record));
+}
+
+// A declared input with no binding reads 0 in the older program format, without a word (docs/proposals/programSdkV2.md,
+// decision 8). It stays so, for the numbers of saved models; this only says it, once per instance and input.
+void ProviderRuntime::noteUnboundInputs() {
+    std::unordered_map<std::string, std::vector<std::string>> declaredByProcess;
+    for (const auto& record : instanceRecords_) {
+        auto found = declaredByProcess.find(record.processKey);
+        if (found == declaredByProcess.end()) {
+            found = declaredByProcess.emplace(record.processKey, processes_.at(record.processKey)->declaredInputKeys()).first;
+        }
+        for (const auto& key : found->second) {
+            if (std::find(record.boundKeys.begin(), record.boundKeys.end(), key) != record.boundKeys.end()) continue;
+            warnings_.push_back({"inputUnbound", {record.entityId}, key, record.implementation});
+        }
+    }
 }
 
 std::vector<std::pair<std::string, double>> ProviderRuntime::evaluateNode(
@@ -1565,7 +1625,17 @@ std::vector<std::byte> ProviderRuntime::requestNodeCheckpoint(const NodeProvider
     if (instanceIt == taskInstanceIds_.end()) {
         throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
     }
-    return processIt->second->requestCheckpoint(instanceIt->second);
+    auto payload = processIt->second->requestCheckpoint(instanceIt->second);
+    // One Python object serves every node running the same source, so their memory is shared (docs/proposals/
+    // programSdkV2.md, decision 8). Said once per program, when it shows it keeps memory by checkpointing some.
+    const auto sharing = nodesByProcess_.find(task.providerProcessKeyCache);
+    if (task.implementation == ContributionImplementation::pythonProvider && !payload.empty() && sharing != nodesByProcess_.end()
+        && sharing->second.size() > 1
+        && std::find(sharedCheckpointWarned_.begin(), sharedCheckpointWarned_.end(), sharing->first) == sharedCheckpointWarned_.end()) {
+        sharedCheckpointWarned_.push_back(sharing->first);
+        warnings_.push_back({"sharedCheckpoint", sharing->second, "", task.implementation});
+    }
+    return payload;
 }
 
 void ProviderRuntime::requestNodeRestore(const NodeProviderTask& task, std::span<const std::byte> payload) {

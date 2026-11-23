@@ -80,6 +80,7 @@ import { offerMissingPlugins } from './missingPlugins.mjs';
 import './phoneMenu.mjs';
 import './phoneSheets.mjs';
 import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle, stabilityGroupWhen } from '../stabilityFindingGroups.mjs';
+import { captureProgramWarnings, programWarningIssues } from '../programWarnings.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
@@ -5663,7 +5664,10 @@ function applyNodeTemplate(template) {
         color: Number.parseInt((template.color ?? '#34727a').replace('#', ''), 16),
         states: resolvedStates,
         sourceTerms: [],
-        substepsPerGlobalStep: 1
+        substepsPerGlobalStep: 1,
+        // A mechanical or electrical part says semi-implicit Euler itself (docs/proposals/integrators.md, decision 1), so the node it
+        // places keeps an oscillation's energy bounded, and the file says so. A node placed before keeps what it had.
+        ...(template.numerics?.integration === 'semiImplicit' ? { integration: 'semiImplicit' } : {})
     };
     // Built against `definition` after its states are resolved, via the same function the node
     // editor's own source term UI uses -- a self-referencing coupling (e.g. displacement's rate
@@ -6137,8 +6141,10 @@ function renderValidationFailure(message) {
 }
 
 function renderValidationStatus() {
-    const errors = currentValidation.issues.filter((item) => item.severity === 'error').length;
-    const warnings = currentValidation.issues.filter((item) => item.severity === 'warning').length;
+    const issues = capturedProgramWarnings.length && $('#validationSummary').dataset.validationSource === 'engine'
+        ? [...currentValidation.issues, ...programWarningIssues(capturedProgramWarnings, serializeProjectDocument())] : currentValidation.issues;
+    const errors = issues.filter((item) => item.severity === 'error').length;
+    const warnings = issues.filter((item) => item.severity === 'warning').length;
     const summary = $('#validationSummary');
     summary.classList.remove('pending');
     summary.classList.toggle('error', errors > 0);
@@ -6149,7 +6155,7 @@ function renderValidationStatus() {
     $('#runButton').title = errors ? 'Run settings (resolve model errors before starting)' : 'Run simulation';
 
     const severityByEntity = new Map();
-    currentValidation.issues.forEach((item) => {
+    issues.forEach((item) => {
         const entityId = Number(item.location.entityId);
         if (!validModelEntityId(entityId)) return;
         const previous = severityByEntity.get(entityId);
@@ -6172,18 +6178,18 @@ function renderValidationStatus() {
     });
     updateRelationshipSelection();
 
-    $('#validationPanelTitle').textContent = currentValidation.issues.length
+    $('#validationPanelTitle').textContent = issues.length
         ? `${errors} errors · ${warnings} warnings` : 'No issues';
     const container = $('#validationIssues');
     container.replaceChildren();
-    if (!currentValidation.issues.length) container.innerHTML = '<p class="validationEmpty">This model is structurally valid and ready for a simulation runtime.</p>';
-    currentValidation.issues.forEach((item) => {
+    if (!issues.length) container.innerHTML = '<p class="validationEmpty">This model is structurally valid and ready for a simulation runtime.</p>';
+    issues.forEach((item) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = `validationIssue ${item.severity}`;
         button.innerHTML = `<i></i><span><strong>${escapeHtml(item.message)}</strong><small>${escapeHtml(item.location.kind)}${item.location.field ? ` · ${escapeHtml(item.location.field)}` : ''}</small></span>`;
         button.addEventListener('click', () => navigateToValidationIssue(item));
-        container.appendChild(button);
+        container.appendChild(withSemiImplicitAction(button, item.code === 'numericsUndampedOscillation' ? Number(item.location.entityId) : null));
         if (item.code === 'numericsStiffModel' && methodOf(activeRunConfiguration()) !== stiffIntegrationMethod) container.appendChild(useStiffButton());
     });
 }
@@ -6209,6 +6215,40 @@ async function useStiffMethod() {
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
     $('#statusText').textContent = 'The model now runs with Stiff (Run settings).';
+}
+
+// An undamped oscillation that Explicit Euler grows is fixed by semi-implicit Euler for its node (docs/proposals/integrators.md,
+// decision 1): the warning, and the finding a run raises for it, offer that as one click beside them, undone as one step.
+function withSemiImplicitAction(item, nodeId) {
+    if (nodeId === null || !nodeObjects.has(nodeId)) return item;
+    const row = document.createElement('div');
+    row.className = 'issueWithAction';
+    const action = document.createElement('button');
+    action.type = 'button';
+    action.className = 'issueAction';
+    labelSemiImplicitAction(action);
+    action.addEventListener('click', () => useSemiImplicit(nodeId));
+    row.append(item, action);
+    return row;
+}
+
+// With a result shown the model is locked: the button says it closes the result first, and asks as Close and edit does.
+function labelSemiImplicitAction(action) {
+    action.textContent = activeResult ? 'Close results and use semi-implicit' : 'Use semi-implicit';
+    action.title = activeResult
+        ? 'The model is locked while results are shown: this closes them first (you are asked, as Close and edit asks), then integrates this node with semi-implicit Euler, which keeps an oscillation\'s energy bounded. Undo to go back.'
+        : 'Integrate this node with semi-implicit Euler, which keeps an oscillation\'s energy bounded. Undo to go back.';
+}
+
+async function useSemiImplicit(nodeId) {
+    // Shown with a result, the model cannot be changed: closing the result first asks, as Close and edit does.
+    const node = nodeObjects.get(nodeId);
+    const closedResults = Boolean(activeResult);
+    if (activeResult) await closeResultPlayback();
+    // Cancelled: the result stays and the model is not touched.
+    if (activeResult || !node || node.userData.definition.integration === 'semiImplicit') return;
+    changeNodeModel(node, (snapshot) => { snapshot.integration = 'semiImplicit'; });
+    $('#statusText').textContent = `${closedResults ? 'Results closed · ' : ''}${node.userData.definition.title} now uses semi-implicit Euler · Undo to go back`;
 }
 
 function formatResultTime(time) {
@@ -6778,7 +6818,7 @@ function renderStabilityFindings() {
         button.dataset.nodeId = String(finding.nodeId);
         button.innerHTML = `<i></i><span><strong>${escapeHtml(subject)}</strong><small>${escapeHtml(finding.message)} · ${escapeHtml(when)}</small></span>`;
         button.addEventListener('click', () => navigateToStabilityFinding(finding));
-        list.appendChild(button);
+        list.appendChild(withSemiImplicitAction(button, finding.code === 'duringRunUndampedOscillation' ? finding.nodeId : null));
         if (finding.code === 'adaptiveStepsLimitedByStiffness') list.appendChild(useStiffButton());
     });
 
@@ -6986,6 +7026,21 @@ function updateLiveResultControls() {
     }
     renderExecutionSummary();
     renderStabilityFindings();
+    noteProgramWarnings();
+    $$('.issueAction').forEach(labelSemiImplicitAction);
+}
+
+// What the last run found about its programs that validation cannot see (src/programWarnings.mjs): kept, and listed with the
+// model's warnings, while each program is as it was; a run whose programs raise none clears them.
+let capturedProgramWarnings = [];
+let capturedProgramWarningsKey = '[]';
+function noteProgramWarnings() {
+    if (!activeResult) return;
+    const key = JSON.stringify(activeResult.programWarnings ?? []);
+    if (key === capturedProgramWarningsKey) return;
+    capturedProgramWarningsKey = key;
+    capturedProgramWarnings = captureProgramWarnings(activeResult, serializeProjectDocument());
+    if ($('#validationSummary').dataset.validationSource === 'engine') renderValidationStatus();
 }
 
 $('#executionSummaryButton').addEventListener('click', () => {

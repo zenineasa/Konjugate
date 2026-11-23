@@ -55,7 +55,7 @@ class WebProviderBridge:
                 instances = [(_int(instance["instanceId"]), instance["inputKeys"]) for instance in request["instances"]]
                 ids = handle_initialize(self._provider, self._description, self._instance_bindings, instances)
                 self._initialized = True
-                return json.dumps({"ok": True, "initializedIds": ids})
+                return json.dumps({"ok": True, "initializedIds": ids, "inputKeys": [inp.key for inp in self._description.inputs]})
 
             if kind == "evaluateBatch":
                 evaluations = [(_int(item["instanceId"]), [_float(v) for v in item["inputs"]]) for item in request["evaluations"]]

@@ -59,7 +59,7 @@ test('a relationship provider is created from its source, initialized, evaluated
     const send = await bridged();
     assert.deepEqual(send({ kind: 'create', processKey: 'hello', source: await example('helloWorld.py') }), { ok: true });
     assert.deepEqual(send({ kind: 'initialize', processKey: 'hello', instances: [{ instanceId: '1', inputKeys: ['input'] }, { instanceId: '2', inputKeys: ['input'] }] }),
-        { ok: true, initializedIds: [1, 2] });
+        { ok: true, initializedIds: [1, 2], inputKeys: ['input'] }, 'Initialised, saying the inputs its describe() declares, so the engine can name one left unbound.');
     assert.deepEqual(send({ kind: 'evaluateBatch', processKey: 'hello', sequence: '1', simulationTime: '0', stepSize: '0.1', evaluations: [{ instanceId: '1', inputs: ['3'] }, { instanceId: '2', inputs: ['-0.5'] }] }),
         { ok: true, contributions: [{ instanceId: 1, value: 6 }, { instanceId: 2, value: -1 }] });
     assert.deepEqual(send({ kind: 'shutdown', processKey: 'hello' }), { ok: true });

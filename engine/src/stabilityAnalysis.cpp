@@ -137,6 +137,7 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
     std::size_t negativeRealPartCount = 0;
     Eigen::Index dominantIndex = 0;
     bool hasNonNegativeRealPart = false;
+    bool hasGrowingRealPart = false;
     double minStableNodeStepSize = std::numeric_limits<double>::infinity();
     for (Eigen::Index index = 0; index < solver.eigenvalues().size(); ++index) {
         const auto eigenvalue = solver.eigenvalues()(index);
@@ -158,6 +159,7 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
         } else if (eigenvalue.real() > neutralRate || std::abs(eigenvalue.imag()) > neutralRate) {
             // Growing, or oscillating without decay: Explicit Euler amplifies either at every step size.
             hasNonNegativeRealPart = true;
+            if (eigenvalue.real() > neutralRate) hasGrowingRealPart = true;
         }
     }
     // A small tolerance above the exact 1.0 boundary, not a real stability margin: the
@@ -173,6 +175,7 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
         // Mutually exclusive by construction: for Re(λ) ≥ 0, |1+h·λ| ≥ 1 for every h > 0, so no
         // finite step size stabilizes that mode at all -- there is no bound to report.
         assessment.unconditionallyUnstable = hasNonNegativeRealPart;
+        assessment.undampedOscillation = hasNonNegativeRealPart && !hasGrowingRealPart && !node.semiImplicit && !node.verlet && stateCount > 1;
         if (!hasNonNegativeRealPart) {
             assessment.requiredSubsteps = static_cast<std::size_t>(std::ceil(globalTimeStep / minStableNodeStepSize));
         }
@@ -227,6 +230,53 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
                     (stableAt(middle) ? high : low) = middle;
                 }
                 assessment.requiredSubsteps = high;
+            }
+        }
+    }
+
+    // A semi-implicit node updates its states one after another in the order it lists them, each from the states already updated
+    // (docs/projectSchema.md, numerics.integration): linearised, a substep is x' = x + h(L x' + (D + U) x), with L the part of the
+    // Jacobian below its diagonal, so its amplification matrix is (I - hL)^-1 (I + h(D + U)), not Euler's I + hJ. An undamped
+    // oscillation, which Euler amplifies at every step, is then neutral (|μ| = 1) up to hω = 2. One state has nothing before it,
+    // and the two agree.
+    if (node.semiImplicit && stateCount > 1) {
+        const auto size = static_cast<Eigen::Index>(stateCount);
+        const Eigen::MatrixXd lower = jacobian.triangularView<Eigen::StrictlyLower>();
+        const Eigen::MatrixXd rest = jacobian - lower;
+        const auto amplificationAt = [&](double stepSize) {
+            const Eigen::MatrixXd identity = Eigen::MatrixXd::Identity(size, size);
+            const Eigen::MatrixXd amplificationMatrix = (identity - stepSize * lower).triangularView<Eigen::Lower>().solve(identity + stepSize * rest);
+            const Eigen::EigenSolver<Eigen::MatrixXd> amplificationSolver(amplificationMatrix, /*computeEigenvectors=*/false);
+            double largest = idleStateCount ? 1.0 : 0.0;
+            for (Eigen::Index index = 0; index < amplificationSolver.eigenvalues().size(); ++index) largest = std::max(largest, std::abs(amplificationSolver.eigenvalues()(index)));
+            return largest;
+        };
+        const auto stableAt = [&](double amplification) { return amplification <= 1.0 + 1e-6; };
+        assessment.maxAmplificationFactor = amplificationAt(nodeStepSize);
+        assessment.stable = stableAt(assessment.maxAmplificationFactor);
+        assessment.unconditionallyUnstable = false;
+        assessment.requiredSubsteps.reset();
+        if (!assessment.stable && hasGrowingRealPart) {
+            // The equations themselves grow (Re(λ) > 0): no method and no step holds that, as for Explicit Euler above.
+            assessment.unconditionallyUnstable = true;
+        } else if (!assessment.stable) {
+            // The fewest substeps that make it stable: doubled until it is, then halved back by bisection, up to a million times
+            // the substeps; beyond that no count is offered.
+            constexpr std::size_t searchLimit = 1u << 20;
+            std::size_t stableCount = 0;
+            std::size_t unstableCount = node.substeps;
+            for (std::size_t count = node.substeps * 2; count <= node.substeps * searchLimit; count *= 2) {
+                if (stableAt(amplificationAt(globalTimeStep / static_cast<double>(count)))) { stableCount = count; break; }
+                unstableCount = count;
+            }
+            if (!stableCount) {
+                assessment.unconditionallyUnstable = true;
+            } else {
+                while (stableCount - unstableCount > 1) {
+                    const auto middle = unstableCount + (stableCount - unstableCount) / 2;
+                    if (stableAt(amplificationAt(globalTimeStep / static_cast<double>(middle)))) stableCount = middle; else unstableCount = middle;
+                }
+                assessment.requiredSubsteps = stableCount;
             }
         }
     }

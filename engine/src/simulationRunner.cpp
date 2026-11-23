@@ -1567,6 +1567,22 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
         }
         json << ']';
     }
+    // The older program format's hazards that change no number (docs/proposals/programSdkV2.md, decision 8): written only
+    // when there are some, so a result without them says what it always said. Ids only; the app names them.
+    if (providerRuntime && !providerRuntime->warnings().empty()) {
+        json << ",\"programWarnings\":[";
+        const auto& warnings = providerRuntime->warnings();
+        for (std::size_t index = 0; index < warnings.size(); ++index) {
+            const auto& warning = warnings[index];
+            json << (index ? "," : "") << "{\"code\":\"" << warning.code << "\",\"language\":\""
+                 << (warning.implementation == ContributionImplementation::cppProvider ? "cpp" : "python") << "\",\"entityIds\":[";
+            for (std::size_t entity = 0; entity < warning.entityIds.size(); ++entity) json << (entity ? "," : "") << warning.entityIds[entity];
+            json << "]";
+            if (!warning.port.empty()) json << ",\"port\":\"" << escape(warning.port) << '"';
+            json << '}';
+        }
+        json << ']';
+    }
     json
          << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionBackendName(executionSettings.requestedBackend)
          << "\",\"backend\":\"" << executionBackendName(executionSettings.backend)

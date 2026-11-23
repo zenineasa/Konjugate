@@ -269,9 +269,18 @@ assert.ok(bandWidth(withInputs) > 1.2 * bandWidth(withoutInputs), `The band at t
 assert.ok(coverage(withInputs) > coverage(withoutInputs), `The forecast band holds ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings with the inputs' uncertainty, ${(100 * coverage(withoutInputs)).toFixed(0)}% without.`);
 assert.ok(withInputs.cycles.at(-1).inputSpreads.livingRoomHeater > 0, 'Each input is moved by how far its forecasts have been off.');
 assert.equal(windows(withInputs.cycles), windows(withoutInputs.cycles), 'The inputs\' uncertainty reaches only the forecast.');
+// The room's "band honest · x% outside" judges each reading against the bands earlier moves forecast for it (estimate.ahead), so the
+// inputs' uncertainty is in what it judges: fewer readings outside with it than without.
+const aheadShare = ({ cycles }) => {
+    const sum = (key) => cycles.reduce((total, cycle) => total + (cycle.estimate?.ahead?.livingRoomTemperature?.[key] ?? 0), 0);
+    assert.ok(sum('total') > 0, 'Readings are judged against the bands forecast for them.');
+    return sum('outside') / sum('total');
+};
+assert.ok(aheadShare(withInputs) < aheadShare(withoutInputs), `Judged against the bands forecast for them, ${(100 * aheadShare(withInputs)).toFixed(0)}% of the readings fell outside with the inputs' uncertainty, ${(100 * aheadShare(withoutInputs)).toFixed(0)}% without.`);
 
 console.log(`Thermostats in the model: the rooms' forecasts missed by ${handedMiss.toFixed(3)} K with the heaters handed to them and the setpoints to their plans, ${allHeldMiss.toFixed(3)} K held; `
     + `estimated, the forecast inside its own band at every point of the three minutes after now, outside it at ${ownBand.outside} of ${ownBand.all} over the hour. `
-    + `The band ${bandWidth(withInputs).toFixed(3)} K wide with the inputs' uncertainty, holding ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings; ${bandWidth(withoutInputs).toFixed(3)} K and ${(100 * coverage(withoutInputs)).toFixed(0)}% without.`);
+    + `The band ${bandWidth(withInputs).toFixed(3)} K wide with the inputs' uncertainty, holding ${(100 * coverage(withInputs)).toFixed(0)}% of the later readings; ${bandWidth(withoutInputs).toFixed(3)} K and ${(100 * coverage(withoutInputs)).toFixed(0)}% without; `
+    + `the room's honesty, against the bands forecast for each reading with its noise, ${(100 * aheadShare(withInputs)).toFixed(0)}% outside with them and ${(100 * aheadShare(withoutInputs)).toFixed(0)}% without.`);
 console.log(`Inputs in the forecast: the heaters' own forecasts missed by ${heaterScores} at their average against held; the rooms' by ${averagedMiss.toFixed(3)} K at their average, ${automaticMiss.toFixed(3)} K on Automatic, `
     + `${heldMiss.toFixed(3)} K held; on the second day the last day repeated for the weather (${dayScores.outdoorTemperature.error.day.toFixed(2)} K against ${dayScores.outdoorTemperature.error.hold.toFixed(2)} K held) and the sun.`);

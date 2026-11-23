@@ -7,6 +7,7 @@
     "description": "An electric motor with two states: Armature current (A) and Angular velocity of the rotor (rad/s), both starting at 0. It has no equations of its own. Armature dynamics, from a Voltage source or a Battery, drives the current, and reads the speed back as the back EMF. Shaft dynamics (against a Torque load) or Rotational drive (swinging a Rotational link) turns current into speed. Traction, Discharge and Resistive heating read the current to move a chassis, drain a battery and heat a housing. It spans the electrical and mechanical domains because it converts one into the other.",
     "shape": "cylinder",
     "color": "#397b86",
+    "numerics": { "integration": "semiImplicit" },
     "states": [
         { "symbol": "current", "label": "Armature current", "initialValue": 0, "unit": "A" },
         { "symbol": "angularVelocity", "label": "Angular velocity", "initialValue": 0, "unit": "rad/s" }

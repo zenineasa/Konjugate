@@ -177,6 +177,9 @@ export function validateComponentTemplate(template) {
         validateBundleTemplate(template);
     } else if (template.kind === 'node') {
         if (!Array.isArray(template.states) || !template.states.length) throw new Error('A node template needs at least one state.');
+        if (template.numerics !== undefined && !['explicit', 'semiImplicit'].includes(template.numerics?.integration ?? 'explicit')) {
+            throw new Error('A node template\'s numerics.integration must be "explicit" or "semiImplicit".');
+        }
         const stateSymbols = new Set();
         template.states.forEach((state) => {
             if (!componentTemplateIdPattern.test(state.symbol ?? '') || !state.label) throw new Error('A node template state needs a label and symbol.');

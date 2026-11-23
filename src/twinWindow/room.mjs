@@ -785,6 +785,11 @@ function renderView() {
     drawAxis(time);
     // The legend names what is drawn: the band only while a signal is estimated, what was tried only in a sandbox.
     $('#legendBand').hidden = !twin.tiles.some((tile) => tile.estimated);
+    // What the band takes in, said where it is named: the inputs' uncertainty is on for every twin with an estimator unless turned off.
+    $('#legendBand').title = twin.settings?.estimator?.inputUncertainty === false
+        ? 'The estimator\'s members, 10th to 90th percentile: the model\'s and the readings\' uncertainty. The inputs\' uncertainty is left out (the engineer\'s view turns it on).'
+        : 'The estimator\'s members, 10th to 90th percentile: the model\'s and the readings\' uncertainty, and, ahead of now, the inputs\' too, how far their forecasts have been off (on unless the engineer\'s view turns it off).';
+    $('#legendBand').lastChild.textContent = twin.settings?.estimator?.inputUncertainty === false ? 'Band (10–90%)' : 'Band (10–90%, with inputs)';
     $('#legendTried').hidden = !twin.sandbox || !following;
     drawInferred(cycle);
 }
@@ -792,18 +797,26 @@ function renderView() {
 // ---- Events ----------------------------------------------------------------------------------------------------------------------
 // One list, timed, newest first: warnings, the twin falling behind, the engine restarted, what the source says, changes made, the end.
 // actions: [{ label, run }] offered on the event, such as replaying a recording.
-// An estimated signal's band: how many of its readings fell outside the 10th to 90th percentile the twin expected, where about one in
-// five is honest; far more, the twin is surer than it should be (its band too narrow), far fewer, more cautious than it need be.
+// An estimated signal's band: how many of its readings fell outside the 10th to 90th percentile the twin had forecast for them, where
+// about one in five is honest; far more, the twin is surer than it should be (its band too narrow), far fewer, more cautious than it
+// need be. Judged against the band as it is drawn ahead of now, at every lead up to the horizon (`ahead`, src/windowSession.mjs), so
+// the inputs' uncertainty, which widens only what lies ahead, is in what is judged when it is on; until a reading has met a forecast,
+// nothing is said.
 function bandOf(tile, cycles) {
-    const outside = cycles.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.outside ?? 0), 0);
-    const total = cycles.reduce((sum, item) => sum + (item.estimate?.outside?.[tile.signal]?.total ?? 0), 0);
+    const outside = cycles.reduce((sum, item) => sum + (item.estimate?.ahead?.[tile.signal]?.outside ?? 0), 0);
+    const total = cycles.reduce((sum, item) => sum + (item.estimate?.ahead?.[tile.signal]?.total ?? 0), 0);
     if (!total) return null;
     const share = Math.round((outside / total) * 100);
     const word = share > 35 ? 'too narrow' : share < 8 ? 'too wide' : 'honest';
+    const inputs = twin?.settings?.estimator?.inputUncertainty === false
+        ? 'The inputs\' uncertainty is left out of the band (the engineer\'s view turns it on), so this judges the model\'s and the readings\' uncertainty alone.'
+        : 'The band takes in the inputs\' uncertainty too, how far their forecasts have been off, so this judges all of it.';
+    const advice = word === 'too narrow' ? 'The twin is surer than it should be: give the readings more noise, or let the model drift more, in the engineer\'s view.'
+        : word === 'too wide' ? 'The twin is more cautious than it need be: less noise, or less drift, would tighten it.' : '';
     return {
         word, share,
         text: `band ${word} · ${share}% outside`,
-        title: `${outside} of ${total} readings fell outside the twin's 10th to 90th percentile; about 20% is honest. Each reading is judged against the band from the move before it, up to that move's now, where the band is the model's and the readings' uncertainty alone: the inputs' own uncertainty widens only what lies ahead of now, so this says nothing of it. ${word === 'too narrow' ? 'The twin is surer than it should be: give the readings more noise, or let the model drift more, in the engineer\'s view.' : word === 'too wide' ? 'The twin is more cautious than it need be: less noise, or less drift, would tighten it.' : ''}`.trim()
+        title: `${outside} of ${total} times a reading fell outside the 10th to 90th percentile the twin had forecast for it; about 20% is honest. Each reading is judged against the band each earlier move drew for it ahead of that move's now, at whatever lead up to the horizon it was, the readings' noise included. ${inputs} ${advice}`.trim()
     };
 }
 

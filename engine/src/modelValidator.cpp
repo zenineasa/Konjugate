@@ -1294,6 +1294,18 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                             << assessment->maxAmplificationFactor << " > 1 per global step)";
                     if (resolved) message << " -- driven mainly by " << resolved->phrase;
                     const auto symbol = stateSymbol(document, assessment->dominantStateId);
+                    if (assessment->undampedOscillation) {
+                        // An undamped oscillation, not a growing mode (docs/proposals/integrators.md, decision 1): a fix is one click
+                        // away, on this warning and on the node's Numerics tab. Its own code, so the app can offer it.
+                        std::ostringstream plain;
+                        plain << "This node oscillates without damping"
+                              << (symbol.empty() ? "" : " ('" + symbol + "' swings back and forth)")
+                              << ", and Explicit Euler makes an undamped oscillation grow at every step size, however many substeps "
+                              << "it has: in the oscillator benchmark its energy grows about nine million-fold over 1024 s. Semi-implicit "
+                              << "Euler keeps that energy within 1 %: use semi-implicit for this node (Numerics tab, Integration).";
+                        add(result, "numericsUndampedOscillation", "warning", plain.str(), "node", nodeId, "numerics");
+                        continue;
+                    }
                     if (assessment->unconditionallyUnstable) {
                         message << " -- no substep count can stabilize this with " << (node.verlet ? "Verlet" : "Explicit Euler") << " ("
                                 << (symbol.empty() ? "its dominant state" : "'" + symbol + "'") << " has a genuinely growing mode) "

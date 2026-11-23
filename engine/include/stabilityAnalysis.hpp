@@ -55,6 +55,10 @@ struct NodeStabilityAssessment {
     // is too aggressive -- a modeling/tuning question this diagnostic can flag but not answer.
     // Mutually exclusive with requiredSubsteps by construction. Only meaningful when `!stable`.
     bool unconditionallyUnstable = false;
+    // Of those, the case where no mode truly grows (no Re(λ) > 0): the node oscillates without damping, which Explicit Euler
+    // makes grow at every step and semi-implicit Euler keeps bounded (docs/proposals/integrators.md, decision 1). Only set for
+    // a node integrated explicitly with more than one state; a semi-implicit node is judged by its own amplification matrix.
+    bool undampedOscillation = false;
 };
 
 // Pre-run (validate-time) phase of docs/proposals/numericalStabilityDiagnostics.md's three-phase

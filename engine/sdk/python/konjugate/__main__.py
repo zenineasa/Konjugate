@@ -496,6 +496,23 @@ def _run_worker(provider, stdin_stream, stdout_stream):
     return 0
 
 
+_VERSION2_IMPORT = None
+
+
+def _is_version2_source(module_path):
+    """Whether a program's source is written against version 2 of the SDK: it imports from konjugate.v2."""
+    global _VERSION2_IMPORT
+    if _VERSION2_IMPORT is None:
+        import re
+
+        _VERSION2_IMPORT = re.compile(r"^\s*(from\s+konjugate\.v2(\.\w+)*\s+import|import\s+konjugate\.v2)\b", re.MULTILINE)
+    try:
+        with open(module_path, encoding="utf-8") as stream:
+            return _VERSION2_IMPORT.search(stream.read()) is not None
+    except OSError:
+        return False
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python -m konjugate <provider_module.py>", file=sys.stderr)
@@ -504,6 +521,26 @@ def main():
     module_path = str(Path(sys.argv[1]).resolve())
     stdin_stream = sys.stdin.buffer
     stdout_stream = sys.stdout.buffer
+
+    # A version 2 program (it imports konjugate.v2) is served by its own loop (konjugate/v2/_wire.py); every other source is a
+    # version 1 provider, served exactly as before.
+    if _is_version2_source(module_path):
+        try:
+            from konjugate.v2._host import ProgramHost, load_program_class
+            from konjugate.v2._wire import run_worker
+
+            host = ProgramHost(load_program_class(module_path), module_path)
+        except Exception as error:
+            _write_framed(stdout_stream, _encode_provider_failure(0, "factoryFailed", str(error), True))
+            return 1
+        try:
+            return run_worker(host, stdin_stream, stdout_stream)
+        except Exception as error:
+            try:
+                _write_framed(stdout_stream, _encode_provider_failure(0, "workerFailure", str(error), True))
+            except Exception:
+                pass
+            return 1
 
     try:
         provider = _load_provider_class(module_path)

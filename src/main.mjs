@@ -9,7 +9,7 @@ import { release as osRelease, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
-import { checkObjectiveWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkObjectiveWithEngine, checkProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -2803,6 +2803,11 @@ ipcMain.handle('providerEditorOpenWindow', (event, payload) => {
 
 ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
     kind === 'python' ? validatePythonSource(source) : validateCppSource(source)
+));
+
+// Check program, from the code editor: the program's standard checks, run by the engine (docs/programs.md, "Testing a program").
+ipcMain.handle('providerEditorCheck', async (_event, { source, kind, inputs }) => (
+    checkProgramWithEngine({ kind, source, inputs: inputs ?? {} }, await engineOptions())
 ));
 
 ipcMain.handle('providerEditorApply', (event, { source }) => {

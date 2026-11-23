@@ -6,6 +6,7 @@
 #include "relationshipProvider.pb.h"
 #include "konjugate/providerSharedMemoryChannel.hpp"
 #include "konjugate/providerInProcessAbi.hpp"
+#include "programUnits.hpp"
 
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
@@ -16,6 +17,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -26,7 +29,11 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <regex>
+#include <set>
+#include <sstream>
 #include <openssl/evp.h>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -113,7 +120,7 @@ std::string preparePythonProviderSource(const std::string& source, const Provide
 // under the same source-hash build directory, just as different filenames, so choosing a
 // different mode/shape for the same source never collides with a previously-built artifact of
 // another kind.
-enum class CppProviderArtifactKind { executable, sharedLibrary, nodeSharedLibrary };
+enum class CppProviderArtifactKind { executable, sharedLibrary, nodeSharedLibrary, programSharedLibrary };
 
 // Compiles an inline C++ relationship's source, together with the public SDK header and one of
 // Konjugate's glue wrappers, into a native provider artifact. The build is cached on disk by a
@@ -131,7 +138,8 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
     }
 
     const bool sharedLibrary = kind != CppProviderArtifactKind::executable;
-    const std::string glueFile = kind == CppProviderArtifactKind::nodeSharedLibrary ? "providerInProcessNodeShim.cpp"
+    const std::string glueFile = kind == CppProviderArtifactKind::programSharedLibrary ? "providerInProcessProgramShim.cpp"
+        : kind == CppProviderArtifactKind::nodeSharedLibrary ? "providerInProcessNodeShim.cpp"
         : kind == CppProviderArtifactKind::sharedLibrary ? "providerInProcessShim.cpp" : "providerWorker.cpp";
     // A node-shaped artifact's generated glue dlopen()s a second, external library of its own
     // (e.g. an imported FMU's own compiled binary) -- on Linux that symbol lives in libdl, which
@@ -167,7 +175,8 @@ std::string buildCppProvider(const std::string& source, const ProviderConfigurat
 
         cppToolchain::buildNativeArtifact(sourcePath, gluePath, sdkRoot / "include",
             artifactPath, sharedLibrary, config.cppCompiler,
-            kind == CppProviderArtifactKind::nodeSharedLibrary ? "the C++ computational-node provider" : "the C++ relationship provider",
+            kind == CppProviderArtifactKind::programSharedLibrary ? "the C++ program"
+                : kind == CppProviderArtifactKind::nodeSharedLibrary ? "the C++ computational-node provider" : "the C++ relationship provider",
             needsDynamicLoaderLibrary);
     }
 
@@ -220,11 +229,17 @@ class ProviderControlChannel {
 public:
     ProviderControlChannel(std::string processKey, ContributionImplementation implementation,
                            std::string sourcePath, const ProviderConfiguration& config,
-                           std::vector<std::pair<std::string, std::string>> extraEnvironment = {})
-        : processKey_(std::move(processKey)), implementation_(implementation), sourcePath_(std::move(sourcePath)) {
+                           std::vector<std::pair<std::string, std::string>> extraEnvironment = {}, std::uint32_t apiVersion = 1)
+        : processKey_(std::move(processKey)), implementation_(implementation), sourcePath_(std::move(sourcePath)), apiVersion_(apiVersion) {
         spawn(config, std::move(extraEnvironment));
         performHandshake();
     }
+
+    // A version 2 worker's description of its program, from the handshake (empty from a version 1 worker).
+    const std::string& programDescription() const noexcept { return programDescription_; }
+
+    // One request and its answer, for messages this class has no method for (version 2's).
+    ProviderToEngine request(const EngineToProvider& message, const char* during) { return roundTrip(message, during); }
 
     ~ProviderControlChannel() { close(); }
     ProviderControlChannel(const ProviderControlChannel&) = delete;
@@ -388,15 +403,18 @@ private:
         EngineToProvider msg;
         auto* handshake = msg.mutable_handshake();
         handshake->set_protocol_version(1);
-        handshake->set_provider_api_version(1);
+        handshake->set_provider_api_version(apiVersion_);
         const auto resp = roundTrip(msg, "the handshake");
         if (resp.has_failure()) {
+            // A program that could not be loaded says why in words (a misspelt port names its line): that message is the error.
+            if (apiVersion_ == 2) throw std::runtime_error(std::string(resp.failure().message()));
             throw std::runtime_error("Provider process handshake failed: " + std::string(resp.failure().message()));
         }
         if (!resp.has_handshake()) {
             throw std::runtime_error("Unexpected response to handshake from provider process " + processKey_);
         }
         for (const auto& key : resp.handshake().input_keys()) declaredInputKeys_.emplace_back(key);
+        programDescription_ = std::string(resp.handshake().program_description());
     }
 
     void send(const google::protobuf::MessageLite& message) {
@@ -435,6 +453,8 @@ private:
     std::string processKey_;
     ContributionImplementation implementation_;
     std::string sourcePath_;
+    std::uint32_t apiVersion_ = 1;
+    std::string programDescription_;
     std::unique_ptr<ChildProcess> process_;
     std::vector<std::string> declaredInputKeys_;
 };
@@ -1427,6 +1447,1060 @@ private:
 };
 #endif
 
+// ── Version 2 programs (konjugate/sdk/v2, konjugate.v2; docs/proposals/programSdkV2.md) ─────────────────────────────────────────────
+//
+// One backend per program source, whichever transport serves it: the program's description (read once), and per instance its port
+// mapping (each binding to its port, each optional port's default), the unit conversion at each port, its memory (the engine's copy,
+// always exact: a transport out of process returns it after every advance), its clock and whether advance() has run. Errors are named
+// here, where the program, what it belongs to, its ports and the inputs are all known.
+
+struct ProgramPortDescription {
+    std::string key;
+    std::string kind;
+    std::string unit;
+    bool hasDefault = false;
+    double defaultValue = 0;
+};
+
+struct ProgramOutputDescription {
+    std::string key;
+    std::string unit;
+    bool declaresDependencies = false;
+    std::vector<std::string> dependsOn;
+};
+
+struct ProgramFieldDescription {
+    std::string name;
+    std::string type;
+    std::size_t count = 1;
+    std::size_t offset = 0;
+    std::string unit;
+};
+
+struct ProgramDescription {
+    std::string name;
+    bool node = false;
+    std::vector<ProgramPortDescription> inputs;
+    std::vector<ProgramOutputDescription> outputs;
+    std::vector<ProgramFieldDescription> memory;
+    std::size_t memorySize = 0;
+    double clockPeriod = 0;
+    std::string clockConstant;
+};
+
+ProgramDescription parseProgramDescription(const std::string& json) {
+    boost::property_tree::ptree tree;
+    std::istringstream stream(json);
+    try {
+        boost::property_tree::read_json(stream, tree);
+    } catch (const std::exception& error) {
+        throw std::runtime_error(std::string("A program's description could not be read: ") + error.what());
+    }
+    ProgramDescription description;
+    description.name = tree.get<std::string>("name", "the program");
+    description.node = tree.get<std::string>("kind", "relationship") == "node";
+    if (const auto inputs = tree.get_child_optional("inputs")) for (const auto& [unused, item] : *inputs) {
+        static_cast<void>(unused);
+        ProgramPortDescription port;
+        port.key = item.get<std::string>("key", "");
+        port.kind = item.get<std::string>("kind", "input");
+        port.unit = item.get<std::string>("unit", "");
+        if (const auto fallback = item.get_optional<double>("default")) {
+            port.hasDefault = true;
+            port.defaultValue = *fallback;
+        }
+        description.inputs.push_back(std::move(port));
+    }
+    if (const auto outputs = tree.get_child_optional("outputs")) for (const auto& [unused, item] : *outputs) {
+        static_cast<void>(unused);
+        ProgramOutputDescription port;
+        port.key = item.get<std::string>("key", "");
+        port.unit = item.get<std::string>("unit", "");
+        if (const auto depends = item.get_child_optional("dependsOn")) {
+            port.declaresDependencies = true;
+            for (const auto& entry : *depends) port.dependsOn.push_back(entry.second.get_value<std::string>());
+        }
+        description.outputs.push_back(std::move(port));
+    }
+    if (const auto memory = tree.get_child_optional("memory")) for (const auto& [unused, item] : *memory) {
+        static_cast<void>(unused);
+        ProgramFieldDescription field;
+        field.name = item.get<std::string>("name", "");
+        field.type = item.get<std::string>("type", "real");
+        field.count = item.get<std::size_t>("count", 1);
+        field.offset = item.get<std::size_t>("offset", 0);
+        field.unit = item.get<std::string>("unit", "");
+        description.memory.push_back(std::move(field));
+    }
+    description.memorySize = tree.get<std::size_t>("memorySize", 0);
+    description.clockPeriod = tree.get<double>("clockPeriod", 0);
+    description.clockConstant = tree.get<std::string>("clockConstant", "");
+    return description;
+}
+
+std::uint8_t memoryTypeCode(const std::string& type) {
+    if (type == "integer") return 1;
+    if (type == "flag") return 2;
+    if (type == "reals") return 3;
+    if (type == "random") return 4;
+    return 0;
+}
+
+std::size_t memorySlots(const ProgramFieldDescription& field) {
+    return field.type == "random" ? 2 : field.type == "reals" ? field.count : 1;
+}
+
+// A hash of the fields' names, types and sizes: a checkpoint's memory whose layout matches is restored in one comparison.
+std::uint64_t memoryLayoutHash(const std::vector<ProgramFieldDescription>& fields) {
+    std::uint64_t hash = 0xCBF29CE484222325ULL;
+    const auto mix = [&](const std::string& text) {
+        for (const char character : text) {
+            hash ^= static_cast<std::uint8_t>(character);
+            hash *= 0x100000001B3ULL;
+        }
+    };
+    for (const auto& field : fields) mix(field.name + ":" + field.type + ":" + std::to_string(field.count) + ";");
+    return hash;
+}
+
+struct ProgramReply {
+    std::int32_t status = 0; // 0 done, 1 failed, 2 out of domain, 3 not provided
+    std::string message;
+    std::uint32_t line = 0;
+    std::vector<double> values;
+    double clockPeriod = 0;
+    // A worker's copy of the instance's memory after the call, when it sends one.
+    std::string memory;
+};
+
+struct ProgramInvocation {
+    std::uint64_t instanceId = 0;
+    const double* values = nullptr;
+    std::byte* memory = nullptr;
+    bool first = false;
+};
+
+struct ProgramStart {
+    std::uint64_t instanceId = 0;
+    std::string owner;
+    double startTime = 0;
+    std::vector<double> values;
+    std::vector<unsigned char> bound;
+    EntityId ownerId = 0;
+    std::uint64_t seed = 0;
+    std::byte* memory = nullptr;
+};
+
+// How a program is reached: in-process through the version 2 ABI, or a worker over the pipe. Memory pointers are the engine's own
+// buffers; a transport out of process copies the memory its worker returns into them.
+class ProgramTransport {
+public:
+    virtual ~ProgramTransport() = default;
+    virtual const std::string& description() const = 0;
+    virtual std::vector<ProgramReply> start(const std::vector<ProgramStart>& instances) = 0;
+    virtual std::vector<ProgramReply> evaluate(double time, const std::vector<ProgramInvocation>& calls, std::size_t outputCount) = 0;
+    virtual std::vector<ProgramReply> advance(double time, double size, const std::vector<ProgramInvocation>& calls) = 0;
+    virtual std::vector<ProgramReply> jacobian(double time, const std::vector<ProgramInvocation>& calls, std::size_t entryCount) = 0;
+    virtual void setMemory(const std::vector<ProgramInvocation>& calls, std::size_t memorySize) = 0;
+    virtual void shutdown() noexcept = 0;
+    // The program's number of inputs and its memory's size, once its description is read.
+    virtual void configure(std::size_t inputCount, std::size_t memorySize) = 0;
+};
+
+class InProcessProgramTransport final : public ProgramTransport {
+public:
+    InProcessProgramTransport(std::string processKey, const std::string& libraryPath) : processKey_(std::move(processKey)) {
+#ifdef _WIN32
+        handle_ = ::LoadLibraryA(libraryPath.c_str());
+        if (!handle_) throw std::runtime_error("The program's library could not be loaded from '" + libraryPath + "'.");
+        auto entryPoint = reinterpret_cast<KonjugateInProcessProgramV2Fn>(::GetProcAddress(handle_, kKonjugateInProcessProgramEntryPoint));
+#else
+        handle_ = ::dlopen(libraryPath.c_str(), RTLD_LOCAL | RTLD_NOW);
+        if (!handle_) throw std::runtime_error("The program's library could not be loaded: " + std::string(::dlerror()));
+        auto entryPoint = reinterpret_cast<KonjugateInProcessProgramV2Fn>(::dlsym(handle_, kKonjugateInProcessProgramEntryPoint));
+#endif
+        if (!entryPoint || !(table_ = entryPoint())) {
+            unloadLibrary();
+            throw std::runtime_error("The program's library has no version 2 entry point.");
+        }
+        if (table_->size < sizeof(KonjugateInProcessProgramV2) || table_->abiVersion != kKonjugateInProcessProgramAbiVersion) {
+            unloadLibrary();
+            throw std::runtime_error("The program was built for another version of Konjugate's program ABI; build it again.");
+        }
+        self_ = table_->create();
+        if (!self_) {
+            const std::string message = table_->lastError(nullptr);
+            unloadLibrary();
+            throw std::runtime_error(message);
+        }
+        description_ = table_->description(self_);
+    }
+
+    ~InProcessProgramTransport() override { shutdown(); }
+
+    const std::string& description() const override { return description_; }
+
+    std::vector<ProgramReply> start(const std::vector<ProgramStart>& instances) override {
+        std::vector<ProgramReply> outcomes;
+        for (const auto& instance : instances) {
+            ProgramReply outcome;
+            outcome.status = table_->createInstance(self_, instance.instanceId, instance.owner.c_str(), instance.startTime, instance.values.data(),
+                instance.bound.data(), static_cast<std::uint32_t>(instance.values.size()), instance.ownerId, instance.seed,
+                reinterpret_cast<std::uint8_t*>(instance.memory), &outcome.clockPeriod);
+            if (outcome.status) fillError(outcome);
+            outcomes.push_back(std::move(outcome));
+        }
+        return outcomes;
+    }
+
+    std::vector<ProgramReply> evaluate(double time, const std::vector<ProgramInvocation>& calls, std::size_t outputCount) override {
+        std::vector<ProgramReply> outcomes(calls.size());
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            auto& outcome = outcomes[index];
+            outcome.values.assign(outputCount, unsetOutput());
+            outcome.status = table_->evaluate(self_, calls[index].instanceId, time, calls[index].values, inputCount_,
+                reinterpret_cast<const std::uint8_t*>(calls[index].memory), outcome.values.data(), static_cast<std::uint32_t>(outputCount));
+            if (outcome.status) fillError(outcome);
+        }
+        return outcomes;
+    }
+
+    std::vector<ProgramReply> advance(double time, double size, const std::vector<ProgramInvocation>& calls) override {
+        std::vector<ProgramReply> outcomes(calls.size());
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            outcomes[index].status = table_->advance(self_, calls[index].instanceId, time, size, calls[index].first ? 1 : 0, calls[index].values,
+                inputCount_, reinterpret_cast<std::uint8_t*>(calls[index].memory));
+            if (outcomes[index].status) fillError(outcomes[index]);
+        }
+        return outcomes;
+    }
+
+    std::vector<ProgramReply> jacobian(double time, const std::vector<ProgramInvocation>& calls, std::size_t entryCount) override {
+        std::vector<ProgramReply> outcomes(calls.size());
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            auto& outcome = outcomes[index];
+            outcome.values.assign(entryCount, 0.0);
+            outcome.status = table_->jacobian(self_, calls[index].instanceId, time, calls[index].values, inputCount_,
+                reinterpret_cast<const std::uint8_t*>(calls[index].memory), outcome.values.data(), static_cast<std::uint32_t>(entryCount));
+            if (outcome.status == 1 || outcome.status == 2) fillError(outcome);
+        }
+        return outcomes;
+    }
+
+    // The engine's buffer is the program's memory: nothing to send.
+    void setMemory(const std::vector<ProgramInvocation>&, std::size_t) override {}
+
+    void shutdown() noexcept override {
+        if (self_ && table_) {
+            table_->shutdownProgram(self_);
+            table_->destroy(self_);
+            self_ = nullptr;
+        }
+        unloadLibrary();
+    }
+
+    void configure(std::size_t inputCount, std::size_t) override { inputCount_ = static_cast<std::uint32_t>(inputCount); }
+
+    // What an output holds before evaluate() runs: a NaN no arithmetic makes, so one left unwritten is told from one set to NaN.
+    static double unsetOutput() { return std::bit_cast<double>(std::uint64_t{0x7FF4B1D0DEADBEEFULL}); }
+
+private:
+    void fillError(ProgramReply& outcome) const {
+        outcome.message = table_->lastError(self_);
+        outcome.line = table_->lastErrorLine(self_);
+    }
+
+    void unloadLibrary() noexcept {
+#ifdef _WIN32
+        if (handle_) { ::FreeLibrary(handle_); handle_ = nullptr; }
+#else
+        if (handle_) { ::dlclose(handle_); handle_ = nullptr; }
+#endif
+        table_ = nullptr;
+    }
+
+    std::string processKey_;
+    const KonjugateInProcessProgramV2* table_ = nullptr;
+    void* self_ = nullptr;
+    std::string description_;
+    std::uint32_t inputCount_ = 0;
+#ifdef _WIN32
+    HMODULE handle_ = nullptr;
+#else
+    void* handle_ = nullptr;
+#endif
+};
+
+class PipeProgramTransport final : public ProgramTransport {
+public:
+    PipeProgramTransport(std::string processKey, ContributionImplementation implementation, std::string sourcePath, const ProviderConfiguration& config)
+        : channel_(std::move(processKey), implementation, std::move(sourcePath), config, {}, 2) {
+        if (channel_.programDescription().empty()) {
+            throw std::runtime_error("The program's worker did not describe a version 2 program: it may be an older Konjugate's SDK.");
+        }
+    }
+
+    const std::string& description() const override { return channel_.programDescription(); }
+
+    std::vector<ProgramReply> start(const std::vector<ProgramStart>& instances) override {
+        EngineToProvider message;
+        auto* request = message.mutable_program_initialize();
+        for (const auto& instance : instances) {
+            auto* item = request->add_instances();
+            item->set_instance_id(instance.instanceId);
+            item->set_owner(instance.owner);
+            item->set_start_time(instance.startTime);
+            for (const auto value : instance.values) item->add_values(value);
+            item->set_bound(std::string(instance.bound.begin(), instance.bound.end()));
+            item->set_owner_id(instance.ownerId);
+            item->set_program_seed(instance.seed);
+        }
+        auto outcomes = roundTrip(message, "starting the program", instances.size());
+        for (std::size_t index = 0; index < instances.size(); ++index) copyMemory(outcomes[index], instances[index].memory);
+        return finish(std::move(outcomes));
+    }
+
+    std::vector<ProgramReply> evaluate(double time, const std::vector<ProgramInvocation>& calls, std::size_t) override {
+        EngineToProvider message;
+        auto* request = message.mutable_program_evaluate();
+        request->set_time(time);
+        for (const auto& call : calls) addCall(request->add_calls(), call);
+        return finish(roundTrip(message, "evaluate()", calls.size()));
+    }
+
+    std::vector<ProgramReply> advance(double time, double size, const std::vector<ProgramInvocation>& calls) override {
+        EngineToProvider message;
+        auto* request = message.mutable_program_advance();
+        request->set_time(time);
+        request->set_size(size);
+        for (const auto& call : calls) addCall(request->add_calls(), call);
+        auto outcomes = roundTrip(message, "advance()", calls.size());
+        for (std::size_t index = 0; index < calls.size(); ++index) if (!outcomes[index].status) copyMemory(outcomes[index], calls[index].memory);
+        return finish(std::move(outcomes));
+    }
+
+    std::vector<ProgramReply> jacobian(double time, const std::vector<ProgramInvocation>& calls, std::size_t) override {
+        EngineToProvider message;
+        auto* request = message.mutable_program_jacobian();
+        request->set_time(time);
+        for (const auto& call : calls) addCall(request->add_calls(), call);
+        return finish(roundTrip(message, "jacobian()", calls.size()));
+    }
+
+    void setMemory(const std::vector<ProgramInvocation>& calls, std::size_t memorySize) override {
+        if (!memorySize || calls.empty()) return;
+        EngineToProvider message;
+        auto* request = message.mutable_program_set_memory();
+        for (const auto& call : calls) {
+            auto* item = request->add_memories();
+            item->set_instance_id(call.instanceId);
+            item->set_memory(std::string(reinterpret_cast<const char*>(call.memory), memorySize));
+        }
+        const auto response = channel_.request(message, "restoring the program's memory");
+        if (response.has_failure()) throw std::runtime_error(std::string(response.failure().message()));
+    }
+
+    void shutdown() noexcept override { channel_.close(); }
+
+    void configure(std::size_t inputCount, std::size_t memorySize) override {
+        inputCount_ = inputCount;
+        memorySize_ = memorySize;
+    }
+
+private:
+    void addCall(provider::protocol::ProgramCall* item, const ProgramInvocation& call) const {
+        item->set_instance_id(call.instanceId);
+        for (std::size_t index = 0; index < inputCount_; ++index) item->add_values(call.values[index]);
+        if (call.first) item->set_first(true);
+    }
+
+    std::vector<ProgramReply> roundTrip(const EngineToProvider& message, const char* during, std::size_t expected) {
+        const auto response = channel_.request(message, during);
+        if (response.has_failure()) throw std::runtime_error(std::string(response.failure().message()));
+        if (!response.has_program() || static_cast<std::size_t>(response.program().outcomes_size()) != expected) {
+            throw std::runtime_error(std::string("The program's worker answered ") + during + " with something else.");
+        }
+        std::vector<ProgramReply> outcomes;
+        for (const auto& item : response.program().outcomes()) {
+            ProgramReply outcome;
+            outcome.status = static_cast<std::int32_t>(item.status());
+            outcome.message = std::string(item.message());
+            outcome.line = item.line();
+            outcome.values.assign(item.values().begin(), item.values().end());
+            outcome.clockPeriod = item.clock_period();
+            outcome.memory = std::string(item.memory());
+            outcomes.push_back(std::move(outcome));
+        }
+        return outcomes;
+    }
+
+    void copyMemory(const ProgramReply& outcome, std::byte* memory) const {
+        if (outcome.status || !memory || !memorySize_) return;
+        if (outcome.memory.size() != memorySize_) throw std::runtime_error("The program's worker returned memory of the wrong size.");
+        std::memcpy(memory, outcome.memory.data(), memorySize_);
+    }
+
+    static std::vector<ProgramReply> finish(std::vector<ProgramReply> outcomes) { return outcomes; }
+
+    ProviderControlChannel channel_;
+    std::size_t inputCount_ = 0;
+    std::size_t memorySize_ = 0;
+};
+
+struct ProgramOutputSpec {
+    std::string key;     // the output's key as the file binds it (a relationship's one output whatever its key)
+    std::string unit;    // the state's unit
+    bool rate = true;    // into a Rate state (a rate), or an Update (a value)
+    std::string label;   // the state, in words
+};
+
+struct ProgramInstanceSpec {
+    std::uint64_t instanceId = 0;
+    EntityId ownerId = 0;
+    std::uint8_t ownerKind = 0;
+    std::string owner;
+    std::uint64_t seed = 0;
+    std::vector<CompiledBinding> bindings;
+    std::vector<double> startValues;     // in binding order
+    std::vector<ProgramOutputSpec> outputs;
+};
+
+std::string formatNumber(double value) {
+    std::ostringstream stream;
+    stream.precision(10);
+    stream << value;
+    return stream.str();
+}
+
+class ProgramBackend final : public ProviderBackend {
+public:
+    ProgramBackend(std::string processKey, std::unique_ptr<ProgramTransport> transport)
+        : processKey_(std::move(processKey)), transport_(std::move(transport)), description_(parseProgramDescription(transport_->description())) {
+        transport_->configure(description_.inputs.size(), description_.memorySize);
+        if (description_.outputs.empty()) throw std::runtime_error("The program " + description_.name + " declares no output.");
+    }
+
+    ~ProgramBackend() override { shutdown(); }
+
+    const ProgramDescription& description() const noexcept { return description_; }
+
+    void addInstance(std::uint64_t, const std::vector<CompiledBinding>&) override {
+        throw std::runtime_error("A version 2 program is started with its description, not as a version 1 provider.");
+    }
+
+    // Checks the instance's bindings against the program's ports, by name and unit, before anything runs.
+    void addProgramInstance(ProgramInstanceSpec spec) {
+        const auto& name = description_.name;
+        Instance instance;
+        instance.portOfBinding.assign(spec.bindings.size(), 0);
+        instance.scale.assign(description_.inputs.size(), 1.0);
+        instance.offset.assign(description_.inputs.size(), 0.0);
+        instance.identity.assign(description_.inputs.size(), 1);
+        instance.bound.assign(description_.inputs.size(), 0);
+        instance.defaults.assign(description_.inputs.size(), 0.0);
+        instance.portLabels.assign(description_.inputs.size(), "");
+        std::string known;
+        for (const auto& port : description_.inputs) known += (known.empty() ? "" : ", ") + port.key;
+        for (std::size_t index = 0; index < spec.bindings.size(); ++index) {
+            const auto& binding = spec.bindings[index];
+            const auto found = std::find_if(description_.inputs.begin(), description_.inputs.end(), [&](const auto& port) { return port.key == binding.symbol; });
+            if (found == description_.inputs.end()) {
+                throw std::runtime_error("The program " + name + " on " + spec.owner + " has no input ‘" + binding.symbol + "’ (its inputs: " +
+                    (known.empty() ? std::string("none") : known) + "). Bind one of those on the Program tab, or declare ‘" + binding.symbol + "’ in the code.");
+            }
+            const auto port = static_cast<std::size_t>(found - description_.inputs.begin());
+            if (instance.bound[port]) throw std::runtime_error("Input ‘" + found->key + "’ of " + name + " on " + spec.owner + " is bound twice.");
+            instance.bound[port] = 1;
+            instance.portOfBinding[index] = port;
+            instance.portLabels[port] = binding.label;
+            // The bound value's unit to the port's: converted at the port, refused by name when it cannot be.
+            if (!found->unit.empty() && !binding.unit.empty()) {
+                const auto conversion = unitConversion(binding.unit, found->unit, false);
+                if (!conversion.error.empty()) {
+                    throw std::runtime_error("Input ‘" + found->key + "’ of the program " + name + " on " + spec.owner + " is in " + found->unit +
+                        " but is bound to " + (binding.label.empty() ? std::string("a value") : binding.label) + ", in " + binding.unit + ".");
+                }
+                instance.scale[port] = conversion.scale;
+                instance.offset[port] = conversion.offset;
+                instance.identity[port] = conversion.identity ? 1 : 0;
+                if (!conversion.identity) instance.conversions.push_back("‘" + found->key + "’ is converted from " + binding.unit + " to " + found->unit);
+            }
+        }
+        for (std::size_t port = 0; port < description_.inputs.size(); ++port) {
+            const auto& declared = description_.inputs[port];
+            if (instance.bound[port]) continue;
+            if (!declared.hasDefault) {
+                throw std::runtime_error("Input ‘" + declared.key + "’ of " + name + " on " + spec.owner + " is not bound to anything and has no default. "
+                    "Bind it on the Program tab, or give it a default in the code.");
+            }
+            instance.defaults[port] = declared.defaultValue;
+        }
+        // Outputs: a relationship's one output reaches its state; a node program's are matched by key.
+        for (const auto& output : spec.outputs) {
+            std::size_t index = 0;
+            if (description_.node) {
+                const auto found = std::find_if(description_.outputs.begin(), description_.outputs.end(), [&](const auto& port) { return port.key == output.key; });
+                if (found == description_.outputs.end()) {
+                    std::string outputs;
+                    for (const auto& port : description_.outputs) outputs += (outputs.empty() ? "" : ", ") + port.key;
+                    throw std::runtime_error("The program " + name + " on " + spec.owner + " has no output ‘" + output.key + "’ (its outputs: " + outputs + ").");
+                }
+                index = static_cast<std::size_t>(found - description_.outputs.begin());
+            }
+            OutputMap map;
+            map.index = index;
+            map.key = output.key;
+            const auto& declared = description_.outputs[index];
+            if (!declared.unit.empty() && !output.unit.empty()) {
+                const auto expected = output.rate ? perSecond(output.unit) : output.unit;
+                const auto conversion = unitConversion(declared.unit, expected, output.rate);
+                if (!conversion.error.empty()) {
+                    throw std::runtime_error("Output ‘" + declared.key + "’ of the program " + name + " on " + spec.owner + " is in " + declared.unit + ", but " +
+                        (output.label.empty() ? std::string("its state") : output.label) + " is " + (output.rate ? "a Rate state in " + output.unit +
+                        ", which takes " + perSecond(output.unit) + "." : "an Update state in " + output.unit + "."));
+                }
+                map.scale = conversion.scale;
+                map.offset = conversion.offset;
+                map.identity = conversion.identity;
+            }
+            instance.outputs.push_back(std::move(map));
+        }
+        if (instance.outputs.empty() && !description_.node) instance.outputs.push_back(OutputMap{});
+        instance.memory.assign(std::max<std::size_t>(description_.memorySize, 8), std::byte{0});
+        instance.ownerId = spec.ownerId;
+        instance.ownerKind = spec.ownerKind;
+        instance.owner = std::move(spec.owner);
+        instance.seed = spec.seed;
+        instance.startValues = std::move(spec.startValues);
+        instance.values.assign(description_.inputs.size(), 0.0);
+        instances_.emplace(spec.instanceId, std::move(instance));
+        order_.push_back(spec.instanceId);
+    }
+
+    void sendInitialization() override {
+        std::vector<ProgramStart> starts;
+        for (const auto instanceId : order_) {
+            auto& instance = instances_.at(instanceId);
+            if (instance.started) continue;
+            ProgramStart start;
+            start.instanceId = instanceId;
+            start.owner = instance.owner;
+            start.values = portValues(instance, instance.startValues.data());
+            start.bound = instance.bound;
+            start.ownerId = instance.ownerId;
+            start.seed = instance.seed;
+            start.memory = instance.memory.data();
+            starts.push_back(std::move(start));
+        }
+        if (starts.empty()) return;
+        const auto outcomes = transport_->start(starts);
+        for (std::size_t index = 0; index < starts.size(); ++index) {
+            auto& instance = instances_.at(starts[index].instanceId);
+            const auto& outcome = outcomes.at(index);
+            if (outcome.status) {
+                throw std::runtime_error(description_.name + " on " + instance.owner + " failed in initialize(): " + outcome.message + lineText(outcome.line));
+            }
+            instance.clockPeriod = outcome.clockPeriod;
+            if (!(instance.clockPeriod >= 0) || !std::isfinite(instance.clockPeriod)) {
+                throw std::runtime_error("The clock of " + description_.name + " on " + instance.owner + " has a period of " + formatNumber(instance.clockPeriod) +
+                    " s; it must be a positive whole number of the run's time steps.");
+            }
+            instance.started = true;
+        }
+    }
+
+    std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
+        std::uint64_t, double simulationTime, double,
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) override {
+        if (description_.node) throw std::runtime_error("The node program " + description_.name + " cannot be evaluated as a relationship's term.");
+        const auto outputs = evaluate(simulationTime, evaluations);
+        std::vector<std::pair<std::uint64_t, double>> results;
+        results.reserve(outputs.size());
+        for (std::size_t index = 0; index < outputs.size(); ++index) results.emplace_back(evaluations[index].first, outputs[index].front());
+        return results;
+    }
+
+    // Each evaluation's output named by `keys` (a relationship's one output whatever its key; one of several by key).
+    std::vector<double> evaluateKeyed(double simulationTime, const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations,
+                                      const std::vector<const std::string*>& keys) {
+        const auto outputs = evaluate(simulationTime, evaluations);
+        std::vector<double> results;
+        results.reserve(outputs.size());
+        for (std::size_t index = 0; index < outputs.size(); ++index) {
+            const auto& maps = instances_.at(evaluations[index].first).outputs;
+            std::size_t at = 0;
+            if (maps.size() > 1) {
+                const auto found = std::find_if(maps.begin(), maps.end(), [&](const auto& map) { return map.key == *keys[index]; });
+                if (found == maps.end()) throw std::runtime_error("The program " + description_.name + " has no output ‘" + *keys[index] + "’.");
+                at = static_cast<std::size_t>(found - maps.begin());
+            }
+            results.push_back(outputs[index].at(at));
+        }
+        return results;
+    }
+
+    std::vector<std::pair<std::string, double>> evaluateNode(std::uint64_t instanceId, double simulationTime, double, std::span<const double> inputs) override {
+        const std::vector<std::pair<std::uint64_t, std::span<const double>>> evaluations{{instanceId, inputs}};
+        const auto outputs = evaluate(simulationTime, evaluations).front();
+        const auto& instance = instances_.at(instanceId);
+        std::vector<std::pair<std::string, double>> results;
+        results.reserve(instance.outputs.size());
+        for (std::size_t index = 0; index < instance.outputs.size(); ++index) results.emplace_back(instance.outputs[index].key, outputs[index]);
+        return results;
+    }
+
+    bool advancesEachStep(std::uint64_t instanceId) const {
+        const auto& instance = instances_.at(instanceId);
+        return description_.memorySize > 0 && instance.clockPeriod == 0;
+    }
+
+    double clockPeriod(std::uint64_t instanceId) const { return instances_.at(instanceId).clockPeriod; }
+
+    // advance() for a batch of this program's instances, each with its inputs in binding order.
+    void advance(const std::vector<std::pair<std::uint64_t, std::span<const double>>>& calls, double time, double size) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<ProgramInvocation> programCalls;
+        programCalls.reserve(calls.size());
+        for (const auto& [instanceId, inputs] : calls) {
+            auto& instance = instances_.at(instanceId);
+            instance.values = portValues(instance, inputs.data());
+            programCalls.push_back({instanceId, instance.values.data(), instance.memory.data(), !instance.advanced});
+        }
+        const auto outcomes = transport_->advance(time, size, programCalls);
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            auto& instance = instances_.at(calls[index].first);
+            const auto& outcome = outcomes.at(index);
+            if (outcome.status) {
+                throw std::runtime_error(description_.name + " on " + instance.owner + " failed in advance() at t = " + formatNumber(time) + " s: " +
+                    outcome.message + lineText(outcome.line) + inputsText(instance, instance.values));
+            }
+            instance.advanced = true;
+        }
+    }
+
+    ProgramMemoryState memoryState(std::uint64_t instanceId) const {
+        const auto& instance = instances_.at(instanceId);
+        ProgramMemoryState state;
+        state.owner = instance.ownerId;
+        state.ownerKind = instance.ownerKind;
+        state.layout = memoryLayoutHash(description_.memory);
+        for (const auto& field : description_.memory) {
+            ProgramMemoryField item;
+            item.name = field.name;
+            item.type = memoryTypeCode(field.type);
+            item.words.resize(memorySlots(field));
+            std::memcpy(item.words.data(), instance.memory.data() + field.offset, item.words.size() * 8);
+            if (item.type == 2) item.words[0] = (item.words[0] & 0xFF) ? 1 : 0;
+            state.fields.push_back(std::move(item));
+        }
+        return state;
+    }
+
+    // The program's Jacobian at these inputs (binding order), outputs x inputs row by output; nothing when the program gives none.
+    std::optional<std::vector<double>> jacobian(std::uint64_t instanceId, double time, std::span<const double> inputs) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& instance = instances_.at(instanceId);
+        instance.values = portValues(instance, inputs.data());
+        const auto outcomes = transport_->jacobian(time, {{instanceId, instance.values.data(), instance.memory.data(), false}},
+            description_.inputs.size() * description_.outputs.size());
+        const auto& outcome = outcomes.at(0);
+        if (outcome.status == 3) return std::nullopt;
+        if (outcome.status) throw std::runtime_error(description_.name + " failed in jacobian(): " + outcome.message + lineText(outcome.line));
+        return outcome.values;
+    }
+
+    bool hasMemory() const noexcept { return description_.memorySize > 0; }
+    const std::string& owner(std::uint64_t instanceId) const { return instances_.at(instanceId).owner; }
+
+    // Memory from a checkpoint, field by field by name: a field kept with the same type and size is restored; a field new since starts from
+    // its declared value, and one dropped is left out, each said in `notes`; one whose type or size changed stops the continuation.
+    void restoreMemory(std::uint64_t instanceId, const ProgramMemoryState& saved, std::vector<std::string>* notes) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& instance = instances_.at(instanceId);
+        const auto who = description_.name + " on " + instance.owner;
+        for (const auto& field : description_.memory) {
+            const auto found = std::find_if(saved.fields.begin(), saved.fields.end(), [&](const auto& item) { return item.name == field.name; });
+            if (found == saved.fields.end()) {
+                if (notes) notes->push_back("Memory ‘" + field.name + "’ of " + who + " is new since this checkpoint and starts from its declared value.");
+                continue;
+            }
+            if (found->type != memoryTypeCode(field.type) || found->words.size() != memorySlots(field)) {
+                throw std::runtime_error("Memory ‘" + field.name + "’ of " + who + " has changed its type or size since this checkpoint, so no value of it "
+                    "is right: run from the start instead.");
+            }
+            std::memcpy(instance.memory.data() + field.offset, found->words.data(), found->words.size() * 8);
+        }
+        for (const auto& item : saved.fields) {
+            const bool kept = std::any_of(description_.memory.begin(), description_.memory.end(), [&](const auto& field) { return field.name == item.name; });
+            if (!kept && notes) notes->push_back("Memory ‘" + item.name + "’ of " + who + " is no longer in the program and is left out.");
+        }
+        instance.advanced = true;
+        transport_->setMemory({{instanceId, nullptr, instance.memory.data(), false}}, description_.memorySize);
+    }
+
+    void shutdown() noexcept override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (transport_) transport_->shutdown();
+    }
+
+private:
+    struct OutputMap {
+        std::size_t index = 0;
+        std::string key;
+        double scale = 1;
+        double offset = 0;
+        bool identity = true;
+    };
+
+    struct Instance {
+        EntityId ownerId = 0;
+        std::uint8_t ownerKind = 0;
+        std::string owner;
+        std::uint64_t seed = 0;
+        std::vector<std::size_t> portOfBinding;
+        std::vector<double> scale;
+        std::vector<double> offset;
+        std::vector<unsigned char> identity;
+        std::vector<unsigned char> bound;
+        std::vector<double> defaults;
+        std::vector<std::string> portLabels;
+        std::vector<std::string> conversions;
+        std::vector<OutputMap> outputs;
+        std::vector<double> startValues;
+        std::vector<double> values;
+        std::vector<std::byte> memory;
+        double clockPeriod = 0;
+        bool started = false;
+        bool advanced = false;
+        bool checked = false;
+    };
+
+    // The program's inputs in its declaration order from the bound values in binding order: converted at the port, defaults filled in.
+    std::vector<double> portValues(const Instance& instance, const double* bindingValues) const {
+        std::vector<double> values(instance.defaults);
+        for (std::size_t index = 0; index < instance.portOfBinding.size(); ++index) {
+            const auto port = instance.portOfBinding[index];
+            const double value = bindingValues[index];
+            values[port] = instance.identity[port] ? value : value * instance.scale[port] + instance.offset[port];
+        }
+        return values;
+    }
+
+    static std::string lineText(std::uint32_t line) { return line ? " (line " + std::to_string(line) + ")" : std::string(); }
+
+    static std::string stageText() {
+        const auto& context = programCallContext();
+        if (!context.method) return {};
+        if (!context.stage) return std::string(" (") + context.method + ")";
+        return " (stage " + std::to_string(context.stage) + " of " + std::to_string(context.stages) + ", " + context.method + ")";
+    }
+
+    std::string inputsText(const Instance& instance, const std::vector<double>& values) const {
+        std::string text;
+        for (std::size_t port = 0; port < description_.inputs.size(); ++port) {
+            const auto& declared = description_.inputs[port];
+            text += (text.empty() ? ". Inputs: " : ", ") + declared.key + " = " + formatNumber(values[port]) + (declared.unit.empty() ? "" : " " + declared.unit);
+        }
+        static_cast<void>(instance);
+        return text;
+    }
+
+    // Every instance's outputs, converted into its states' units, with every failure named.
+    std::vector<std::vector<double>> evaluate(double time, const std::vector<std::pair<std::uint64_t, std::span<const double>>>& evaluations) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        std::vector<ProgramInvocation> calls;
+        calls.reserve(evaluations.size());
+        for (const auto& [instanceId, inputs] : evaluations) {
+            auto& instance = instances_.at(instanceId);
+            instance.values = portValues(instance, inputs.data());
+            calls.push_back({instanceId, instance.values.data(), instance.memory.data(), false});
+        }
+        const auto outputCount = description_.outputs.size();
+        const auto outcomes = transport_->evaluate(time, calls, outputCount);
+        // The first evaluation of each instance is made twice and compared: the commonest impurity (a counter in a member) is caught
+        // before it changes anything.
+        std::vector<ProgramInvocation> unchecked;
+        std::vector<std::size_t> uncheckedAt;
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            if (!instances_.at(calls[index].instanceId).checked && !outcomes[index].status) {
+                unchecked.push_back(calls[index]);
+                uncheckedAt.push_back(index);
+            }
+        }
+        if (!unchecked.empty()) {
+            const auto again = transport_->evaluate(time, unchecked, outputCount);
+            for (std::size_t at = 0; at < unchecked.size(); ++at) {
+                auto& instance = instances_.at(unchecked[at].instanceId);
+                const auto& first = outcomes[uncheckedAt[at]].values;
+                const auto& second = again[at].values;
+                for (std::size_t output = 0; output < std::min(first.size(), second.size()); ++output) {
+                    if (std::bit_cast<std::uint64_t>(first[output]) != std::bit_cast<std::uint64_t>(second[output])) {
+                        throw std::runtime_error(description_.name + " on " + instance.owner + " gave a different ‘" + description_.outputs[output].key +
+                            "’ when called twice with the same inputs at t = " + formatNumber(time) + " s (" + formatNumber(first[output]) + ", then " +
+                            formatNumber(second[output]) + "). evaluate() must not change anything: keep what it remembers in declared memory and "
+                            "change it in advance().");
+                    }
+                }
+                instance.checked = true;
+            }
+        }
+        std::vector<std::vector<double>> results;
+        results.reserve(calls.size());
+        for (std::size_t index = 0; index < calls.size(); ++index) {
+            const auto& instance = instances_.at(calls[index].instanceId);
+            const auto& outcome = outcomes[index];
+            const auto who = description_.name + " on " + instance.owner;
+            if (outcome.status == 2) {
+                throw ProgramOutOfDomain(who + " refused its inputs at t = " + formatNumber(time) + " s" + stageText() + ": " + outcome.message +
+                    lineText(outcome.line) + inputsText(instance, instance.values));
+            }
+            if (outcome.status) {
+                throw std::runtime_error(who + " failed in evaluate() at t = " + formatNumber(time) + " s" + stageText() + ": " + outcome.message +
+                    lineText(outcome.line) + inputsText(instance, instance.values));
+            }
+            std::vector<double> converted;
+            converted.reserve(instance.outputs.size());
+            for (const auto& map : instance.outputs) {
+                const double raw = outcome.values.at(map.index);
+                const auto& key = description_.outputs[map.index].key;
+                if (std::bit_cast<std::uint64_t>(raw) == std::bit_cast<std::uint64_t>(InProcessProgramTransport::unsetOutput())) {
+                    throw std::runtime_error(description_.name + " did not set ‘" + key + "’ (evaluate() at t = " + formatNumber(time) + " s, on " + instance.owner + ").");
+                }
+                if (!std::isfinite(raw)) {
+                    std::string cause = " from finite inputs" + inputsText(instance, instance.values);
+                    for (std::size_t port = 0; port < description_.inputs.size(); ++port) {
+                        if (std::isfinite(instance.values[port])) continue;
+                        const auto& label = instance.portLabels[port];
+                        cause = ": the input ‘" + description_.inputs[port].key + "’ was already " + formatNumber(instance.values[port]) +
+                            (label.empty() ? std::string() : ": look at what sets " + label);
+                        break;
+                    }
+                    throw ProgramOutOfDomain(who + " gave " + formatNumber(raw) + " for ‘" + key + "’ at t = " + formatNumber(time) + " s" + stageText() + cause + ".");
+                }
+                converted.push_back(map.identity ? raw : raw * map.scale + map.offset);
+            }
+            results.push_back(std::move(converted));
+        }
+        return results;
+    }
+
+    std::string processKey_;
+    std::unique_ptr<ProgramTransport> transport_;
+    ProgramDescription description_;
+    std::unordered_map<std::uint64_t, Instance> instances_;
+    std::vector<std::uint64_t> order_;
+    // As every version 1 transport: calls into one program are serialized (docs/proposals/programSdkV2.md, decision 6).
+    std::mutex mutex_;
+};
+
+#ifdef __EMSCRIPTEN__
+// The web edition's transport for a version 2 Python program: the Pyodide bridge (src/webPythonProviderBridge.mjs and
+// konjugate/_webBridge.py), called synchronously with plain JSON as WasmPyodideProviderBackend calls it, the bridge serving the program
+// with the same ProgramHost the native worker uses. Memory crosses as base64.
+class WebProgramTransport final : public ProgramTransport {
+public:
+    WebProgramTransport(std::string processKey, const std::string& source) : processKey_(std::move(processKey)) {
+        boost::property_tree::ptree request;
+        request.put("kind", "create");
+        request.put("processKey", processKey_);
+        request.put("source", source);
+        description_ = dispatch(request).get<std::string>("description", "");
+        if (description_.empty()) throw std::runtime_error("The web edition's Python did not describe a version 2 program.");
+    }
+
+    const std::string& description() const override { return description_; }
+
+    void configure(std::size_t inputCount, std::size_t memorySize) override {
+        inputCount_ = inputCount;
+        memorySize_ = memorySize;
+    }
+
+    std::vector<ProgramReply> start(const std::vector<ProgramStart>& instances) override {
+        boost::property_tree::ptree request = base("programInitialize");
+        boost::property_tree::ptree list;
+        for (const auto& instance : instances) {
+            boost::property_tree::ptree item;
+            item.put("instanceId", instance.instanceId);
+            item.put("owner", instance.owner);
+            item.put("startTime", instance.startTime);
+            item.add_child("values", numbers(instance.values.data(), instance.values.size()));
+            boost::property_tree::ptree bound;
+            for (const auto flag : instance.bound) bound.push_back({"", boost::property_tree::ptree(std::to_string(static_cast<int>(flag)))});
+            item.add_child("bound", bound);
+            item.put("ownerId", instance.ownerId);
+            item.put("programSeed", instance.seed);
+            list.push_back({"", item});
+        }
+        request.add_child("instances", list);
+        auto replies = outcomes(dispatch(request));
+        for (std::size_t index = 0; index < instances.size() && index < replies.size(); ++index) copyMemory(replies[index], instances[index].memory);
+        return replies;
+    }
+
+    std::vector<ProgramReply> evaluate(double time, const std::vector<ProgramInvocation>& calls, std::size_t) override {
+        auto request = base("programEvaluate");
+        request.put("time", time);
+        request.add_child("calls", encodeCalls(calls));
+        return outcomes(dispatch(request));
+    }
+
+    std::vector<ProgramReply> advance(double time, double size, const std::vector<ProgramInvocation>& calls) override {
+        auto request = base("programAdvance");
+        request.put("time", time);
+        request.put("size", size);
+        request.add_child("calls", encodeCalls(calls));
+        auto replies = outcomes(dispatch(request));
+        for (std::size_t index = 0; index < calls.size() && index < replies.size(); ++index) copyMemory(replies[index], calls[index].memory);
+        return replies;
+    }
+
+    std::vector<ProgramReply> jacobian(double time, const std::vector<ProgramInvocation>& calls, std::size_t) override {
+        auto request = base("programJacobian");
+        request.put("time", time);
+        request.add_child("calls", encodeCalls(calls));
+        return outcomes(dispatch(request));
+    }
+
+    void setMemory(const std::vector<ProgramInvocation>& calls, std::size_t memorySize) override {
+        if (!memorySize || calls.empty()) return;
+        auto request = base("programSetMemory");
+        boost::property_tree::ptree list;
+        for (const auto& call : calls) {
+            boost::property_tree::ptree item;
+            item.put("instanceId", call.instanceId);
+            item.put("memoryBase64", encode(std::span<const std::byte>(call.memory, memorySize)));
+            list.push_back({"", item});
+        }
+        request.add_child("memories", list);
+        dispatch(request);
+    }
+
+    void shutdown() noexcept override {
+        try {
+            dispatch(base("shutdown"));
+        } catch (...) {} // NOLINT(bugprone-empty-catch)
+    }
+
+private:
+    boost::property_tree::ptree base(const char* kind) const {
+        boost::property_tree::ptree request;
+        request.put("kind", kind);
+        request.put("processKey", processKey_);
+        return request;
+    }
+
+    static boost::property_tree::ptree numbers(const double* values, std::size_t count) {
+        boost::property_tree::ptree list;
+        for (std::size_t index = 0; index < count; ++index) {
+            std::ostringstream text;
+            text.precision(17);
+            text << values[index];
+            list.push_back({"", boost::property_tree::ptree(text.str())});
+        }
+        return list;
+    }
+
+    boost::property_tree::ptree encodeCalls(const std::vector<ProgramInvocation>& calls) const {
+        boost::property_tree::ptree list;
+        for (const auto& call : calls) {
+            boost::property_tree::ptree item;
+            item.put("instanceId", call.instanceId);
+            item.add_child("values", numbers(call.values, inputCount_));
+            item.put("first", call.first ? 1 : 0);
+            list.push_back({"", item});
+        }
+        return list;
+    }
+
+    static std::vector<ProgramReply> outcomes(const boost::property_tree::ptree& response) {
+        std::vector<ProgramReply> replies;
+        if (const auto list = response.get_child_optional("outcomes")) for (const auto& [unused, item] : *list) {
+            static_cast<void>(unused);
+            ProgramReply reply;
+            reply.status = item.get<std::int32_t>("status", 0);
+            reply.message = item.get<std::string>("message", "");
+            reply.line = item.get<std::uint32_t>("line", 0);
+            reply.clockPeriod = item.get<double>("clockPeriod", 0);
+            if (const auto values = item.get_child_optional("outputs")) {
+                for (const auto& value : *values) {
+                    const auto text = value.second.get_value<std::string>();
+                    reply.values.push_back(text == "nan" || text == "NaN" ? std::numeric_limits<double>::quiet_NaN()
+                        : text == "inf" || text == "Infinity" ? std::numeric_limits<double>::infinity()
+                        : text == "-inf" || text == "-Infinity" ? -std::numeric_limits<double>::infinity() : std::stod(text));
+                }
+            }
+            const auto memory = decode(item.get<std::string>("memoryBase64", ""));
+            reply.memory.assign(reinterpret_cast<const char*>(memory.data()), memory.size());
+            replies.push_back(std::move(reply));
+        }
+        return replies;
+    }
+
+    void copyMemory(const ProgramReply& reply, std::byte* memory) const {
+        if (reply.status || !memory || !memorySize_ || reply.memory.size() != memorySize_) return;
+        std::memcpy(memory, reply.memory.data(), memorySize_);
+    }
+
+    static std::string encode(std::span<const std::byte> bytes) {
+        static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string out;
+        std::size_t index = 0;
+        for (; index + 3 <= bytes.size(); index += 3) {
+            const unsigned value = (static_cast<unsigned>(bytes[index]) << 16) | (static_cast<unsigned>(bytes[index + 1]) << 8) | static_cast<unsigned>(bytes[index + 2]);
+            out += table[(value >> 18) & 63]; out += table[(value >> 12) & 63]; out += table[(value >> 6) & 63]; out += table[value & 63];
+        }
+        if (bytes.size() - index == 1) {
+            const unsigned value = static_cast<unsigned>(bytes[index]) << 16;
+            out += table[(value >> 18) & 63]; out += table[(value >> 12) & 63]; out += "==";
+        } else if (bytes.size() - index == 2) {
+            const unsigned value = (static_cast<unsigned>(bytes[index]) << 16) | (static_cast<unsigned>(bytes[index + 1]) << 8);
+            out += table[(value >> 18) & 63]; out += table[(value >> 12) & 63]; out += table[(value >> 6) & 63]; out += '=';
+        }
+        return out;
+    }
+
+    static std::vector<std::byte> decode(const std::string& text) {
+        std::vector<std::byte> out;
+        int buffer = 0;
+        int bits = 0;
+        for (const char character : text) {
+            int value = -1;
+            if (character >= 'A' && character <= 'Z') value = character - 'A';
+            else if (character >= 'a' && character <= 'z') value = character - 'a' + 26;
+            else if (character >= '0' && character <= '9') value = character - '0' + 52;
+            else if (character == '+') value = 62;
+            else if (character == '/') value = 63;
+            if (value < 0) continue;
+            buffer = (buffer << 6) | value;
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                out.push_back(static_cast<std::byte>((buffer >> bits) & 0xff));
+            }
+        }
+        return out;
+    }
+
+    boost::property_tree::ptree dispatch(const boost::property_tree::ptree& request) {
+        std::ostringstream requestStream;
+        boost::property_tree::write_json(requestStream, request, false);
+        char* responsePointer = wasmDispatchPythonProviderRequest(requestStream.str().c_str());
+        const std::string responseJson(responsePointer);
+        std::free(responsePointer);
+        boost::property_tree::ptree response;
+        std::istringstream responseStream(responseJson);
+        boost::property_tree::read_json(responseStream, response);
+        if (!response.get<bool>("ok", false)) throw std::runtime_error(response.get<std::string>("message", "The web edition's Python failed."));
+        return response;
+    }
+
+    std::string processKey_;
+    std::string description_;
+    std::size_t inputCount_ = 0;
+    std::size_t memorySize_ = 0;
+};
+#endif
+
 namespace {
 
 // Each tier is only attempted for cppProvider tasks in its matching (or a higher) execution
@@ -1501,6 +2575,28 @@ std::unique_ptr<ProviderBackend> createProviderBackend(const std::string& key, C
     return std::make_unique<PipeProviderBackend>(key, implementation, launchPath, config);
 }
 
+// A version 2 program's backend (process keys "cpp2:" and "py2:"). C++ runs in-process whatever the execution mode, as C++ node programs
+// do: version 2 has no C++ worker transport yet (docs/proposals/programSdkV2.md, Order of work, stage 5). Python runs in its worker.
+std::unique_ptr<ProgramBackend> createProgramBackend(const std::string& key, ContributionImplementation implementation,
+                                                     const std::string& providerSource, const ProviderConfiguration& config) {
+#ifdef __EMSCRIPTEN__
+    static_cast<void>(config);
+    if (implementation == ContributionImplementation::cppProvider) {
+        throw std::runtime_error("A C++ program cannot run in the web edition: it would need compiling in the browser. Run the model in the desktop app.");
+    }
+    return std::make_unique<ProgramBackend>(key, std::make_unique<WebProgramTransport>(key, providerSource));
+#else
+    if (implementation == ContributionImplementation::cppProvider) {
+        const auto libraryPath = buildCppProvider(providerSource, config, CppProviderArtifactKind::programSharedLibrary);
+        return std::make_unique<ProgramBackend>(key, std::make_unique<InProcessProgramTransport>(key, libraryPath));
+    }
+    return std::make_unique<ProgramBackend>(key, std::make_unique<PipeProgramTransport>(key, implementation,
+        preparePythonProviderSource(providerSource, config), config));
+#endif
+}
+
+bool isProgramKey(const std::string& key) { return key.rfind("py2:", 0) == 0 || key.rfind("cpp2:", 0) == 0; }
+
 } // namespace
 
 ProviderRuntime::ProviderRuntime(ProviderConfiguration configuration)
@@ -1513,9 +2609,75 @@ ProviderRuntime::~ProviderRuntime() {
 void ProviderRuntime::initialize(const ExecutionPlan& plan) {
     if (initialized_) return;
 
+    // Version 2 programs: one instance per program, however many tasks evaluate it (a two-way relationship's far end is the same program).
+    const auto addProgram = [&](const std::string& key, ContributionImplementation implementation, const std::string& source,
+                                ProgramInstanceSpec spec) {
+        if (programOwners_.contains(spec.ownerId)) return programOwners_.at(spec.ownerId).instanceId;
+        auto& proc = processes_[key];
+        if (!proc) {
+            auto backend = createProgramBackend(key, implementation, source, configuration_);
+            programBackends_[key] = backend.get();
+            proc = std::move(backend);
+        }
+        auto* backend = programBackends_.at(key);
+        spec.instanceId = nextInstanceId_++;
+        programOwners_[spec.ownerId] = {backend, spec.instanceId};
+        programOrder_.push_back(spec.ownerId);
+        const auto instanceId = spec.instanceId;
+        backend->addProgramInstance(std::move(spec));
+        return instanceId;
+    };
+    // Every output of each version 2 relationship's or term's program, across the nodes they reach: a relationship's program with several
+    // outputs (implementation.outputs) is one instance whose outputs reach states of both its ends.
+    std::unordered_map<EntityId, std::vector<ProgramOutputSpec>> outputsByOwner;
+    for (const auto& node : plan.nodes) {
+        for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
+            for (const auto& task : *tasks) {
+                if (task.programVersion != 2 || task.negateOutput) continue;
+                outputsByOwner[task.sourceId].push_back({task.providerOutputKey, task.outputUnit, tasks == &node.contributions, task.outputLabel});
+            }
+        }
+    }
+    for (const auto& node : plan.nodes) {
+        StateValues localStates(node.stateIndexes.size());
+        for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) localStates[index] = plan.initialStates.at(node.stateIndexes[index]);
+        const auto contributionSpec = [&](const ContributionTask& task, bool rate, std::uint8_t ownerKind) {
+            ProgramInstanceSpec spec;
+            spec.ownerId = task.sourceId;
+            spec.ownerKind = ownerKind;
+            spec.owner = task.programOwner;
+            spec.seed = task.programSeed;
+            spec.bindings = task.bindings;
+            spec.startValues = programInputs(task.bindings, localStates, plan.initialStates, resolveTaskParameterValues(task.parameters, {}, {}, 0), 0);
+            spec.outputs = outputsByOwner[task.sourceId];
+            if (spec.outputs.empty()) spec.outputs.push_back({task.providerOutputKey, task.outputUnit, rate, task.outputLabel});
+            return spec;
+        };
+        for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
+            for (const auto& task : *tasks) {
+                if (task.programVersion != 2 || task.negateOutput) continue;
+                const bool rate = tasks == &node.contributions;
+                taskInstanceIds_[task.sourceId] = addProgram(providerProcessKey(task), task.implementation, task.providerSource,
+                    contributionSpec(task, rate, task.programOwnerKind));
+            }
+        }
+        if (node.nodeProvider && node.nodeProvider->programVersion == 2) {
+            const auto& task = *node.nodeProvider;
+            ProgramInstanceSpec spec;
+            spec.ownerId = task.nodeId;
+            spec.ownerKind = 0;
+            spec.owner = task.programOwner;
+            spec.seed = task.programSeed;
+            spec.bindings = task.bindings;
+            spec.startValues = programInputs(task.bindings, localStates, plan.initialStates, resolveTaskParameterValues(task.parameters, {}, {}, 0), 0);
+            for (const auto& output : task.outputs) spec.outputs.push_back({output.key, output.unit, !output.setsValue, output.label});
+            taskInstanceIds_[task.nodeId] = addProgram(task.providerProcessKeyCache, task.implementation, task.providerSource, std::move(spec));
+        }
+    }
+
     for (const auto& node : plan.nodes) {
         for (const auto& task : node.contributions) {
-            if (task.implementation == ContributionImplementation::equation) continue;
+            if (task.implementation == ContributionImplementation::equation || task.programVersion == 2) continue;
 
             const std::string key = providerProcessKey(task);
             auto& proc = processes_[key];
@@ -1536,7 +2698,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
         // here identically, or its first evaluation throws "Task not registered in ProviderRuntime."
         // So must a value term's (NodeExecutionPlan::valueTerms), evaluated the same way in the update phase.
         for (const auto* tasks : {&node.algebraicTasks, &node.valueTerms}) for (const auto& task : *tasks) {
-            if (task.implementation == ContributionImplementation::equation) continue;
+            if (task.implementation == ContributionImplementation::equation || task.programVersion == 2) continue;
 
             const std::string key = providerProcessKey(task);
             auto& proc = processes_[key];
@@ -1551,7 +2713,7 @@ void ProviderRuntime::initialize(const ExecutionPlan& plan) {
             recordInstance(task.sourceId, key, task.implementation, task.bindings);
         }
 
-        if (node.nodeProvider) {
+        if (node.nodeProvider && node.nodeProvider->programVersion != 2) {
             // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- guarded by the if() directly above.
             const auto& task = *node.nodeProvider;
             const auto& key = task.providerProcessKeyCache;
@@ -1686,6 +2848,13 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
         evaluations.emplace_back(instIt->second, inputs[index]);
     }
 
+    // A version 2 program: each term's own output, by key.
+    if (const auto program = programBackends_.find(key); program != programBackends_.end()) {
+        std::vector<const std::string*> keys;
+        keys.reserve(tasks.size());
+        for (const auto* task : tasks) keys.push_back(&task->providerOutputKey);
+        return program->second->evaluateKeyed(simulationTime, evaluations, keys);
+    }
     const auto results = proc->evaluateBatch(tasks.front()->sequence, simulationTime, stepSize, evaluations);
     if (results.size() != tasks.size()) {
         throw std::runtime_error("A provider process returned a different number of contributions than requested.");
@@ -1706,6 +2875,255 @@ std::vector<double> ProviderRuntime::evaluateBatch(const std::vector<const Contr
         ordered.push_back(results[index].second);
     }
     return ordered;
+}
+
+bool ProviderRuntime::declaredPure(const std::string& processKey) const { return isProgramKey(processKey); }
+
+bool ProviderRuntime::programAdvancesEachStep(EntityId owner) const {
+    const auto found = programOwners_.find(owner);
+    return found != programOwners_.end() && found->second.backend->advancesEachStep(found->second.instanceId);
+}
+
+double ProviderRuntime::programClockPeriod(EntityId owner) const {
+    const auto found = programOwners_.find(owner);
+    return found != programOwners_.end() ? found->second.backend->clockPeriod(found->second.instanceId) : 0;
+}
+
+void ProviderRuntime::advancePrograms(const std::vector<ProgramAdvanceCall>& calls, double time, double size) {
+    // One batch per program source, in the order the calls come.
+    std::vector<std::pair<ProgramBackend*, std::vector<std::pair<std::uint64_t, std::span<const double>>>>> batches;
+    for (const auto& call : calls) {
+        const auto found = programOwners_.find(call.owner);
+        if (found == programOwners_.end()) throw std::runtime_error("A program was advanced that the run never started.");
+        auto batch = std::find_if(batches.begin(), batches.end(), [&](const auto& item) { return item.first == found->second.backend; });
+        if (batch == batches.end()) batch = batches.insert(batches.end(), {found->second.backend, {}});
+        batch->second.emplace_back(found->second.instanceId, std::span<const double>(call.inputs));
+    }
+    for (const auto& [backend, batch] : batches) backend->advance(batch, time, size);
+}
+
+std::optional<std::vector<std::string>> ProviderRuntime::programOutputDependencies(EntityId owner, const std::string& outputKey) const {
+    const auto found = programOwners_.find(owner);
+    if (found == programOwners_.end()) return std::nullopt;
+    const auto& description = found->second.backend->description();
+    const auto output = std::find_if(description.outputs.begin(), description.outputs.end(), [&](const auto& port) { return port.key == outputKey; });
+    const auto& declared = description.node ? output : description.outputs.begin();
+    if (declared == description.outputs.end() || !declared->declaresDependencies) return std::nullopt;
+    return declared->dependsOn;
+}
+
+std::vector<ProgramMemoryState> ProviderRuntime::programMemory() const {
+    std::vector<ProgramMemoryState> states;
+    for (const auto owner : programOrder_) {
+        const auto& entry = programOwners_.at(owner);
+        if (entry.backend->hasMemory()) states.push_back(entry.backend->memoryState(entry.instanceId));
+    }
+    return states;
+}
+
+void ProviderRuntime::restoreProgramMemory(const std::vector<ProgramMemoryState>& memory, std::vector<std::string>* notes) {
+    for (const auto& saved : memory) {
+        const auto found = programOwners_.find(saved.owner);
+        if (found == programOwners_.end()) {
+            if (notes) notes->push_back("A program's memory in this checkpoint belongs to something no longer in the model, and is left out.");
+            continue;
+        }
+        found->second.backend->restoreMemory(found->second.instanceId, saved, notes);
+    }
+}
+
+std::vector<std::pair<EntityId, double>> ProviderRuntime::programClocks() const {
+    std::vector<std::pair<EntityId, double>> clocks;
+    for (const auto owner : programOrder_) {
+        const auto& entry = programOwners_.at(owner);
+        const auto period = entry.backend->clockPeriod(entry.instanceId);
+        if (period > 0) clocks.emplace_back(owner, period);
+    }
+    return clocks;
+}
+
+std::string ProviderRuntime::programName(EntityId owner) const {
+    const auto found = programOwners_.find(owner);
+    if (found == programOwners_.end()) return {};
+    return found->second.backend->description().name + " on " + found->second.backend->owner(found->second.instanceId);
+}
+
+namespace {
+
+std::string jsonString(const std::string& text) {
+    std::string out = "\"";
+    for (const char character : text) {
+        const auto byte = static_cast<unsigned char>(character);
+        if (character == '"' || character == '\\') { out += '\\'; out += character; }
+        else if (character == '\n') out += "\\n";
+        else if (byte < 0x20) { char escaped[8]; std::snprintf(escaped, sizeof escaped, "\\u%04x", byte); out += escaped; }
+        else out += character;
+    }
+    return out + "\"";
+}
+
+std::string jsonNumber(double value) {
+    if (!std::isfinite(value)) return "null";
+    std::ostringstream stream;
+    stream.precision(17);
+    stream << value;
+    return stream.str();
+}
+
+}
+
+std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                         const std::unordered_map<std::string, double>& givenInputs, double time) {
+    std::vector<std::string> problems;
+    std::string name;
+    std::string programKind;
+    std::string described = "[]";
+    std::string outputsJson = "{}";
+    std::string memoryJson = "{}";
+    const auto finish = [&] {
+        std::string json = "{\"ok\":" + std::string(problems.empty() ? "true" : "false") + ",\"program\":" + jsonString(name) + ",\"kind\":" +
+            jsonString(programKind) + ",\"inputs\":" + described + ",\"problems\":[";
+        for (std::size_t index = 0; index < problems.size(); ++index) json += (index ? "," : "") + jsonString(problems[index]);
+        return json + "],\"outputs\":" + outputsJson + ",\"memory\":" + memoryJson + "}";
+    };
+    const auto implementation = kind == "cpp" ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
+    std::unique_ptr<ProgramBackend> backend;
+    try {
+        backend = createProgramBackend((kind == "cpp" ? "cpp2:" : "py2:") + source, implementation, source, configuration);
+    } catch (const std::exception& error) {
+        problems.emplace_back(error.what());
+        return finish();
+    }
+    const auto& description = backend->description();
+    name = description.name;
+    programKind = description.node ? "node" : "relationship";
+    // Every port declared once, with a key a file can bind.
+    const std::regex identifier("^[a-z][A-Za-z0-9]*$");
+    std::set<std::string> keys;
+    described = "[";
+    for (std::size_t index = 0; index < description.inputs.size(); ++index) {
+        const auto& port = description.inputs[index];
+        described += std::string(index ? "," : "") + "{\"key\":" + jsonString(port.key) + ",\"kind\":" + jsonString(port.kind) + ",\"unit\":" + jsonString(port.unit) +
+            (port.hasDefault ? ",\"default\":" + jsonNumber(port.defaultValue) : "") + "}";
+    }
+    described += "]";
+    for (const auto& key : [&] {
+             std::vector<std::string> all;
+             for (const auto& port : description.inputs) all.push_back(port.key);
+             for (const auto& port : description.outputs) all.push_back(port.key);
+             return all;
+         }()) {
+        if (!std::regex_match(key, identifier)) problems.push_back("The port '" + key + "' is not a valid key: it must start with a small letter and hold only letters and digits.");
+        if (!keys.insert(key).second) problems.push_back("The port '" + key + "' is declared twice.");
+    }
+    if (!problems.empty()) return finish();
+    // Two instances of the program, every input bound, read from what was given, the default, or 0.
+    std::vector<CompiledBinding> bindings;
+    std::vector<double> values;
+    for (const auto& port : description.inputs) {
+        CompiledBinding binding;
+        binding.symbol = port.key;
+        bindings.push_back(binding);
+        const auto given = givenInputs.find(port.key);
+        values.push_back(given != givenInputs.end() ? given->second : port.hasDefault ? port.defaultValue : 0.0);
+    }
+    for (std::uint64_t instance = 1; instance <= 2; ++instance) {
+        ProgramInstanceSpec spec;
+        spec.instanceId = instance;
+        spec.ownerId = 1;
+        spec.owner = "the check";
+        spec.bindings = bindings;
+        spec.startValues = values;
+        for (const auto& port : description.outputs) spec.outputs.push_back({port.key, "", true, ""});
+        backend->addProgramInstance(std::move(spec));
+    }
+    std::vector<double> outputs;
+    try {
+        backend->sendInitialization();
+        // The first evaluation is made twice and compared by the backend itself: purity.
+        const auto evaluated = backend->evaluateNode(1, time, 0, values);
+        outputsJson = "{";
+        for (std::size_t index = 0; index < evaluated.size(); ++index) {
+            outputs.push_back(evaluated[index].second);
+            outputsJson += std::string(index ? "," : "") + jsonString(evaluated[index].first) + ":" + jsonNumber(evaluated[index].second);
+        }
+        outputsJson += "}";
+    } catch (const std::exception& error) {
+        problems.emplace_back(error.what());
+        return finish();
+    }
+    // The memory round trip: memory copied into a fresh instance, then both advanced and evaluated alike.
+    try {
+        if (backend->hasMemory()) {
+            // Both as a run continued from a checkpoint: the same memory, and neither at its first advance().
+            const auto saved = backend->memoryState(1);
+            backend->restoreMemory(1, saved, nullptr);
+            backend->restoreMemory(2, saved, nullptr);
+            const double size = backend->clockPeriod(1) > 0 ? backend->clockPeriod(1) : 0.01;
+            for (int round = 0; round < 3; ++round) {
+                const double at = time + size * (round + 1);
+                const std::vector<std::pair<std::uint64_t, std::span<const double>>> left{{1, values}};
+                const std::vector<std::pair<std::uint64_t, std::span<const double>>> right{{2, values}};
+                backend->advance(left, at, size);
+                backend->advance(right, at, size);
+                const auto one = backend->memoryState(1);
+                const auto two = backend->memoryState(2);
+                bool same = one.fields.size() == two.fields.size();
+                for (std::size_t field = 0; same && field < one.fields.size(); ++field) same = one.fields[field].words == two.fields[field].words;
+                if (!same) {
+                    problems.emplace_back("Memory restored into a fresh instance did not advance as the original did: something the program remembers is not declared as memory.");
+                    break;
+                }
+                const auto a = backend->evaluateNode(1, at, 0, values);
+                const auto b = backend->evaluateNode(2, at, 0, values);
+                bool equal = a.size() == b.size();
+                for (std::size_t index = 0; equal && index < a.size(); ++index) equal = std::bit_cast<std::uint64_t>(a[index].second) == std::bit_cast<std::uint64_t>(b[index].second);
+                if (!equal) {
+                    problems.emplace_back("A fresh instance with the same memory gave different outputs: the program keeps something outside its declared memory.");
+                    break;
+                }
+            }
+            memoryJson = "{";
+            const auto state = backend->memoryState(1);
+            for (std::size_t index = 0; index < state.fields.size(); ++index) {
+                const auto& field = state.fields[index];
+                memoryJson += std::string(index ? "," : "") + jsonString(field.name) + ":[";
+                for (std::size_t word = 0; word < field.words.size(); ++word) {
+                    const double shown = field.type == 0 || field.type == 3 ? std::bit_cast<double>(field.words[word])
+                        : field.type == 1 ? static_cast<double>(std::bit_cast<std::int64_t>(field.words[word])) : static_cast<double>(field.words[word]);
+                    memoryJson += std::string(word ? "," : "") + jsonNumber(shown);
+                }
+                memoryJson += "]";
+            }
+            memoryJson += "}";
+        }
+        // A Jacobian, if given, against central differences.
+        if (const auto entries = backend->jacobian(1, time, values)) {
+            const auto width = description.inputs.size();
+            for (std::size_t column = 0; column < width; ++column) {
+                const double step = 1e-6 * std::max(1.0, std::abs(values[column]));
+                auto above = values;
+                auto below = values;
+                above[column] += step;
+                below[column] -= step;
+                const auto high = backend->evaluateNode(1, time, 0, above);
+                const auto low = backend->evaluateNode(1, time, 0, below);
+                for (std::size_t row = 0; row < description.outputs.size(); ++row) {
+                    const double differenced = (high[row].second - low[row].second) / (2 * step);
+                    const double given = entries->at(row * width + column);
+                    if (std::abs(differenced - given) > 1e-4 * std::max(1.0, std::abs(differenced))) {
+                        std::ostringstream message;
+                        message << "The Jacobian's entry for '" << description.outputs[row].key << "' by '" << description.inputs[column].key << "' is "
+                                << given << ", but differences give " << differenced << ".";
+                        problems.push_back(message.str());
+                    }
+                }
+            }
+        }
+    } catch (const std::exception& error) {
+        problems.emplace_back(error.what());
+    }
+    return finish();
 }
 
 void ProviderRuntime::shutdown() noexcept {

@@ -69,7 +69,8 @@ import {
     parseProviderReference,
     providerReferenceValue, parseProgramBindingValue, programBindingValue } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
-import { defaultNodeProviderSource, defaultProviderSource, replayProviderSource } from '../providerTemplate.mjs';
+import { defaultNodeProviderSource, defaultProviderSource, programSourceVersion, replayProviderSource } from '../providerTemplate.mjs';
+import { programCheckInputs } from '../programConversion.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
 import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
@@ -2606,7 +2607,9 @@ function partChip(entry, node, equations, names, { reader = node.userData.id, st
         const program = edge?.implementation?.kind;
         if (program && program !== 'equation') {
             chip.classList.add('program');
-            body = escapeHtml(`${programLanguage(program)} program`);
+            // A program with several outputs says which one reaches this state ("output 1 of 2").
+            const outputs = edge.implementation.outputs ?? [];
+            body = escapeHtml(`${programLanguage(program)} program${entry.programOutput && outputs.length > 1 ? ` · output ${entry.outputIndex + 1} of ${outputs.length}` : ''}`);
         } else {
             const model = entry.outputIndex !== undefined ? edge?.equationModel?.outputs?.[entry.outputIndex] : edge?.equationModel;
             const latex = relationshipLatexInReaderNames(termLatex(entry, equations), edge?.equationModel?.bindings, edge ?? {}, equations.nodes, reader, names, edge?.parameters);
@@ -4415,6 +4418,7 @@ function renderEdgeEditor(definition) {
         edgeProgramSection.source = definition.implementation.source;
         edgeProgramSection.outputKey = definition.implementation.output?.key;
         renderProviderBindingRows(definition);
+        renderProgramOutputRows(definition);
     }
     renderRelationshipRows(definition);
 }
@@ -4849,7 +4853,11 @@ function relationshipEquationContext(definition) {
         const index = terms.findIndex(isThis);
         if (index >= 0) landings.push({ stateId, terms, index, entry: terms[index] });
     }
-    return { equations, names, main: landings.find((landing) => !landing.entry.reciprocal) ?? null, other: landings.find((landing) => landing.entry.reciprocal) ?? null };
+    return {
+        equations, names, main: landings.find((landing) => !landing.entry.reciprocal) ?? null, other: landings.find((landing) => landing.entry.reciprocal) ?? null,
+        // A program with several outputs: where each lands, in its outputs' order.
+        outputs: landings.filter((landing) => landing.entry.programOutput).sort((a, b) => a.entry.outputIndex - b.entry.outputIndex)
+    };
 }
 
 function relationshipLeftSide(landing, context) {
@@ -4874,7 +4882,7 @@ function relationshipRowChips(landing, context, { before }) {
 }
 
 // This relationship's own part as a chip: its program, which it opens, or (on the other end's row) its equation negated.
-function relationshipLiveChip(definition, { negated = false, latex = '' } = {}) {
+function relationshipLiveChip(definition, { negated = false, latex = '', which = '' } = {}) {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'partChip live';
@@ -4885,7 +4893,7 @@ function relationshipLiveChip(definition, { negated = false, latex = '' } = {}) 
     // Its sign stands before it (appendParts): on the other end's row, its part taken away whole.
     const shown = isProgram ? { sign: negated ? '−' : '+', latex: '' } : signedPart(latex, { negated });
     chip.dataset.sign = shown.sign;
-    chip.innerHTML = `<small>this relationship${negated ? ', negated' : ''}${isProgram ? ' · Open program' : ''} ›</small><span class="partChipBody">${isProgram ? escapeHtml(programLanguage(program)) : latexMarkup(shown.latex)}</span>`;
+    chip.innerHTML = `<small>this relationship${which ? ` · ${escapeHtml(which)}` : ''}${negated ? ', negated' : ''}${isProgram ? ' · Open program' : ''} ›</small><span class="partChipBody">${isProgram ? escapeHtml(programLanguage(program)) : latexMarkup(shown.latex)}</span>`;
     chip.addEventListener('click', () => {
         if (program === 'plugin') $('#editEdgePluginProvider')?.focus();
         else if (isProgram) $('#editOpenProviderEditor')?.click();
@@ -4900,7 +4908,36 @@ function renderRelationshipRows(definition) {
     const lhs = $('[data-landing-lhs]', landing);
     const rhs = $('[data-landing-rhs]', landing);
     const isProgram = Boolean(definition.implementation?.kind) && definition.implementation.kind !== 'equation';
-    lhs.hidden = rhs.hidden = !context.main;
+    // A program with several outputs: a row for each, under the direction and the language, in place of the one equation.
+    const several = context.outputs.length > 1;
+    let outputRows = $('#edgeOutputLandings');
+    if (!outputRows) {
+        outputRows = document.createElement('div');
+        outputRows.id = 'edgeOutputLandings';
+        outputRows.className = 'otherEndRow';
+        $('.equationLine', landing).before(outputRows);
+    }
+    outputRows.replaceChildren();
+    outputRows.hidden = !several;
+    if (several) {
+        context.outputs.forEach((output) => {
+            const owner = context.equations.nodes.find((node) => node.states.some((state) => Number(state.id) === output.stateId));
+            const state = owner?.states.find((candidate) => Number(candidate.id) === output.stateId);
+            const which = `output ${output.entry.outputIndex + 1} of ${context.outputs.length}`;
+            const head = document.createElement('span');
+            head.className = 'relationshipRowHead';
+            head.textContent = `${which} · ${owner?.title ?? ''} · ${state?.label ?? state?.symbol ?? ''}`;
+            const line = document.createElement('div');
+            line.className = 'relationshipRowLine';
+            line.insertAdjacentHTML('beforeend', `<span class="rowLeftSide">${relationshipLeftSide(output, context)}</span>`);
+            const before = relationshipRowChips(output, context, { before: true });
+            appendParts(line, before, { leading: false });
+            appendParts(line, [relationshipLiveChip(definition, { which })], { leading: before.length > 0 });
+            appendParts(line, relationshipRowChips(output, context, { before: false }), { leading: true });
+            outputRows.append(head, line);
+        });
+    }
+    lhs.hidden = rhs.hidden = !context.main || several;
     lhs.replaceChildren();
     rhs.replaceChildren();
     if (context.main) {
@@ -6699,7 +6736,7 @@ function renderExecutionSummary() {
     if (integration?.heldTerms?.length) {
         const termName = ({ sourceId }) => model.relationships.find((edge) => edge.id === sourceId)?.name
             ?? model.nodes.find((node) => node.sourceTerms?.some((term) => term.id === sourceId))?.name ?? `Term ${sourceId}`;
-        methodLines.push(`${integration.heldTerms.length === 1 ? '1 program' : `${integration.heldTerms.length} programs`} evaluated once a step and held, coupled at first order: ${nameList(integration.heldTerms.map(termName))}.`);
+        methodLines.push(`${integration.heldTerms.length === 1 ? '1 program' : `${integration.heldTerms.length} programs`} in the older program format evaluated once a step and held, coupled at first order: ${nameList(integration.heldTerms.map(termName))}. Converting a program to version 2, from its code editor, lets it take every stage.`);
     }
     // Event location (docs/proposals/integrators.md): the switches located and stepped to, or, under Euler, the conditions it did not locate.
     const conditionName = ({ sourceId }) => model.relationships.find((edge) => edge.id === sourceId)?.name
@@ -8690,15 +8727,24 @@ function updateRunMethodFields() {
         : method.stepsPerGlobalStep
         ? `Updates, controls and samples happen at every global step; the method takes ${steps > 1 ? `${steps} steps` : 'one step'} within it, every node together.`
         : 'Updates, controls and samples happen at every global step; each node takes its own substeps within it (Numerics tab).';
-    const participation = method.id === 'nodeByNode' ? { stepped: [], programs: [] } : stageParticipation(serializeProjectDocument());
+    const participation = method.id === 'nodeByNode' ? { stepped: [], programs: [], older: [] } : stageParticipation(serializeProjectDocument());
     const lines = [];
     if (participation.stepped.length) {
         lines.push(`Stepped on their own and read by the rest as they were at each step's start, so coupled at first order: ${nameList(participation.stepped)}.`);
     }
     if (participation.programs.length) {
-        lines.push(`Programs are evaluated once a step and held through it, so coupled at first order: ${nameList(participation.programs)}.`);
+        lines.push(`Under ${method.name}, these programs are held once per global step, coupled at first order, because they use the older program format: ${nameList(participation.programs)}.`);
     }
-    $('#runMethodParticipation').textContent = lines.join(' ');
+    // Each program in the older format, with the way out beside it: its code editor, opened on the conversion.
+    const links = participation.older.map((program) => {
+        const link = document.createElement('button');
+        link.type = 'button';
+        link.className = 'linkButton runConvertLink';
+        link.textContent = participation.older.length > 1 ? `Convert ${program.name} to version 2 ›` : 'Convert to version 2 ›';
+        link.addEventListener('click', () => openProgramConversion(program.target));
+        return link;
+    });
+    $('#runMethodParticipation').replaceChildren(document.createTextNode(lines.join(' ')), ...(links.length ? [document.createElement('br'), ...links] : []));
     $('#runMethodParticipation').hidden = !lines.length;
 }
 $('#runMethod').addEventListener('change', updateRunMethodFields);
@@ -10540,7 +10586,7 @@ async function commitCausalInference() {
         operations.push({
             kind: 'addSourceTerm', ref: `causalInferenceInput${index}`,
             nodeRef: target.nodeRef ?? target.nodeId, outputStateRef: target.stateRef ?? target.stateId,
-            implementation: { kind: 'cpp', source: replayProviderSource(input.columnName, columnSeries(input.columnName), input.columnName) },
+            implementation: { kind: 'cpp', providerApiVersion: 2, source: replayProviderSource(input.columnName, columnSeries(input.columnName), input.columnName) },
             setsValue: true
         });
     });
@@ -13813,7 +13859,8 @@ $('#editNodeProgramOpenEditor').addEventListener('click', () => {
     window.providerEditor.openWindow({
         source: $('#editNodeProgramSource').value,
         kind: implementation.kind,
-        title: selectedNode.userData.definition.title
+        title: selectedNode.userData.definition.title,
+        ...programEditorContext(implementation)
     });
 });
 $('#editAddNodeProgramInput').addEventListener('click', () => {
@@ -13989,6 +14036,82 @@ function previewEdgeEquation(typed, origin) {
     updateValidationStatus();
 }
 
+// A relationship's program with several outputs (docs/proposals/unifiedEntityEditors.md, decision 13): a row for each, its key and the
+// state of either end it reaches, in place of the one output key and "Equation for". Offered for a program in the current format on a
+// one-way relationship; removing all but one goes back to the one output.
+function renderProgramOutputRows(definition) {
+    const implementation = definition.implementation;
+    const outputs = implementation?.outputs ?? [];
+    const several = outputs.length > 0;
+    const canAdd = !several && (implementation?.kind === 'cpp' || implementation?.kind === 'python') && definition.directionality !== 'bidirectional'
+        && programSourceVersion(implementation.kind, implementation.source) === 2;
+    edgeProgramSection.singleOutput.hidden = several;
+    $('#edgeLanding .landingState').hidden = several;
+    // One state's equation around this part says where a single output lands; several outputs say it row by row.
+    edgeProgramSection.addOutputButton.hidden = !canAdd && !several;
+    edgeProgramSection.outputRows.hidden = !several;
+    const ends = [['source', definition.source], ['target', definition.target]].map(([role, nodeId]) => [role, model.nodes.find((node) => node.id === nodeId)]).filter(([, node]) => node);
+    edgeProgramSection.outputRows.replaceChildren(...outputs.map((output, index) => {
+        const row = document.createElement('div');
+        row.className = 'programOutputRow';
+        const label = document.createElement('small');
+        label.textContent = `Output ${index + 1} of ${outputs.length}`;
+        const key = document.createElement('input');
+        key.value = output.key ?? '';
+        key.autocomplete = 'off';
+        key.setAttribute('aria-label', `Output ${index + 1}'s key`);
+        key.addEventListener('change', () => changeEdgeModel(definition, (snapshot) => { snapshot.implementation.outputs[index].key = key.value.trim(); }));
+        const state = document.createElement('select');
+        state.setAttribute('aria-label', `The state output ${index + 1} reaches`);
+        for (const [role, node] of ends) {
+            const group = document.createElement('optgroup');
+            group.label = `${role === 'source' ? 'Source' : 'Target'} · ${node.title}`;
+            for (const candidate of node.states) group.appendChild(new Option(`${node.title} · ${candidate.label ?? candidate.symbol}`, equationOutputValue(role, candidate.id)));
+            state.appendChild(group);
+        }
+        state.value = equationOutputValue(output.role === 'source' ? 'source' : 'target', output.stateId);
+        state.addEventListener('change', () => {
+            const picked = parseEquationOutput(state.value);
+            if (picked) changeEdgeModel(definition, (snapshot) => { Object.assign(snapshot.implementation.outputs[index], picked); });
+        });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.title = 'Remove this output';
+        remove.addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
+            const remaining = snapshot.implementation.outputs.filter((_, at) => at !== index);
+            if (remaining.length <= 1) {
+                snapshot.implementation.output = remaining[0] ?? { key: 'output', role: 'target', stateId: definition.targetStateId };
+                delete snapshot.implementation.outputs;
+            } else {
+                snapshot.implementation.outputs = remaining;
+            }
+        }));
+        row.append(label, key, state, remove);
+        return row;
+    }));
+    edgeProgramSection.addOutputButton.textContent = several ? '＋ Another output' : '＋ Another output, to a state of either end';
+}
+edgeProgramSection.addOutputButton.addEventListener('click', () => {
+    if (!selectedRelationship?.implementation || activeResult) return;
+    changeEdgeModel(selectedRelationship, (snapshot) => {
+        const implementation = snapshot.implementation;
+        const generated = (program) => defaultProviderSource(program.kind, program.bindings ?? [], program.output?.key, snapshot.title, program.outputs?.map((output) => ({ key: output.key })));
+        const untouched = implementation.source === generated(implementation);
+        const outputs = implementation.outputs ?? [{ key: implementation.output?.key || 'output', role: implementation.output?.role ?? 'target', stateId: implementation.output?.stateId ?? snapshot.targetStateId }];
+        // The next output reaches the other end's first state, or the same end's next: changed on its row.
+        const last = outputs.at(-1);
+        const otherRole = last.role === 'source' ? 'target' : 'source';
+        const otherNode = model.nodes.find((node) => node.id === (otherRole === 'source' ? snapshot.source : snapshot.target));
+        let key = `output${outputs.length + 1}`;
+        while (outputs.some((output) => output.key === key)) key = `${key}b`;
+        outputs.push({ key, role: otherRole, stateId: otherNode?.states?.[0]?.id ?? last.stateId });
+        implementation.outputs = outputs;
+        delete implementation.output;
+        if (untouched) implementation.source = generated(implementation);
+    });
+});
+
 $('#editEquationOutput').addEventListener('change', (event) => {
     if (!selectedRelationship) return;
     const picked = parseEquationOutput(event.target.value);
@@ -14065,9 +14188,49 @@ edgeProgramSection.onOpenEditor(() => {
     window.providerEditor.openWindow({
         source: edgeProgramSection.source,
         kind: selectedRelationship.implementation.kind,
-        title: selectedRelationship.title
+        title: selectedRelationship.title,
+        ...programEditorContext(selectedRelationship.implementation, selectedRelationship.parameters),
+        convert: edgeProgramSection.takeConversionRequest()
     });
 });
+// What the code editor is told of a model's program: that it is one (so it says which program format it is in, offers to convert an older
+// one and offers Check program), and the values its inputs have in the model now, which Check program checks it at.
+function programEditorContext(implementation, parameters = []) {
+    let checkInputs = {};
+    try {
+        checkInputs = programCheckInputs(serializeProjectDocument(), implementation, parameters);
+    } catch { /* checked at defaults */ }
+    return { program: true, checkInputs };
+}
+
+// "Convert to version 2 ›" beside a program the Run dialog names as held (docs/proposals/programSdkV2.md, Migration): its code editor,
+// opened on the conversion.
+function openProgramConversion(target) {
+    if (target.type === 'edge') {
+        const relationship = model.relationships.find((candidate) => candidate.id === target.edgeId && !candidate.deleted);
+        if (!relationship?.implementation) return;
+        providerEditTarget = { type: 'editor', relationshipId: relationship.id };
+        window.providerEditor.openWindow({ source: relationship.implementation.source ?? '', kind: relationship.implementation.kind, title: relationship.title,
+            ...programEditorContext(relationship.implementation, relationship.parameters), convert: true });
+        return;
+    }
+    const node = nodeObjects.get(target.nodeId);
+    const definition = node?.userData.definition;
+    if (!definition) return;
+    if (target.type === 'node') {
+        if (!definition.implementation) return;
+        providerEditTarget = { type: 'node', nodeId: target.nodeId };
+        window.providerEditor.openWindow({ source: definition.implementation.source ?? '', kind: definition.implementation.kind, title: definition.title,
+            ...programEditorContext(definition.implementation), convert: true });
+        return;
+    }
+    const term = definition.sourceTerms.find((candidate) => candidate.id === target.termId);
+    if (!term?.implementation) return;
+    providerEditTarget = { type: 'sourceTerm', nodeId: target.nodeId, termId: term.id };
+    window.providerEditor.openWindow({ source: term.implementation.source ?? '', kind: term.implementation.kind, title: definition.title,
+        ...programEditorContext(term.implementation, term.parameters), convert: true });
+}
+
 window.providerEditor.onApplied(({ source }) => {
     const fail = (error) => window.providerEditor.reportApplied({ applied: false, error });
     const succeed = () => window.providerEditor.reportApplied({ applied: true });
@@ -14200,7 +14363,9 @@ termProgramSection.onOpenEditor(() => {
     window.providerEditor.openWindow({
         source: termProgramSection.source,
         kind: term.implementation.kind,
-        title: definition.title
+        title: definition.title,
+        ...programEditorContext(term.implementation, term.parameters),
+        convert: termProgramSection.takeConversionRequest()
     });
 });
 termProgramSection.sourceField.addEventListener('input', (event) => {

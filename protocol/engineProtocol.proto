@@ -202,6 +202,8 @@ message RestoreState {
     double time = 1;
     repeated double values = 2;
     repeated NodeProviderCheckpoint provider_states = 3;
+    // Every version 2 program's memory, as a checkpoint keeps it.
+    repeated ProgramMemory program_memory = 4;
 }
 
 // Forgets the checkpoints, and the input readings no longer needed, from before `time`.
@@ -244,6 +246,8 @@ message SessionReply {
     uint64 compute_nanoseconds = 7;
     // For an advance: how many checkpoints it kept.
     uint32 checkpoints_taken = 8;
+    // For a restore: every version 2 program's memory it restored, as a checkpoint keeps it.
+    repeated ProgramMemory program_memory = 9;
 }
 
 message NodeProviderCheckpoint {
@@ -262,6 +266,39 @@ message ResultCheckpoint {
     // (docs/proposals/integrators.md, Checkpoints and restart): empty, and so absent, for every method that has none --
     // explicitEuler and rungeKutta4 among them. A reader that does not know it skips it.
     bytes solver_state = 7;
+    // Every version 2 program's memory (docs/proposals/programSdkV2.md, Automatic memory checkpoints): absent from every checkpoint of a
+    // model without one, so such a result is byte for byte what it was. A reader that does not know it skips it.
+    repeated ProgramMemory program_memory = 8;
+}
+
+// One field of a version 2 program's memory: its name, its type and its value.
+message ProgramMemoryField {
+    string name = 1;
+    enum Type {
+        REAL = 0;
+        INTEGER = 1;
+        FLAG = 2;
+        REALS = 3;
+        RANDOM = 4;
+    }
+    Type type = 2;
+    repeated double reals = 3;       // REAL (one), REALS (the array)
+    repeated sint64 integers = 4;    // INTEGER, FLAG (0 or 1)
+    repeated fixed64 words = 5;      // RANDOM: seed and counter
+}
+
+message ProgramMemory {
+    // The stable id of the node, relationship or source term the program belongs to, and which.
+    uint64 owner_id = 1;
+    enum OwnerKind {
+        NODE_PROGRAM = 0;
+        SOURCE_TERM = 1;
+        RELATIONSHIP_TERM = 2;
+    }
+    OwnerKind owner_kind = 2;
+    uint32 term_index = 3;           // which of a relationship's terms, when it has several
+    fixed64 layout = 4;              // a hash of the declared fields' names, types and sizes
+    repeated ProgramMemoryField fields = 5;
 }
 
 // docs/proposals/numericalStabilityDiagnostics.md's during-run phase: node_id/state_id are raw

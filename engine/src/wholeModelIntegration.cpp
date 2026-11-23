@@ -274,9 +274,11 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
         const auto& node = plan.nodes[index];
         WholeModelNode compiled;
         const auto& provider = node.nodeProvider;
-        // A provider that sets its states' values is a co-simulation step (an imported FMU): it can only be told to step.
-        compiled.stepped = provider && (!pure(provider->providerProcessKeyCache) ||
-            std::any_of(provider->outputs.begin(), provider->outputs.end(), [](const auto& output) { return output.setsValue; }));
+        // A provider that sets its states' values is a co-simulation step (an imported FMU): it can only be told to step. A version 2 node
+        // program's outputs into Update states are values read at the update instant instead (docs/proposals/programSdkV2.md), so it
+        // takes part in the stages with its other outputs.
+        compiled.stepped = provider && (!pure(provider->providerProcessKeyCache) || (provider->programVersion != 2 &&
+            std::any_of(provider->outputs.begin(), provider->outputs.end(), [](const auto& output) { return output.setsValue; })));
         if (compiled.stepped) {
             whole.steppedNodes.push_back(index);
             whole.nodes.push_back(std::move(compiled));
@@ -294,7 +296,7 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
             integrated.insert(task.outputStateIndex);
         }
         if (provider) {
-            for (const auto& output : provider->outputs) integrated.insert(output.stateIndex);
+            for (const auto& output : provider->outputs) if (!output.setsValue) integrated.insert(output.stateIndex);
         }
         for (const auto local : integrated) {
             compiled.integratedStates.push_back(node.stateIndexes.at(local));
@@ -330,15 +332,25 @@ std::size_t boundState(const NodeExecutionPlan& node, const CompiledBinding& bin
 
 }
 
-std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole) {
+std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole, const ProviderEvaluator* providers) {
     std::vector<std::vector<std::size_t>> reads(plan.initialStates.size());
+    // A version 2 program's declared dependencies: only the bindings to those inputs can change the output.
+    const auto narrow = [&](EntityId owner, const std::string& outputKey, const std::vector<CompiledBinding>& bindings, std::vector<unsigned char>& used) {
+        if (!providers) return;
+        const auto declared = providers->programOutputDependencies(owner, outputKey);
+        if (!declared) return;
+        for (std::size_t binding = 0; binding < bindings.size(); ++binding) {
+            if (std::find(declared->begin(), declared->end(), bindings[binding].symbol) == declared->end()) used[binding] = 0;
+        }
+    };
     for (std::size_t index = 0; index < plan.nodes.size(); ++index) {
         const auto& wholeNode = whole.nodes[index];
         if (wholeNode.stepped) continue;
         const auto& node = plan.nodes[index];
         for (const auto& task : wholeNode.stageNode.contributions) {
             const auto output = node.stateIndexes.at(task.outputStateIndex);
-            const auto used = usedBindings(task);
+            auto used = usedBindings(task);
+            if (task.programVersion == 2) narrow(task.sourceId, task.providerOutputKey, task.bindings, used);
             for (std::size_t binding = 0; binding < task.bindings.size(); ++binding) {
                 const auto state = used[binding] ? boundState(node, task.bindings[binding]) : std::numeric_limits<std::size_t>::max();
                 if (state != std::numeric_limits<std::size_t>::max()) reads[output].push_back(state);
@@ -346,7 +358,12 @@ std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, cons
         }
         if (const auto& provider = wholeNode.stageNode.nodeProvider) {
             for (const auto& output : provider->outputs) {
-                for (const auto& binding : provider->bindings) {
+                if (output.setsValue) continue;
+                std::vector<unsigned char> used(provider->bindings.size(), 1);
+                if (provider->programVersion == 2) narrow(node.nodeId, output.key, provider->bindings, used);
+                for (std::size_t index = 0; index < provider->bindings.size(); ++index) {
+                    if (!used[index]) continue;
+                    const auto& binding = provider->bindings[index];
                     const auto state = boundState(node, binding);
                     if (state != std::numeric_limits<std::size_t>::max()) reads[node.stateIndexes.at(output.stateIndex)].push_back(state);
                 }

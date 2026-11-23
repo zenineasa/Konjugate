@@ -19,6 +19,7 @@ okf_version: "0.2"
 * [Assistant Model Findings](assistantModelFindings.md) - What the harness showed about small untuned local models, above all how they keep asking for more information on clear requests, with the runs, numbers, examples and caveats
 * [Assistant Evaluation](assistantEvaluation.md) - Harness that scores a model on the assistant's job: cases, assertions, reference answers, the error-direction report, request pools and commands
 * [Parallel Execution](parallelExecution.md) - Native execution backends: serial loop, shared thread pool, and communication-aware partitions
+* [Writing a Program](programs.md) - Writing a term or a node as a C++ or Python program: ports and units, evaluate(), memory and clocks, errors, testing and converting older programs
 * [Provider Execution Transports](providerExecution.md) - Runtime execution and IPC options for user-defined C++ and Python providers
 * [Subsystems](subsystems.md) - Subsystems and components: boundary terminals, the lifecycle, reusable instances with ports and exposed parameters, component files, My library and linked components
 * [Relationship Groups](edgeGroups.md) - Shared relationship definitions expanding into a mesh of relationships across member nodes

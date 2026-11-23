@@ -31,6 +31,7 @@ struct ProviderConfiguration {
 };
 
 class ProviderBackend;
+class ProgramBackend;
 
 // A hazard of the older program format that changes no number but is worth saying (docs/proposals/programSdkV2.md,
 // decision 8). "inputUnbound": a declared input of the program at entityIds[0] (an edge, a source term or a node) has no
@@ -65,6 +66,19 @@ public:
     std::vector<std::byte> requestNodeCheckpoint(const NodeProviderTask& task) override;
     void requestNodeRestore(const NodeProviderTask& task, std::span<const std::byte> payload) override;
 
+    // Version 2 programs (docs/proposals/programSdkV2.md): pure by their shape, so they take part in every stage; their memory and clocks.
+    bool declaredPure(const std::string& processKey) const override;
+    bool programAdvancesEachStep(EntityId owner) const override;
+    double programClockPeriod(EntityId owner) const override;
+    void advancePrograms(const std::vector<ProgramAdvanceCall>& calls, double time, double size) override;
+    std::optional<std::vector<std::string>> programOutputDependencies(EntityId owner, const std::string& outputKey) const override;
+    std::vector<ProgramMemoryState> programMemory() const override;
+    void restoreProgramMemory(const std::vector<ProgramMemoryState>& memory, std::vector<std::string>* notes) override;
+    // Every program with a clock: what it belongs to and its period, in the model's order.
+    std::vector<std::pair<EntityId, double>> programClocks() const;
+    // The name of the program of `owner` ("PidController"), empty for none.
+    std::string programName(EntityId owner) const;
+
     void shutdown() noexcept;
 
     // The warnings found so far: unbound inputs once the programs have started, a shared checkpoint once one is taken.
@@ -89,11 +103,26 @@ private:
     ProviderConfiguration configuration_;
     std::unordered_map<std::string, std::unique_ptr<ProviderBackend>> processes_;
     std::unordered_map<EntityId, std::uint64_t> taskInstanceIds_;
+    struct ProgramEntry {
+        ProgramBackend* backend = nullptr;
+        std::uint64_t instanceId = 0;
+    };
+    std::unordered_map<std::string, ProgramBackend*> programBackends_;
+    std::unordered_map<EntityId, ProgramEntry> programOwners_;
+    std::vector<EntityId> programOrder_;
     std::uint64_t nextInstanceId_ = 1;
     bool initialized_ = false;
     bool shutdown_ = false;
 };
 
 bool planRequiresProviders(const ExecutionPlan& plan);
+
+// Check program (docs/programs.md, "Testing a program"): a version 2 program loaded as a run loads it, and the standard checks run on it
+// at `time` with these inputs (by key; one not given reads its default, or 0): every port declared once with a key a file can bind;
+// evaluate() finite with every output set; purity (the first evaluation made twice and compared); the memory round trip (memory restored
+// into a fresh instance advances and evaluates alike); a Jacobian, if given, against differences. The answer as JSON: { ok, program,
+// kind, inputs, problems, outputs, memory }.
+std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                         const std::unordered_map<std::string, double>& inputs, double time);
 
 }

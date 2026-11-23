@@ -110,6 +110,11 @@ struct CompiledBinding {
     EntityId valueId = 0;
     std::size_t valueIndex = std::numeric_limits<std::size_t>::max();
     std::size_t parameterIndex = std::numeric_limits<std::size_t>::max();
+    // What the bound value is measured in (the state's or parameter's unit, "s" for the time): filled only for a version 2 program's
+    // bindings, whose ports are checked and converted against it (docs/proposals/programSdkV2.md, Units and dimensions); and what it
+    // is in words, for messages ("Room.temperature", "the parameter conductance", "the time").
+    std::string unit;
+    std::string label;
 };
 
 struct ParameterSchedule;
@@ -206,6 +211,16 @@ struct ContributionTask {
     // other. False for every other contribution (source terms, directed edges, and a
     // bidirectional edge's own primary output).
     bool negateOutput = false;
+    // A program's SDK version (implementation.providerApiVersion): 1, or 2 for a program written against konjugate/sdk/v2 or
+    // konjugate.v2, which is pure by its shape, keeps its memory with the engine and names its own errors. For a version 2 program:
+    // what it belongs to, in words ("relationship Wall → Room", "node Heater's own part"), its optional seed, and the unit of the state
+    // its output reaches.
+    std::uint32_t programVersion = 1;
+    std::string programOwner;
+    std::uint8_t programOwnerKind = 1; // 1 a node's own part, 2 a relationship's term (ProgramMemoryState::ownerKind)
+    std::uint64_t programSeed = 0;
+    std::string outputUnit;
+    std::string outputLabel;
 };
 
 // Contributions sharing the same (implementation, providerSource) run in the same worker
@@ -232,7 +247,12 @@ struct NodeProviderOutputBinding {
     // Euler-specific pseudo-derivative trick FMI import used before this field existed (see
     // src/fmiResolver.mjs). No SDK change: NodeOutputCollector::addGradient's value is reinterpreted
     // exactly like a source term's addGradient value is.
+    // A version 2 node program's output into an Update state (setsValue, or a state whose kind is "update") is read at the update
+    // instant instead: evaluate() at the step's end, with the memory advance() just wrote (applyProgramUpdates), never in a substep.
     bool setsValue = false;
+    // The state's unit, and the state in words, for a version 2 program's output.
+    std::string unit;
+    std::string label;
 };
 
 // Owns ALL the dynamics of one node, unlike ContributionTask which owns one scalar derivative
@@ -255,6 +275,51 @@ struct NodeProviderTask {
     // values, stored schedules and recorded interventions reach them as they reach any parameter.
     std::vector<CompiledParameter> parameters;
     std::vector<NodeProviderOutputBinding> outputs; // N named outputs -> this node's own states
+    // As ContributionTask's: the SDK version, what it belongs to in words, its optional seed.
+    std::uint32_t programVersion = 1;
+    std::string programOwner;
+    std::uint64_t programSeed = 0;
+};
+
+// Version 2 programs (docs/proposals/programSdkV2.md). A program refusing its inputs (OutOfDomain) or giving a value that is not a
+// finite number: an adaptive or stiff method rejects the step and tries a smaller one; every other method stops the run with the
+// message, which names the program, what it belongs to, the port, the time and the stage.
+struct ProgramOutOfDomain : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// Where a program is being called from, for its messages: the method and the stage, set by the whole-model integration before each stage
+// it evaluates (stages are evaluated one after another, and a stage's tasks are handed to the backend's threads after it is set, so every
+// thread reads it as set). Euler node by node leaves it empty.
+struct ProgramCallContext {
+    const char* method = nullptr;   // "Runge–Kutta 4"
+    std::size_t stage = 0;          // 1-based; 0 for none
+    std::size_t stages = 0;
+};
+ProgramCallContext& programCallContext() noexcept;
+
+// One version 2 program's inputs, as the binding order gives them, for advance().
+struct ProgramAdvanceCall {
+    EntityId owner = 0;
+    std::vector<double> inputs;
+};
+
+// One field of a version 2 program's memory, as a checkpoint keeps it: its name, its type (0 a real, 1 an integer, 2 a flag, 3 an array
+// of reals, 4 a random stream) and its 8-byte slots as they are (a real's or an integer's bits, a flag's 0 or 1, an array's reals, a
+// stream's seed and counter).
+struct ProgramMemoryField {
+    std::string name;
+    std::uint8_t type = 0;
+    std::vector<std::uint64_t> words;
+};
+
+// One version 2 program's memory: what it belongs to (the id of its node, relationship or term, and which: 0 a node's program, 1 a
+// node's own part, 2 a relationship's term), a hash of its fields' names, types and sizes, and its fields.
+struct ProgramMemoryState {
+    EntityId owner = 0;
+    std::uint8_t ownerKind = 0;
+    std::uint64_t layout = 0;
+    std::vector<ProgramMemoryField> fields;
 };
 
 class ProviderEvaluator {
@@ -291,6 +356,37 @@ public:
     virtual bool declaredPure(const std::string& processKey) const {
         static_cast<void>(processKey);
         return false;
+    }
+    // Version 2 programs' memory (docs/proposals/programSdkV2.md, How the engine calls a program). Whether the program of `owner` (the id
+    // of its node, relationship or term) has memory and no clock, so advance() is called after every accepted step; the period of its
+    // clock, 0 for none; advance() for a batch of programs, each with its inputs at the step's end (or the tick). The defaults answer for
+    // an evaluator with no version 2 programs.
+    virtual bool programAdvancesEachStep(EntityId owner) const {
+        static_cast<void>(owner);
+        return false;
+    }
+    virtual double programClockPeriod(EntityId owner) const {
+        static_cast<void>(owner);
+        return 0;
+    }
+    virtual void advancePrograms(const std::vector<ProgramAdvanceCall>& calls, double time, double size) {
+        static_cast<void>(time);
+        static_cast<void>(size);
+        if (!calls.empty()) throw std::runtime_error("This provider evaluator does not support version 2 programs.");
+    }
+    // The inputs (by key) a version 2 program's output declares it depends on, or nothing when it declares none (every input then counts).
+    // For a relationship's program, its one output whatever `outputKey` is.
+    virtual std::optional<std::vector<std::string>> programOutputDependencies(EntityId owner, const std::string& outputKey) const {
+        static_cast<void>(owner);
+        static_cast<void>(outputKey);
+        return std::nullopt;
+    }
+    // Every version 2 program's memory now, and a restore of it (fields matched by name; what was added or dropped since is said in
+    // `notes`, one sentence each).
+    virtual std::vector<ProgramMemoryState> programMemory() const { return {}; }
+    virtual void restoreProgramMemory(const std::vector<ProgramMemoryState>& memory, std::vector<std::string>* notes) {
+        static_cast<void>(notes);
+        if (!memory.empty()) throw std::runtime_error("This provider evaluator does not support version 2 programs.");
     }
 };
 
@@ -341,6 +437,8 @@ struct NodeExecutionPlan {
     std::size_t settleLimit = 1000;
     std::optional<NodeProviderTask> nodeProvider;
     std::size_t estimatedOperationsPerSubstep = 0;
+    // True when any of the node's terms, or its own program, is a version 2 program: advance() may be due after its substeps.
+    bool hasVersion2Programs = false;
     // True when any parameter of this node's tasks follows a stored schedule, so its values are
     // re-resolved every substep (as they are while an intervention is recorded).
     bool hasParameterSchedules = false;
@@ -577,6 +675,39 @@ UpdateOutcome applyUpdates(const ExecutionPlan& plan, StateValues& states, const
 std::size_t evaluateAlgebraicRelationships(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                                     const std::vector<ParameterSchedule>& activeSchedules, double simulationTime,
                                     double stepSize = 0, ProviderEvaluator* providerEvaluator = nullptr);
+
+// The values of a task's parameters at `time`, resolved as every parameter is: live overrides, recorded interventions and stored
+// schedules first, else the parameter's own value.
+std::vector<double> resolveTaskParameterValues(const std::vector<CompiledParameter>& parameters, const EntityValues& liveParameterValues,
+                                               const std::vector<ParameterSchedule>& activeSchedules, double time);
+
+// The inputs of a program's bindings, in binding order: local states, the snapshot, resolved parameter values (one list per task, as
+// resolveParameterValues gives them) and the time.
+std::vector<double> programInputs(const std::vector<CompiledBinding>& bindings, const StateValues& localStates, const StateValues& snapshot,
+                                  const std::vector<double>& parameterValues, double time);
+
+// advance() for every version 2 program of `node` with memory and no clock, after one of its substeps under Euler node by node: its
+// inputs read from `localStates` (the node's states at the substep's end) and `snapshot`, its parameters at `time` (the substep's end).
+void advanceNodePrograms(const NodeExecutionPlan& node, const StateValues& localStates, const StateValues& snapshot,
+                         const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules, double time,
+                         double size, ProviderEvaluator* providerEvaluator);
+
+// advance() for version 2 programs of the whole plan at `time`, reading `states`: `clocked` false, every program with memory and no
+// clock whose node `include` says (after an accepted whole-model step of `size`; every node when `include` is empty); `clocked` true,
+// every program whose clock ticks at `time` (with its period as the step). Ticks fall at whole multiples of a clock's period.
+void advancePlanPrograms(const ExecutionPlan& plan, const StateValues& states, const EntityValues& liveParameterValues,
+                         const std::vector<ParameterSchedule>& activeSchedules, double time, double size, bool clocked,
+                         ProviderEvaluator* providerEvaluator, const std::vector<unsigned char>& include = {});
+
+// Whether `time` is a tick of a clock of `period`: a whole multiple of it.
+bool clockTicksAt(double period, double time) noexcept;
+
+// The update instant for version 2 node programs' outputs into Update states: each such program evaluated at `time` from `readStates`
+// (every state as the update phase reads it), its outputs written into `states`.
+void applyProgramUpdates(const ExecutionPlan& plan, const StateValues& readStates, StateValues& states, const EntityValues& liveParameterValues,
+                         const std::vector<ParameterSchedule>& activeSchedules, double time, ProviderEvaluator* providerEvaluator);
+// Whether any node has a version 2 program with outputs into Update states.
+bool planHasProgramUpdates(const ExecutionPlan& plan);
 
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                            double time, double stepSize, ProviderEvaluator* providerEvaluator = nullptr,

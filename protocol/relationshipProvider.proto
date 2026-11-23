@@ -24,6 +24,10 @@ message HandshakeResponse {
     string output_key = 6;
     bool supports_node_provider = 7;
     repeated string output_keys = 8;
+    // Version 2 (docs/proposals/programSdkV2.md): the program's whole description -- its ports with kind, unit and default, its outputs'
+    // declared dependencies, its memory fields, its clock -- as JSON in exactly the in-process ABI's shape
+    // (KonjugateInProcessProgramV2::description), so both transports are read by one parser. Absent from a version 1 worker's answer.
+    string program_description = 9;
 }
 
 message ProviderInstance {
@@ -110,6 +114,71 @@ message RestoreResponse {
     bool restored = 2;
 }
 
+// ── Version 2 (konjugate.v2, docs/proposals/programSdkV2.md) ────────────────────────────────────────────────────────────────────────
+// One object per instance. Every input crosses in the program's declaration order, already defaulted and converted to the program's
+// units by the engine. The worker keeps each instance's memory and returns it whole after initialize and every advance, so the engine's
+// copy is always exact; a restore sends it back. An outcome's status: 0 done, 1 failed (message, line), 2 out of domain (the program
+// refused these inputs: an adaptive method rejects the step), 3 not provided (no Jacobian).
+
+message ProgramInstance {
+    uint64 instance_id = 1;
+    string owner = 2;            // "node Heater", for the program's messages
+    double start_time = 3;
+    repeated double values = 4;  // every input at the start: initialize() reads the constants among them
+    bytes bound = 5;             // one byte per input: 0 for an optional input left unbound
+    uint64 owner_id = 6;         // the id of the node, relationship or term: a Random stream's seed
+    uint64 program_seed = 7;     // the program's optional seed
+}
+
+message ProgramInitializeRequest {
+    repeated ProgramInstance instances = 1;
+}
+
+message ProgramCall {
+    uint64 instance_id = 1;
+    repeated double values = 2;
+    bool first = 3;              // advance: the first of the run
+}
+
+message ProgramEvaluateRequest {
+    double time = 1;
+    repeated ProgramCall calls = 2;
+}
+
+message ProgramAdvanceRequest {
+    double time = 1;
+    double size = 2;
+    repeated ProgramCall calls = 3;
+}
+
+message ProgramJacobianRequest {
+    double time = 1;
+    repeated ProgramCall calls = 2;
+}
+
+message ProgramMemory {
+    uint64 instance_id = 1;
+    bytes memory = 2;
+}
+
+message ProgramSetMemoryRequest {
+    repeated ProgramMemory memories = 1;
+}
+
+message ProgramOutcome {
+    uint64 instance_id = 1;
+    repeated double values = 2;  // evaluate: the outputs; jacobian: the entries, outputs x inputs, row by output
+    uint32 status = 3;
+    string message = 4;
+    uint32 line = 5;             // the line of the program's source the failure came from, 0 when not known
+    bytes memory = 6;            // initialize and advance: the instance's memory after the call
+    double clock_period = 7;     // initialize: the clock's period, 0 for none
+}
+
+message ProgramResponse {
+    repeated ProgramOutcome outcomes = 1;
+}
+
 message ProviderFailure {
     uint64 sequence = 1;
     string code = 2;
@@ -126,6 +195,11 @@ message EngineToProvider {
         NodeEvaluateRequest node_evaluate = 6;
         CheckpointRequest checkpoint = 7;
         RestoreRequest restore = 8;
+        ProgramInitializeRequest program_initialize = 9;
+        ProgramEvaluateRequest program_evaluate = 10;
+        ProgramAdvanceRequest program_advance = 11;
+        ProgramSetMemoryRequest program_set_memory = 12;
+        ProgramJacobianRequest program_jacobian = 13;
     }
 }
 
@@ -139,5 +213,7 @@ message ProviderToEngine {
         NodeEvaluateResponse node_evaluate = 6;
         CheckpointResponse checkpoint = 7;
         RestoreResponse restore = 8;
+        // The answer to every version 2 request (a set-memory request is answered with no outcomes).
+        ProgramResponse program = 9;
     }
 }

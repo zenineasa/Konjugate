@@ -4,7 +4,7 @@ title: Program SDK version 2
 description: A second version of the C++ and Python program SDK in which evaluate() only computes outputs, memory is declared as named, typed fields that change only in advance() once per accepted step (or on a declared clock) and that the engine saves and restores itself, and ports are declared once with units and checked at load; so a program's purity follows from its shape, every program can take part in Runge-Kutta 4, Dormand-Prince and Rodas4 stages, checkpoints cannot forget a field, and typos fail at load by name. Also the further hazards of this kind found in today's SDK and the design's answer to each, how the engine calls programs under every method, automatic memory checkpoints, migration from version 1, which keeps working unchanged, documentation, backwards compatibility and staged delivery.
 tags: [proposals, engine, sdk, providers, programs, integrators, checkpoints, python, cpp]
 status: draft
-implementation: none
+implementation: partial
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->

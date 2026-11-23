@@ -12,5 +12,6 @@ contextBridge.exposeInMainWorld('windowControls', Object.freeze({
 contextBridge.exposeInMainWorld('providerEditorWindow', Object.freeze({
     onContent: (callback) => ipcRenderer.on('providerEditorContent', (_event, payload) => callback(payload)),
     validate: (source, kind) => ipcRenderer.invoke('providerEditorValidate', { source, kind }),
-    apply: (source) => ipcRenderer.invoke('providerEditorApply', { source })
+    apply: (source) => ipcRenderer.invoke('providerEditorApply', { source }),
+    check: (source, kind, inputs) => ipcRenderer.invoke('providerEditorCheck', { source, kind, inputs })
 }));

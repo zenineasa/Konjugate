@@ -28,6 +28,7 @@ import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
 import { dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
     rungeKutta4Python } from './integratorSources.mjs';
+import { programSourceVersion } from './providerTemplate.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -315,6 +316,9 @@ export function buildModel(sourceDocument, options = {}) {
         }
         if (disabledNodeIds.has(edge.source.nodeId) || disabledNodeIds.has(edge.target.nodeId)) continue;
         const programmable = edge.implementation != null;
+        if (programmable && Array.isArray(edge.implementation.outputs)) {
+            throw new Error(`The relationship "${edge.name}" is a program with several outputs, which code export cannot write yet -- export blocked.`);
+        }
         const outputRole = programmable ? edge.implementation.output.role : edge.equationModel.output.role;
         const outputStateId = programmable ? edge.implementation.output.stateId : edge.equationModel.output.stateId;
         const outputPlan = nodePlanById.get(stateOwnerNodeId.get(outputStateId));
@@ -683,6 +687,11 @@ export function collectProviders(model, kind) {
         }
         if (providerKind !== 'cpp' && providerKind !== 'python') {
             throw new Error(`The ${owner.entityLabel} has an unrecognized provider kind "${providerKind}".`);
+        }
+        // A program in the current program format (version 2) keeps its memory with the engine and is converted at its ports; code
+        // export does not write that yet, so it refuses rather than write a program that would run differently.
+        if (programSourceVersion(providerKind, owner.implementation.source) === 2) {
+            throw new Error(`The ${owner.entityLabel} is written in the current program format, which code export cannot write yet -- export blocked.`);
         }
         if (providerKind !== kind) {
             throw new Error(`The ${owner.entityLabel} is implemented in ${providerKind === 'cpp' ? 'C++' : 'Python'}, but export to ${kind === 'cpp' ? 'C++' : 'Python'} was requested -- export blocked. Provider source is never auto-translated between languages.`);

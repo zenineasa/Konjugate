@@ -115,8 +115,10 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
 // Under Rodas4, per state of the plan, the states its derivative reads at a stage (docs/proposals/integrators.md, Jacobians for
 // Rodas4): from the model's graph, every state an equation into it uses, and every state a pure program into it binds (a pure node
 // program: every state it binds, into each of its outputs). A held program and a stepped node are constants within the step and read
-// none. The Jacobian's pattern is built from these, so it is known exactly before the run.
-std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole);
+// none. The Jacobian's pattern is built from these, so it is known exactly before the run. A version 2 program whose output declares the
+// inputs it depends on (docs/proposals/programSdkV2.md, Jacobians for Rodas4) reads only the states bound to those, when `providers` is
+// given.
+std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole, const ProviderEvaluator* providers = nullptr);
 // Whether anything evaluated at stages may depend on the time within a step: an equation using the time or a parameter that follows a
 // stored schedule, or a pure program (which is given the time). Rodas4 then works out df/dt; a recorded intervention active in a step
 // is added by the caller.

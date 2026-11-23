@@ -106,3 +106,32 @@ test('a request the provider cannot take comes back as a failure the engine can 
     const broken = send({ kind: 'create', processKey: 'broken', source: 'def (:\n' });
     assert.equal(broken.ok, false, 'A source that does not even parse.');
 });
+
+test('a version 2 program is described, started, advanced and evaluated, its memory returned and restored', async () => {
+    const send = await bridged();
+    const created = send({ kind: 'create', processKey: 'py2:pid', source: await example('pidController.py') });
+    assert.equal(created.ok, true);
+    const description = JSON.parse(created.description);
+    assert.equal(description.name, 'PidController');
+    assert.equal(description.clockPeriod, 0.01);
+    assert.deepEqual(description.memory.map((field) => field.name), ['integral', 'previousError', 'held', 'noise']);
+    // Inputs in declaration order: measurement, setpoint, kp, ki, kd, maxPower, sensorNoise; every number quoted, as the engine writes it.
+    const values = ['290', '293.15', '50', '5', '1', '2000', '0.1'];
+    const started = send({ kind: 'programInitialize', processKey: 'py2:pid', instances: [{ instanceId: '3', owner: 'node Heater', startTime: '0', values, bound: ['1', '1', '1', '1', '1', '1', '1'], ownerId: '1', programSeed: '0' }] });
+    assert.equal(started.outcomes[0].status, 0);
+    assert.equal(started.outcomes[0].clockPeriod, 0.01);
+    const initial = started.outcomes[0].memoryBase64;
+    const advanced = send({ kind: 'programAdvance', processKey: 'py2:pid', time: '0', size: '0.01', calls: [{ instanceId: '3', values, first: '1' }] });
+    const memory = Buffer.from(advanced.outcomes[0].memoryBase64, 'base64');
+    assert.equal(memory.length, 40);
+    const held = memory.readDoubleLE(16);
+    assert.ok(held > 0 && held <= 2000, `The command is held in memory (${held} W).`);
+    assert.equal(memory.readBigUInt64LE(32), 2n, 'The noise stream drew twice.');
+    assert.deepEqual(send({ kind: 'programEvaluate', processKey: 'py2:pid', time: '0.005', calls: [{ instanceId: '3', values }] }).outcomes[0].outputs, [held]);
+    send({ kind: 'programSetMemory', processKey: 'py2:pid', memories: [{ instanceId: '3', memoryBase64: initial }] });
+    assert.deepEqual(send({ kind: 'programEvaluate', processKey: 'py2:pid', time: '0', calls: [{ instanceId: '3', values }] }).outcomes[0].outputs, [0],
+        'Restored to its starting memory, the command is 0 again.');
+    const refused = send({ kind: 'programEvaluate', processKey: 'py2:pid', time: '0', calls: [{ instanceId: '3', values: ['NaN', ...values.slice(1)] }] });
+    assert.equal(refused.outcomes[0].status, 0, 'A NaN input reaches the program; the engine names it, not the bridge.');
+    assert.deepEqual(send({ kind: 'shutdown', processKey: 'py2:pid' }), { ok: true });
+});

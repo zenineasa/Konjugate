@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { reconcileEquationBindings, timeBinding, validateEquationLatex } from './equationModel.mjs';
+import { programSourceVersion } from './providerTemplate.mjs';
 
 export const assistantProposalVersion = 1;
 const symbolPattern = /^[a-z][A-Za-z0-9]*$/;
@@ -244,7 +245,8 @@ export function applyAssistantProposal(projectDocument, proposal, options = {}) 
                     expression: '',
                     implementation: {
                         kind,
-                        providerApiVersion: 1,
+                        // The program SDK version the source is written against (a replayed input's is version 2).
+                        providerApiVersion: programSourceVersion(kind, source),
                         source,
                         bindings: [],
                         output: { key: 'output', stateId: output.value.id }

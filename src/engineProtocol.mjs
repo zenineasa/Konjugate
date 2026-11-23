@@ -213,7 +213,9 @@ export function encodeEngineCommand(sequence, command) {
             ...(command.providerStates ?? []).map((saved) => encodedMessageField(3, concatBytes([
                 encodedField(1, 0, encodeVarint(saved.nodeId)),
                 encodedField(2, 2, concatBytes([encodeVarint(saved.payload.length), saved.payload]))
-            ])))
+            ]))),
+            // Version 2 programs' memory, as a checkpoint keeps it (decodedProgramMemory's shape).
+            ...(command.programMemory ?? []).map((memory) => encodedMessageField(4, encodedProgramMemory(memory)))
         ]);
         payloadField = 10;
     } else if (command.type === 'retainCheckpointsFrom') {
@@ -341,6 +343,130 @@ export function decodeResultIndexPayload(buffer) {
     return index;
 }
 
+// A version 2 program's memory in a checkpoint (protocol ProgramMemory), as the JSON a startCheckpoint's programMemory takes:
+// { ownerId, ownerKind, layout, fields: [{ name, type, reals?, integers?, words? }] }, 64-bit integers and words as decimal strings so no
+// digit is lost (docs/proposals/programSdkV2.md, Automatic memory checkpoints).
+function readBigVarint(buffer, offset) {
+    let value = 0n;
+    let shift = 0n;
+    while (offset < buffer.length) {
+        const byte = buffer[offset++];
+        value |= BigInt(byte & 0x7f) << shift;
+        if (!(byte & 0x80)) return { value, offset };
+        shift += 7n;
+    }
+    throw new Error('Invalid Protobuf varint.');
+}
+
+function decodedProgramMemoryField(buffer) {
+    const field = { name: '', type: 0 };
+    const reals = [];
+    const integers = [];
+    const words = [];
+    let offset = 0;
+    while (offset < buffer.length) {
+        const key = readBigVarint(buffer, offset);
+        offset = key.offset;
+        const number = Number(key.value >> 3n);
+        const wireType = Number(key.value & 7n);
+        if (wireType === 0) {
+            const item = readBigVarint(buffer, offset);
+            offset = item.offset;
+            if (number === 2) field.type = Number(item.value);
+            else if (number === 4) integers.push(String((item.value >> 1n) ^ -(item.value & 1n)));
+        } else if (wireType === 1) {
+            const bytes = buffer.subarray(offset, offset + 8);
+            offset += 8;
+            const view = new DataView(bytes.buffer, bytes.byteOffset, 8);
+            if (number === 3) reals.push(view.getFloat64(0, true));
+            else if (number === 5) words.push(String(view.getBigUint64(0, true)));
+        } else if (wireType === 2) {
+            const length = readBigVarint(buffer, offset);
+            offset = length.offset;
+            const bytes = buffer.subarray(offset, offset + Number(length.value));
+            offset += Number(length.value);
+            if (number === 1) field.name = decodeUtf8(bytes);
+            else if (number === 3) reals.push(...packedDoubles(bytes));
+            else if (number === 5) {
+                const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.length);
+                for (let at = 0; at < bytes.length; at += 8) words.push(String(view.getBigUint64(at, true)));
+            } else if (number === 4) {
+                for (let at = 0; at < bytes.length;) {
+                    const item = readBigVarint(bytes, at);
+                    at = item.offset;
+                    integers.push(String((item.value >> 1n) ^ -(item.value & 1n)));
+                }
+            }
+        } else if (wireType === 5) {
+            offset += 4;
+        } else {
+            throw new Error(`Unsupported Protobuf wire type ${wireType}.`);
+        }
+    }
+    if (reals.length) field.reals = reals;
+    if (integers.length) field.integers = integers;
+    if (words.length) field.words = words;
+    return field;
+}
+
+function encodeBigVarint(value) {
+    const bytes = [];
+    let rest = BigInt.asUintN(64, BigInt(value));
+    do {
+        const byte = Number(rest & 0x7fn);
+        rest >>= 7n;
+        bytes.push(byte | (rest ? 0x80 : 0));
+    } while (rest);
+    return new Uint8Array(bytes);
+}
+
+function encodedFixed64(value) {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setBigUint64(0, BigInt.asUintN(64, BigInt(value)), true);
+    return bytes;
+}
+
+// decodedProgramMemory's shape back into protocol ProgramMemory, for a session's restoreState.
+export function encodedProgramMemory(memory) {
+    const fieldBytes = (field) => {
+        const reals = field.reals ?? [];
+        const realBytes = new Uint8Array(8 * reals.length);
+        reals.forEach((value, index) => writeDoubleLE(realBytes, 8 * index, Number(value)));
+        const integers = concatBytes((field.integers ?? []).map((value) => {
+            const big = BigInt(value);
+            return encodeBigVarint(big < 0n ? (-big << 1n) - 1n : big << 1n);
+        }));
+        const words = concatBytes((field.words ?? []).map((value) => encodedFixed64(value)));
+        const name = new TextEncoder().encode(field.name ?? '');
+        return concatBytes([
+            encodedField(1, 2, concatBytes([encodeVarint(name.length), name])),
+            ...(field.type ? [encodedField(2, 0, encodeVarint(field.type))] : []),
+            ...(reals.length ? [encodedField(3, 2, concatBytes([encodeVarint(realBytes.length), realBytes]))] : []),
+            ...(integers.length ? [encodedField(4, 2, concatBytes([encodeVarint(integers.length), integers]))] : []),
+            ...(words.length ? [encodedField(5, 2, concatBytes([encodeVarint(words.length), words]))] : [])
+        ]);
+    };
+    return concatBytes([
+        encodedField(1, 0, encodeVarint(Number(memory.ownerId))),
+        ...(memory.ownerKind ? [encodedField(2, 0, encodeVarint(memory.ownerKind))] : []),
+        ...(memory.termIndex ? [encodedField(3, 0, encodeVarint(memory.termIndex))] : []),
+        encodedField(4, 1, encodedFixed64(memory.layout ?? '0')),
+        ...(memory.fields ?? []).map((field) => encodedMessageField(5, fieldBytes(field)))
+    ]);
+}
+
+export function decodedProgramMemory(buffer) {
+    const memory = { ownerId: 0, ownerKind: 0, layout: '0', fields: [] };
+    for (const item of fields(buffer)) {
+        if (item.number === 1 && item.wireType === 0) memory.ownerId = item.value;
+        else if (item.number === 2 && item.wireType === 0) memory.ownerKind = item.value;
+        else if (item.number === 3 && item.wireType === 0) memory.termIndex = item.value;
+        else if (item.number === 4 && item.wireType === 1) memory.layout = String(new DataView(item.value.buffer, item.value.byteOffset, 8).getBigUint64(0, true));
+        else if (item.number === 5 && item.wireType === 2) memory.fields.push(decodedProgramMemoryField(item.value));
+    }
+    return memory;
+}
+
 export function decodeResultHeaderPayload(buffer) {
     const header = { resultVersion: 0, metadata: null, stateIds: [], checkpoints: [] };
     for (const field of fields(buffer)) {
@@ -371,6 +497,9 @@ export function decodeResultHeaderPayload(buffer) {
                         else if (providerItem.number === 2 && providerItem.wireType === 2) payload = encodeBase64(providerItem.value);
                     }
                     checkpoint.providerStates.push({ nodeId, payload });
+                } else if (item.number === 8 && item.wireType === 2) {
+                    // A version 2 program's memory, shaped as startCheckpoint.programMemory takes it, so it goes back verbatim.
+                    (checkpoint.programMemory ??= []).push(decodedProgramMemory(item.value));
                 }
             }
             header.checkpoints.push(checkpoint);
@@ -458,6 +587,9 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
                         else if (providerItem.number === 2 && providerItem.wireType === 2) payload = encodeBase64(providerItem.value);
                     }
                     checkpoint.providerStates.push({ nodeId, payload });
+                } else if (item.number === 8 && item.wireType === 2) {
+                    // A version 2 program's memory, shaped as startCheckpoint.programMemory takes it, so it goes back verbatim.
+                    (checkpoint.programMemory ??= []).push(decodedProgramMemory(item.value));
                 }
             }
             checkpoints.push(checkpoint);
@@ -546,7 +678,8 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
                 time: checkpoint.time,
                 solver: checkpoint.solver,
                 states: materializeStates(checkpoint.values),
-                providerStates: checkpoint.providerStates
+                providerStates: checkpoint.providerStates,
+                ...(checkpoint.programMemory ? { programMemory: checkpoint.programMemory } : {})
             };
         })
     };
@@ -619,6 +752,7 @@ function decodedSessionReply(buffer) {
             reply.providerStates.push(saved);
         } else if (item.number === 7 && item.wireType === 0) reply.computeNanoseconds = item.value;
         else if (item.number === 8 && item.wireType === 0) reply.checkpointsTaken = item.value;
+        else if (item.number === 9 && item.wireType === 2) (reply.programMemory ??= []).push(decodedProgramMemory(item.value));
     }
     return reply;
 }

@@ -103,11 +103,10 @@ ${readLines}
 }
 
 /**
- * Generates a starter provider implementation from the relationship's currently declared
- * bindings and output key, so authoring a C++/Python relationship begins from a compiling
- * skeleton that already names every value the provider can read from and write to.
+ * The older program format's starter relationship (version 1 of the SDK, konjugate/relationshipProvider.hpp and konjugate): kept for
+ * what still needs one (tests of held version 1 programs); new programs start from defaultProviderSource, version 2.
  */
-export function defaultProviderSource(kind, bindings = [], outputKey = '', title = '') {
+export function olderProviderSource(kind, bindings = [], outputKey = '', title = '') {
     const inputKeys = sanitizedKeys(bindings);
     const trimmedOutputKey = outputKey?.trim() ?? '';
     return kind === 'python'
@@ -148,13 +147,15 @@ export function replayProviderSource(columnName, pairs, title) {
     if (!Array.isArray(pairs) || pairs.length < 2) {
         throw new Error(`replayProviderSource needs at least 2 recorded samples for "${columnName}", got ${pairs?.length ?? 0}.`);
     }
-    const { id, name, className } = providerIdentity(title || columnName);
+    const { name, className } = providerIdentity(title || columnName);
     const times = pairs.map((pair) => cppDoubleLiteral(pair.time)).join(', ');
     const values = pairs.map((pair) => cppDoubleLiteral(pair.value)).join(', ');
-    return `#include <konjugate/relationshipProvider.hpp>
+    return `#include <konjugate/sdk/v2/program.hpp>
 
 #include <cstddef>
 #include <memory>
+
+namespace k = konjugate::sdk::v2;
 
 namespace {
 
@@ -163,57 +164,47 @@ constexpr double kTimes[] = { ${times} };
 constexpr double kValues[] = { ${values} };
 constexpr std::size_t kSampleCount = sizeof(kTimes) / sizeof(kTimes[0]);
 
-class ${className} final : public konjugate::sdk::v1::RelationshipProvider {
+// ${name}: the recorded values, linearly interpolated, held past either end. A function of time alone, so it takes every stage of every
+// method.
+class ${className} final : public k::Relationship {
 public:
-    konjugate::sdk::v1::RelationshipDescription describe() const override {
-        return {
-            "${id}",
-            "${name}",
-            {},
-            konjugate::sdk::v1::ScalarPort{"output", "output", ""}
-        };
-    }
+    k::Output output{this, "output"};
 
-    void evaluate(const konjugate::sdk::v1::EvaluationContext& context,
-                  konjugate::sdk::v1::OutputCollector& output) override {
-        if (kSampleCount < 2) { output.addGradient(kValues[0]); return; }
+    double evaluate(double t, const k::Inputs&) const override {
+        if (kSampleCount < 2) return kValues[0];
         const double rowTimeStep = kTimes[1] - kTimes[0];
         // position is dimensionless (row-index units), so a fixed small nudge here is safe
         // regardless of the CSV's own absolute time scale or sampling interval. Needed because
-        // the caller's own accumulated simulationTime can drift a hair off an exact recorded
+        // the caller's own accumulated simulation time can drift a hair off an exact recorded
         // sample time (e.g. summing 0.2 five times does not land on exactly 1.0 in double
         // precision) -- both range boundaries below and the interior interval lookup all derive
         // from this one nudged value, so "just before the end" and "just past an interior
         // boundary" get the same tolerant treatment rather than two independently-tuned checks
         // drifting out of sync with each other. See docs/proposals/causalInferenceInputReplay.md.
-        const double position = (context.simulationTime - kTimes[0]) / rowTimeStep + 1e-6;
+        const double position = (t - kTimes[0]) / rowTimeStep + 1e-6;
         // Before the first recorded sample, or past the last one (any run longer than the CSV's
         // own recorded span will reach this): hold at the nearest known point rather than
         // extrapolating.
-        if (position < 0) { output.addGradient(kValues[0]); return; }
-        if (position >= kSampleCount - 1) { output.addGradient(kValues[kSampleCount - 1]); return; }
+        if (position < 0) return kValues[0];
+        if (position >= kSampleCount - 1) return kValues[kSampleCount - 1];
         std::size_t index = static_cast<std::size_t>(position);
         if (index >= kSampleCount - 1) index = kSampleCount - 2;
         const double fraction = position - static_cast<double>(index);
-        output.addGradient(kValues[index] + fraction * (kValues[index + 1] - kValues[index]));
+        return kValues[index] + fraction * (kValues[index + 1] - kValues[index]);
     }
 };
 
 }
 
-std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProvider() {
-    return std::make_unique<${className}>();
-}
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<${className}>(); }
 `;
 }
 
 /**
- * A starter computational-node provider (a node's own program): it reads every declared input by its key and adds
- * to every declared output, and keeps no state of its own, so checkpoint() is empty. A program that keeps state (a
- * controller's integral, say) saves it in checkpoint() and reads it back in restore(), so forks and resumed runs
- * carry on exactly.
+ * The older program format's starter node program (version 1): it reads every declared input by its key and adds to every declared
+ * output, and keeps no state of its own, so checkpoint() is empty. New node programs start from defaultNodeProviderSource, version 2.
  */
-export function defaultNodeProviderSource(kind, inputs = [], outputs = [], title = '') {
+export function olderNodeProviderSource(kind, inputs = [], outputs = [], title = '') {
     const inputKeys = sanitizedKeys(inputs);
     const outputKeys = sanitizedKeys(outputs);
     const { id, name, className } = providerIdentity(title || 'Node');
@@ -288,5 +279,272 @@ ${outputKeys.map((key) => `        outputs.addGradient("${key}", 0.0);`).join('\
 std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
     return std::make_unique<${className}>();
 }
+`;
+}
+
+// ---- Version 2 of the program SDK (konjugate/sdk/v2/program.hpp, konjugate.v2; docs/programs.md) -------------------------------------
+
+// A program's SDK version as its source says: 2 when it includes konjugate/sdk/v2 or imports from konjugate.v2, 1 otherwise. The app
+// writes this into the file's providerApiVersion when the program is saved (docs/proposals/programSdkV2.md, Versioning).
+export function programSourceVersion(kind, source) {
+    if (typeof source !== 'string') return 1;
+    if (kind === 'cpp') return source.includes('konjugate/sdk/v2/') ? 2 : 1;
+    if (kind === 'python') return /^\s*(from\s+konjugate\.v2(\.\w+)*\s+import|import\s+konjugate\.v2\b)/m.test(source) ? 2 : 1;
+    return 1;
+}
+
+// An implementation with its providerApiVersion as its source says, for a program written in C++ or Python; anything else as it is. A
+// version 1 program's file is left byte for byte as it was (an absent version stays absent).
+export function withProgramVersion(implementation) {
+    if (!implementation || (implementation.kind !== 'cpp' && implementation.kind !== 'python') || typeof implementation.source !== 'string') return implementation;
+    const version = programSourceVersion(implementation.kind, implementation.source);
+    if (implementation.providerApiVersion === version || (implementation.providerApiVersion === undefined && version === 1)) return implementation;
+    return { ...implementation, providerApiVersion: version };
+}
+
+// A port key (camelCase, as the file binds it) as a Python attribute (snake_case): konjugate.v2 binds `source_temperature` as
+// `sourceTemperature`, so the two always agree.
+export function pythonAttribute(key) {
+    return key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+}
+
+const cppReserved = new Set(['alignas', 'alignof', 'and', 'asm', 'auto', 'bool', 'break', 'case', 'catch', 'char', 'class', 'const', 'constexpr', 'continue',
+    'decltype', 'default', 'delete', 'do', 'double', 'else', 'enum', 'explicit', 'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline',
+    'int', 'long', 'mutable', 'namespace', 'new', 'noexcept', 'not', 'nullptr', 'operator', 'or', 'private', 'protected', 'public', 'register', 'return',
+    'short', 'signed', 'sizeof', 'static', 'struct', 'switch', 'template', 'this', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union',
+    'unsigned', 'using', 'virtual', 'void', 'volatile', 'while', 'evaluate', 'advance', 'initialize', 'shutdown', 'jacobian', 'registry']);
+const pythonReserved = new Set(['and', 'as', 'assert', 'async', 'await', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else', 'except', 'finally',
+    'for', 'from', 'global', 'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'try', 'while', 'with', 'yield',
+    'evaluate', 'advance', 'initialize', 'shutdown', 'jacobian', 'outputs']);
+
+// A port's member name in C++ (its key, or the key with an underscore where the key is a word the language or the SDK keeps).
+export function cppMember(key) {
+    return cppReserved.has(key) ? `${key}_` : key;
+}
+
+// A port's attribute in Python, with name= when its snake_case would not give the key back.
+function pythonPort(key, declaration) {
+    const attribute = pythonAttribute(key);
+    if (pythonReserved.has(attribute)) return { attribute: `${attribute}_`, declaration: declaration.replace(/\)$/, `${declaration.endsWith('()') ? '' : ', '}name="${key}")`) };
+    return { attribute, declaration };
+}
+
+const commentLines = {
+    cpp: [
+        '        // evaluate() changes nothing: it may be called at any stage of a step, any number of times. What the program remembers',
+        '        // between steps is declared memory (k::Memory), changed only in advance(); a quantity that changes continuously is better',
+        '        // a node\'s state that an output drives, so the method integrates it to its own order.'
+    ],
+    python: [
+        '        # evaluate() changes nothing: it may be called at any stage of a step, any number of times. What the program remembers',
+        '        # between steps is declared memory (Memory), changed only in advance(); a quantity that changes continuously is better',
+        '        # a node\'s state that an output drives, so the method integrates it to its own order.'
+    ]
+};
+
+function relationshipTemplateV2(kind, inputKeys, outputKey, title) {
+    const { className, name } = providerIdentity(title);
+    const output = outputKey || 'output';
+    if (kind === 'python') {
+        const ports = inputKeys.map((key) => pythonPort(key, 'Input()'));
+        const out = pythonPort(output, 'Output()');
+        return `from konjugate.v2 import Input, Output, Relationship
+
+
+class ${className}(Relationship):
+    """${name}."""
+
+    # Each input, bound to a state, a parameter or the time. Give a unit, Input("K"), to have it checked against what it is bound to
+    # when the run starts, and converted where it can be.
+${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # No bindings declared yet: add one, and it appears here.'}
+    ${out.attribute} = ${out.declaration}
+
+    def evaluate(self, t, x):
+        # The output's value from the inputs${ports.length ? `: ${ports.map((port) => `x.${port.attribute}`).join(', ')}` : ''}.
+${commentLines.python.join('\n')}
+        return 0.0
+`;
+    }
+    const members = inputKeys.map((key) => `    k::Input ${cppMember(key)}{this, "${key}"};`);
+    return `#include <konjugate/sdk/v2/program.hpp>
+
+#include <memory>
+
+namespace k = konjugate::sdk::v2;
+
+namespace {
+
+// ${name}.
+class ${className} final : public k::Relationship {
+public:
+    // Each input, bound to a state, a parameter or the time; the quoted key is what the project file binds. Give a unit,
+    // {this, "key", "K"}, to have it checked against what it is bound to when the run starts, and converted where it can be.
+${members.length ? members.join('\n') : '    // No bindings declared yet: add one, and it appears here.'}
+    k::Output ${cppMember(output)}{this, "${output}"};
+
+    double evaluate(double t, const k::Inputs& x) const override {
+        // The output's value from the inputs${inputKeys.length ? `: ${inputKeys.map((key) => `x[${cppMember(key)}]`).join(', ')}` : ''}.
+${commentLines.cpp.join('\n')}
+        static_cast<void>(t);
+        static_cast<void>(x);
+        return 0.0;
+    }
+};
+
+}
+
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<${className}>(); }
+`;
+}
+
+function nodeTemplateV2(kind, inputKeys, outputKeys, title) {
+    const { className, name } = providerIdentity(title || 'Node');
+    if (kind === 'python') {
+        const ports = inputKeys.map((key) => pythonPort(key, 'Input()'));
+        const outs = outputKeys.map((key) => pythonPort(key, 'Output()'));
+        return `from konjugate.v2 import Input, Node, Output
+
+
+class ${className}(Node):
+    """${name}."""
+
+    # Each input, bound to one of this node's states, another node's or a shared parameter. Give a unit, Input("K"), to have it checked
+    # against what it is bound to when the run starts, and converted where it can be.
+${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # None declared yet.'}
+    # Each output: a rate into a Rate state, or the value of an Update state.
+${outs.length ? outs.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # None declared yet.'}
+
+    def evaluate(self, t, x):
+        # Every output's value from the inputs${ports.length ? `: ${ports.map((port) => `x.${port.attribute}`).join(', ')}` : ''}.
+${commentLines.python.join('\n')}
+        return ${outs.length ? `self.outputs(${outs.map((port) => `${port.attribute}=0.0`).join(', ')})` : '()'}
+`;
+    }
+    return `#include <konjugate/sdk/v2/program.hpp>
+
+#include <memory>
+
+namespace k = konjugate::sdk::v2;
+
+namespace {
+
+// ${name}.
+class ${className} final : public k::Node {
+public:
+    // Each input, bound to one of this node's states, another node's or a shared parameter; the quoted key is what the project
+    // file binds. Give a unit, {this, "key", "K"}, to have it checked when the run starts, and converted where it can be.
+${inputKeys.length ? inputKeys.map((key) => `    k::Input ${cppMember(key)}{this, "${key}"};`).join('\n') : '    // None declared yet.'}
+    // Each output: a rate into a Rate state, or the value of an Update state.
+${outputKeys.length ? outputKeys.map((key) => `    k::Output ${cppMember(key)}{this, "${key}"};`).join('\n') : '    // None declared yet.'}
+
+    void evaluate(double t, const k::Inputs& x, k::Outputs& y) const override {
+        // Every output's value from the inputs${inputKeys.length ? `: ${inputKeys.map((key) => `x[${cppMember(key)}]`).join(', ')}` : ''}.
+${commentLines.cpp.join('\n')}
+        static_cast<void>(t);
+        static_cast<void>(x);
+${outputKeys.length ? outputKeys.map((key) => `        y[${cppMember(key)}] = 0.0;`).join('\n') : '        static_cast<void>(y);'}
+    }
+};
+
+}
+
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<${className}>(); }
+`;
+}
+
+/**
+ * A starter relationship program (version 2 of the program SDK) from the relationship's bindings and output key, so writing a C++ or
+ * Python relationship begins from a compiling program that already declares every value it is bound to and its output.
+ */
+export function defaultProviderSource(kind, bindings = [], outputKey = '', title = '', outputs = null) {
+    // A relationship's program with several outputs (implementation.outputs) computes them together, as a node program does.
+    if (Array.isArray(outputs) && outputs.length > 1) return nodeTemplateV2(kind, sanitizedKeys(bindings), sanitizedKeys(outputs), title);
+    return relationshipTemplateV2(kind, sanitizedKeys(bindings), outputKey?.trim() ?? '', title);
+}
+
+/**
+ * A starter node program (version 2): every bound input and output declared, every output set to 0. It keeps no memory; one that
+ * must (a digital controller's integral) declares it, and the engine saves and restores it.
+ */
+export function defaultNodeProviderSource(kind, inputs = [], outputs = [], title = '') {
+    return nodeTemplateV2(kind, sanitizedKeys(inputs), sanitizedKeys(outputs), title);
+}
+
+/**
+ * "Controller (sampled)": a node program sampled on a clock, with memory and a seeded random stream, as a digital controller is: its
+ * output held between samples and set in advance() at every tick. The period is a whole number of the run's time steps.
+ */
+export function sampledControllerSource(kind, inputs = [], outputs = [], title = 'Controller', period = 0.01) {
+    const inputKeys = sanitizedKeys(inputs);
+    const outputKeys = sanitizedKeys(outputs);
+    const { className, name } = providerIdentity(title || 'Controller');
+    const first = inputKeys[0] ?? 'measurement';
+    const declaredInputs = inputKeys.length ? inputKeys : [first];
+    const declaredOutputs = outputKeys.length ? outputKeys : ['command'];
+    if (kind === 'python') {
+        const ports = declaredInputs.map((key) => pythonPort(key, 'Input()'));
+        const outs = declaredOutputs.map((key) => pythonPort(key, 'Output()'));
+        return `from konjugate.v2 import Clock, Input, Memory, Node, Output, Random
+
+
+class ${className}(Node):
+    """${name}: sampled every ${period} s, its outputs held between samples, as a digital controller's are."""
+
+${ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n')}
+${outs.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n')}
+
+    clock = Clock(${period})                 # advance() at the start and every ${period} s: a whole number of the run's time steps
+
+    # What the controller remembers between samples: changed only in advance(), saved and restored by the engine.
+${outs.map((port) => `    held_${port.attribute} = Memory(0.0)`).join('\n')}
+    noise = Random()                      # a seeded stream, for a noisy sensor: m.noise.normal() in advance()
+
+    def evaluate(self, t, x):
+        # Between samples each output holds what the last sample set.
+        return self.outputs(${outs.map((port) => `${port.attribute}=x.held_${port.attribute}`).join(', ')})
+
+    def advance(self, step, x, m):
+        # At each sample: read the inputs (x.${ports[0].attribute}), work out the commands and hold them. step.first is the run's
+        # first sample; step.size is the clock's period.
+${outs.map((port) => `        m.held_${port.attribute} = 0.0`).join('\n')}
+`;
+    }
+    return `#include <konjugate/sdk/v2/program.hpp>
+
+#include <memory>
+
+namespace k = konjugate::sdk::v2;
+
+namespace {
+
+// ${name}: sampled every ${period} s, its outputs held between samples, as a digital controller's are.
+class ${className} final : public k::Node {
+public:
+${declaredInputs.map((key) => `    k::Input ${cppMember(key)}{this, "${key}"};`).join('\n')}
+${declaredOutputs.map((key) => `    k::Output ${cppMember(key)}{this, "${key}"};`).join('\n')}
+
+    k::Clock clock{this, ${period}};     // advance() at the start and every ${period} s: a whole number of the run's time steps
+
+    // What the controller remembers between samples: changed only in advance(), saved and restored by the engine.
+${declaredOutputs.map((key) => `    k::Memory<double> held${key.charAt(0).toUpperCase()}${key.slice(1)}{this, "held${key.charAt(0).toUpperCase()}${key.slice(1)}", 0.0};`).join('\n')}
+    k::Memory<k::Random> noise{this, "noise"};   // a seeded stream, for a noisy sensor: m[noise].normal() in advance()
+
+    void evaluate(double, const k::Inputs& x, k::Outputs& y) const override {
+        // Between samples each output holds what the last sample set.
+${declaredOutputs.map((key) => `        y[${cppMember(key)}] = x[held${key.charAt(0).toUpperCase()}${key.slice(1)}];`).join('\n')}
+    }
+
+    void advance(const k::Step& step, const k::Inputs& x, k::MemoryWriter& m) const override {
+        // At each sample: read the inputs (x[${cppMember(declaredInputs[0])}]), work out the commands and hold them. step.first is the
+        // run's first sample; step.size is the clock's period.
+        static_cast<void>(step);
+        static_cast<void>(x);
+${declaredOutputs.map((key) => `        m[held${key.charAt(0).toUpperCase()}${key.slice(1)}] = 0.0;`).join('\n')}
+    }
+};
+
+}
+
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<${className}>(); }
 `;
 }

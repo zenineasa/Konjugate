@@ -10,6 +10,7 @@
 #include "parameterFittingReport.hpp"
 #include "partitionPlan.hpp"
 #include "projectContainer.hpp"
+#include "providerRuntime.hpp"
 #include "simulationRunner.hpp"
 #include "validationReport.hpp"
 #include "engineProtocol.pb.h"
@@ -295,6 +296,32 @@ int main(int argc, char** argv) {
             runConfiguration.get<double>("targetTime"), runConfiguration.get<double>("globalTimeStep"),
             runConfiguration.get<double>("outputInterval"), outputOption, verifyRollback);
         std::_Exit(0);
+    }
+    // Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run through the transport a run
+    // uses. --configuration holds { kind, providers, inputs, time }; the answer is written to --report as JSON.
+    if (argc >= 3 && std::string(argv[1]) == "checkProgram") {
+        const auto configurationOption = optionPath(argc, argv, "--configuration").string();
+        const auto reportOption = optionPath(argc, argv, "--report").string();
+        if (configurationOption.empty() || reportOption.empty()) {
+            std::cerr << "checkProgram requires --configuration and --report.\n";
+            std::_Exit(64);
+        }
+        boost::property_tree::ptree check;
+        boost::property_tree::read_json(configurationOption, check);
+        konjugate::ProviderConfiguration providerConfig;
+        providerConfig.cppCompiler = check.get<std::string>("providers.cpp.compiler", "");
+        providerConfig.cppSdkPath = check.get<std::string>("providers.cpp.sdkPath", "");
+        providerConfig.pythonInterpreter = check.get<std::string>("providers.python.interpreter", "");
+        providerConfig.pythonSdkPath = check.get<std::string>("providers.python.sdkPath", "");
+        providerConfig.buildDirectory = check.get<std::string>("providers.buildDirectory", "");
+        std::unordered_map<std::string, double> inputs;
+        if (const auto given = check.get_child_optional("inputs")) for (const auto& [key, value] : *given) inputs[key] = value.get_value<double>();
+        const auto answer = konjugate::checkProgram(check.get<std::string>("kind", "python"), readTextFile(argv[2]), providerConfig, inputs,
+            check.get<double>("time", 0));
+        std::ofstream reportStream(reportOption, std::ios::trunc);
+        reportStream << answer << '\n';
+        reportStream.close();
+        std::_Exit(reportStream ? 0 : 1);
     }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"

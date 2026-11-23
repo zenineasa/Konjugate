@@ -33,8 +33,9 @@ export class ProgramSourceSection {
                 <button${attributes('open', 'templateButton')} type="button">Open code editor</button>
                 <button${attributes('reset', 'templateButton')} type="button" hidden>Reset template</button>
             </div></div>
-            <p class="builderHint">Implement <code>describe()</code>/<code>evaluate()</code> using the Konjugate provider SDK. Source is stored with the project and compiled or launched locally.</p>
-            <textarea${attributes('source', 'providerSource')} rows="${Number(rows)}" spellcheck="false" placeholder="#include &lt;konjugate/relationshipProvider.hpp&gt;…"></textarea>`;
+            <p class="builderHint">Declare the program's inputs and output and write <code>evaluate()</code>, which changes nothing; what it remembers between steps is declared memory, changed in <code>advance()</code>. The source is stored with the project and compiled or run on this computer.</p>
+            <p class="builderHint programFormatNotice" hidden><span>Older program format: held under Runge–Kutta 4 and the adaptive methods.</span> <button class="programConvertLink" type="button">Convert to version 2 ›</button></p>
+            <textarea${attributes('source', 'providerSource')} rows="${Number(rows)}" spellcheck="false" placeholder="#include &lt;konjugate/sdk/v2/program.hpp&gt;…"></textarea>`;
         container.innerHTML = `
             ${names.code ? `<div${id('code')}>${code}</div>` : code}
             ${names.pluginFields ? `<div${id('pluginFields')} hidden>
@@ -44,7 +45,9 @@ export class ProgramSourceSection {
             <h3>Bindings <button${id('addBinding')} type="button">＋</button></h3>
             <p class="builderHint">${escapeHtml(bindingHint)}</p>
             <div${attributes('bindings', bindingsClass)}></div>
-            <label class="editorField"><span>Output key</span><input${id('outputKey')} autocomplete="off" placeholder="${escapeHtml(outputPlaceholder)}"></label>`;
+            <label class="editorField programSingleOutput"><span>Output key</span><input${id('outputKey')} autocomplete="off" placeholder="${escapeHtml(outputPlaceholder)}"></label>
+            <div class="programOutputRows" hidden></div>
+            <button class="addProgramOutput" type="button" hidden title="A program in the current format can give this relationship several outputs, each reaching a state of either end">＋ Another output</button>`;
         const find = (name) => {
             if (ids[name]) return container.querySelector(`#${CSS.escape(ids[name])}`);
             return classes[name] ? container.querySelector(`.${CSS.escape(classes[name])}`) : null;
@@ -59,8 +62,27 @@ export class ProgramSourceSection {
         this.addBindingButton = find('addBinding');
         this.bindings = find('bindings');
         this.outputKeyField = find('outputKey');
+        this.formatNotice = container.querySelector('.programFormatNotice');
+        // Several outputs (a relationship's program in the current format): a row each, and the way to add one; the owner draws them.
+        this.singleOutput = container.querySelector('.programSingleOutput');
+        this.outputRows = container.querySelector('.programOutputRows');
+        this.addOutputButton = container.querySelector('.addProgramOutput');
+        this.convertLink = container.querySelector('.programConvertLink');
+        this.conversionRequested = false;
+        // "Convert to version 2 ›" opens the code editor on the conversion, through the owner's Open code editor.
+        this.convertLink.addEventListener('click', () => {
+            this.conversionRequested = true;
+            this.openButton.click();
+        });
         // Typing a source in offers to put the template back.
         this.sourceField.addEventListener('input', () => this.refreshReset());
+    }
+
+    // Whether Open code editor was pressed by "Convert to version 2 ›" (asked once: the request is used up).
+    takeConversionRequest() {
+        const requested = this.conversionRequested;
+        this.conversionRequested = false;
+        return requested;
     }
 
     get source() { return this.sourceField.value; }
@@ -76,6 +98,8 @@ export class ProgramSourceSection {
 
     refreshReset() {
         this.resetButton.hidden = !this.sourceField.value.trim();
+        // A program in the older format (version 1 of the SDK) says so, with the way out beside it.
+        this.formatNotice.hidden = !/#include\s*<konjugate\/relationshipProvider\.hpp>|^\s*from\s+konjugate\s+import\b|^\s*import\s+konjugate\s*$/m.test(this.sourceField.value);
     }
 
     // A program's own source, or an installed plugin's provider in its place.

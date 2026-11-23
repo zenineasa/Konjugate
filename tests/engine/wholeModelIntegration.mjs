@@ -27,7 +27,7 @@ import { spawn } from 'node:child_process';
 import { decodeProjectFile, encodeProjectFile } from '../../src/projectFile.mjs';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
 import { decodeValidationReport } from '../../src/reportProtocol.mjs';
-import { defaultNodeProviderSource, defaultProviderSource } from '../../src/providerTemplate.mjs';
+import { olderNodeProviderSource, olderProviderSource } from '../../src/providerTemplate.mjs';
 
 const executable = process.argv[2];
 if (!executable) throw new Error('Pass the konjugateEngine executable path.');
@@ -201,14 +201,14 @@ std::unique_ptr<konjugate::sdk::v1::RelationshipProvider> createRelationshipProv
             'Holding a program must not change the states it does not reach.');
     }
 
-    // The starter templates are version 1 programs: a relationship's is held and a node's stepped on its own, in both languages.
+    // The older program format's starter templates (version 1): a relationship's is held and a node's stepped on its own, in both languages.
     for (const kind of ['python', 'cpp']) {
-        const templated = decay({ kind, source: defaultProviderSource(kind, [{ key: 'y' }], 'rate', 'Feed') });
+        const templated = decay({ kind, source: olderProviderSource(kind, [{ key: 'y' }], 'rate', 'Feed') });
         templated.nodes.push({
             id: 3, name: 'Programmed', position: [4, 0, 0],
             states: [{ id: 41, name: 'Level', symbol: 'level', initialValue: 1, unit: '' }],
             implementation: {
-                kind, providerApiVersion: 1, source: defaultNodeProviderSource(kind, [{ key: 'level' }], [{ key: 'levelRate' }], 'Programmed'),
+                kind, providerApiVersion: 1, source: olderNodeProviderSource(kind, [{ key: 'level' }], [{ key: 'levelRate' }], 'Programmed'),
                 bindings: [{ key: 'level', kind: 'state', stateId: 41 }], outputs: [{ key: 'levelRate', stateId: 41 }]
             },
             sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#2f6970' }

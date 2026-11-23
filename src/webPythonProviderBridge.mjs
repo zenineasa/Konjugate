@@ -15,7 +15,8 @@
 // webEngineWorker.mjs) and the provider editor's "Validate" button
 // (webShims/providerEditor.mjs), so Pyodide itself only ever loads once per Worker/page.
 
-const sdkFiles = ['__init__.py', '__main__.py', '_webBridge.py'];
+// The SDK as Pyodide needs it: version 1's package, and version 2's (konjugate.v2) beside it.
+const sdkFiles = ['__init__.py', '__main__.py', '_webBridge.py', 'v2/__init__.py', 'v2/_host.py', 'v2/testing.py', 'v2/check.py'];
 
 // Where Pyodide and the provider SDK come from: beside this module in the web shell, which scripts/buildWebShell.mjs assembles with
 // both. Replaceable before Pyodide is first loaded (setPythonProviderSources), so a test can run the same bridge on the Pyodide in
@@ -41,7 +42,7 @@ function ensurePyodideLoaded() {
         pyodidePromise = (async () => {
             const { loadPyodide } = await sources.importPyodide();
             const pyodide = await loadPyodide({ indexURL: sources.indexURL });
-            pyodide.FS.mkdirTree('/konjugateSdk/konjugate');
+            pyodide.FS.mkdirTree('/konjugateSdk/konjugate/v2');
             pyodide.FS.mkdirTree('/konjugateProviders');
             for (const fileName of sdkFiles) pyodide.FS.writeFile(`/konjugateSdk/konjugate/${fileName}`, await sources.readSdkFile(fileName));
             pyodide.runPython('import sys\nif "/konjugateSdk" not in sys.path: sys.path.insert(0, "/konjugateSdk")');
@@ -105,7 +106,8 @@ export async function installPythonProviderBridge(Module) {
                 pyodide.FS.writeFile(scratchPath, request.source);
                 const bridge = createBridge(scratchPath);
                 bridgesByProcessKey.set(request.processKey, bridge);
-                return JSON.stringify({ ok: true });
+                // A version 2 program answers with its description (konjugate/_webBridge.py's created_json).
+                return bridge.created_json();
             }
             const bridge = bridgesByProcessKey.get(request.processKey);
             if (!bridge) throw new Error(`No Python provider bridge for '${request.processKey}'.`);

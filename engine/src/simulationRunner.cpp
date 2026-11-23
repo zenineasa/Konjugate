@@ -17,6 +17,7 @@
 #include "konjugate/integrators/rodas4.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
+#include <bit>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -65,8 +66,77 @@ struct Sample { double time; Values states; Values parts; };
 // Each entry pairs a computational-node-provider-owning node's id with that provider instance's
 // opaque checkpoint() payload. Empty for a plan with no computational-node providers.
 using ProviderCheckpointStates = std::vector<std::pair<EntityId, std::vector<std::byte>>>;
+// A version 2 program's memory in a result's checkpoint (protocol ProgramMemory), and back: reals as doubles, integers and flags as
+// integers, a random stream's seed and counter as words.
+void encodeProgramMemory(const ProgramMemoryState& memory, protocol::ProgramMemory& encoded) {
+    encoded.set_owner_id(memory.owner);
+    encoded.set_owner_kind(static_cast<protocol::ProgramMemory::OwnerKind>(memory.ownerKind));
+    encoded.set_layout(memory.layout);
+    for (const auto& field : memory.fields) {
+        auto* item = encoded.add_fields();
+        item->set_name(field.name);
+        item->set_type(static_cast<protocol::ProgramMemoryField::Type>(field.type));
+        for (const auto word : field.words) {
+            if (field.type == 0 || field.type == 3) item->add_reals(std::bit_cast<double>(word));
+            else if (field.type == 1 || field.type == 2) item->add_integers(std::bit_cast<std::int64_t>(word));
+            else item->add_words(word);
+        }
+    }
+}
+
+ProgramMemoryState decodeProgramMemory(const protocol::ProgramMemory& encoded) {
+    ProgramMemoryState memory;
+    memory.owner = encoded.owner_id();
+    memory.ownerKind = static_cast<std::uint8_t>(encoded.owner_kind());
+    memory.layout = encoded.layout();
+    for (const auto& item : encoded.fields()) {
+        ProgramMemoryField field;
+        field.name = std::string(item.name());
+        field.type = static_cast<std::uint8_t>(item.type());
+        for (const auto value : item.reals()) field.words.push_back(std::bit_cast<std::uint64_t>(value));
+        for (const auto value : item.integers()) field.words.push_back(std::bit_cast<std::uint64_t>(value));
+        for (const auto value : item.words()) field.words.push_back(value);
+        memory.fields.push_back(std::move(field));
+    }
+    return memory;
+}
+
+// startCheckpoint.programMemory: the same shape as JSON ({ ownerId, ownerKind, layout, fields: [{ name, type, reals, integers, words }] }),
+// 64-bit integers and words as decimal strings so no digit is lost.
+std::vector<ProgramMemoryState> programMemoryFromJson(const boost::property_tree::ptree& tree) {
+    std::vector<ProgramMemoryState> memories;
+    for (const auto& [unused, entry] : tree) {
+        static_cast<void>(unused);
+        ProgramMemoryState memory;
+        memory.owner = entry.get<EntityId>("ownerId");
+        memory.ownerKind = static_cast<std::uint8_t>(entry.get<unsigned>("ownerKind", 0));
+        memory.layout = std::stoull(entry.get<std::string>("layout", "0"));
+        if (const auto fields = entry.get_child_optional("fields")) for (const auto& [unusedField, item] : *fields) {
+            static_cast<void>(unusedField);
+            ProgramMemoryField field;
+            field.name = item.get<std::string>("name");
+            field.type = static_cast<std::uint8_t>(item.get<unsigned>("type", 0));
+            if (const auto reals = item.get_child_optional("reals")) for (const auto& value : *reals) field.words.push_back(std::bit_cast<std::uint64_t>(value.second.get_value<double>()));
+            if (const auto integers = item.get_child_optional("integers")) for (const auto& value : *integers) field.words.push_back(std::bit_cast<std::uint64_t>(std::stoll(value.second.get_value<std::string>())));
+            if (const auto words = item.get_child_optional("words")) for (const auto& value : *words) field.words.push_back(std::stoull(value.second.get_value<std::string>()));
+            memory.fields.push_back(std::move(field));
+        }
+        memories.push_back(std::move(memory));
+    }
+    return memories;
+}
+
 // `solverKind` is the method that made it, empty for this run's own; `solverState` its hidden state (solver_state), empty for none.
-struct Checkpoint { std::string uuid; double time; Values states; ProviderCheckpointStates providerStates; std::string solverState; std::string solverKind; };
+// `programMemory`: every version 2 program's memory, kept by the engine (docs/proposals/programSdkV2.md, Automatic memory checkpoints).
+struct Checkpoint {
+    std::string uuid;
+    double time;
+    Values states;
+    ProviderCheckpointStates providerStates;
+    std::string solverState;
+    std::string solverKind;
+    std::vector<ProgramMemoryState> programMemory;
+};
 enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
@@ -931,6 +1001,25 @@ private:
     void flushSampleEvents();
     void appendStreamRecord(const std::string& type, double time, const Values& recordStates, const std::string& uuid = {});
     ProviderCheckpointStates captureProviderStates();
+    // A checkpoint of the run as it stands at `time`.
+    Checkpoint makeCheckpoint(double time) {
+        Checkpoint checkpoint{createUuid(), time, states, captureProviderStates(), solverState(), {}, {}};
+        if (providerRuntime) checkpoint.programMemory = providerRuntime->programMemory();
+        return checkpoint;
+    }
+    // Version 2 programs (docs/proposals/programSdkV2.md): each clock's period checked against the global step; at a fresh run's start,
+    // the clocks' first tick and the programs' values into Update states; after each global step, the ticks due and those values.
+    void checkProgramClocks();
+    void startPrograms(double time);
+    void afterGlobalStep(double time, double stepSize);
+    bool programClocksPresent = false;
+    bool programUpdatesPresent = false;
+    // Under a whole-model method: whether a version 2 program in a node taking part in the stages advances after every accepted step,
+    // and which nodes take part (the others are stepped on their own, and advance their programs in their substeps).
+    bool programsAdvanceAtSteps = false;
+    std::vector<unsigned char> stageNodeMask;
+    // What was said while restoring programs' memory from a checkpoint (a field added or dropped since), told once on standard error.
+    std::vector<std::string> programMemoryNotes;
     void restoreStartCheckpoint(const boost::property_tree::ptree& checkpoint);
     void prependContinuedResult(const std::filesystem::path& path);
 
@@ -1127,7 +1216,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         // Rodas4's structure, from the graph: which states each state's derivative reads, so the Jacobian's pattern, its colours
         // and the sparse LU's ordering are worked out once, here.
         if (integration.method == IntegrationMethod::rodas4) {
-            stiffSystem = integrators::makeRodas4System(wholeModel.integrated, stageReads(executionPlan, wholeModel), wholeModel.errorGroups);
+            stiffSystem = integrators::makeRodas4System(wholeModel.integrated, stageReads(executionPlan, wholeModel, providerRuntime.get()), wholeModel.errorGroups);
             stagesReadTimeAlways = stagesReadTime(executionPlan, wholeModel);
         }
         // A node's work a global step is its work an evaluation times the method's evaluations a step, not its substeps.
@@ -1229,6 +1318,14 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
 
     if (const auto checkpoint = configuration.get_child_optional("startCheckpoint")) restoreStartCheckpoint(*checkpoint);
     if (!(startTime >= 0) || !(targetTime > startTime)) throw std::runtime_error("targetTime must be later than the restart checkpoint.");
+    checkProgramClocks();
+    // A fresh run's programs start at its start: their clocks' first tick, then their values into Update states. A run continued from a
+    // checkpoint has both in the checkpoint already (it was taken after the step's ticks and Updates), so nothing is repeated.
+    if (!configuration.get_child_optional("startCheckpoint")) {
+        startPrograms(startTime);
+        if (programUpdatesPresent) stepExecutor->restore(states);
+    }
+    for (const auto& note : programMemoryNotes) std::cerr << "note: " << note << '\n';
 
     for (const auto& item : nodeSubsteps) nodeIds.push_back(item.first);
     std::sort(nodeIds.begin(), nodeIds.end());
@@ -1258,7 +1355,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     updateStates(startTime, false, globalTimeStep);
     partTable = recordedParts(executionPlan);
     samples = {{startTime, states, partsAt(startTime)}};
-    checkpoints = {{createUuid(), startTime, states, captureProviderStates(), solverState()}};
+    checkpoints = {makeCheckpoint(startTime)};
     // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
     // this run's result, so the result file holds the whole run and not only the part since the restart -- what is exported,
     // saved, forked from and read back is then all of it. The app passes a copy of that run's result file.
@@ -1381,6 +1478,7 @@ void Simulation::prependContinuedResult(const std::filesystem::path& path) {
         earlier.providerStates = std::move(providerStates);
         earlier.solverKind = checkpoint.solver_kind();
         earlier.solverState = checkpoint.solver_state();
+        for (const auto& memory : checkpoint.program_memory()) earlier.programMemory.push_back(decodeProgramMemory(memory));
         earlierCheckpoints.push_back(std::move(earlier));
     }
     for (const auto& intervention : stored.header.interventions()) {
@@ -1413,7 +1511,7 @@ void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& check
     // exhaustively: a missing entry fails loudly here rather than silently resetting a
     // provider instance to its initialize()-time default.
     const auto providerNodeCount = std::count_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
-        [](const auto& node) { return node.nodeProvider.has_value(); });
+        [](const auto& node) { return node.nodeProvider.has_value() && node.nodeProvider->programVersion != 2; });
     if (providerNodeCount) {
         const auto providerStatesNode = checkpoint.get_child_optional("providerStates");
         if (!providerStatesNode) {
@@ -1424,7 +1522,7 @@ void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& check
             const auto nodeId = entityIdValue(entry.second, "nodeId");
             const auto nodeIt = std::find_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
                 [&](const auto& node) { return node.nodeId == nodeId; });
-            if (nodeIt == executionPlan.nodes.end() || !nodeIt->nodeProvider || !restoredNodes.insert(nodeId).second) {
+            if (nodeIt == executionPlan.nodes.end() || !nodeIt->nodeProvider || nodeIt->nodeProvider->programVersion == 2 || !restoredNodes.insert(nodeId).second) {
                 throw std::runtime_error("The restart checkpoint references an unknown computational-node provider.");
             }
             providerRuntime->requestNodeRestore(*nodeIt->nodeProvider,
@@ -1434,6 +1532,10 @@ void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& check
             throw std::runtime_error("The restart checkpoint is missing computational-node provider state.");
         }
     }
+    // Version 2 programs' memory, by field name; a checkpoint from before a program had memory leaves it at its declared start.
+    if (const auto memory = checkpoint.get_child_optional("programMemory"); memory && providerRuntime) {
+        providerRuntime->restoreProgramMemory(programMemoryFromJson(*memory), &programMemoryNotes);
+    }
     stepExecutor->restore(states);
 }
 
@@ -1441,7 +1543,7 @@ ProviderCheckpointStates Simulation::captureProviderStates() {
     ProviderCheckpointStates result;
     if (!providerRuntime) return result;
     for (const auto& node : executionPlan.nodes) {
-        if (node.nodeProvider) result.emplace_back(node.nodeId, providerRuntime->requestNodeCheckpoint(*node.nodeProvider));
+        if (node.nodeProvider && node.nodeProvider->programVersion != 2) result.emplace_back(node.nodeId, providerRuntime->requestNodeCheckpoint(*node.nodeProvider));
     }
     return result;
 }
@@ -1482,7 +1584,7 @@ void Simulation::captureBoundary() {
         appendStreamRecord("sample", currentTime, states);
     }
     if (currentTime > checkpoints.back().time + 1e-12) {
-        checkpoints.push_back({createUuid(), currentTime, states, captureProviderStates(), solverState()});
+        checkpoints.push_back(makeCheckpoint(currentTime));
         appendStreamRecord("checkpoint", currentTime, states, checkpoints.back().uuid);
     }
 }
@@ -1732,6 +1834,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
                 providerState->set_node_id(nodeId);
                 providerState->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
             }
+            for (const auto& memory : checkpoint.programMemory) encodeProgramMemory(memory, *encoded->add_program_memory());
         }
     }
     const auto appendLength = [](std::string& target, std::size_t size) {
@@ -1826,6 +1929,82 @@ void Simulation::settleIfParametersChanged() {
 // One global step: every node integrated from the step's starting snapshot by the execution backend, the results gathered into
 // the state vector, then the algebraic relationships set at the step's end and the stability monitor told. `elapsed` is the
 // time the step ends at, worked out by the caller from the step count rather than by adding steps up.
+void Simulation::checkProgramClocks() {
+    if (!providerRuntime) return;
+    programUpdatesPresent = planHasProgramUpdates(executionPlan);
+    if (integration.method != IntegrationMethod::nodeByNode) {
+        stageNodeMask.assign(executionPlan.nodes.size(), 0);
+        for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+            const auto& node = executionPlan.nodes[index];
+            if (wholeModel.nodes[index].stepped || !node.hasVersion2Programs) continue;
+            stageNodeMask[index] = 1;
+            for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
+                for (const auto& task : *tasks) if (task.programVersion == 2 && providerRuntime->programAdvancesEachStep(task.sourceId)) programsAdvanceAtSteps = true;
+            }
+            if (node.nodeProvider && node.nodeProvider->programVersion == 2 && providerRuntime->programAdvancesEachStep(node.nodeId)) programsAdvanceAtSteps = true;
+        }
+        // Adaptive and Stiff choose their own steps inside the global step; a program that remembers something from step to step is
+        // advanced after each accepted one, which these methods do not do yet. Refused by name rather than never advanced.
+        if (programsAdvanceAtSteps && integration.method != IntegrationMethod::rungeKutta4) {
+            std::string names;
+            for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
+                if (!stageNodeMask[index]) continue;
+                const auto& node = executionPlan.nodes[index];
+                const auto add = [&](EntityId owner) {
+                    if (providerRuntime->programAdvancesEachStep(owner)) names += (names.empty() ? "" : ", ") + providerRuntime->programName(owner);
+                };
+                for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
+                    for (const auto& task : *tasks) if (task.programVersion == 2 && !task.negateOutput) add(task.sourceId);
+                }
+                if (node.nodeProvider && node.nodeProvider->programVersion == 2) add(node.nodeId);
+            }
+            throw std::runtime_error("Under " + std::string(integration.method == IntegrationMethod::rodas4 ? "Stiff" : "Adaptive") + ", a program that "
+                "remembers something from step to step is not advanced yet: " + names + ". Run with Runge–Kutta 4 or Euler, or give the "
+                "program a clock, which ticks at global steps under every method.");
+        }
+    }
+    for (const auto& [owner, period] : providerRuntime->programClocks()) {
+        programClocksPresent = true;
+        const double ratio = period / globalTimeStep;
+        const double whole = std::round(ratio);
+        if (whole >= 1 && std::abs(ratio - whole) <= 1e-9 * whole) continue;
+        const double below = std::max(1.0, std::floor(ratio)) * globalTimeStep;
+        const double above = std::max(1.0, std::ceil(ratio)) * globalTimeStep;
+        std::ostringstream message;
+        message << std::setprecision(10) << "The clock of " << providerRuntime->programName(owner) << " ticks every " << period
+                << " s, which is not a whole number of the run's time steps (" << globalTimeStep << " s). Use a period of " << below << " s";
+        if (above != below) message << " or " << above << " s";
+        message << " in the program, or a time step that divides " << period << " s.";
+        throw std::runtime_error(message.str());
+    }
+}
+
+void Simulation::startPrograms(double time) {
+    if (!providerRuntime) return;
+    if (programClocksPresent) {
+        advancePlanPrograms(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time, 0, true, providerRuntime.get());
+    }
+    if (programUpdatesPresent) {
+        const auto read = states;
+        applyProgramUpdates(executionPlan, read, states, runControl.parameterValues, runControl.activeSchedules, time, providerRuntime.get());
+    }
+}
+
+// The end of a global step: the clocks that tick at it, then the update phase, version 2 programs' values into Update states read from
+// the states as the update phase reads them (Rate states at the step's end, Update states at its start).
+void Simulation::afterGlobalStep(double time, double stepSize) {
+    if (programClocksPresent) {
+        advancePlanPrograms(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time, 0, true, providerRuntime.get());
+    }
+    if (!programUpdatesPresent) {
+        updateStates(time, true, stepSize);
+        return;
+    }
+    const auto read = states;
+    updateStates(time, true, stepSize);
+    applyProgramUpdates(executionPlan, read, states, runControl.parameterValues, runControl.activeSchedules, time, providerRuntime.get());
+}
+
 void Simulation::integrateStep(std::size_t step, double synchronizationStep, double elapsed) {
     if (integration.method != IntegrationMethod::nodeByNode) {
         integrateWholeModelStep(synchronizationStep, elapsed);
@@ -1857,7 +2036,7 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
     currentTime = elapsed;
     // The states algebraic relationships set, from the states the step reached, at its end: every
     // node reads them from the next step's synchronization snapshot.
-    updateStates(currentTime, true, synchronizationStep);
+    afterGlobalStep(currentTime, synchronizationStep);
     if (!stabilityMonitoredNodeIds.empty()) {
         auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);
         stabilityFindings.insert(stabilityFindings.end(),
@@ -1884,6 +2063,10 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     // Programs evaluated at stages are given the method's step: Runge–Kutta 4's, or under Dormand–Prince the global step, its largest.
     StageRequest request{&wholeModel, &heldValues, 0, integration.method == IntegrationMethod::rungeKutta4 ? internalStep : synchronizationStep,
         false, synchronizationStep};
+    // What a program's message names as where it was called from.
+    auto& callContext = programCallContext();
+    callContext = {integration.method == IntegrationMethod::rungeKutta4 ? "Runge–Kutta 4" : isStiff(integration) || integration.method == IntegrationMethod::rodas4
+        ? "Stiff, Rodas4" : "Adaptive, Dormand–Prince 5(4)", 0, integrationMethodStages(integration.method)};
     const auto evaluateAt = [&](bool atStart, double time, const Values& stageStates, Values& derivatives) {
         request.stageTime = time;
         request.evaluateHeld = atStart;
@@ -1961,15 +2144,35 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         takenSteps = stiffStatistics.acceptedSteps - acceptedBefore;
     } else {
         const auto evaluateRungeKutta = [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+            callContext.stage = stage + 1;
             evaluateAt(step == 0 && stage == 0, time, stageStates, derivatives);
         };
-        if (switching) {
-            integrators::rungeKutta4GlobalStepWithEvents(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, *switching,
-                evaluateRungeKutta);
+        if (!programsAdvanceAtSteps) {
+            if (switching) {
+                integrators::rungeKutta4GlobalStepWithEvents(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, *switching,
+                    evaluateRungeKutta);
+            } else {
+                integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, evaluateRungeKutta);
+            }
         } else {
-            integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, evaluateRungeKutta);
+            // Version 2 programs with memory advance after every accepted step (docs/proposals/programSdkV2.md): the global step is taken
+            // as its internal steps one at a time, the same arithmetic in the same order (each step starts at currentTime + i h with h
+            // the global step over `steps`), with advance() between them, reading the states each step reached.
+            const auto internal = synchronizationStep / static_cast<double>(std::max<std::size_t>(1, steps));
+            for (std::size_t step = 0; step < std::max<std::size_t>(1, steps); ++step) {
+                const double start = currentTime + static_cast<double>(step) * internal;
+                const auto evaluateStep = [&](std::size_t, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+                    evaluateRungeKutta(step, stage, time, stageStates, derivatives);
+                };
+                if (switching) integrators::rungeKutta4GlobalStepWithEvents(start, internal, 1, reached, wholeModel.integrated, *switching, evaluateStep);
+                else integrators::rungeKutta4GlobalStep(start, internal, 1, reached, wholeModel.integrated, evaluateStep);
+                const double end = step + 1 == std::max<std::size_t>(1, steps) ? elapsed : currentTime + static_cast<double>(step + 1) * internal;
+                advancePlanPrograms(executionPlan, reached, runControl.parameterValues, runControl.activeSchedules, end, internal, false,
+                    providerRuntime.get(), stageNodeMask);
+            }
         }
     }
+    callContext = {};
     // The events located this global step: each instant counted once, however many conditions changed at it; the first thousand kept
     // for the result, each with its condition. A global step that reached the limit is said once, as a finding.
     if (switching) {
@@ -2014,7 +2217,7 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     synchronizationComputeNanoseconds += static_cast<std::uint64_t>(std::max<std::int64_t>(0, synchronizationElapsed));
     states = std::move(reached);
     currentTime = elapsed;
-    updateStates(currentTime, true, synchronizationStep);
+    afterGlobalStep(currentTime, synchronizationStep);
     if (!stabilityMonitoredNodeIds.empty()) {
         auto newFindings = stabilityMonitor->observeGlobalStep(states, currentTime);
         stabilityFindings.insert(stabilityFindings.end(),
@@ -2062,7 +2265,7 @@ void Simulation::recordStepOutput(std::size_t step, double elapsed) {
     // only the first and last checkpoints existed for an uninterrupted run, so "Fork here"
     // at an arbitrary scrubbed time silently snapped to the nearest of just those two.
     if (elapsed > checkpoints.back().time + 1e-12) {
-        checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates(), solverState()});
+        checkpoints.push_back(makeCheckpoint(elapsed));
         appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
     }
     const auto publicationTime = std::chrono::steady_clock::now();
@@ -2139,7 +2342,9 @@ void Simulation::restoreProviderStates(const std::vector<std::pair<EntityId, std
     for (const auto& [nodeId, payload] : providerStates) {
         const auto node = std::find_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
             [&](const auto& candidate) { return candidate.nodeId == nodeId; });
-        if (node == executionPlan.nodes.end() || !node->nodeProvider) throw std::runtime_error("A saved provider state names a node with no provider.");
+        if (node == executionPlan.nodes.end() || !node->nodeProvider || node->nodeProvider->programVersion == 2) {
+            throw std::runtime_error("A saved provider state names a node with no provider.");
+        }
         providerRuntime->requestNodeRestore(*node->nodeProvider, payload);
     }
 }
@@ -2179,7 +2384,7 @@ std::uint32_t Simulation::advanceTo(double time, bool takeCheckpoints) {
             if (batch->times_size() >= 4096) flush();
         }
         if (const auto key = takeCheckpoints ? checkpointKey(elapsed) : -1; key >= 0) {
-            sessionCheckpoints[key] = Checkpoint{createUuid(), elapsed, states, captureProviderStates(), solverState()};
+            sessionCheckpoints[key] = makeCheckpoint(elapsed);
             ++taken;
         }
     }
@@ -2210,6 +2415,7 @@ const ProviderCheckpointStates& Simulation::restoreCheckpoint(const protocol::Re
     const auto& checkpoint = found->second;
     states = checkpoint.states;
     restoreProviderStates(checkpoint.providerStates);
+    if (providerRuntime) providerRuntime->restoreProgramMemory(checkpoint.programMemory, nullptr);
     for (const auto& [index, value] : overrides) states[index] = value;
     // Back at a checkpoint as it was, the controller carries on as it did; with states replaced it starts afresh (Hairer's initial step).
     resetSolverState(overrides.empty() ? checkpoint.solverState : std::string());
@@ -2228,7 +2434,8 @@ ProviderCheckpointStates Simulation::restoreState(const protocol::RestoreState& 
         if (!std::isfinite(value)) throw std::runtime_error("A state can only be set to a finite number.");
     }
     if (!std::isfinite(command.time())) throw std::runtime_error("The time to restore to must be finite.");
-    const auto providerNodes = std::count_if(executionPlan.nodes.begin(), executionPlan.nodes.end(), [](const auto& node) { return node.nodeProvider.has_value(); });
+    const auto providerNodes = std::count_if(executionPlan.nodes.begin(), executionPlan.nodes.end(),
+        [](const auto& node) { return node.nodeProvider.has_value() && node.nodeProvider->programVersion != 2; });
     if (command.provider_states_size() != providerNodes) throw std::runtime_error("The state to restore needs the saved state of every node provider.");
     std::vector<std::pair<EntityId, std::vector<std::byte>>> providerStates;
     for (const auto& item : command.provider_states()) {
@@ -2238,6 +2445,12 @@ ProviderCheckpointStates Simulation::restoreState(const protocol::RestoreState& 
     const auto& stateIds = executionPlan.stateIds;
     for (std::size_t index = 0; index < stateIds.size(); ++index) states[executionPlan.stateIndexes.at(stateIds[index])] = command.values(static_cast<int>(index));
     restoreProviderStates(providerStates);
+    // Version 2 programs' memory, field by field by name; a state saved before a program had memory leaves it as it is.
+    if (providerRuntime && command.program_memory_size()) {
+        std::vector<ProgramMemoryState> memory;
+        for (const auto& item : command.program_memory()) memory.push_back(decodeProgramMemory(item));
+        providerRuntime->restoreProgramMemory(memory, nullptr);
+    }
     resetSolverState();
     currentTime = command.time();
     baseTime = command.time();
@@ -2376,6 +2589,8 @@ void Simulation::reply(const protocol::EngineCommand& command, bool ok, const st
             saved->set_node_id(nodeId);
             saved->set_payload(std::string(reinterpret_cast<const char*>(payload.data()), payload.size()));
         }
+        // And every version 2 program's memory as restored, for the session log.
+        if (providerRuntime) for (const auto& memory : providerRuntime->programMemory()) encodeProgramMemory(memory, *answer->add_program_memory());
     }
     writeFramedEvent(*eventStream, event);
 }

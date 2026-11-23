@@ -147,6 +147,7 @@ add_executable(konjugateEngine
     src/projectContainer.cpp
     src/cppToolchain.cpp
     src/fmiImport.cpp
+    src/programUnits.cpp
     src/providerRuntime.cpp
     src/duringRunStabilityMonitor.cpp
     src/simulationRunner.cpp
@@ -191,6 +192,13 @@ add_library(konjugateProviderInProcessNodeShim STATIC
 )
 target_include_directories(konjugateProviderInProcessNodeShim PUBLIC include)
 
+# The version 2 program SDK's glue (konjugate/sdk/v2/program.hpp), same compile-check purpose: buildCppProvider() compiles and links
+# it against a version 2 program's source at run time. It defines no createProgram(), which each program does.
+add_library(konjugateProviderInProcessProgramShim STATIC
+    src/providerInProcessProgramShim.cpp
+)
+target_include_directories(konjugateProviderInProcessProgramShim PUBLIC include)
+
 install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 # The C++/Python provider SDKs are source, not build output, but a packaged app still needs
 # them on disk: buildCppProvider() compiles inline C++ providers against the public header and
@@ -209,6 +217,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessNodeShim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessProgramShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/fmiGlue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/objectiveProgramMain.cpp"
     DESTINATION src
@@ -276,6 +285,7 @@ if(BUILD_TESTING)
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
+        src/programUnits.cpp
         src/providerRuntime.cpp
         src/childProcess.cpp
     )
@@ -303,7 +313,19 @@ if(BUILD_TESTING)
                 "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
                 "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/nodeProviderWorkerTest.py"
             )
+            add_test(
+                NAME programSdkV2Test
+                COMMAND "${CMAKE_COMMAND}" -E env
+                "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/sdk/python"
+                "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/programSdkV2Test.py"
+            )
     endif()
+
+    # Version 2 of the program SDK: the header-only C++ SDK and its harness, compiled with every warning on.
+    add_executable(programSdkV2HarnessTests tests/programSdkV2HarnessTests.cpp)
+    target_include_directories(programSdkV2HarnessTests PRIVATE include)
+    target_compile_options(programSdkV2HarnessTests PRIVATE $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall -Wextra -Wpedantic>)
+    add_test(NAME programSdkV2HarnessTests COMMAND programSdkV2HarnessTests)
 
     add_executable(algebraicRelationshipTests
         tests/algebraicRelationshipTests.cpp
@@ -338,6 +360,7 @@ if(BUILD_TESTING)
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
+        src/programUnits.cpp
         src/providerRuntime.cpp
         src/childProcess.cpp
     )
@@ -464,6 +487,7 @@ if(BUILD_TESTING)
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
         src/cppToolchain.cpp
+        src/programUnits.cpp
         src/providerRuntime.cpp
         src/duringRunStabilityMonitor.cpp
         src/simulationRunner.cpp
@@ -499,6 +523,7 @@ if(BUILD_TESTING)
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
         src/cppToolchain.cpp
+        src/programUnits.cpp
         src/providerRuntime.cpp
         src/childProcess.cpp
     )

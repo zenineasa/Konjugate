@@ -16,6 +16,8 @@
 //   newId()                                                  an id for a state saved without one
 //   sourceTermExpressionModel(definition, term), relationshipEquationModel(definition)   the editor's normalisers
 
+import { withProgramVersion } from './providerTemplate.mjs';
+
 // A field this module does not know is kept, and written back as it was, so a document from a newer Konjugate loses
 // nothing by passing through an older one, and a field added to the schema survives load, undo, paste and save before
 // anyone has taught the canvas about it.
@@ -129,10 +131,12 @@ export function nodeToDocument(definition, context) {
         })),
         sourceTerms: (definition.sourceTerms ?? []).map((term) => ({
             ...term,
+            // A program's providerApiVersion follows its source (docs/proposals/programSdkV2.md, Versioning).
+            ...(term.implementation ? { implementation: withProgramVersion(term.implementation) } : {}),
             parameters: term.parameters ?? [],
             ...(!term.implementation ? { expressionModel: context.sourceTermExpressionModel(definition, term) } : {})
         })),
-        ...(definition.implementation ? { implementation: structuredClone(definition.implementation) } : {}),
+        ...(definition.implementation ? { implementation: structuredClone(withProgramVersion(definition.implementation)) } : {}),
         appearance: {
             ...(definition.importedGeometry
                 ? {
@@ -195,7 +199,7 @@ export function relationshipToDocument(definition, context) {
         enabled: definition.enabled !== false,
         equation: definition.equationModel?.latex ?? definition.equation ?? '',
         equationModel: context.relationshipEquationModel(definition),
-        ...(definition.implementation ? { implementation: definition.implementation } : {}),
+        ...(definition.implementation ? { implementation: withProgramVersion(definition.implementation) } : {}),
         parameters: definition.parameters ?? [],
         appearance: {
             color: colorToText(definition.color),

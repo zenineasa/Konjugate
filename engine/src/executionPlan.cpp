@@ -257,6 +257,12 @@ std::vector<EntityId> localStatesRead(const ContributionTask& task) {
     return stateIds;
 }
 
+std::string programProcessKeyPrefix(ContributionImplementation implementation, std::uint32_t version) {
+    const bool python = implementation == ContributionImplementation::pythonProvider;
+    if (version == 2) return python ? "py2:" : "cpp2:";
+    return python ? "py:" : "cpp:";
+}
+
 void bindTask(ContributionTask& task) {
     for (auto& binding : task.bindings) {
         if (binding.source != BindingSource::parameter) continue;
@@ -267,7 +273,93 @@ void bindTask(ContributionTask& task) {
         binding.parameterIndex = static_cast<std::size_t>(std::distance(task.parameters.begin(), found));
     }
     if (task.implementation == ContributionImplementation::equation) bindExpressionSymbols(task.expression, task.bindings);
-    else task.providerProcessKeyCache = (task.implementation == ContributionImplementation::pythonProvider ? "py:" : "cpp:") + task.providerSource;
+    else task.providerProcessKeyCache = programProcessKeyPrefix(task.implementation, task.programVersion) + task.providerSource;
+}
+
+// What the engine knows of a model to describe and check version 2 programs: every node's name, every state's unit and every
+// parameter's (a shared parameter's for one linked to it).
+struct ProgramContext {
+    std::unordered_map<EntityId, std::string> nodeNames;
+    std::unordered_map<EntityId, std::string> stateUnits;
+    std::unordered_map<EntityId, std::string> parameterUnits;
+    std::unordered_map<EntityId, std::string> stateLabels;
+    std::unordered_map<EntityId, std::string> parameterLabels;
+};
+
+ProgramContext scanProgramContext(const boost::property_tree::ptree& document) {
+    ProgramContext context;
+    std::unordered_map<EntityId, std::string> sharedUnits;
+    if (const auto shared = document.get_child_optional("sharedParameters")) {
+        for (const auto& item : *shared) sharedUnits[idValue(item.second, "id")] = value(item.second, "unit");
+    }
+    const auto parameterUnit = [&](const boost::property_tree::ptree& parameter) {
+        const auto linked = parameter.get_optional<EntityId>("sharedParameterId");
+        if (linked && sharedUnits.contains(*linked)) return sharedUnits.at(*linked);
+        return value(parameter, "unit");
+    };
+    for (const auto& [id, unit] : sharedUnits) context.parameterUnits[id] = unit;
+    const auto parameterLabel = [](const boost::property_tree::ptree& parameter) {
+        const auto name = value(parameter, "name");
+        return "the parameter " + (name.empty() ? value(parameter, "symbol") : name);
+    };
+    if (const auto shared = document.get_child_optional("sharedParameters")) {
+        for (const auto& item : *shared) context.parameterLabels[idValue(item.second, "id")] = parameterLabel(item.second);
+    }
+    if (const auto nodes = document.get_child_optional("nodes")) for (const auto& nodeItem : *nodes) {
+        const auto& node = nodeItem.second;
+        context.nodeNames[idValue(node, "id")] = value(node, "name");
+        if (const auto states = node.get_child_optional("states")) for (const auto& state : *states) {
+            const auto stateId = idValue(state.second, "id");
+            context.stateUnits[stateId] = value(state.second, "unit");
+            const auto symbol = value(state.second, "symbol");
+            context.stateLabels[stateId] = value(node, "name") + "." + (symbol.empty() ? value(state.second, "name") : symbol);
+        }
+        if (const auto terms = node.get_child_optional("sourceTerms")) for (const auto& term : *terms) {
+            if (const auto parameters = term.second.get_child_optional("parameters")) {
+                for (const auto& parameter : *parameters) {
+                    context.parameterUnits[idValue(parameter.second, "id")] = parameterUnit(parameter.second);
+                    context.parameterLabels[idValue(parameter.second, "id")] = parameterLabel(parameter.second);
+                }
+            }
+        }
+    }
+    if (const auto edges = document.get_child_optional("edges")) for (const auto& edgeItem : *edges) {
+        if (const auto parameters = edgeItem.second.get_child_optional("parameters")) {
+            for (const auto& parameter : *parameters) {
+                context.parameterUnits[idValue(parameter.second, "id")] = parameterUnit(parameter.second);
+                context.parameterLabels[idValue(parameter.second, "id")] = parameterLabel(parameter.second);
+            }
+        }
+    }
+    return context;
+}
+
+// A program's SDK version from its implementation: absent or 1 is version 1; 2 is version 2; any other is refused by name.
+std::uint32_t programVersionOf(const boost::property_tree::ptree& implementation) {
+    const auto text = value(implementation, "providerApiVersion");
+    if (text.empty() || text == "1") return 1;
+    if (text == "2") return 2;
+    throw std::runtime_error("This program is written for version " + text + " of the program SDK, which this Konjugate does not have; update Konjugate.");
+}
+
+// The units a version 2 program's bindings are measured in.
+void bindProgramUnits(std::vector<CompiledBinding>& bindings, const ProgramContext& context) {
+    for (auto& binding : bindings) {
+        const auto lookup = [&](const std::unordered_map<EntityId, std::string>& map) {
+            const auto found = map.find(binding.valueId);
+            return found != map.end() ? found->second : std::string();
+        };
+        if (binding.source == BindingSource::simulationTime) {
+            binding.unit = "s";
+            binding.label = "the time";
+        } else if (binding.source == BindingSource::parameter) {
+            binding.unit = lookup(context.parameterUnits);
+            binding.label = lookup(context.parameterLabels);
+        } else {
+            binding.unit = lookup(context.stateUnits);
+            binding.label = lookup(context.stateLabels);
+        }
+    }
 }
 
 // An expression's value, each symbol's from `read`: the symbols' values as they stand, or an algebraic relationship's
@@ -1141,6 +1233,7 @@ std::unordered_map<EntityId, SubsystemUpdates> readSubsystemUpdates(const boost:
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     checkRequiredFeatures(document);
+    const auto programContext = scanProgramContext(document);
     const auto sharedParameters = collectSharedParameters(document);
     const auto stateKinds = scanStateKinds(document);
     const auto subsystemUpdates = readSubsystemUpdates(document);
@@ -1232,6 +1325,16 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                     ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
                 task.providerSource = value(term, "implementation.source");
                 task.providerOutputKey = value(term, "implementation.output.key");
+                task.programVersion = programVersionOf(term.get_child("implementation"));
+                if (task.programVersion == 2) {
+                    task.programOwner = "node " + value(node, "name") + "'s own part";
+                    task.programSeed = term.get<std::uint64_t>("implementation.seed", 0);
+                    task.outputUnit = programContext.stateUnits.contains(task.outputStateId) ? programContext.stateUnits.at(task.outputStateId) : "";
+                    task.outputLabel = programContext.stateLabels.contains(task.outputStateId) ? programContext.stateLabels.at(task.outputStateId) : "";
+                    task.programOwnerKind = 1;
+                    bindProgramUnits(task.bindings, programContext);
+                    compiledNode.hasVersion2Programs = true;
+                }
             } else {
                 task.expression = compileExpression(term.get_child("expressionModel.mathJson"));
             }
@@ -1357,7 +1460,20 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                     }
                 }
             }
-            providerTask.providerProcessKeyCache = (kind == "cpp" ? "cpp:" : "py:") + providerTask.providerSource;
+            providerTask.programVersion = programVersionOf(*implementation);
+            if (providerTask.programVersion == 2) {
+                providerTask.programOwner = "node " + value(node, "name");
+                providerTask.programSeed = implementation->get<std::uint64_t>("seed", 0);
+                bindProgramUnits(providerTask.bindings, programContext);
+                // A version 2 program's output into an Update state is a value, read at the update instant; into a Rate state, a rate.
+                for (auto& output : providerTask.outputs) {
+                    output.setsValue = output.setsValue || stateKinds.explicitUpdates.contains(output.stateId);
+                    output.unit = programContext.stateUnits.contains(output.stateId) ? programContext.stateUnits.at(output.stateId) : "";
+                    output.label = programContext.stateLabels.contains(output.stateId) ? programContext.stateLabels.at(output.stateId) : "";
+                }
+                compiledNode.hasVersion2Programs = true;
+            }
+            providerTask.providerProcessKeyCache = programProcessKeyPrefix(providerTask.implementation, providerTask.programVersion) + providerTask.providerSource;
             compiledNode.estimatedOperationsPerSubstep += providerTask.bindings.size() + providerTask.outputs.size() + 1;
             compiledNode.nodeProvider = std::move(providerTask);
         }
@@ -1396,10 +1512,11 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         }
         const auto programmable = implementationKind == "cpp" || implementationKind == "python";
         const auto outputRole = value(edge, programmable ? "implementation.output.role" : "equationModel.output.role");
-        const auto outputStateId = idValue(edge, programmable ? "implementation.output.stateId" : "equationModel.output.stateId");
-        const auto outputNodeId = plan.stateNodes.at(outputStateId);
+        const auto severalOutputs = programmable && edge.get_child_optional("implementation.outputs") && !edge.get_child("implementation.outputs").empty();
+        const auto outputStateId = severalOutputs ? EntityId{0} : idValue(edge, programmable ? "implementation.output.stateId" : "equationModel.output.stateId");
+        const auto outputNodeId = severalOutputs ? EntityId{0} : plan.stateNodes.at(outputStateId);
 
-        auto buildContribution = [&](EntityId contributionNodeId, EntityId contributionStateId, bool negate) {
+        auto buildContribution = [&](EntityId contributionNodeId, EntityId contributionStateId, bool negate, const std::string& outputKey) {
             auto& contributionNode = plan.nodes.at(nodeIndexes.at(contributionNodeId));
             std::unordered_map<EntityId, std::size_t> localStateIndexes;
             for (std::size_t index = 0; index < contributionNode.stateIds.size(); ++index) {
@@ -1421,7 +1538,21 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 task.implementation = implementationKind == "cpp"
                     ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
                 task.providerSource = value(edge, "implementation.source");
-                task.providerOutputKey = value(edge, "implementation.output.key");
+                task.providerOutputKey = outputKey;
+                task.programVersion = programVersionOf(edge.get_child("implementation"));
+                if (task.programVersion == 2) {
+                    const auto nodeName = [&](const std::string& end) {
+                        const auto found = programContext.nodeNames.find(idValue(edge, end + ".nodeId"));
+                        return found != programContext.nodeNames.end() ? found->second : std::string("?");
+                    };
+                    task.programOwner = "relationship " + nodeName("source") + " → " + nodeName("target");
+                    task.programSeed = edge.get<std::uint64_t>("implementation.seed", 0);
+                    task.outputUnit = programContext.stateUnits.contains(contributionStateId) ? programContext.stateUnits.at(contributionStateId) : "";
+                    task.outputLabel = programContext.stateLabels.contains(contributionStateId) ? programContext.stateLabels.at(contributionStateId) : "";
+                    task.programOwnerKind = 2;
+                    bindProgramUnits(task.bindings, programContext);
+                    contributionNode.hasVersion2Programs = true;
+                }
             } else {
                 task.expression = compileExpression(edge.get_child("equationModel.mathJson"));
             }
@@ -1435,7 +1566,18 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             contributionNode.contributions.push_back(std::move(task));
         };
 
-        buildContribution(outputNodeId, outputStateId, false);
+        // A version 2 program with several outputs (implementation.outputs, docs/projectSchema.md): one term per output, each reaching its
+        // state, all of them the one program's (a two-way relationship has one output, validated).
+        if (const auto outputs = programmable ? edge.get_child_optional("implementation.outputs") : boost::none; outputs && !outputs->empty()) {
+            for (const auto& outputItem : *outputs) {
+                const auto stateId = idValue(outputItem.second, "stateId");
+                const auto found = plan.stateNodes.find(stateId);
+                if (found == plan.stateNodes.end()) throw std::runtime_error("A relationship program's output reaches a state that is not in the model.");
+                buildContribution(found->second, stateId, false, value(outputItem.second, "key"));
+            }
+            continue;
+        }
+        buildContribution(outputNodeId, outputStateId, false, value(edge, "implementation.output.key"));
 
         if (value(edge, "directionality") == "bidirectional") {
             // A bidirectional edge applies the same computed value to both connected nodes, with the sign flipped for the
@@ -1446,7 +1588,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 throw std::runtime_error("A two-way relationship's other end has no states.");
             }
             const auto otherStateId = bidirectionalOtherStateId(edge, outputRole, otherNode.stateIds);
-            buildContribution(otherNodeId, otherStateId, true);
+            buildContribution(otherNodeId, otherStateId, true, value(edge, "implementation.output.key"));
         }
     }
     for (auto& node : plan.nodes) if (node.verlet) assignVerletParts(node, verletNames);
@@ -1603,6 +1745,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             if (found == task.outputs.end()) {
                 throw std::runtime_error("A computational-node provider returned an undeclared output key '" + outputKey + "'.");
             }
+            // A version 2 program's output into an Update state is read at the update instant (applyProgramUpdates), not here.
+            if (found->setsValue && task.programVersion == 2) continue;
             if (!std::isfinite(outputValue)) throw std::runtime_error("A computational-node provider produced a non-finite value.");
             if (found->setsValue) {
                 // A plain replacement, exactly like applyAlgebraicTasks -- see
@@ -1757,6 +1901,122 @@ NodeParameterValues resolveParameterValues(const NodeExecutionPlan& node, const 
     return resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
 }
 
+ProgramCallContext& programCallContext() noexcept {
+    static ProgramCallContext context;
+    return context;
+}
+
+std::vector<double> programInputs(const std::vector<CompiledBinding>& bindings, const StateValues& localStates, const StateValues& snapshot,
+                                  const std::vector<double>& parameterValues, double time) {
+    std::vector<double> inputs(bindings.size());
+    for (std::size_t index = 0; index < bindings.size(); ++index) {
+        const auto& binding = bindings[index];
+        if (binding.source == BindingSource::parameter) inputs[index] = parameterValues.at(binding.parameterIndex);
+        else if (binding.source == BindingSource::simulationTime) inputs[index] = time;
+        else if (binding.source == BindingSource::localState) inputs[index] = localStates.at(binding.valueIndex);
+        else inputs[index] = snapshot.at(binding.valueIndex);
+    }
+    return inputs;
+}
+
+std::vector<double> resolveTaskParameterValues(const std::vector<CompiledParameter>& parameters, const EntityValues& liveParameterValues,
+                                               const std::vector<ParameterSchedule>& activeSchedules, double time) {
+    std::vector<double> values;
+    values.reserve(parameters.size());
+    for (const auto& parameter : parameters) values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, time));
+    return values;
+}
+
+namespace {
+
+// Every version 2 program of a node, once each (a two-way relationship's far end is the same program), with what `want` asks of it.
+template <typename Want, typename Visit>
+void forEachNodeProgram(const NodeExecutionPlan& node, Want&& want, Visit&& visit) {
+    for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
+        for (const auto& task : *tasks) {
+            if (task.programVersion != 2 || task.negateOutput || !want(task.sourceId)) continue;
+            visit(task.sourceId, task.bindings, task.parameters);
+        }
+    }
+    if (node.nodeProvider && node.nodeProvider->programVersion == 2 && want(node.nodeId)) {
+        visit(node.nodeId, node.nodeProvider->bindings, node.nodeProvider->parameters);
+    }
+}
+
+}
+
+void advanceNodePrograms(const NodeExecutionPlan& node, const StateValues& localStates, const StateValues& snapshot,
+                         const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules, double time,
+                         double size, ProviderEvaluator* providerEvaluator) {
+    if (!node.hasVersion2Programs || !providerEvaluator) return;
+    std::vector<ProgramAdvanceCall> calls;
+    forEachNodeProgram(node, [&](EntityId owner) { return providerEvaluator->programAdvancesEachStep(owner); },
+        [&](EntityId owner, const std::vector<CompiledBinding>& bindings, const std::vector<CompiledParameter>& parameters) {
+            calls.push_back({owner, programInputs(bindings, localStates, snapshot,
+                resolveTaskParameterValues(parameters, liveParameterValues, activeSchedules, time), time)});
+        });
+    if (!calls.empty()) providerEvaluator->advancePrograms(calls, time, size);
+}
+
+bool clockTicksAt(double period, double time) noexcept {
+    if (!(period > 0)) return false;
+    const double ticks = time / period;
+    const double whole = std::round(ticks);
+    return std::abs(ticks - whole) <= 1e-9 * std::max(1.0, std::abs(whole));
+}
+
+void advancePlanPrograms(const ExecutionPlan& plan, const StateValues& states, const EntityValues& liveParameterValues,
+                         const std::vector<ParameterSchedule>& activeSchedules, double time, double size, bool clocked,
+                         ProviderEvaluator* providerEvaluator, const std::vector<unsigned char>& include) {
+    if (!providerEvaluator) return;
+    // Clocked programs grouped by period, so each batch is told its own period as the step.
+    std::vector<std::pair<double, std::vector<ProgramAdvanceCall>>> batches;
+    for (std::size_t nodeIndex = 0; nodeIndex < plan.nodes.size(); ++nodeIndex) {
+        const auto& node = plan.nodes[nodeIndex];
+        if (!node.hasVersion2Programs || (!include.empty() && !include[nodeIndex])) continue;
+        StateValues localStates(node.stateIndexes.size());
+        for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) localStates[index] = states.at(node.stateIndexes[index]);
+        const auto want = [&](EntityId owner) {
+            if (!clocked) return providerEvaluator->programAdvancesEachStep(owner);
+            return clockTicksAt(providerEvaluator->programClockPeriod(owner), time);
+        };
+        forEachNodeProgram(node, want, [&](EntityId owner, const std::vector<CompiledBinding>& bindings, const std::vector<CompiledParameter>& parameters) {
+            const double step = clocked ? providerEvaluator->programClockPeriod(owner) : size;
+            auto found = std::find_if(batches.begin(), batches.end(), [&](const auto& batch) { return batch.first == step; });
+            if (found == batches.end()) found = batches.insert(batches.end(), {step, {}});
+            found->second.push_back({owner, programInputs(bindings, localStates, states,
+                resolveTaskParameterValues(parameters, liveParameterValues, activeSchedules, time), time)});
+        });
+    }
+    for (const auto& [step, calls] : batches) providerEvaluator->advancePrograms(calls, time, step);
+}
+
+bool planHasProgramUpdates(const ExecutionPlan& plan) {
+    return std::any_of(plan.nodes.begin(), plan.nodes.end(), [](const auto& node) {
+        return node.nodeProvider && node.nodeProvider->programVersion == 2 &&
+            std::any_of(node.nodeProvider->outputs.begin(), node.nodeProvider->outputs.end(), [](const auto& output) { return output.setsValue; });
+    });
+}
+
+void applyProgramUpdates(const ExecutionPlan& plan, const StateValues& readStates, StateValues& states, const EntityValues& liveParameterValues,
+                         const std::vector<ParameterSchedule>& activeSchedules, double time, ProviderEvaluator* providerEvaluator) {
+    for (const auto& node : plan.nodes) {
+        if (!node.nodeProvider || node.nodeProvider->programVersion != 2) continue;
+        const auto& task = *node.nodeProvider;
+        if (std::none_of(task.outputs.begin(), task.outputs.end(), [](const auto& output) { return output.setsValue; })) continue;
+        if (!providerEvaluator) throw std::runtime_error("A node program requires an initialized provider runtime.");
+        StateValues localStates(node.stateIndexes.size());
+        for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) localStates[index] = readStates.at(node.stateIndexes[index]);
+        const auto inputs = programInputs(task.bindings, localStates, readStates,
+            resolveTaskParameterValues(task.parameters, liveParameterValues, activeSchedules, time), time);
+        for (const auto& [key, value] : providerEvaluator->evaluateNode(task, inputs, time, 0)) {
+            const auto output = std::find_if(task.outputs.begin(), task.outputs.end(), [&](const auto& candidate) { return candidate.key == key; });
+            if (output == task.outputs.end() || !output->setsValue) continue;
+            states.at(node.stateIndexes.at(output->stateIndex)) = value;
+        }
+    }
+}
+
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions) {
     std::stable_sort(contributions.begin(), contributions.end(), [](const auto& left, const auto& right) {
@@ -1894,6 +2154,7 @@ StateValues integrateVerletNode(const NodeExecutionPlan& node, StateValues local
         if (hasSchedules) kickParameters = resolve(kickTasks, end);
         kick = rates(kickTasks, kickParameters, end);
         for (const auto index : kicked) localStates[index] += half * (kick[index] + held[index]);
+        advanceNodePrograms(node, localStates, synchronizationSnapshot, liveParameterValues, activeSchedules, end, nodeTimeStep, providerEvaluator);
     }
     return localStates;
 }
@@ -1955,6 +2216,8 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                 const auto stateEvaluated = evaluateContributionTasks(stateTasks, localStates, synchronizationSnapshot, stateParameters, substepTime, nodeTimeStep, providerEvaluator);
                 for (const auto& derivative : reduceContributions(stateEvaluated)) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
             }
+            advanceNodePrograms(node, localStates, synchronizationSnapshot, liveParameterValues, activeSchedules,
+                simulationTime + static_cast<double>(substep + 1) * nodeTimeStep, nodeTimeStep, providerEvaluator);
             continue;
         }
         const auto evaluated = evaluateContributionTasks(
@@ -1968,6 +2231,9 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         for (const auto& [stateIndex, algebraicValue] : algebraicNodeProviderWrites) localStates.at(stateIndex) = algebraicValue;
         const auto derivatives = reduceContributions(evaluated);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+        // advance() for the node's version 2 programs with memory, once per substep, with its end and size.
+        advanceNodePrograms(node, localStates, synchronizationSnapshot, liveParameterValues, activeSchedules,
+            simulationTime + static_cast<double>(substep + 1) * nodeTimeStep, nodeTimeStep, providerEvaluator);
     }
     const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
     return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};

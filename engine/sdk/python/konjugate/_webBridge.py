@@ -19,6 +19,7 @@ import json
 
 from konjugate.__main__ import (
     ProviderProtocolError,
+    _is_version2_source,
     _load_provider_class,
     handle_checkpoint,
     handle_evaluate_batch,
@@ -41,6 +42,9 @@ def _float(value):
 
 
 class WebProviderBridge:
+    def created_json(self):
+        return json.dumps({"ok": True})
+
     def __init__(self, provider):
         self._provider = provider
         self._description = provider.describe()
@@ -93,5 +97,62 @@ class WebProviderBridge:
             return json.dumps({"ok": False, "code": "workerFailure", "message": str(error), "fatal": True})
 
 
+class WebProgramBridge:
+    """A version 2 program (konjugate.v2), served with the same ProgramHost the native worker uses (konjugate/v2/_host.py); memory as
+    base64. See WebProgramTransport in engine/src/providerRuntime.cpp for the C++ side."""
+
+    def __init__(self, module_path):
+        from konjugate.v2._host import ProgramHost, load_program_class
+
+        self._host = ProgramHost(load_program_class(module_path, f"_konjugate_web_program_{abs(hash(module_path))}"), module_path)
+
+    def created_json(self):
+        return json.dumps({"ok": True, "description": json.dumps(self._host.describe())})
+
+    @staticmethod
+    def _outcomes(outcomes):
+        return [
+            {
+                "instanceId": outcome["instanceId"],
+                "outputs": [repr(value) if value != value or value in (float("inf"), float("-inf")) else value for value in outcome.get("outputs") or []],
+                "status": outcome.get("status", 0),
+                "message": outcome.get("message", ""),
+                "line": outcome.get("line", 0),
+                "memoryBase64": base64.b64encode(outcome.get("memory") or b"").decode("ascii"),
+                "clockPeriod": outcome.get("clockPeriod", 0.0),
+            }
+            for outcome in outcomes
+        ]
+
+    def dispatch_json(self, request_json):
+        request = json.loads(request_json)
+        kind = request["kind"]
+        try:
+            calls = [(_int(item["instanceId"]), [_float(value) for value in item.get("values", [])], bool(_int(item.get("first", 0))))
+                     for item in request.get("calls", [])]
+            if kind == "programInitialize":
+                instances = [(_int(item["instanceId"]), item.get("owner", ""), _float(item.get("startTime", 0)), [_float(value) for value in item.get("values", [])],
+                              [_int(flag) for flag in item.get("bound", [])], _int(item.get("ownerId", 0)), _int(item.get("programSeed", 0)))
+                             for item in request.get("instances", [])]
+                return json.dumps({"ok": True, "outcomes": self._outcomes(self._host.initialize(instances))})
+            if kind == "programEvaluate":
+                return json.dumps({"ok": True, "outcomes": self._outcomes(self._host.evaluate(_float(request["time"]), [(i, v) for i, v, _ in calls]))})
+            if kind == "programAdvance":
+                return json.dumps({"ok": True, "outcomes": self._outcomes(self._host.advance(_float(request["time"]), _float(request["size"]), calls))})
+            if kind == "programJacobian":
+                return json.dumps({"ok": True, "outcomes": self._outcomes(self._host.jacobian(_float(request["time"]), [(i, v) for i, v, _ in calls]))})
+            if kind == "programSetMemory":
+                self._host.set_memory([(_int(item["instanceId"]), base64.b64decode(item.get("memoryBase64", ""))) for item in request.get("memories", [])])
+                return json.dumps({"ok": True, "outcomes": []})
+            if kind == "shutdown":
+                self._host.shutdown()
+                return json.dumps({"ok": True})
+            raise RuntimeError(f"Unknown web program bridge request kind: {kind}")
+        except Exception as error:  # noqa: BLE001 -- reported to the engine, which names the program
+            return json.dumps({"ok": False, "code": "workerFailure", "message": str(error), "fatal": True})
+
+
 def create_bridge(module_path):
+    if _is_version2_source(module_path):
+        return WebProgramBridge(module_path)
     return WebProviderBridge(_load_provider_class(module_path))

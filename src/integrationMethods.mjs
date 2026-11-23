@@ -1,5 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
+import { programSourceVersion } from './providerTemplate.mjs';
+
 // The integration methods a run can use (docs/proposals/integrators.md), named once for the Run dialog, the result's execution
 // summary, code export and the benchmarks. A run configuration says `method` only when it is not Euler node by node,
 // `stepsPerGlobalStep` only when it is not 1, and Adaptive's `tolerance` only where it is not the default, so a model that uses none of
@@ -117,25 +119,38 @@ export function withStateAbsoluteTolerance(state, value) {
 }
 
 // Under a whole-model method, what cannot take part in its stages (docs/proposals/integrators.md, Programs and Nodes that cannot take
-// stages): a node that is a program of its own (an imported FMU among them) is stepped on its own, and a term written as a program is
-// held, evaluated once per global step; a version 1 program cannot be known to be pure (docs/proposals/programSdkV2.md). Each with the
-// name to show.
+// stages): a node that is a program of its own in the older program format (an imported FMU among them) is stepped on its own, and a term
+// written as a program in the older format is held, evaluated once per global step; a version 1 program cannot be known to be pure, and a
+// version 2 program takes every stage (docs/proposals/programSdkV2.md). Each with the name to show; `older` lists every program in the
+// older format with where it is, for "Convert to version 2 ›".
 export function stageParticipation(document) {
     const nodes = (document?.nodes ?? []).filter((node) => node.enabled !== false);
     const nodeName = new Map(nodes.map((node) => [node.id, node.name || `Node ${node.id}`]));
+    const older = (implementation) => (implementation?.kind === 'cpp' || implementation?.kind === 'python')
+        && programSourceVersion(implementation.kind, implementation.source) === 1;
     const stepped = [];
     const programs = [];
+    const olderPrograms = [];
     for (const node of nodes) {
-        if (node.implementation) stepped.push(nodeName.get(node.id));
+        if (node.implementation && (node.implementation.kind === 'fmi' || older(node.implementation))) {
+            stepped.push(nodeName.get(node.id));
+            if (older(node.implementation)) olderPrograms.push({ name: `${nodeName.get(node.id)}'s program`, target: { type: 'node', nodeId: node.id } });
+        }
         for (const term of node.sourceTerms ?? []) {
-            if (term.implementation && term.setsValue !== true) programs.push(`${nodeName.get(node.id)}'s ${term.state ?? 'term'}`);
+            if (!term.implementation || term.setsValue === true || !older(term.implementation)) continue;
+            const name = `${nodeName.get(node.id)}'s ${term.state ?? 'term'}`;
+            programs.push(name);
+            olderPrograms.push({ name, target: { type: 'sourceTerm', nodeId: node.id, termId: term.id } });
         }
     }
     for (const edge of document?.edges ?? []) {
         if (edge.enabled === false || !nodeName.has(edge.source?.nodeId) || !nodeName.has(edge.target?.nodeId)) continue;
-        if (edge.implementation) programs.push(edge.name || `Relationship ${edge.id}`);
+        if (!edge.implementation || !older(edge.implementation)) continue;
+        const name = edge.name || `Relationship ${edge.id}`;
+        programs.push(name);
+        olderPrograms.push({ name, target: { type: 'edge', edgeId: edge.id } });
     }
-    return { stepped, programs };
+    return { stepped, programs, older: olderPrograms };
 }
 
 // A short list of names: the first few, then how many more.

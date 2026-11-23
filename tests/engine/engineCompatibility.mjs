@@ -676,12 +676,12 @@ assert.notEqual(await run(executable, [
     '--output', join(directory, 'nodeProviderRestartMissingProviderState.bin')
 ]), 0);
 
-// The canvas's starting program for a node (Program in the node editor) runs as written, in Python and in C++, once its
-// two outputs are filled in: a rate for the tank's level, and a value set every substep.
+// The older program format's starting program for a node runs as written, in Python and in C++, once its two outputs are filled in:
+// a rate for the tank's level, and a value set every substep.
 {
-    const { defaultNodeProviderSource } = await import('../../src/providerTemplate.mjs');
+    const { olderNodeProviderSource } = await import('../../src/providerTemplate.mjs');
     const runTemplate = async (kind) => {
-        let source = defaultNodeProviderSource(kind, [{ key: 'level' }, { key: 'setpoint' }], [{ key: 'rate' }, { key: 'shown' }], 'Tank');
+        let source = olderNodeProviderSource(kind, [{ key: 'level' }, { key: 'setpoint' }], [{ key: 'rate' }, { key: 'shown' }], 'Tank');
         source = kind === 'python'
             ? source.replace('outputs.add_gradient("rate", 0.0)', 'outputs.add_gradient("rate", inputs["setpoint"] - inputs["level"])')
                 .replace('outputs.add_gradient("shown", 0.0)', 'outputs.add_gradient("shown", 2 * inputs["level"])')

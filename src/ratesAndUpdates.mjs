@@ -71,6 +71,15 @@ export function termsReachingStates(nodes, edges, { includeDisabled = false } = 
             }));
             continue;
         }
+        // A program with several outputs (implementation.outputs): each reaches its state, a rate or a value as that state's kind says.
+        const programOutputs = edge.implementation?.outputs;
+        if (Array.isArray(programOutputs) && programOutputs.length) {
+            programOutputs.forEach((output, outputIndex) => add(output.stateId, {
+                type: 'relationship', edgeId: edge.id, nodeId: nodeIdOf(output.role === 'source' ? 'source' : 'target'), outputIndex, outputKey: output.key,
+                role: output.role === 'source' ? 'source' : 'target', setsValue: false, programOutput: true
+            }));
+            continue;
+        }
         const output = edge.implementation?.output ?? edge.equationModel?.output ?? { role: 'target', stateId: target.stateId };
         const role = output.role === 'source' ? 'source' : 'target';
         const stateId = output.stateId || (role === 'source' ? source.stateId : target.stateId) || firstStateId(nodeIdOf(role));

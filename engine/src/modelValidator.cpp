@@ -112,6 +112,39 @@ std::string stateSymbol(const boost::property_tree::ptree& document, EntityId st
 
 // The stability pass under a whole-model method (assessWholeModelStability): one finding for the model, on its run settings, where
 // the step is chosen -- a global timestep, or steps per global step, rather than a node's substeps.
+// Which version of the program SDK a program's source is written against: 2 when it includes konjugate/sdk/v2 or imports konjugate.v2.
+bool sourceIsVersion2(const std::string& kind, const std::string& source) {
+    if (kind == "cpp") return source.find("konjugate/sdk/v2/") != std::string::npos;
+    static const std::regex python(R"((^|\n)\s*(from\s+konjugate\.v2(\.\w+)*\s+import|import\s+konjugate\.v2\b))");
+    return std::regex_search(source, python);
+}
+
+// A program's providerApiVersion: 1 or 2, and agreeing with its source; another version is one this Konjugate does not have
+// (docs/proposals/programSdkV2.md, Versioning). The file is the engine's switch and the source the truth, so a disagreement says which to
+// change.
+void checkProgramVersion(ValidationResult& result, const boost::property_tree::ptree& implementation, const std::string& kind,
+                         const std::string& entityType, const std::string& id, const std::string& field) {
+    const auto version = value(implementation, "providerApiVersion");
+    if (version != "1" && version != "2") {
+        add(result, "providerApiVersionInvalid", "error", version.empty()
+            ? "A program must say which version of the program SDK it is written for (providerApiVersion)."
+            : "This program is written for version " + version + " of the program SDK, which this Konjugate does not have; update Konjugate.",
+            entityType, id, field);
+        return;
+    }
+    const auto source = value(implementation, "source");
+    if (source.empty()) return;
+    const bool newer = sourceIsVersion2(kind, source);
+    if (version == "1" && newer) {
+        add(result, "programVersionMismatch", "error", "This program's code is written in the newer program format, but the file says it is "
+            "in the older one. Save the program again from its editor, or set its providerApiVersion to 2.", entityType, id, field);
+    } else if (version == "2" && !newer) {
+        add(result, "programVersionMismatch", "error", std::string("This program's code is written in the older program format, but the file says "
+            "it is in the newer one. ") + (kind == "cpp" ? "Include <konjugate/sdk/v2/program.hpp>" : "Import from konjugate.v2") +
+            ", or set its providerApiVersion to 1.", entityType, id, field);
+    }
+}
+
 void addWholeModelStability(ValidationResult& result, const boost::property_tree::ptree& document, const ExecutionPlan& plan,
                             double globalTimeStep, const IntegrationSettings& integration) {
     const auto assessment = assessWholeModelStability(plan, plan.initialStates, globalTimeStep, integration.stepsPerGlobalStep, 400,
@@ -810,9 +843,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 add(result, "sourceKindInvalid", "error", "A node's own part must be written as an equation, a C++ program or a Python program.", "node", id, "sourceTerms");
             }
             if (termImplementationKind == "cpp" || termImplementationKind == "python") {
-                if (value(*termImplementation, "providerApiVersion") != "1") {
-                    add(result, "providerApiVersionInvalid", "error", "A node's own part written as a program requires provider API version 1.", "node", id, "sourceTerms");
-                }
+                checkProgramVersion(result, *termImplementation, termImplementationKind, "node", id, "sourceTerms");
                 if (value(*termImplementation, "source").empty()) {
                     add(result, "providerSourceEmpty", "error", "A node's own part written as a program needs its program's source.", "node", id, "sourceTerms");
                 }
@@ -899,9 +930,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         "Computational-node provider implementation kind must be python or cpp.",
                         "node", id, "implementation");
                 }
-                if (value(*implementation, "providerApiVersion") != "1") {
-                    add(result, "providerApiVersionInvalid", "error", "Programmable computational-node providers require provider API version 1.", "node", id, "implementation");
-                }
+                checkProgramVersion(result, *implementation, kind, "node", id, "implementation");
                 if (value(*implementation, "source").empty()) {
                     add(result, "providerSourceEmpty", "error", "Programmable computational-node providers require inline source.", "node", id, "implementation");
                 }
@@ -973,10 +1002,14 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                         add(result, "nodeProviderOutputMissing", "error", "Provider output must reference an existing local state.", "node", id, "implementation");
                     } else {
                         stateContributorCounts[outputStateId] += 1;
-                        if (value(output, "setsValue") == "true") programValueStateIds.insert(outputStateId);
+                        // A version 2 program's output means what its state's kind says (docs/proposals/programSdkV2.md): into an Update
+                        // state it is the state's value, read at the update instant, setsValue or not.
+                        const bool version2 = value(*implementation, "providerApiVersion") == "2";
+                        const bool setsValue = value(output, "setsValue") == "true" || (version2 && declaredKind(outputStateId) == "update");
+                        if (setsValue) programValueStateIds.insert(outputStateId);
                         else programRateCounts[outputStateId] += 1;
-                        note(value(output, "setsValue") == "true" ? valueSources[outputStateId] : rateSources[outputStateId], value(node, "name") + "'s program");
-                        if (value(output, "setsValue") == "true") {
+                        note(setsValue ? valueSources[outputStateId] : rateSources[outputStateId], value(node, "name") + "'s program");
+                        if (setsValue && !version2) {
                             setsValueStateIds.insert(outputStateId);
                             // A setsValue output reading its own target state back through one of
                             // this provider's (shared, per-node not per-output) bindings would make
@@ -1106,9 +1139,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             add(result, "providerKindInvalid", "error", "Relationship implementation kind must be equation, cpp or python.", "edge", id, "implementation");
         }
         if (implementationKind == "cpp" || implementationKind == "python") {
-            if (value(*implementation, "providerApiVersion") != "1") {
-                add(result, "providerApiVersionInvalid", "error", "Programmable relationships require provider API version 1.", "edge", id, "implementation");
-            }
+            checkProgramVersion(result, *implementation, implementationKind, "edge", id, "implementation");
             if (value(*implementation, "source").empty()) {
                 add(result, "providerSourceEmpty", "error", "Programmable relationships require inline source.", "edge", id, "implementation");
             }
@@ -1147,6 +1178,27 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 } else {
                     add(result, "providerBindingKindInvalid", "error", "Provider binding kind must be state or parameter.", "edge", id, "implementation");
                 }
+            }
+            // A program with several outputs (implementation.outputs): each checked as the one output is, for a version 2 program on a
+            // one-way relationship.
+            if (const auto outputs = implementation->get_child_optional("outputs"); outputs && !outputs->empty()) {
+                if (value(*implementation, "providerApiVersion") != "2") {
+                    add(result, "programOutputsUnsupported", "error", "Only a program in the current program format can give a relationship several outputs.", "edge", id, "implementation");
+                }
+                if (value(edge, "directionality") == "bidirectional") {
+                    add(result, "programOutputsUnsupported", "error", "A two-way relationship gives one output, which reaches both ends; give a program with several outputs a one-way relationship.", "edge", id, "implementation");
+                }
+                std::set<std::string> outputKeys;
+                for (const auto& outputItem : *outputs) {
+                    boost::property_tree::ptree single;
+                    single.add_child("output", outputItem.second);
+                    validateProviderOutput(result, single, stateIds, sourceNode, targetNode, id);
+                    if (!outputKeys.insert(value(outputItem.second, "key")).second) {
+                        add(result, "providerOutputKeyDuplicate", "error", "Provider output key \"" + value(outputItem.second, "key") + "\" is duplicated.", "edge", id, "implementation");
+                    }
+                    countEdgeContribution(value(outputItem.second, "role"), value(outputItem.second, "stateId"));
+                }
+                continue;
             }
             validateProviderOutput(result, *implementation, stateIds, sourceNode, targetNode, id);
             countEdgeContribution(value(*implementation, "output.role"), value(*implementation, "output.stateId"));

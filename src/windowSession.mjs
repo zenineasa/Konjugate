@@ -562,7 +562,7 @@ export class WindowSession {
                 // measured states replaced.
                 if (estimating) analysis = await this.#analyse(anchor, now, previous, corrections);
                 const start = estimating
-                    ? [...this.#parameterCommands(analysis.mean), { type: 'restoreState', time: anchor, values: analysis.mean.slice(0, this.#engine.stateIds.length), providerStates: previous.restored.providerStates }]
+                    ? [...this.#parameterCommands(analysis.mean), { type: 'restoreState', time: anchor, values: analysis.mean.slice(0, this.#engine.stateIds.length), providerStates: previous.restored.providerStates, ...(previous.restored.programMemory ? { programMemory: previous.restored.programMemory } : {}) }]
                     : [...this.#catchUp(index, previous, plan.origin), { type: 'restoreCheckpoint', time: anchor, overrides }];
                 // Two checkpoints are taken: the next anchor's, for the next move, and now's, for the forecast to start from.
                 const nextAnchor = anchor + this.stride;
@@ -622,7 +622,7 @@ export class WindowSession {
             // What the forecast assumed of each input past now, and how each choice has done against what arrived.
             projections: Object.fromEntries(Object.entries(projections).map(([signal, { choice, using, reason, samples, held }]) => [signal, { choice, using, reason, samples, ...(held ? { held } : {}) }])),
             inputScores: this.#scoreProjections(now),
-            restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates },
+            restored: { time: restored.time, values: restored.values, providerStates: restored.providerStates, ...(restored.programMemory ? { programMemory: restored.programMemory } : {}) },
             inputs: Object.fromEntries(this.inputs.map((entry) => [entry.signal, this.#goodReadings(entry.signal, now).map(({ time, value }) => ({ time, value }))])),
             wallSeconds, computeSeconds, checkpointsTaken, corrections,
             // Where the forecast starts, for each measured signal: the model at now, the latest reading, and the value set (null when
@@ -715,7 +715,7 @@ export class WindowSession {
         for (const member of this.#ensemble.members) {
             commands.push(
                 ...this.#parameterCommands(member),
-                { type: 'restoreState', time: from, values: member.slice(0, stateIds.length), providerStates: previous.restored.providerStates },
+                { type: 'restoreState', time: from, values: member.slice(0, stateIds.length), providerStates: previous.restored.providerStates, ...(previous.restored.programMemory ? { programMemory: previous.restored.programMemory } : {}) },
                 { type: 'advanceTo', time: anchor, takeCheckpoints: true },
                 { type: 'restoreCheckpoint', time: anchor, overrides: [] }
             );
@@ -804,7 +804,7 @@ export class WindowSession {
         const commands = members.flatMap((member, index) => [
             ...perMember[index].before,
             ...this.#parameterCommands(member),
-            { type: 'restoreState', time: cycle.anchor, values: member.slice(0, stateIds.length), providerStates: cycle.restored.providerStates },
+            { type: 'restoreState', time: cycle.anchor, values: member.slice(0, stateIds.length), providerStates: cycle.restored.providerStates, ...(cycle.restored.programMemory ? { programMemory: cycle.restored.programMemory } : {}) },
             { type: 'advanceTo', time: end },
             ...perMember[index].after
         ]);
@@ -905,7 +905,7 @@ export class WindowSession {
         // A refit or a model change since that move restarted the twin from a state of its own, which is where to run from.
         const logged = origin ?? this.#restartFrom ?? previous?.restored;
         const from = previous
-            ? { type: 'restoreState', time: logged.time, values: logged.values, providerStates: logged.providerStates }
+            ? { type: 'restoreState', time: logged.time, values: logged.values, providerStates: logged.providerStates, ...(logged.programMemory ? { programMemory: logged.programMemory } : {}) }
             : { type: 'restoreCheckpoint', time: 0, overrides: this.outputs.flatMap((entry) => {
                 const measured = this.#measurementAt(entry.signal, 0, this.#anchor(index) + this.window);
                 return measured === null ? [] : [{ stateId: entry.stateId, value: measured }];
@@ -986,7 +986,7 @@ export class WindowSession {
         const state = from ?? this.#restartFrom ?? last.restored;
         await this.#engine.run([
             ...this.#inputCommands(last.now),
-            { type: 'restoreState', time: state.time, values: state.values, providerStates: state.providerStates },
+            { type: 'restoreState', time: state.time, values: state.values, providerStates: state.providerStates, ...(state.programMemory ? { programMemory: state.programMemory } : {}) },
             { type: 'advanceTo', time: this.#anchor(index), takeCheckpoints: true, discardSamples: true }
         ]);
     }
@@ -1060,7 +1060,7 @@ export class WindowSession {
             }
             const before = this.document;
             this.document = document;
-            const from = { time: target.restored.time, values, providerStates: target.restored.providerStates };
+            const from = { time: target.restored.time, values, providerStates: target.restored.providerStates, ...(target.restored.programMemory ? { programMemory: target.restored.programMemory } : {}) };
             try {
                 await this.#restart(this.#nextCycle, from);
                 if (JSON.stringify(this.#engine.stateIds) !== JSON.stringify(stateIds)) throw new ReplayError('A refit changes values only, not the model\'s states.');
@@ -1103,6 +1103,8 @@ export class WindowSession {
             const before = { document: this.document, estimatedParameters: this.estimatedParameters, inferredStateIds: this.inferredStateIds };
             const oldIds = this.#engine.stateIds;
             const providerStates = target.restored.providerStates.filter((entry) => document.nodes.some((node) => node.id === entry.nodeId));
+            // Version 2 programs' memory: the engine matches it by what it belongs to and by field name, and leaves out what is gone.
+            const programMemory = target.restored.programMemory;
             try {
                 this.#useModel(document);
                 await this.#engine?.close().catch(() => {});
@@ -1112,10 +1114,10 @@ export class WindowSession {
                     const position = oldIds.indexOf(stateId);
                     return position >= 0 ? target.restored.values[position] : Number(states.get(stateId)?.initialValue ?? 0);
                 });
-                const from = { time: target.restored.time, values, providerStates };
+                const from = { time: target.restored.time, values, providerStates, ...(programMemory ? { programMemory } : {}) };
                 await this.#engine.run([
                     ...this.#inputCommands(target.now),
-                    { type: 'restoreState', time: from.time, values, providerStates },
+                    { type: 'restoreState', time: from.time, values, providerStates, ...(programMemory ? { programMemory } : {}) },
                     { type: 'advanceTo', time: this.#anchor(this.#nextCycle), takeCheckpoints: true, discardSamples: true }
                 ]);
                 this.#restartFrom = from;
@@ -1155,7 +1157,8 @@ export class WindowSession {
                 startCheckpoint: {
                     time: cycle.restored.time,
                     states: stateIds.map((stateId, position) => ({ stateId, value: cycle.restored.values[position] })),
-                    providerStates: cycle.restored.providerStates.map(({ nodeId, payload }) => ({ nodeId, payload: base64(payload) }))
+                    providerStates: cycle.restored.providerStates.map(({ nodeId, payload }) => ({ nodeId, payload: base64(payload) })),
+                    ...(cycle.restored.programMemory?.length ? { programMemory: cycle.restored.programMemory } : {})
                 }
             }
         };
@@ -1205,7 +1208,7 @@ export class Sandbox {
         }, session.engineOptions);
         await sandbox.#engine.run([
             ...session.inputs.filter((entry) => cycle.inputs[entry.signal].length).map((entry) => ({ type: 'appendInputSamples', parameterId: entry.parameterId, samples: cycle.inputs[entry.signal] })),
-            { type: 'restoreState', time: cycle.restored.time, values: cycle.restored.values, providerStates: cycle.restored.providerStates },
+            { type: 'restoreState', time: cycle.restored.time, values: cycle.restored.values, providerStates: cycle.restored.providerStates, ...(cycle.restored.programMemory ? { programMemory: cycle.restored.programMemory } : {}) },
             { type: 'advanceTo', time: cycle.now, discardSamples: true }
         ]);
         sandbox.time = cycle.now;

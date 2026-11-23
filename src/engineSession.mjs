@@ -171,7 +171,9 @@ export class EngineSession {
 
     advanceTo(time, { takeCheckpoints = false, keepEvery = 1 } = {}) { return this.run([{ type: 'advanceTo', time, takeCheckpoints, keepEvery }]).then(([reply]) => reply); }
     restoreCheckpoint(time, overrides = []) { return this.run([{ type: 'restoreCheckpoint', time, overrides }]).then(([reply]) => reply); }
-    restoreState(time, values, providerStates = []) { return this.run([{ type: 'restoreState', time, values, providerStates }]).then(([reply]) => reply); }
+    restoreState(time, values, providerStates = [], programMemory = []) {
+        return this.run([{ type: 'restoreState', time, values, providerStates, ...(programMemory.length ? { programMemory } : {}) }]).then(([reply]) => reply);
+    }
     appendInputs(parameterId, samples, replaceFrom) { return this.run([{ type: 'appendInputSamples', parameterId, samples, replaceFrom }]).then(([reply]) => reply); }
     retainFrom(time) { return this.run([{ type: 'retainCheckpointsFrom', time }]).then(([reply]) => reply); }
 

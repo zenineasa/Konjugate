@@ -79,7 +79,20 @@ test('what cannot take stages is named before the run: a node that is a program 
             { id: 43, name: 'To nothing', source: { nodeId: 4 }, target: { nodeId: 3 }, implementation: { kind: 'python' } }
         ]
     };
-    assert.deepEqual(stageParticipation(document), { stepped: ['Pump', 'Controller'], programs: ["Tank's level", 'Valve'] });
+    const participation = stageParticipation(document);
+    assert.deepEqual(participation.stepped, ['Pump', 'Controller']);
+    assert.deepEqual(participation.programs, ["Tank's level", 'Valve']);
+    assert.deepEqual(participation.older.map((program) => program.target), [
+        { type: 'node', nodeId: 2 }, { type: 'sourceTerm', nodeId: 3, termId: 31 }, { type: 'edge', edgeId: 41 }
+    ], 'Every program in the older format is listed, with where it is, for its "Convert to version 2 ›".');
+    // A program in the current format takes every stage: neither stepped nor held.
+    const newer = structuredClone(document);
+    newer.nodes[1].implementation.source = 'from konjugate.v2 import Input, Node, Output\n';
+    newer.edges[0].implementation.source = '#include <konjugate/sdk/v2/program.hpp>\n';
+    newer.edges[0].implementation.kind = 'cpp';
+    const current = stageParticipation(newer);
+    assert.deepEqual(current.stepped, ['Pump']);
+    assert.deepEqual(current.programs, ["Tank's level"]);
     assert.equal(nameList(['a', 'b', 'c']), 'a, b and c');
     assert.equal(nameList(['a', 'b', 'c', 'd', 'e', 'f'], 4), 'a, b, c, d and 2 more');
 });

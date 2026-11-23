@@ -78,7 +78,9 @@ export async function openIndexedResult(path) {
                     time: checkpoint.time,
                     solver: checkpoint.solver,
                     states: header.stateIds.map((stateId, stateIndex) => ({ stateId, value: checkpoint.values[stateIndex] })),
-                    providerStates: checkpoint.providerStates
+                    providerStates: checkpoint.providerStates,
+                    // Version 2 programs' memory, as a startCheckpoint takes it; only when the run had some.
+                    ...(checkpoint.programMemory ? { programMemory: checkpoint.programMemory } : {})
                 }))
             },
             async readSamples({ startTime = -Infinity, endTime = Infinity, maximumSamples = Infinity } = {}) {

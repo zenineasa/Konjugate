@@ -93,9 +93,47 @@ struct KonjugateInProcessNodeProviderV1 {
 
 using KonjugateInProcessNodeProviderV1Fn = const KonjugateInProcessNodeProviderV1* (*)();
 
+// Version 2 of the program SDK (konjugate/sdk/v2/program.hpp, docs/proposals/programSdkV2.md): one table for both kinds of program,
+// beginning with its own size and ABI version so later fields are appended and an engine reads only the part it knows; an optional
+// method (a Jacobian) is a capability, answered by status 3 when the program gives none. One object per instance; the engine owns
+// each instance's memory (memorySize bytes, 8-byte aligned, zeroed before createInstance) and passes it to every call, so it saves and
+// restores memory without asking. Status codes: 0 done, 1 failed (lastError, lastErrorLine), 2 out of domain (the program refused
+// these inputs; lastError says why), 3 not provided.
+struct KonjugateInProcessProgramV2 {
+    std::uint32_t size;
+    std::uint32_t abiVersion;
+    // The artifact: a probe instance read for the description. Returns nullptr on failure (lastError(nullptr) says why).
+    void* (*create)();
+    void (*destroy)(void* self);
+    // The program's description, as JSON owned by the library: name, kind (relationship or node), inputs (key, kind, unit, default),
+    // outputs (key, unit, dependsOn), memory (name, type, count, offset, unit), memorySize, clockPeriod, clockConstant.
+    const char* (*description)(void* self);
+    // A new instance: constructed, its memory set to the declared starting values (each Random seeded from ownerId, programSeed and the
+    // field's name), then initialize() called with `values` (every input in declaration order, at the start) and `bound` (one flag per
+    // input). *clockPeriod is its clock's period after initialize(), 0 for none.
+    std::int32_t (*createInstance)(void* self, std::uint64_t instanceId, const char* owner, double startTime, const double* values,
+                                   const unsigned char* bound, std::uint32_t valueCount, std::uint64_t ownerId, std::uint64_t programSeed,
+                                   std::uint8_t* memory, double* clockPeriod);
+    // outputs: one per declared output, in declaration order.
+    std::int32_t (*evaluate)(void* self, std::uint64_t instanceId, double time, const double* values, std::uint32_t valueCount,
+                             const std::uint8_t* memory, double* outputs, std::uint32_t outputCount);
+    std::int32_t (*advance)(void* self, std::uint64_t instanceId, double time, double size, std::int32_t first, const double* values,
+                            std::uint32_t valueCount, std::uint8_t* memory);
+    // entries: outputCount x valueCount, row by output; status 3 when the program gives no Jacobian.
+    std::int32_t (*jacobian)(void* self, std::uint64_t instanceId, double time, const double* values, std::uint32_t valueCount,
+                             const std::uint8_t* memory, double* entries, std::uint32_t entryCount);
+    const char* (*lastError)(void* self);
+    std::uint32_t (*lastErrorLine)(void* self);
+    void (*shutdownProgram)(void* self);
+};
+
+using KonjugateInProcessProgramV2Fn = const KonjugateInProcessProgramV2* (*)();
+
 } // extern "C"
 
 // The symbol names the engine dlsym()s/GetProcAddress()s for; kept as named constants so the
 // shims that export them and the engine that looks them up cannot drift independently.
 inline constexpr const char* kKonjugateInProcessProviderEntryPoint = "konjugate_in_process_provider_v1";
 inline constexpr const char* kKonjugateInProcessNodeProviderEntryPoint = "konjugate_in_process_node_provider_v1";
+inline constexpr const char* kKonjugateInProcessProgramEntryPoint = "konjugate_in_process_program_v2";
+inline constexpr std::uint32_t kKonjugateInProcessProgramAbiVersion = 1;

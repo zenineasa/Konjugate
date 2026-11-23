@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../src/nodeProgram.mjs';
-import { defaultNodeProviderSource } from '../src/providerTemplate.mjs';
+import { defaultNodeProviderSource, olderNodeProviderSource } from '../src/providerTemplate.mjs';
 
 const tank = { id: 1, title: 'Tank', states: [{ id: 2, symbol: 'level' }, { id: 3, symbol: 'effort' }] };
 const valve = { id: 4, title: 'Valve', states: [{ id: 5, symbol: 'opening' }] };
@@ -73,15 +73,22 @@ test('an FMU says which binary runs, what it fixes, what it converts and what is
 });
 
 test('a new program starts from a template naming every input and output', () => {
-    const python = defaultNodeProviderSource('python', [{ key: 'level' }], [{ key: 'rate' }], 'Tank');
-    assert.match(python, /class Tank\(NodeProvider\)/);
-    assert.match(python, /ScalarPort\("level", "level", ""\)/);
-    assert.match(python, /outputs\.add_gradient\("rate", 0\.0\)/);
-    assert.match(python, /def checkpoint\(self\):\n        return b""/);
+    const python = defaultNodeProviderSource('python', [{ key: 'level' }, { key: 'inflowRate' }], [{ key: 'rate' }], 'Tank');
+    assert.match(python, /^from konjugate\.v2 import Input, Node, Output$/m);
+    assert.match(python, /class Tank\(Node\)/);
+    assert.match(python, /^    level = Input\(\)$/m);
+    assert.match(python, /^    inflow_rate = Input\(\)$/m, 'A camelCase key is a snake_case attribute, which binds as the key.');
+    assert.match(python, /^    rate = Output\(\)$/m);
+    assert.match(python, /return self\.outputs\(rate=0\.0\)/);
+    assert.doesNotMatch(python, /checkpoint/, 'A version 2 program writes no checkpoint: the engine keeps its memory.');
     const cpp = defaultNodeProviderSource('cpp', [{ key: 'level' }], [{ key: 'rate' }], 'Tank');
-    assert.match(cpp, /class Tank final : public konjugate::sdk::v1::NodeProvider/);
-    assert.match(cpp, /createNodeProvider\(\)/);
-    assert.match(cpp, /outputs\.addGradient\("rate", 0\.0\);/);
+    assert.match(cpp, /#include <konjugate\/sdk\/v2\/program\.hpp>/);
+    assert.match(cpp, /class Tank final : public k::Node/);
+    assert.match(cpp, /k::Input level\{this, "level"\};/);
+    assert.match(cpp, /y\[rate\] = 0\.0;/);
+    assert.match(cpp, /std::unique_ptr<k::Program> createProgram\(\)/);
+    const older = olderNodeProviderSource('python', [{ key: 'level' }], [{ key: 'rate' }], 'Tank');
+    assert.match(older, /class Tank\(NodeProvider\)/, 'The older program format keeps its own template.');
 });
 
 test('an installed plugin\'s relationship providers are offered, pinned to the installed version', async () => {

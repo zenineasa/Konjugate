@@ -21,6 +21,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'wholeModelI
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'eventLocation.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'outputSampling.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'programWarnings.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'programSdkV2.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'algebraicSnapshotContract.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'ringSettling.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'updateChainAcrossNodes.mjs'), executable]);

@@ -1,0 +1,62 @@
+{
+    "id": "pureQuadratic",
+    "group": "nonlinear",
+    "title": "Purely quadratic term x2 = 0.8 x1² + …",
+    "kind": "discrete",
+    "seed": 121,
+    "rows": 1500,
+    "expect": "limit",
+    "inference": {
+        "degrees": [
+            1,
+            2
+        ]
+    },
+    "limit": "x1 is symmetric about zero, so x1² has no linear correlation with x1; the skeleton (stage 1) is linear and prunes the pair before any power is fitted.",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.3,
+                "noise": 0.3
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "quadratic": 0.8
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 2,
+                        "rate": 0.8
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -1,
+            "x2": -0.7
+        }
+    }
+}

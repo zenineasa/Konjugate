@@ -135,7 +135,7 @@ async function main() {
             if (machine.power?.source === 'Battery Power') console.warn('⚠ Running on battery power; macOS may throttle the processor.');
             if (machine.power?.lowPowerMode) console.warn('⚠ Low Power Mode is on.');
             timings = [];
-            for (const { id, directory } of selected) {
+            for (const { id, directory, measure } of selected) {
                 const config = JSON.parse(readFileSync(join(directory, 'benchmark.json'), 'utf8'));
                 for (const timing of config.timing ?? []) {
                     const modelPath = join(directory, `${timing.model}.kjt`);
@@ -151,6 +151,16 @@ async function main() {
                         peakResidentBytes: memory.length ? Math.max(...memory) : null
                     });
                     console.log(`  timed ${id}: ${timing.label}: median ${timings.at(-1).wall.median.toFixed(1)} ms over ${repeats} runs`);
+                }
+                // A problem that times its own cases (generated models, several backends) exports measure(); its rows, plots and notes join
+                // its own section of the report.
+                if (measure) {
+                    const measured = await measure({ engine: baseEngine, config, repeats, warmupRuns });
+                    timings.push(...measured.timings);
+                    const entry = results.find((candidate) => candidate.id === id);
+                    entry.rows.push(...measured.rows.map((row) => ({ problem: id, ...row })));
+                    entry.plots.push(...measured.plots);
+                    entry.notes.push(...measured.notes);
                 }
             }
             timingSummary = { repeats, warmupRuns, caffeinated: Boolean(process.env.KONJUGATE_BENCHMARK_CAFFEINATED), busyProcesses: [...new Set(busy.map((entry) => entry.kind))] };

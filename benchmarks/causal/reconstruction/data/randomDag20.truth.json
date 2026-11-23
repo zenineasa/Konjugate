@@ -1,0 +1,501 @@
+{
+    "id": "randomDag20",
+    "group": "topology",
+    "title": "Random sparse graph, 20 variables",
+    "kind": "discrete",
+    "seed": 107,
+    "rows": 1000,
+    "expect": "recover",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.58,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.343,
+                "noise": 1
+            },
+            {
+                "name": "x3",
+                "self": 0.479,
+                "noise": 1
+            },
+            {
+                "name": "x4",
+                "self": 0.402,
+                "noise": 1
+            },
+            {
+                "name": "x5",
+                "self": 0.59,
+                "noise": 1
+            },
+            {
+                "name": "x6",
+                "self": 0.334,
+                "noise": 1
+            },
+            {
+                "name": "x7",
+                "self": 0.265,
+                "noise": 1
+            },
+            {
+                "name": "x8",
+                "self": 0.557,
+                "noise": 1
+            },
+            {
+                "name": "x9",
+                "self": 0.259,
+                "noise": 1
+            },
+            {
+                "name": "x10",
+                "self": 0.334,
+                "noise": 1
+            },
+            {
+                "name": "x11",
+                "self": 0.218,
+                "noise": 1
+            },
+            {
+                "name": "x12",
+                "self": 0.427,
+                "noise": 1
+            },
+            {
+                "name": "x13",
+                "self": 0.553,
+                "noise": 1
+            },
+            {
+                "name": "x14",
+                "self": 0.402,
+                "noise": 1
+            },
+            {
+                "name": "x15",
+                "self": 0.222,
+                "noise": 1
+            },
+            {
+                "name": "x16",
+                "self": 0.318,
+                "noise": 1
+            },
+            {
+                "name": "x17",
+                "self": 0.205,
+                "noise": 1
+            },
+            {
+                "name": "x18",
+                "self": 0.484,
+                "noise": 1
+            },
+            {
+                "name": "x19",
+                "self": 0.275,
+                "noise": 1
+            },
+            {
+                "name": "x20",
+                "self": 0.33,
+                "noise": 1
+            }
+        ],
+        "edges": [
+            {
+                "source": "x3",
+                "target": "x4",
+                "linear": -0.511
+            },
+            {
+                "source": "x4",
+                "target": "x6",
+                "linear": 0.792
+            },
+            {
+                "source": "x5",
+                "target": "x6",
+                "linear": -0.76
+            },
+            {
+                "source": "x9",
+                "target": "x10",
+                "linear": 0.671
+            },
+            {
+                "source": "x3",
+                "target": "x11",
+                "linear": 0.83
+            },
+            {
+                "source": "x10",
+                "target": "x11",
+                "linear": 0.834
+            },
+            {
+                "source": "x3",
+                "target": "x12",
+                "linear": -0.641
+            },
+            {
+                "source": "x4",
+                "target": "x12",
+                "linear": -0.81
+            },
+            {
+                "source": "x5",
+                "target": "x13",
+                "linear": 0.689
+            },
+            {
+                "source": "x5",
+                "target": "x14",
+                "linear": -0.575
+            },
+            {
+                "source": "x9",
+                "target": "x14",
+                "linear": 0.875
+            },
+            {
+                "source": "x8",
+                "target": "x15",
+                "linear": 0.67
+            },
+            {
+                "source": "x14",
+                "target": "x15",
+                "linear": -0.505
+            },
+            {
+                "source": "x9",
+                "target": "x16",
+                "linear": -0.538
+            },
+            {
+                "source": "x6",
+                "target": "x17",
+                "linear": -0.498
+            },
+            {
+                "source": "x15",
+                "target": "x17",
+                "linear": -0.737
+            },
+            {
+                "source": "x5",
+                "target": "x18",
+                "linear": 0.402
+            },
+            {
+                "source": "x17",
+                "target": "x18",
+                "linear": 0.535
+            },
+            {
+                "source": "x9",
+                "target": "x19",
+                "linear": 0.569
+            },
+            {
+                "source": "x16",
+                "target": "x19",
+                "linear": -0.677
+            },
+            {
+                "source": "x18",
+                "target": "x20",
+                "linear": 0.418
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3",
+            "x4",
+            "x5",
+            "x6",
+            "x7",
+            "x8",
+            "x9",
+            "x10",
+            "x11",
+            "x12",
+            "x13",
+            "x14",
+            "x15",
+            "x16",
+            "x17",
+            "x18",
+            "x19",
+            "x20"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x3",
+                "target": "x4",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.511
+                    }
+                ]
+            },
+            {
+                "source": "x4",
+                "target": "x6",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.792
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x6",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.76
+                    }
+                ]
+            },
+            {
+                "source": "x9",
+                "target": "x10",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.671
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x11",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.83
+                    }
+                ]
+            },
+            {
+                "source": "x10",
+                "target": "x11",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.834
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x12",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.641
+                    }
+                ]
+            },
+            {
+                "source": "x4",
+                "target": "x12",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.81
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x13",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.689
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x14",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.575
+                    }
+                ]
+            },
+            {
+                "source": "x9",
+                "target": "x14",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.875
+                    }
+                ]
+            },
+            {
+                "source": "x8",
+                "target": "x15",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.67
+                    }
+                ]
+            },
+            {
+                "source": "x14",
+                "target": "x15",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.505
+                    }
+                ]
+            },
+            {
+                "source": "x9",
+                "target": "x16",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.538
+                    }
+                ]
+            },
+            {
+                "source": "x6",
+                "target": "x17",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.498
+                    }
+                ]
+            },
+            {
+                "source": "x15",
+                "target": "x17",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.737
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x18",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.402
+                    }
+                ]
+            },
+            {
+                "source": "x17",
+                "target": "x18",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.535
+                    }
+                ]
+            },
+            {
+                "source": "x9",
+                "target": "x19",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.569
+                    }
+                ]
+            },
+            {
+                "source": "x16",
+                "target": "x19",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.677
+                    }
+                ]
+            },
+            {
+                "source": "x18",
+                "target": "x20",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.418
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.42000000000000004,
+            "x2": -0.657,
+            "x3": -0.521,
+            "x4": -0.598,
+            "x5": -0.41000000000000003,
+            "x6": -0.6659999999999999,
+            "x7": -0.735,
+            "x8": -0.44299999999999995,
+            "x9": -0.741,
+            "x10": -0.6659999999999999,
+            "x11": -0.782,
+            "x12": -0.573,
+            "x13": -0.44699999999999995,
+            "x14": -0.598,
+            "x15": -0.778,
+            "x16": -0.6819999999999999,
+            "x17": -0.795,
+            "x18": -0.516,
+            "x19": -0.725,
+            "x20": -0.6699999999999999
+        }
+    }
+}

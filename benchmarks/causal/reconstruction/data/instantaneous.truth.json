@@ -1,0 +1,57 @@
+{
+    "id": "instantaneous",
+    "group": "model class",
+    "title": "Effect within one row x2(t) = 0.8 x1(t) + …",
+    "kind": "discrete",
+    "seed": 131,
+    "rows": 1500,
+    "expect": "limit",
+    "limit": "The effect is faster than the sampling, so there is no lagged evidence of its direction; at best the pair is found as correlation without a direction.",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.5,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.3,
+                "noise": 0.5
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "linear": 0.8,
+                "lag": 0
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 0,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.8
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.5,
+            "x2": -0.7
+        }
+    }
+}

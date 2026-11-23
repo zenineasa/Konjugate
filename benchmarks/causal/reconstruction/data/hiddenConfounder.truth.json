@@ -1,0 +1,59 @@
+{
+    "id": "hiddenConfounder",
+    "group": "model class",
+    "title": "Hidden common cause z → x1, z → x2 (z not in the CSV)",
+    "kind": "discrete",
+    "seed": 132,
+    "rows": 1500,
+    "expect": "limit",
+    "hidden": [
+        "z"
+    ],
+    "limit": "Nothing can tell a hidden common cause from a direct link using the observed columns alone; x1 and x2 truly share no edge, so any edge found between them is false.",
+    "generator": {
+        "variables": [
+            {
+                "name": "z",
+                "self": 0.8,
+                "noise": 1
+            },
+            {
+                "name": "x1",
+                "self": 0.3,
+                "noise": 0.5
+            },
+            {
+                "name": "x2",
+                "self": 0.3,
+                "noise": 0.5
+            }
+        ],
+        "edges": [
+            {
+                "source": "z",
+                "target": "x1",
+                "linear": 0.8
+            },
+            {
+                "source": "z",
+                "target": "x2",
+                "linear": 0.8
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2"
+        ],
+        "hidden": [
+            "z"
+        ],
+        "edges": [],
+        "selfRates": {
+            "x1": -0.7,
+            "x2": -0.7
+        }
+    }
+}

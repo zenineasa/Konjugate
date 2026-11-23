@@ -1,0 +1,104 @@
+{
+    "id": "odeChainDt0p1",
+    "group": "continuous time",
+    "title": "Linear ODE chain x1 → x2 → x3 → x4, sampled every 0.1 s",
+    "kind": "ode",
+    "seed": 140,
+    "rows": 1500,
+    "sampleInterval": 0.1,
+    "fineStep": 0.001,
+    "expect": "limit",
+    "limit": "Sampled finely, each variable changes little in one row; conditioned on the source's current value, its previous one adds only about Δt/2 of the coupling, below the skeleton's fixed threshold of 0.1 in partial correlation. More rows do not help (6,000 rows give the same), since the threshold is on the size of the correlation, not its significance.",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": -1,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": -1,
+                "noise": 1
+            },
+            {
+                "name": "x3",
+                "self": -1,
+                "noise": 1
+            },
+            {
+                "name": "x4",
+                "self": -1,
+                "noise": 1
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "linear": 1
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "linear": 0.8
+            },
+            {
+                "source": "x3",
+                "target": "x4",
+                "linear": -0.8
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 0.1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3",
+            "x4"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 1
+                    }
+                ]
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.8
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x4",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.8
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -1,
+            "x2": -1,
+            "x3": -1,
+            "x4": -1
+        }
+    }
+}

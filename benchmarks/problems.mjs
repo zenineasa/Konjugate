@@ -11,6 +11,8 @@ import * as pendulum from './mechanical/pendulum/problem.mjs';
 import * as lotkaVolterra from './population/lotkaVolterra/problem.mjs';
 import * as graphSplit from './coupling/graphSplit/problem.mjs';
 import * as convergenceOrder from './verification/convergenceOrder/problem.mjs';
+import * as graphScalability from './scaling/graphScalability/problem.mjs';
+import * as causalReconstruction from './causal/reconstruction/problem.mjs';
 
 export const problems = [
     { id: 'thermal/rcNetwork', directory: rcNetwork.directory, models: rcNetwork.models, evaluate: rcNetwork.evaluate },
@@ -19,5 +21,7 @@ export const problems = [
     { id: 'mechanical/pendulum', directory: pendulum.directory, models: pendulum.models, evaluate: pendulum.evaluate },
     { id: 'population/lotkaVolterra', directory: lotkaVolterra.directory, models: lotkaVolterra.models, evaluate: lotkaVolterra.evaluate },
     { id: 'verification/convergenceOrder', directory: convergenceOrder.directory, models: {}, evaluate: convergenceOrder.evaluate },
-    { id: 'coupling/graphSplit', directory: graphSplit.directory, models: graphSplit.models, evaluate: graphSplit.evaluate }
+    { id: 'coupling/graphSplit', directory: graphSplit.directory, models: graphSplit.models, evaluate: graphSplit.evaluate },
+    { id: 'scaling/graphScalability', directory: graphScalability.directory, models: graphScalability.models, evaluate: graphScalability.evaluate, measure: graphScalability.measure },
+    { id: 'causal/reconstruction', directory: causalReconstruction.directory, models: causalReconstruction.models, evaluate: causalReconstruction.evaluate }
 ];

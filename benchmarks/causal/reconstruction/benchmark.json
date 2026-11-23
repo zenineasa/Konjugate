@@ -1,0 +1,48 @@
+{
+    "title": "Causal reconstruction: finding known graphs and equations again",
+    "summary": "Synthetic time series generated from known graphs and equations (chains, forks, colliders, a feedback loop, random sparse graphs of 10 and 20 variables; noise from σ = 0.5 to 32; quadratic and source-target product terms; a delay of two rows, an effect within one row, a hidden common cause, a near-noiseless copy; and a continuous-time system sampled from every 0.1 s to every 2 s), the graph hidden, and Konjugate's causal inference asked to find it: edge precision, recall and F1, direction, and the error of the recovered equations, including where it fails.",
+    "sampleSize": { "dataset": "randomDag10", "rows": [250, 500, 1000, 1500] },
+    "measures": {
+        "f1": "directed-edge F1 (harmonic mean of precision and recall over edges with a direction)",
+        "recall": "share of the true edges found with their direction",
+        "falseEdges": "edges proposed that are not in the true graph",
+        "directionAccuracy": "share of the true edges found at all whose direction is reported exactly",
+        "equationError": "equation error: ‖estimated - true rates‖ / ‖true rates‖ over every true or proposed edge, a missing edge counting as zero",
+        "foundEquationError": "equation error over the true edges that were found"
+    },
+    "notes": [
+        "infer fits one-row-lagged, additive models (with optional powers of a source and a source-target product) by ridge regression, after a skeleton of lag-1 partial correlations with a fixed threshold of 0.1 (docs/causalInference.md). Datasets inside that model class are recovered well; the ones outside it are included to show where it fails, and say why in their rows.",
+        "False edges in the recoverable datasets are reverse edges with small rates (the shrinkage effect docs/causalInference.md describes): each row gives the largest false edge's rate beside the smallest true rate. Less noise does not always help: the diamond with the least downstream noise (σ = 0.5) has two (x2 → x1, x3 → x1), because x2 and x3 then follow x1 closely enough to predict it, and it scores below the same diamond at σ = 2. A hidden common cause is the exception: its false edges are as strong as true ones, and nothing in the data can tell them apart.",
+        "A variable with no cause found gets no equation at all, by design (docs/causalInference.md, 'Replaying recorded values for input columns'); the own-rate error is measured only over variables with a true cause.",
+        "Rates are compared in the engine's own units, per second of the CSV's time column: an edge's terms, and a variable's own rate (its self-lag coefficient less one, over Δt). For the continuous-time datasets the true rates are the system matrix A; infer reports (Φ - I)/Δt for the sampled transition Φ = exp(A Δt), which equals A only as A Δt → 0, while at fine sampling the skeleton finds nothing: there is no sampling interval at which both the structure and the rates are right."
+    ],
+    "timing": [],
+    "thresholds": {
+        "chain.f1": { "min": 0.95 },
+        "fork.f1": { "min": 0.95 },
+        "collider.f1": { "min": 0.95 },
+        "diamond.f1": { "min": 0.75 },
+        "feedback.f1": { "min": 0.95 },
+        "randomDag10.f1": { "min": 0.95 },
+        "randomDag20.f1": { "min": 0.86 },
+        "diamondNoise2.f1": { "min": 0.95 },
+        "quadratic.f1": { "min": 0.95 },
+        "bilinear.f1": { "min": 0.95 },
+        "odeChainDt0p5.f1": { "min": 0.95 },
+        "odeChainDt1.f1": { "min": 0.95 },
+        "odeChainDt0p5.equationError": { "min": 0.34, "max": 0.53 },
+        "odeChainDt1.equationError": { "min": 0.48, "max": 0.74 },
+        "diamondNoise8.recall": { "min": 0.7, "max": 0.8 },
+        "diamondNoise32.recall": { "min": 0.45, "max": 0.55 },
+        "pureQuadratic.recall": { "min": 0, "max": 0 },
+        "lag2.foundEquationError": { "min": 0.42, "max": 0.66 },
+        "instantaneous.directionAccuracy": { "min": 0, "max": 0 },
+        "hiddenConfounder.falseEdges": { "min": 2, "max": 2 },
+        "nearDeterministic.recall": { "min": 0, "max": 0 },
+        "odeChainDt0p1.recall": { "min": 0, "max": 0 },
+        "odeChainDt2.equationError": { "min": 0.65, "max": 1.0 },
+        "pooled.directionAccuracy": { "min": 0.9 },
+        "pooled.foundEquationError": { "max": 0.058 },
+        "sampleSize.f1Gain": { "min": 0.4, "max": 0.52 }
+    }
+}

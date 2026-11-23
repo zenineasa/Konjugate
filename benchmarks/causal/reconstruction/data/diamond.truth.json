@@ -1,0 +1,117 @@
+{
+    "id": "diamond",
+    "group": "topology",
+    "title": "Diamond x1 → x2, x3 → x4",
+    "kind": "discrete",
+    "seed": 104,
+    "rows": 1500,
+    "expect": "recover",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.5,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.3,
+                "noise": 0.5
+            },
+            {
+                "name": "x3",
+                "self": 0.3,
+                "noise": 0.5
+            },
+            {
+                "name": "x4",
+                "self": 0.2,
+                "noise": 0.5
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "linear": 0.8
+            },
+            {
+                "source": "x1",
+                "target": "x3",
+                "linear": 0.6
+            },
+            {
+                "source": "x2",
+                "target": "x4",
+                "linear": 0.5
+            },
+            {
+                "source": "x3",
+                "target": "x4",
+                "linear": -0.7
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3",
+            "x4"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.8
+                    }
+                ]
+            },
+            {
+                "source": "x1",
+                "target": "x3",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.6
+                    }
+                ]
+            },
+            {
+                "source": "x2",
+                "target": "x4",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.5
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x4",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.7
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.5,
+            "x2": -0.7,
+            "x3": -0.7,
+            "x4": -0.8
+        }
+    }
+}

@@ -1,0 +1,80 @@
+{
+    "id": "nearDeterministic",
+    "group": "model class",
+    "title": "Near-noiseless copy x1 → x2, x3(t) = x2(t) + 0.01 ε",
+    "kind": "discrete",
+    "seed": 133,
+    "rows": 1500,
+    "expect": "limit",
+    "limit": "The skeleton conditions on every other current and lagged column at once; x3 is an almost exact copy of x2 in the same row, so conditioned on it x2 has nothing left to correlate with x1 (the collider-bias limitation docs/causalInference.md describes). The copy itself, within one row, is outside the lag-1 model.",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.5,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.3,
+                "noise": 0.5
+            },
+            {
+                "name": "x3",
+                "self": 0,
+                "noise": 0.01
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "linear": 0.8
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "linear": 1,
+                "lag": 0
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.8
+                    }
+                ]
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "lag": 0,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 1
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.5,
+            "x2": -0.7,
+            "x3": -1
+        }
+    }
+}

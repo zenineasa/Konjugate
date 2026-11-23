@@ -1,0 +1,60 @@
+{
+    "id": "bilinear",
+    "group": "nonlinear",
+    "title": "Source-target product x2 += 0.3 x1 x2 (with a linear path)",
+    "kind": "discrete",
+    "seed": 122,
+    "rows": 1500,
+    "expect": "recover",
+    "inference": {
+        "interaction": true
+    },
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.5,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.4,
+                "noise": 0.5
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "linear": 0.6,
+                "interaction": 0.3
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x2",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.6
+                    }
+                ],
+                "interaction": 0.3
+            }
+        ],
+        "selfRates": {
+            "x1": -0.5,
+            "x2": -0.6
+        }
+    }
+}

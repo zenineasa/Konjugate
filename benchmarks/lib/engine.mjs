@@ -8,10 +8,12 @@
 //   substeps     every node's numerics.substepsPerGlobalStep
 //   method       the run's method ("rungeKutta4"; docs/proposals/integrators.md), and its stepsPerGlobalStep, set on the run
 //                configuration the engine is given rather than on the model
+//
+// A run executes on the serial backend unless `execution` (docs/parallelExecution.md) chooses another, as the scaling benchmarks do.
 
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
@@ -79,20 +81,24 @@ export function createEngine(executable, workDirectory) {
             if (code !== 0) throw new Error(`${modelPath} did not validate (exit ${code}). ${diagnostics}`);
         },
         // run: { globalTimeStep, targetTime, outputInterval }. Returns the sampled times, each state's samples by state ID, and the work the
-        // engine reports: global steps, node substeps executed and contributions evaluated, summed over nodes.
-        async run(modelPath, variant, run, { measure = false } = {}) {
+        // engine reports: global steps, node substeps executed and contributions evaluated, summed over nodes. execution: the run
+        // configuration's execution settings (backend, workerThreads, partitionCount, ...), serial when absent. modelAsIs: run the file
+        // as it is, without reading and rewriting it, for a generated model too large to be decoded and encoded again for nothing (only
+        // the run's method may then be varied).
+        async run(modelPath, variant, run, { measure = false, execution = null, modelAsIs = false } = {}) {
             const index = runIndex++;
             const configurationPath = join(workDirectory, `run${index}.json`);
             const outputPath = join(workDirectory, `run${index}.bin`);
             const method = variant?.method ? { method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}) } : {};
-            await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial' } }));
-            const engineArgs = ['run', await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];
+            await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial', ...(execution ?? {}) } }));
+            const engineArgs = ['run', modelAsIs ? modelPath : await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];
             const wrapper = measure ? memoryWrapper() : null;
             const startedAt = performance.now();
             const { code, diagnostics } = wrapper ? await execute(wrapper.command, [...wrapper.args, executable, ...engineArgs]) : await execute(executable, engineArgs);
             const wallMilliseconds = performance.now() - startedAt;
             if (code !== 0) throw Object.assign(new Error(`The engine failed on ${modelPath} (exit ${code}). ${diagnostics.trim()}`), { engineExitCode: code, diverged: /non-finite/.test(diagnostics) });
             const result = decodeResultFile(await readFile(outputPath));
+            await rm(outputPath, { force: true });
             const times = result.samples.map((sample) => sample.time);
             const values = new Map();
             for (const sample of result.samples) {
@@ -113,8 +119,13 @@ export function createEngine(executable, workDirectory) {
                 timing: measure ? {
                     wallMilliseconds,
                     engineComputeMilliseconds: Number(result.execution.synchronizationComputeNanoseconds) / 1e6,
+                    planningMilliseconds: Number(result.execution.planningNanoseconds) / 1e6,
                     peakResidentBytes: memoryMatch ? Number(memoryMatch[1]) * wrapper.bytesPerUnit : null
                 } : null,
+                execution: {
+                    backend: result.execution.backend, workerThreads: result.execution.workerThreads, selectionReason: result.execution.selectionReason,
+                    communicationCutFraction: result.execution.communicationCutFraction, estimatedOperationsPerSynchronization: Number(result.execution.estimatedOperationsPerSynchronization)
+                },
                 engineVersion: result.engineVersion
             };
         }

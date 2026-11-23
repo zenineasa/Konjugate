@@ -1,0 +1,255 @@
+{
+    "id": "randomDag10",
+    "group": "topology",
+    "title": "Random sparse graph, 10 variables",
+    "kind": "discrete",
+    "seed": 106,
+    "rows": 1500,
+    "expect": "recover",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.284,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.462,
+                "noise": 1
+            },
+            {
+                "name": "x3",
+                "self": 0.247,
+                "noise": 1
+            },
+            {
+                "name": "x4",
+                "self": 0.519,
+                "noise": 1
+            },
+            {
+                "name": "x5",
+                "self": 0.297,
+                "noise": 1
+            },
+            {
+                "name": "x6",
+                "self": 0.428,
+                "noise": 1
+            },
+            {
+                "name": "x7",
+                "self": 0.519,
+                "noise": 1
+            },
+            {
+                "name": "x8",
+                "self": 0.521,
+                "noise": 1
+            },
+            {
+                "name": "x9",
+                "self": 0.211,
+                "noise": 1
+            },
+            {
+                "name": "x10",
+                "self": 0.246,
+                "noise": 1
+            }
+        ],
+        "edges": [
+            {
+                "source": "x2",
+                "target": "x3",
+                "linear": -0.628
+            },
+            {
+                "source": "x3",
+                "target": "x5",
+                "linear": -0.686
+            },
+            {
+                "source": "x4",
+                "target": "x5",
+                "linear": -0.473
+            },
+            {
+                "source": "x4",
+                "target": "x6",
+                "linear": -0.572
+            },
+            {
+                "source": "x5",
+                "target": "x7",
+                "linear": -0.407
+            },
+            {
+                "source": "x3",
+                "target": "x8",
+                "linear": -0.771
+            },
+            {
+                "source": "x7",
+                "target": "x8",
+                "linear": 0.718
+            },
+            {
+                "source": "x4",
+                "target": "x10",
+                "linear": -0.627
+            },
+            {
+                "source": "x5",
+                "target": "x10",
+                "linear": -0.652
+            },
+            {
+                "source": "x6",
+                "target": "x10",
+                "linear": -0.585
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3",
+            "x4",
+            "x5",
+            "x6",
+            "x7",
+            "x8",
+            "x9",
+            "x10"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x2",
+                "target": "x3",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.628
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x5",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.686
+                    }
+                ]
+            },
+            {
+                "source": "x4",
+                "target": "x5",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.473
+                    }
+                ]
+            },
+            {
+                "source": "x4",
+                "target": "x6",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.572
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x7",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.407
+                    }
+                ]
+            },
+            {
+                "source": "x3",
+                "target": "x8",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.771
+                    }
+                ]
+            },
+            {
+                "source": "x7",
+                "target": "x8",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.718
+                    }
+                ]
+            },
+            {
+                "source": "x4",
+                "target": "x10",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.627
+                    }
+                ]
+            },
+            {
+                "source": "x5",
+                "target": "x10",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.652
+                    }
+                ]
+            },
+            {
+                "source": "x6",
+                "target": "x10",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": -0.585
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.716,
+            "x2": -0.538,
+            "x3": -0.753,
+            "x4": -0.481,
+            "x5": -0.7030000000000001,
+            "x6": -0.5720000000000001,
+            "x7": -0.481,
+            "x8": -0.479,
+            "x9": -0.789,
+            "x10": -0.754
+        }
+    }
+}

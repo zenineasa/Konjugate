@@ -1,0 +1,78 @@
+{
+    "id": "collider",
+    "group": "topology",
+    "title": "Collider x1 → x3 ← x2",
+    "kind": "discrete",
+    "seed": 103,
+    "rows": 1500,
+    "expect": "recover",
+    "generator": {
+        "variables": [
+            {
+                "name": "x1",
+                "self": 0.5,
+                "noise": 1
+            },
+            {
+                "name": "x2",
+                "self": 0.4,
+                "noise": 1
+            },
+            {
+                "name": "x3",
+                "self": 0.3,
+                "noise": 0.5
+            }
+        ],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x3",
+                "linear": 0.7
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "linear": 0.6
+            }
+        ]
+    },
+    "truth": {
+        "timeStep": 1,
+        "observed": [
+            "x1",
+            "x2",
+            "x3"
+        ],
+        "hidden": [],
+        "edges": [
+            {
+                "source": "x1",
+                "target": "x3",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.7
+                    }
+                ]
+            },
+            {
+                "source": "x2",
+                "target": "x3",
+                "lag": 1,
+                "terms": [
+                    {
+                        "degree": 1,
+                        "rate": 0.6
+                    }
+                ]
+            }
+        ],
+        "selfRates": {
+            "x1": -0.5,
+            "x2": -0.6,
+            "x3": -0.7
+        }
+    }
+}

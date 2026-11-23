@@ -42,14 +42,24 @@ test('a program in the current format is exported with the SDK pasted in, its in
     assert.doesNotMatch(cpp, /#pragma once/);
     assert.match(cpp, /const double programInputs\[\] = \{ snapshot\[0\], state\[0\], 4\.0, 2\.0 \};/);
     const python = generateStandaloneProgram(conduction('python', await readFile(join(root, 'examples', 'providers', 'conduction.py'), 'utf8')), 'python');
-    assert.match(python, /\.view\(\[snapshot\[0\], state\[0\], 4\.0, 2\.0\], \{\}\)/);
+    assert.match(python, /\.evaluate\(step_time, \[snapshot\[0\], state\[0\], 4\.0, 2\.0\]\)/);
+    // One instance, kept as the engine keeps it: started before the run with its inputs there.
+    assert.match(cpp, /provider0Instance\.start\(1, "relationship Wall → Room", 31, 0, programInputs\);/);
+    assert.match(python, /\.start\(1, "relationship Wall \\u2192 Room", 31, 0, \[/);
     assert.doesNotMatch(python, /^from konjugate\.v2 import/m);
 });
 
 test('what export cannot write yet is refused by name', async () => {
-    const pid = await readFile(join(root, 'examples', 'providers', 'pidController.py'), 'utf8');
-    const remembering = conduction('python', pid.replace('class PidController(Node):', 'class Conduction(Relationship):'));
-    assert.throws(() => generateStandaloneProgram(remembering, 'python'), /remembers something between steps, or has a clock, which code export cannot write yet/);
-    const staged = conduction('python', await readFile(join(root, 'examples', 'providers', 'conduction.py'), 'utf8'), { method: 'rungeKutta4' });
-    assert.throws(() => generateStandaloneProgram(staged, 'python'), /under Runge–Kutta 4/);
+    const conductionPython = await readFile(join(root, 'examples', 'providers', 'conduction.py'), 'utf8');
+    // Memory, clocks and whole-model methods are written; a program's own Jacobian under Stiff is not, nor are threads.
+    const remembering = conduction('python', conductionPython.replace('from konjugate.v2 import Input,', 'from konjugate.v2 import Input, Memory,')
+        .replace('    warming = Output("K/s")', '    warming = Output("K/s")\n    passed = Memory(0.0)'));
+    assert.match(generateStandaloneProgram(remembering, 'python'), /ProgramInstance\(/);
+    for (const method of ['rungeKutta4', 'dormandPrince54', 'rodas4', 'bdf']) assert.match(generateStandaloneProgram(conduction('python', conductionPython, { method }), 'python'), /def evaluate_stage/);
+    const jacobian = `${conductionPython}\n    def jacobian(self, t, x):\n        return {}\n`;
+    assert.throws(() => generateStandaloneProgram(conduction('python', jacobian, { method: 'rodas4' }), 'python'), /gives its own Jacobian, which Stiff uses and code export cannot write yet/);
+    assert.doesNotThrow(() => generateStandaloneProgram(conduction('python', jacobian, { method: 'dormandPrince54' }), 'python'));
+    const conductionCpp = await readFile(join(root, 'examples', 'providers', 'conduction.cpp'), 'utf8');
+    assert.throws(() => generateStandaloneProgram(conduction('cpp', conductionCpp, { method: 'rungeKutta4' }), 'cpp', { parallelism: 'openmp' }),
+        /which code export writes to run in one thread under Runge–Kutta 4: choose "serial"/);
 });

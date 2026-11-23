@@ -21,11 +21,13 @@
 // dependency-free (no FMPy) dlopen-based check instead -- see that file for why both exist.
 
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unzipSync } from 'fflate';
+import { decodeResultFile } from '../../src/engineProtocol.mjs';
 import { generateFmuPackage } from '../../src/fmiExport.mjs';
+import { encodeProjectFile } from '../../src/projectFile.mjs';
 import {
     absoluteTolerance, closeEnough, communicationStepSize, document, execute,
     globalTimeStep, orderedStateNames, relativeTolerance, runRealEngine, stateIds, stateNameByStateId, targetTime
@@ -165,7 +167,113 @@ print(float(result[-1]['Coupled.Value']))
             `Setting the "coupling" parameter via fmi2SetReal should reproduce the real engine's run with that same value: engine=${tunedFinal}, fmu=${tunedFmuFinal}.`);
         console.log('✓ FMU tunable parameter: setting "coupling" via fmi2SetReal matched a real engine run using that same value, not the value baked in at export time.');
 
-        // --- 7. Verlet, node by node (docs/proposals/integrators.md): an FMU of nodes integrated with Verlet steps as the engine does ---
+        // --- 7. A program in the current format (docs/proposals/programSdkV2.md, Export parity): the digital PID example in C++, a node's
+        // program with a clock, a random sensor and memory, setting an Update. The FMU gives the engine's numbers, declares rollback, and a
+        // run restored from fmi2GetFMUstate mid-run continues to the bit, its memory (the controller's integral, its held command, the
+        // sensor's random stream) restored with the states ---
+        {
+            const root = join(import.meta.dirname, '..', '..');
+            const shared = [['setpoint', 293.15, 'K'], ['kp', 50, 'W/K'], ['ki', 5, 'W/(K*s)'], ['kd', 1, 'W*s/K'], ['maxPower', 2000, 'W'], ['sensorNoise', 0.1, 'K']]
+                .map(([symbol, value, unit], index) => ({ id: 500 + index, name: symbol, symbol, value, unit, mode: 'constant' }));
+            const pidTimeStep = 0.005;
+            const pidCommunication = 0.05;
+            const pidTarget = 1;
+            const pid = {
+                format: 'konjugate', version: 1, metadata: { projectName: 'Heated room' }, sharedParameters: shared,
+                nodes: [{
+                    id: 1, name: 'Heater', updates: 'settle',
+                    states: [
+                        { id: 11, name: 'Temperature', symbol: 'temperature', initialValue: 285, unit: 'K', kind: 'rate' },
+                        { id: 12, name: 'Power', symbol: 'power', initialValue: 0, unit: 'W', kind: 'update' }
+                    ],
+                    sourceTerms: [{
+                        id: 101, state: 'temperature', expression: '(power - 50 (temperature - 280)) / 1000',
+                        expressionModel: {
+                            latex: '', output: { stateId: 11 },
+                            mathJson: ['Divide', ['Add', 'power', ['Negate', ['Multiply', 50, ['Add', 'temperature', -280]]]], 1000],
+                            bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'temperature' }, { kind: 'state', nodeId: 1, stateId: 12, symbol: 'power' }]
+                        }
+                    }],
+                    implementation: {
+                        kind: 'cpp', providerApiVersion: 2, source: await readFile(join(root, 'examples', 'providers', 'pidController.cpp'), 'utf8'),
+                        bindings: [{ key: 'measurement', kind: 'state', nodeId: 1, stateId: 11 }, ...shared.map((parameter) => ({ key: parameter.symbol, kind: 'parameter', sharedParameterId: parameter.id }))],
+                        outputs: [{ key: 'power', stateId: 12 }]
+                    }
+                }],
+                edges: [],
+                runConfigurations: [{ id: 900, globalTimeStep: pidTimeStep, outputInterval: pidCommunication }],
+                activeRunConfigurationId: 900
+            };
+            const modelPath = join(directory, 'pid.kjt');
+            const configurationPath = join(directory, 'pidConfiguration.json');
+            const resultPath = join(directory, 'pidResult.bin');
+            await writeFile(modelPath, await encodeProjectFile(JSON.stringify(pid)));
+            await writeFile(configurationPath, JSON.stringify({ name: 'pid', targetTime: pidTarget, globalTimeStep: pidTimeStep, outputInterval: pidCommunication,
+                execution: { backend: 'serial' }, providers: { cpp: { sdkPath: join(root, 'engine') } } }));
+            const pidRun = await execute(executable, ['run', modelPath, '--configuration', configurationPath, '--output', resultPath]);
+            assert.equal(pidRun.code, 0, `The engine must run the PID model: ${pidRun.stderr ?? ''}`);
+            const pidEngine = decodeResultFile(await readFile(resultPath));
+            const pidFmu = await generateFmuPackage(pid, { modelName: 'pidFidelityFixture', engineOptions: { applicationPath: root, resourcesPath: '', packaged: false } });
+            const pidFmuPath = join(directory, 'pid.fmu');
+            await writeFile(pidFmuPath, pidFmu);
+            assert.match(Buffer.from(unzipSync(pidFmu)['modelDescription.xml']).toString('utf8'), /canGetAndSetFMUstate="true"/,
+                'An FMU whose programs are all in the current format declares rollback: their memory is in its state.');
+            const pidDriverPath = join(directory, 'drivePid.py');
+            await writeFile(pidDriverPath, `
+import json, shutil
+from fmpy import read_model_description, extract
+from fmpy.fmi2 import FMU2Slave
+
+fmu_path = ${JSON.stringify(pidFmuPath)}
+md = read_model_description(fmu_path)
+vr = {v.name: v.valueReference for v in md.modelVariables}
+refs = [vr['Heater.Temperature'], vr['Heater.Power']]
+unzipdir = extract(fmu_path)
+fmu = FMU2Slave(guid=md.guid, unzipDirectory=unzipdir, modelIdentifier=md.coSimulation.modelIdentifier, instanceName='pid')
+fmu.instantiate()
+fmu.setupExperiment(startTime=0.0)
+fmu.enterInitializationMode()
+fmu.exitInitializationMode()
+step = ${pidCommunication}
+rows = [[0.0] + fmu.getReal(refs)]
+time = 0.0
+for index in range(${Math.round(pidTarget / pidCommunication)}):
+    fmu.doStep(currentCommunicationPoint=time, communicationStepSize=step)
+    time = (index + 1) * step
+    rows.append([time] + fmu.getReal(refs))
+    if index == 7:
+        snapshot = fmu.getFMUstate()
+        snapshot_time = time
+onwards = rows[9:]
+fmu.setFMUstate(snapshot)
+again = []
+time = snapshot_time
+for index in range(8, ${Math.round(pidTarget / pidCommunication)}):
+    fmu.doStep(currentCommunicationPoint=time, communicationStepSize=step)
+    time = (index + 1) * step
+    again.append([time] + fmu.getReal(refs))
+fmu.freeFMUstate(snapshot)
+fmu.terminate()
+fmu.freeInstance()
+shutil.rmtree(unzipdir, ignore_errors=True)
+print(json.dumps({'rows': rows, 'onwards': onwards, 'again': again}))
+`, 'utf8');
+            const pidSimulation = await execute(python, [pidDriverPath]);
+            assert.equal(pidSimulation.code, 0, `FMPy must drive the PID FMU: ${pidSimulation.stderr ?? ''}`);
+            const driven = JSON.parse(pidSimulation.stdout.trim().split('\n').at(-1));
+            for (const sample of pidEngine.samples) {
+                const row = driven.rows.find((candidate) => Math.abs(candidate[0] - sample.time) < 1e-9);
+                assert.ok(row, `The PID FMU must report a row at t = ${sample.time}.`);
+                sample.states.forEach((state, index) => assert.ok(Math.abs(row[index + 1] - state.value) <= 1e-12 * Math.max(1, Math.abs(state.value)),
+                    `The PID FMU must give the engine's numbers: at t = ${sample.time} state ${state.stateId} is ${row[index + 1]}, the engine ${state.value}.`));
+                comparisons += sample.states.length;
+            }
+            assert.ok(driven.rows.at(-1)[2] > 0, 'The heater must be on.');
+            assert.deepEqual(driven.again, driven.onwards, 'A PID FMU restored from fmi2GetFMUstate mid-run must continue to the bit.');
+            console.log('✓ FMU program in the current format: the PID example matched the engine, and a restore from fmi2GetFMUstate continued to the bit.');
+        }
+
+        // --- 8. Verlet, node by node (docs/proposals/integrators.md): an FMU of nodes integrated with Verlet steps as the engine does ---
         const verlet = { ...verletDocument(), runConfigurations: [{ id: 900, globalTimeStep, outputInterval: communicationStepSize }], activeRunConfigurationId: 900 };
         const verletEngine = await runRealEngine(executable, directory, verlet, 'verlet');
         const verletFmuPath = join(directory, 'verlet.fmu');

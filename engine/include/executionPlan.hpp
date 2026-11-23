@@ -382,6 +382,23 @@ public:
         static_cast<void>(outputKey);
         return std::nullopt;
     }
+    // A program that supplies its own Jacobian (docs/proposals/programSdkV2.md, Jacobians for Rodas4), for the stiff methods' assembly
+    // (jacobianAssembly.hpp): whether the program of `task` gives one; and, for each task, the derivative of its output (in its state's
+    // unit, before negateOutput) by each of its bindings, at the inputs given in binding order, into derivatives[i] (one value per
+    // binding). False when any task cannot supply them; the defaults supply none.
+    virtual bool suppliesJacobian(const ContributionTask& task) const {
+        static_cast<void>(task);
+        return false;
+    }
+    virtual bool evaluateJacobianBatch(const std::vector<const ContributionTask*>& tasks, const std::vector<std::span<const double>>& inputs,
+                                       double simulationTime, double stepSize, std::vector<std::vector<double>>& derivatives) {
+        static_cast<void>(tasks);
+        static_cast<void>(inputs);
+        static_cast<void>(simulationTime);
+        static_cast<void>(stepSize);
+        static_cast<void>(derivatives);
+        return false;
+    }
     // Every version 2 program's memory now, and a restore of it (fields matched by name; what was added or dropped since is said in
     // `notes`, one sentence each).
     virtual std::vector<ProgramMemoryState> programMemory() const { return {}; }

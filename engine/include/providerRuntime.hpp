@@ -72,6 +72,9 @@ public:
     double programClockPeriod(EntityId owner) const override;
     void advancePrograms(const std::vector<ProgramAdvanceCall>& calls, double time, double size) override;
     std::optional<std::vector<std::string>> programOutputDependencies(EntityId owner, const std::string& outputKey) const override;
+    bool suppliesJacobian(const ContributionTask& task) const override;
+    bool evaluateJacobianBatch(const std::vector<const ContributionTask*>& tasks, const std::vector<std::span<const double>>& inputs,
+                               double simulationTime, double stepSize, std::vector<std::vector<double>>& derivatives) override;
     std::vector<ProgramMemoryState> programMemory() const override;
     void restoreProgramMemory(const std::vector<ProgramMemoryState>& memory, std::vector<std::string>* notes) override;
     // Every program with a clock: what it belongs to and its period, in the model's order.

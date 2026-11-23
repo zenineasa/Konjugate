@@ -424,7 +424,7 @@ class Conduction(RelationshipProvider):
 
     // Under Adaptive and Stiff, memory advances after every step they accept (never a rejected one, or one taken again to land on an event),
     // and a run continued from its checkpoint, which keeps the controller and the memory, gives the bits of the whole run.
-    for (const method of ['dormandPrince54', 'rodas4']) {
+    for (const method of ['dormandPrince54', 'rodas4', 'bdf']) {
         const adaptiveTiming = { ...latchTiming, method, tolerance: { relative: 1e-6, absolute: 1e-9 } };
         const whole = await run(latched, adaptiveTiming);
         const lateAdaptive = stateValues(whole, 11).slice(400);
@@ -434,6 +434,129 @@ class Conduction(RelationshipProvider):
         assert.ok(sameBits(whole.samples.filter((sample) => sample.time > 200).flatMap((sample) => sample.states.map((state) => state.value)),
             rest.samples.filter((sample) => sample.time > 200).flatMap((sample) => sample.states.map((state) => state.value))),
         `A latch under ${method} continued from its checkpoint must give the bits of the whole run.`);
+    }
+
+    // A program's own Jacobian under Stiff (Rodas4 and BDF): a stiff conduction, both ways, whose program says its derivatives. They are
+    // supplied terms of the shared Jacobian assembly, beside the equations', taken through its ports and bindings, the other end's with the
+    // sign flipped, so its columns are exact rather than differenced: the run follows the equation's, and a deliberately wrong Jacobian
+    // changes the steps, which it would not if it were not used. Without one, the program is differenced, as an equation is under
+    // finiteDifference.
+    {
+        const pythonJacobian = (factor) => `from konjugate.v2 import Input, Output, Parameter, Relationship
+
+
+class Conduction(Relationship):
+    hot = Input("K")
+    cold = Input("K")
+    conductance = Parameter("W/K")
+    capacity = Parameter("J/K")
+    warming = Output("K/s")
+
+    def evaluate(self, t, x):
+        return x.conductance * (x.hot - x.cold) / x.capacity
+
+    def jacobian(self, t, x):
+        g = ${factor} * x.conductance / x.capacity
+        return {("warming", "hot"): g, ("warming", "cold"): -g}
+`;
+        const cppJacobian = `#include <konjugate/sdk/v2/program.hpp>
+
+#include <memory>
+
+namespace k = konjugate::sdk::v2;
+
+class Conduction final : public k::Relationship {
+public:
+    k::Input     hot        {this, "hot",         "K"};
+    k::Input     cold       {this, "cold",        "K"};
+    k::Parameter conductance{this, "conductance", "W/K"};
+    k::Parameter capacity   {this, "capacity",    "J/K"};
+    k::Output    warming    {this, "warming",     "K/s"};
+
+    double evaluate(double, const k::Inputs& x) const override { return x[conductance] * (x[hot] - x[cold]) / x[capacity]; }
+    void jacobian(double, const k::Inputs& x, k::Jacobian& J) const override {
+        const double g = x[conductance] / x[capacity];
+        J(warming, hot) = g;
+        J(warming, cold) = -g;
+    }
+};
+
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<Conduction>(); }
+`;
+        const bothWays = (implementation) => {
+            const document = conduction({ implementation, capacity: 0.001 });
+            document.edges[0].directionality = 'bidirectional';
+            return document;
+        };
+        for (const method of ['rodas4', 'bdf']) {
+            const stiffTiming = { targetTime: 2, globalTimeStep: 0.1, outputInterval: 0.1, method, tolerance: { relative: 1e-6, absolute: 1e-9 } };
+            const equationRun = await run(bothWays(null), stiffTiming);
+            const differenced = { ...stiffTiming, jacobian: 'finiteDifference' };
+            const equationDifferenced = await run(bothWays(null), differenced);
+            const plain = await run(bothWays({ kind: 'python', providerApiVersion: 2, source: await example('conduction.py') }), differenced);
+            const given = await run(bothWays({ kind: 'python', providerApiVersion: 2, source: pythonJacobian(1) }), stiffTiming);
+            const givenCpp = await run(bothWays({ kind: 'cpp', providerApiVersion: 2, source: cppJacobian }), stiffTiming);
+            const wrong = await run(bothWays({ kind: 'python', providerApiVersion: 2, source: pythonJacobian(0.25) }), stiffTiming);
+            assert.ok(sameBits(valuesOf(plain), valuesOf(equationDifferenced)), `Under ${method} a program without a Jacobian is differenced, as the equation is.`);
+            assert.equal(given.integration.exactColumns, 2, `Under ${method} a program's own Jacobian makes its columns exact.`);
+            const checked = await run(bothWays({ kind: 'python', providerApiVersion: 2, source: pythonJacobian(1) }), { ...stiffTiming, jacobian: 'check' });
+            assert.ok(checked.integration.jacobianCheck.checks > 0 && checked.integration.jacobianCheck.largestDifference < 1e-6,
+                `Under ${method} the check finds the program's Jacobian agreeing with differences (${JSON.stringify(checked.integration.jacobianCheck)}).`);
+            const wrongChecked = await run(bothWays({ kind: 'python', providerApiVersion: 2, source: pythonJacobian(0.25) }), { ...stiffTiming, jacobian: 'check' });
+            assert.ok(wrongChecked.integration.jacobianCheck.largestDifference > 0.1, `Under ${method} the check finds a wrong Jacobian out.`);
+            const expected = valuesOf(equationRun);
+            valuesOf(given).forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-4,
+                `Under ${method} a program's own Jacobian must follow the equation (${value} against ${expected[index]}).`));
+            assert.ok(Math.abs(valuesOf(given).at(-1) - 302.5) < 1e-3 && Math.abs(valuesOf(given).at(-2) - 302.5) < 1e-3,
+                `Under ${method} both ends must settle at the mean (${valuesOf(given).slice(-2)}).`);
+            assert.ok(sameBits(valuesOf(given), valuesOf(givenCpp)), `Under ${method} the Python and C++ Jacobians must give the same bits.`);
+            assert.ok(!sameBits(valuesOf(wrong), valuesOf(given)), `Under ${method} a wrong Jacobian must change the steps.`);
+        }
+    }
+
+    // A relay: memory that switches a rate directly (a jump in the right-hand side at an accepted step). BDF carries its table on across
+    // it rather than starting again after every step whose memory changed (which would hold an accumulator's run at order 1), and stays
+    // honest: its error estimate sees the jump, rejects steps and shortens them, so the relay holds the room at least as tightly as
+    // Rodas4 does at the same tolerance.
+    {
+        const relay = `#include <konjugate/sdk/v2/program.hpp>
+
+#include <memory>
+
+namespace k = konjugate::sdk::v2;
+
+class Relay final : public k::Relationship {
+public:
+    k::Input temperature{this, "temperature"};
+    k::Output rate{this, "rate"};
+    k::Memory<bool> on{this, "on", true};
+
+    double evaluate(double, const k::Inputs& x) const override { return (x[on] ? 2.0 : 0.0) - 0.1 * (x[temperature] - 10.0); }
+    void advance(const k::Step&, const k::Inputs& x, k::MemoryWriter& m) const override {
+        if (x[temperature] > 20.5) m[on] = false;
+        else if (x[temperature] < 19.5) m[on] = true;
+    }
+};
+
+std::unique_ptr<k::Program> createProgram() { return std::make_unique<Relay>(); }
+`;
+        const relayed = {
+            format: 'konjugate', version: 1, copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
+            nodes: [{ id: 1, name: 'Room', states: [{ id: 11, name: 'Temperature', symbol: 'temperature', initialValue: 15, unit: '' }],
+                sourceTerms: [{ id: 101, state: 'temperature', expression: '', implementation: {
+                    kind: 'cpp', providerApiVersion: 2, source: relay, bindings: [{ key: 'temperature', kind: 'state', nodeId: 1, stateId: 11 }], output: { key: 'rate', stateId: 11 }
+                } }] }],
+            edges: []
+        };
+        const relayTiming = (method) => ({ targetTime: 100, globalTimeStep: 0.5, outputInterval: 0.5, method, tolerance: { relative: 1e-6, absolute: 1e-9 } });
+        const swing = (result) => { const late = stateValues(result, 11).slice(100); return [Math.min(...late), Math.max(...late)]; };
+        const underBdf = await run(relayed, relayTiming('bdf'));
+        const underRodas = await run(relayed, relayTiming('rodas4'));
+        const [bdfLow, bdfHigh] = swing(underBdf);
+        const [rodasLow, rodasHigh] = swing(underRodas);
+        assert.ok(underBdf.integration.rejectedSteps > 0 && underBdf.integration.restarts === 0, 'BDF sees the relay\'s jumps in its error estimate, without starting again.');
+        assert.ok(bdfLow >= rodasLow && bdfHigh <= rodasHigh && bdfLow > 19 && bdfHigh < 21,
+            `BDF holds the relay at least as tightly as Rodas4 (${bdfLow} to ${bdfHigh}, against ${rodasLow} to ${rodasHigh}).`);
     }
 
     // OutOfDomain: a fast decay whose program refuses a negative amount. Adaptive and Stiff reject the steps a stage refuses and finish;
@@ -461,7 +584,7 @@ class Decay(Relationship):
         edges: []
     };
     const decayTiming = { targetTime: 0.5, globalTimeStep: 0.1, outputInterval: 0.1 };
-    for (const method of ['dormandPrince54', 'rodas4']) {
+    for (const method of ['dormandPrince54', 'rodas4', 'bdf']) {
         const decayed = await run(decaying, { ...decayTiming, method, tolerance: { relative: 1e-8, absolute: 1e-12 } });
         assert.ok(Math.abs(stateValues(decayed, 11).at(-1) - Math.exp(-25)) < 1e-9, `Under ${method} the refused steps are retried smaller and the decay finishes.`);
         // Adaptive overshoots below zero at a large stage and is refused; Stiff, L-stable, does not overshoot here.

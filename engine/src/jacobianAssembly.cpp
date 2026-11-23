@@ -251,7 +251,10 @@ JacobianPlan compileJacobianPlan(const ExecutionPlan& plan, const WholeModelPlan
         const auto& node = plan.nodes[index];
         for (const auto& task : wholeNode.stageNode.contributions) {
             if (task.implementation == ContributionImplementation::equation) continue;
+            // Its time dependence is not known: df/dt is differenced.
             opaque = true;
+            // A program that supplies its own Jacobian leaves its columns exact: its derivatives are terms below.
+            if (providers && providers->suppliesJacobian(task)) continue;
             programReads(task.sourceId, task.providerOutputKey, task.programVersion, task.bindings, node);
         }
         if (const auto& provider = wholeNode.stageNode.nodeProvider) {
@@ -284,7 +287,29 @@ JacobianPlan compileJacobianPlan(const ExecutionPlan& plan, const WholeModelPlan
         const auto& tasks = wholeNode.stageNode.contributions;
         for (std::size_t taskIndex = 0; taskIndex < tasks.size(); ++taskIndex) {
             const auto& task = tasks[taskIndex];
-            if (task.implementation != ContributionImplementation::equation) continue;
+            if (task.implementation != ContributionImplementation::equation) {
+                if (!providers || !providers->suppliesJacobian(task)) continue;
+                const auto row = position[node.stateIndexes.at(task.outputStateIndex)];
+                if (row == none) continue;
+                // Each binding to a state of an exact column, narrowed to the program's declared dependencies, as stageReads narrows them.
+                const auto declared = providers->programOutputDependencies(task.sourceId, task.providerOutputKey);
+                ++result.suppliedTerms;
+                for (std::size_t binding = 0; binding < task.bindings.size(); ++binding) {
+                    const auto& compiled = task.bindings[binding];
+                    if (declared && std::find(declared->begin(), declared->end(), compiled.symbol) == declared->end()) continue;
+                    const auto state = boundState(node, compiled);
+                    if (state == none || position[state] == none || !result.exactColumn[position[state]]) continue;
+                    JacobianTerm term;
+                    term.node = index;
+                    term.task = taskIndex;
+                    term.supplied = true;
+                    term.binding = binding;
+                    term.negate = task.negateOutput;
+                    term.target = entryOf(row, position[state]);
+                    result.terms.push_back(std::move(term));
+                }
+                continue;
+            }
             const auto output = node.stateIndexes.at(task.outputStateIndex);
             const auto row = position[output];
             if (row == none) continue;
@@ -320,12 +345,15 @@ JacobianPlan compileJacobianPlan(const ExecutionPlan& plan, const WholeModelPlan
 void evaluateExactJacobian(const ExecutionPlan& plan, const WholeModelPlan& whole, const JacobianPlan& jacobianPlan, double time,
                            const std::vector<double>& states, const EntityValues& liveParameterValues,
                            const std::vector<ParameterSchedule>& activeSchedules, const std::vector<double>* latches,
-                           std::vector<double>& jacobian, std::vector<double>* dT) {
+                           std::vector<double>& jacobian, std::vector<double>* dT, ProviderEvaluator* providers) {
     for (const auto entry : jacobianPlan.exactEntries) jacobian[entry] = 0.0;
     if (dT) std::fill(dT->begin(), dT->end(), 0.0);
     // The symbols of each term of the node at hand, as evaluateContributionTasks binds them.
     std::size_t currentNode = std::numeric_limits<std::size_t>::max();
     std::vector<std::vector<double>> symbols;
+    // A supplying program's derivatives by binding, asked once per term at this point.
+    std::vector<std::vector<double>> supplied;
+    std::vector<unsigned char> suppliedReady;
     const auto prepare = [&](std::size_t index) {
         if (index == currentNode) return;
         currentNode = index;
@@ -333,9 +361,10 @@ void evaluateExactJacobian(const ExecutionPlan& plan, const WholeModelPlan& whol
         const auto& tasks = whole.nodes[index].stageNode.contributions;
         const auto parameters = resolveParameterValues(tasks, liveParameterValues, activeSchedules, time);
         symbols.assign(tasks.size(), {});
+        supplied.assign(tasks.size(), {});
+        suppliedReady.assign(tasks.size(), 0);
         for (std::size_t taskIndex = 0; taskIndex < tasks.size(); ++taskIndex) {
             const auto& task = tasks[taskIndex];
-            if (task.implementation != ContributionImplementation::equation) continue;
             auto& values = symbols[taskIndex];
             values.resize(task.bindings.size());
             for (std::size_t binding = 0; binding < task.bindings.size(); ++binding) {
@@ -353,6 +382,20 @@ void evaluateExactJacobian(const ExecutionPlan& plan, const WholeModelPlan& whol
     };
     const auto add = [&](const JacobianTerm& term, double& into) {
         prepare(term.node);
+        if (term.supplied) {
+            if (!suppliedReady[term.task]) {
+                const auto& task = whole.nodes[term.node].stageNode.contributions[term.task];
+                std::vector<std::vector<double>> derivatives;
+                if (!providers || !providers->evaluateJacobianBatch({&task}, {std::span<const double>(symbols[term.task])}, time, 0.0, derivatives)) {
+                    throw std::runtime_error("A program that gave its Jacobian at the run's start gave none now.");
+                }
+                supplied[term.task] = std::move(derivatives.front());
+                suppliedReady[term.task] = 1;
+            }
+            const double value = supplied[term.task].at(term.binding);
+            into += term.negate ? -value : value;
+            return;
+        }
         const double value = evaluateExpressionProgram(term.expression, term.program, symbols[term.task]);
         into += term.negate ? -value : value;
     };

@@ -2049,6 +2049,60 @@ public:
         return results;
     }
 
+    // Whether the program gives its own Jacobian (docs/proposals/programSdkV2.md, Jacobians for Rodas4): asked once, of the first
+    // instance at its starting inputs; a program that fails there is taken to give one, and says so when it is asked in earnest.
+    bool givesJacobian() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!givesJacobian_) {
+            bool gives = false;
+            if (!instances_.empty() && !description_.node) {
+                auto& [instanceId, instance] = *instances_.begin();
+                auto values = portValues(instance, instance.startValues.data());
+                const auto outcomes = transport_->jacobian(0.0, {{instanceId, values.data(), instance.memory.data(), false}},
+                    description_.inputs.size() * description_.outputs.size());
+                gives = outcomes.at(0).status != 3;
+            }
+            givesJacobian_ = gives;
+        }
+        return *givesJacobian_;
+    }
+
+    // The derivative of output `key` (a relationship's one output whatever its key) by each binding, at these inputs (binding order): the
+    // program's jacobian() taken through the conversions at its ports, in its state's unit by the binding's. Nothing when it gives none.
+    std::optional<std::vector<double>> jacobianByBinding(std::uint64_t instanceId, const std::string& key, double time, std::span<const double> inputs) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto& instance = instances_.at(instanceId);
+        std::size_t at = 0;
+        if (instance.outputs.size() > 1) {
+            const auto output = std::find_if(instance.outputs.begin(), instance.outputs.end(), [&](const auto& map) { return map.key == key; });
+            if (output == instance.outputs.end()) return std::nullopt;
+            at = static_cast<std::size_t>(output - instance.outputs.begin());
+        }
+        const auto inputCount = description_.inputs.size();
+        instance.values = portValues(instance, inputs.data());
+        const auto outcomes = transport_->jacobian(time, {{instanceId, instance.values.data(), instance.memory.data(), false}},
+            inputCount * description_.outputs.size());
+        const auto& outcome = outcomes.at(0);
+        if (outcome.status == 3) return std::nullopt;
+        if (outcome.status) {
+            throw std::runtime_error(description_.name + " on " + instance.owner + " failed in jacobian() at t = " + formatNumber(time) + " s" +
+                stageText() + ": " + outcome.message + lineText(outcome.line) + inputsText(instance, instance.values));
+        }
+        const auto& map = instance.outputs[at];
+        const double outputScale = map.identity ? 1.0 : map.scale;
+        std::vector<double> derivatives(instance.portOfBinding.size(), 0.0);
+        for (std::size_t binding = 0; binding < instance.portOfBinding.size(); ++binding) {
+            const auto port = instance.portOfBinding[binding];
+            const double entry = outcome.values.at(map.index * inputCount + port);
+            if (!std::isfinite(entry)) {
+                throw ProgramOutOfDomain(description_.name + " on " + instance.owner + " gave " + formatNumber(entry) + " in its Jacobian for ‘" +
+                    description_.outputs[map.index].key + "’ by ‘" + description_.inputs[port].key + "’ at t = " + formatNumber(time) + " s" + stageText() + ".");
+            }
+            derivatives[binding] = outputScale * entry * (instance.identity[port] ? 1.0 : instance.scale[port]);
+        }
+        return derivatives;
+    }
+
     bool advancesEachStep(std::uint64_t instanceId) const {
         const auto& instance = instances_.at(instanceId);
         return description_.memorySize > 0 && instance.clockPeriod == 0;
@@ -2175,6 +2229,7 @@ private:
         bool checked = false;
     };
 
+
     // The program's inputs in its declaration order from the bound values in binding order: converted at the port, defaults filled in.
     std::vector<double> portValues(const Instance& instance, const double* bindingValues) const {
         std::vector<double> values(instance.defaults);
@@ -2288,6 +2343,7 @@ private:
     std::unique_ptr<ProgramTransport> transport_;
     ProgramDescription description_;
     std::unordered_map<std::uint64_t, Instance> instances_;
+    std::optional<bool> givesJacobian_;
     std::vector<std::uint64_t> order_;
     // As every version 1 transport: calls into one program are serialized (docs/proposals/programSdkV2.md, decision 6).
     std::mutex mutex_;
@@ -2910,6 +2966,28 @@ std::optional<std::vector<std::string>> ProviderRuntime::programOutputDependenci
     const auto& declared = description.node ? output : description.outputs.begin();
     if (declared == description.outputs.end() || !declared->declaresDependencies) return std::nullopt;
     return declared->dependsOn;
+}
+
+bool ProviderRuntime::suppliesJacobian(const ContributionTask& task) const {
+    if (task.programVersion != 2) return false;
+    const auto backend = programBackends_.find(providerProcessKey(task));
+    return backend != programBackends_.end() && backend->second->givesJacobian();
+}
+
+bool ProviderRuntime::evaluateJacobianBatch(const std::vector<const ContributionTask*>& tasks, const std::vector<std::span<const double>>& inputs,
+                                            double simulationTime, double, std::vector<std::vector<double>>& derivatives) {
+    derivatives.assign(tasks.size(), {});
+    for (std::size_t index = 0; index < tasks.size(); ++index) {
+        const auto& task = *tasks[index];
+        if (task.programVersion != 2) return false;
+        const auto backend = programBackends_.find(providerProcessKey(task));
+        const auto instance = taskInstanceIds_.find(task.sourceId);
+        if (backend == programBackends_.end() || instance == taskInstanceIds_.end()) return false;
+        auto given = backend->second->jacobianByBinding(instance->second, task.providerOutputKey, simulationTime, inputs[index]);
+        if (!given) return false;
+        derivatives[index] = std::move(*given);
+    }
+    return true;
 }
 
 std::vector<ProgramMemoryState> ProviderRuntime::programMemory() const {

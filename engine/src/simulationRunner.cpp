@@ -75,6 +75,15 @@ template <typename Inner, typename Accepted>
 struct ProgramStepEvents {
     Inner& inner;
     Accepted onAccepted;
+    // The inner events' latches, which BDF reads (latchesOf); none for an inner that has none.
+    const std::vector<double>& latches = latchesFor(inner);
+    static const std::vector<double>& latchesFor(const Inner& events) {
+        if constexpr (requires { events.latches; }) return events.latches;
+        else {
+            static const std::vector<double> none;
+            return none;
+        }
+    }
     bool active() const { return inner.active(); }
     void beginStep(double time, const std::vector<double>& states) { inner.beginStep(time, states); }
     template <typename At>
@@ -1035,6 +1044,8 @@ private:
     // and which nodes take part (the others are stepped on their own, and advance their programs in their substeps).
     bool programsAdvanceAtSteps = false;
     std::vector<unsigned char> stageNodeMask;
+    // A clock's tick changed some program's memory at the last global step's end: BDF's table, carried across global steps, starts again.
+    bool programMemoryTicked = false;
     // advance() for the programs of the nodes taking part in the stages, after a step an adaptive or stiff method accepted, at `time`
     // with its size, reading the states it reached; whether any program's memory changed.
     bool advanceProgramsAfter(double time, double step, const Values& accepted) {
@@ -1330,7 +1341,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
                 integrators::useExactColumns(*stiffSystem, jacobianPlan.exactColumn);
                 stiffSystem->exact = [this](double time, const Values& states, std::vector<double>& jacobian, std::vector<double>* dT) {
                     evaluateExactJacobian(executionPlan, wholeModel, jacobianPlan, time, states, runControl.parameterValues,
-                        runControl.activeSchedules, switching ? &switching->latches : nullptr, jacobian, dT);
+                        runControl.activeSchedules, switching ? &switching->latches : nullptr, jacobian, dT, providerRuntime.get());
                 };
             }
             if (integration.jacobian == JacobianMethod::check) {
@@ -2088,25 +2099,6 @@ void Simulation::checkProgramClocks() {
             }
             if (node.nodeProvider && node.nodeProvider->programVersion == 2 && providerRuntime->programAdvancesEachStep(node.nodeId)) programsAdvanceAtSteps = true;
         }
-        // BDF chooses its own steps and orders inside the global step; a program that remembers something from step to step is advanced
-        // after each accepted one, which BDF does not do yet (Adaptive and Rodas4 do). Refused by name rather than never advanced.
-        if (programsAdvanceAtSteps && integration.method == IntegrationMethod::bdf) {
-            std::string names;
-            for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
-                if (!stageNodeMask[index]) continue;
-                const auto& node = executionPlan.nodes[index];
-                const auto add = [&](EntityId owner) {
-                    if (providerRuntime->programAdvancesEachStep(owner)) names += (names.empty() ? "" : ", ") + providerRuntime->programName(owner);
-                };
-                for (const auto* tasks : {&node.contributions, &node.algebraicTasks, &node.valueTerms}) {
-                    for (const auto& task : *tasks) if (task.programVersion == 2 && !task.negateOutput) add(task.sourceId);
-                }
-                if (node.nodeProvider && node.nodeProvider->programVersion == 2) add(node.nodeId);
-            }
-            throw std::runtime_error("Under Stiff with BDF, a program that remembers something from step to step is not advanced yet: " + names +
-                ". Choose Rodas4 for Stiff, or Adaptive, Runge–Kutta 4 or Euler, or give the program a clock, which ticks at global steps under every "
-                "method.");
-        }
     }
     for (const auto& [owner, period] : providerRuntime->programClocks()) {
         programClocksPresent = true;
@@ -2139,7 +2131,16 @@ void Simulation::startPrograms(double time) {
 // the states as the update phase reads them (Rate states at the step's end, Update states at its start).
 void Simulation::afterGlobalStep(double time, double stepSize) {
     if (programClocksPresent) {
+        const auto before = integration.method == IntegrationMethod::bdf ? providerRuntime->programMemory() : std::vector<ProgramMemoryState>{};
         advancePlanPrograms(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, time, 0, true, providerRuntime.get());
+        if (integration.method == IntegrationMethod::bdf) {
+            const auto after = providerRuntime->programMemory();
+            for (std::size_t index = 0; index < before.size() && index < after.size(); ++index) {
+                for (std::size_t field = 0; field < before[index].fields.size(); ++field) {
+                    if (before[index].fields[field].words != after[index].fields[field].words) programMemoryTicked = true;
+                }
+            }
+        }
     }
     if (!programUpdatesPresent) {
         updateStates(time, true, stepSize);
@@ -2326,13 +2327,26 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
             return std::abs(time - currentTime) <= std::max(1e-9 * globalTimeStep, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(currentTime));
         });
         const bool restart = cornerHere || runControl.parameterValues != bdfParameterValues || runControl.activeSchedules.size() != bdfSchedules
-            || (switching && switching->latches != bdfLatches);
+            || (switching && switching->latches != bdfLatches) || programMemoryTicked;
+        programMemoryTicked = false;
         const auto acceptedBefore = bdfStatistics.acceptedSteps;
         integrators::BdfTolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
         const auto evaluateBdf = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
             evaluateAt(evaluation == 0, time, stageStates, derivatives);
         };
-        if (switching) {
+        if (programsAdvanceAtSteps) {
+            integrators::BdfNoEvents none;
+            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
+            if (switching) {
+                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
+                integrators::bdfGlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, restart, bdfHistory,
+                    bdfStatistics, events, evaluateBdf, [](double, const Values&) {});
+            } else {
+                ProgramStepEvents<integrators::BdfNoEvents, decltype(advance)> events{none, advance};
+                integrators::bdfGlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, restart, bdfHistory,
+                    bdfStatistics, events, evaluateBdf, [](double, const Values&) {});
+            }
+        } else if (switching) {
             integrators::bdfGlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, restart, bdfHistory, bdfStatistics,
                 *switching, evaluateBdf, [](double, const Values&) {});
         } else {

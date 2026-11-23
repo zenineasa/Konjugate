@@ -17,11 +17,36 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
+
+#ifndef KONJUGATE_INTEGRATORS_STAGE_REJECTED
+#define KONJUGATE_INTEGRATORS_STAGE_REJECTED
+namespace konjugate::integrators {
+
+// Thrown by an evaluation at a stage to say its states are outside what it can compute (a program's OutOfDomain, or a value that is not a
+// finite number): an adaptive or stiff method rejects the step and tries a smaller one, as it does for too large an error
+// (docs/proposals/programSdkV2.md, Exceptions and non-finite values). At the step's start, or with the error control off, it stops the run.
+struct StageRejected : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// After each step the method accepts, `events.accepted(time, step, states)` when the events object has one (the engine's: programs'
+// memory advanced, docs/proposals/programSdkV2.md); whether the derivative at the step's end must be worked out again because what it
+// reads changed. Never called for a step rejected or taken again to land on an event.
+template <typename Events>
+bool acceptedStep(Events& events, double time, double step, const std::vector<double>& states) {
+    if constexpr (requires { { events.accepted(time, step, states) } -> std::convertible_to<bool>; }) return events.accepted(time, step, states);
+    else return false;
+}
+
+}
+#endif
 
 namespace konjugate::integrators {
 
@@ -255,6 +280,8 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
     std::size_t breakpoint = 0;
     std::size_t nextSample = 0;
     std::size_t rejectedInARow = 0;
+    // Why the last step was refused at an evaluation (a program's OutOfDomain), said if no step can then be taken.
+    std::string refused;
     // A located event the step is to land on; NaN for none.
     double eventTarget = std::numeric_limits<double>::quiet_NaN();
     const bool locating = events.active();
@@ -290,6 +317,7 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
             message.precision(17);
             message << "The stiff method could not take a step at " << time << " s: a hundred tries in a row failed; the model may be singular "
                     << "there, or change faster than its tolerance allows.";
+            if (!refused.empty()) message << " The last try was refused: " << refused;
             throw std::runtime_error(message.str());
         }
         // The step is at most the global step.
@@ -342,6 +370,7 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
 
         // Correct by simplified Newton: (I / c - J) dy = f - (psi + d) / c, with the Jacobian kept, worked out again at most once a step.
         bool converged = false;
+        bool refusedStep = false;
         bool currentJacobian = false;
         std::size_t iterations = 0;
         while (true) {
@@ -359,7 +388,14 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
                 }
                 double previousNorm = -1.0;
                 for (iterations = 0; iterations < newtonIterations; ++iterations) {
-                    call(endEvaluation, stage, derivative);
+                    // States an evaluation refuses (a program's OutOfDomain): as a Newton iteration that does not converge, the step halved.
+                    try {
+                        call(endEvaluation, stage, derivative);
+                    } catch (const StageRejected& refusal) {
+                        refused = refusal.what();
+                        refusedStep = true;
+                        break;
+                    }
                     ++statistics.newtonIterations;
                     bool finite = true;
                     for (std::size_t row = 0; row < n; ++row) {
@@ -389,7 +425,7 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
                     previousNorm = deltaNorm;
                 }
             }
-            if (converged || currentJacobian) break;
+            if (converged || currentJacobian || refusedStep) break;
             // Newton stalled with an old Jacobian: work it out again where the step is going, and try once more.
             for (std::size_t row = 0; row < n; ++row) stage[integratedStates[row]] = predicted[row];
             call(endEvaluation, stage, f0);
@@ -532,6 +568,12 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
             events.fire(time);
             eventTarget = std::numeric_limits<double>::quiet_NaN();
         }
+        // The programs' memory advanced with the step accepted (never for one rejected or taken again to land on an event). The table holds
+        // the states the steps reached, which a change of memory leaves true, so it carries on: the next step's Newton iteration reads the
+        // new memory, and a jump it makes shows in the error estimate, which shortens the step, as at any corner not located. (Started
+        // again after every step whose memory changed, as an accumulator's does every step, the table would never leave order 1.)
+        acceptedStep(events, time, step, states);
+        refused.clear();
         const std::size_t breakpointBefore = breakpoint;
         while (breakpoint < breakpoints.size() && breakpoints[breakpoint] <= time) ++breakpoint;
         if (landsOnEnd) break;

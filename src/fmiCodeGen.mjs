@@ -17,8 +17,14 @@
 import { integrationMethod, methodOf } from './integrationMethods.mjs';
 import {
     buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, cppStiffFmuPieces, doubleLiteral,
-    cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
+    cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude,
+    cppProgramAdvanceLines, cppProgramInstantLines, cppProgramStartLines, emitCppNodeProgram, programEntries, programRuntimeCpp,
+    shareProgramInstances, updateStateIndexes
 } from './codeExport.mjs';
+import { programSdkCpp } from './programSdkSources.mjs';
+
+// The symbols of every term, and of a node's own program in the current format, that a parameter can reach.
+const symbolOwners = (plan) => [...plan.algebraic, ...plan.contributions, ...(plan.nodeProvider?.program ? [plan.nodeProvider] : [])];
 
 // Assigns a stable FMI valueReference to every state (as an "output") and every parameter --
 // live (mode: "live") as causality="input"/variability="continuous", constant otherwise as
@@ -61,7 +67,7 @@ function assignValueReferences(model) {
             nextValueReference += 1;
         }
     };
-    for (const plan of model.nodePlans) for (const contribution of [...plan.algebraic, ...plan.contributions]) visitSymbols(contribution.symbols);
+    for (const plan of model.nodePlans) for (const contribution of symbolOwners(plan)) visitSymbols(contribution.symbols);
 
     return { stateVariables, parameterVariables, parameterValueReferences };
 }
@@ -72,7 +78,7 @@ function assignValueReferences(model) {
 // diverges from the plain export's.
 function rewriteParameterSymbols(model, parameterValueReferences) {
     for (const plan of model.nodePlans) {
-        for (const contribution of [...plan.algebraic, ...plan.contributions]) {
+        for (const contribution of symbolOwners(plan)) {
             for (const value of contribution.symbols.values()) {
                 const parameter = value.parameter;
                 if (!parameter || value.schedule !== undefined) continue;
@@ -92,12 +98,14 @@ function cppNodeStepBlocks(model, providerInfo) {
         const commitLines = plan.node.states.map((state, index) => (
             `        state_[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`
         )).join('\n');
+        // A node's own program in the current format adds its rates at each substep; programs that remember advance after each.
+        const nodeLines = plan.nodeProvider?.program ? [emitCppNodeProgram(plan.nodeProvider, providerInfo.get(plan.nodeProvider))] : [];
         return [
             `    // Node: ${plan.node.name}`,
             '    {',
             `        double state[${stateCount}] = { ${seed} };`,
             // Euler or Verlet, as codeExport.mjs writes a node's substeps.
-            cppNodeSubstepLines(plan, emitContribution),
+            cppNodeSubstepLines(plan, emitContribution, { nodeLines, afterSubstep: cppProgramAdvanceLines(plan, providerInfo, model) }),
             cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    }'
@@ -149,16 +157,18 @@ export function generateFmiModel(document) {
         if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which FMU export cannot write under ${integrationMethod(method).name} yet.`);
     }
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
-    // A program in the current format keeps its memory with the engine, which an FMU would save in its FMU state: not written yet.
-    const currentFormat = providers.find((provider) => provider.program);
-    if (currentFormat) throw new Error(`The program of the ${currentFormat.entityLabel} is in the current program format, which FMU export cannot write yet -- export blocked.`);
     const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model);
     rewriteParameterSymbols(model, parameterValueReferences);
-    // A model with any embedded C++ provider can carry arbitrary internal state across evaluate()
-    // calls with no generic way to serialize it -- only a provider-free model supports rollback
-    // (fmi2Get/SetFMUstate). See konjugate/simulationModel.hpp's supportsStateCapture(). Under Stiff the solver's memory (Rodas4's
-    // controller, BDF's table) is not in the captured state either, so rollback is not offered.
-    const supportsStateCapture = providers.length === 0 && !stiff;
+    // A program in the older format can carry arbitrary internal state across evaluate() calls with no generic way to serialize it, so
+    // a model with one does not support rollback (fmi2Get/SetFMUstate; konjugate/simulationModel.hpp's supportsStateCapture()). A program
+    // in the current format keeps its state in declared memory, which the FMU state carries (docs/proposals/programSdkV2.md, Export parity).
+    // Under Stiff the solver's memory (Rodas4's controller, BDF's table) is not in the captured state either, so rollback is not offered.
+    const supportsStateCapture = providers.every((provider) => provider.program) && !stiff;
+    const programs = programEntries(model);
+    // A program in the current format is written into an FMU stepped with Euler, node by node; under Stiff, not yet.
+    if (stiff && programs.length) {
+        throw new Error(`The program of the ${programs[0].task.entityLabel} is in the current program format, which FMU export cannot write under ${integrationMethod(method).name} yet; choose Euler, node by node in the Run settings to export an FMU.`);
+    }
 
     let providerIndex = 0;
     const providerInfo = new Map();
@@ -166,8 +176,11 @@ export function generateFmiModel(document) {
         const namespaceName = `provider${providerIndex}`;
         providerIndex += 1;
         providerInfo.set(provider, { namespaceName, instanceVariable: `${namespaceName}Instance` });
-        return `namespace ${namespaceName} {\n${stripLeadingCppInclude(provider.implementation.source)}\n}\n`;
+        const source = provider.program
+            ? provider.implementation.source.replace(/^#include\s*<konjugate\/sdk\/v2\/program\.hpp>\s*\n/m, '') : stripLeadingCppInclude(provider.implementation.source);
+        return `namespace ${namespaceName} {\n${source}\n}\n`;
     });
+    shareProgramInstances(model, providerInfo);
 
     const stiffPieces = stiff ? cppStiffFmuPieces(model, providers, providerInfo, runConfiguration) : null;
     const stepBlocks = stiff ? stiffPieces.body.join('\n') : cppNodeStepBlocks(model, providerInfo);
@@ -175,11 +188,56 @@ export function generateFmiModel(document) {
 
     const providerMembers = providers.map((provider) => {
         const info = providerInfo.get(provider);
+        if (provider.program) return `    ProgramInstance ${info.instanceVariable};`;
         return `    decltype(${info.namespaceName}::createRelationshipProvider()) ${info.instanceVariable};`;
     }).join('\n');
-    const providerInitializers = providers.map((provider) => {
+    const providerInitializers = providers.filter((provider) => !provider.program).map((provider) => {
         const info = providerInfo.get(provider);
         return `        ${info.instanceVariable} = ${info.namespaceName}::createRelationshipProvider();\n        ${info.instanceVariable}->initialize({});`;
+    }).join('\n');
+    // The programs started from the initial states, then their clocks' first tick and their Update values, before the run's Updates are
+    // settled, as the engine starts a run; again, afresh, when a host sets a parameter before the first step (initialize() reads it).
+    const instantAtStart = cppProgramInstantLines(model, providerInfo, '0.0', false, 'state_').filter(Boolean);
+    const programStartMethod = programs.length ? [
+        '    void startPrograms() {',
+        '        state_ = initialState_;',
+        ...providers.filter((provider) => provider.program).map((provider) => {
+            const info = providerInfo.get(provider);
+            return `        ${info.instanceVariable}.program = ${info.namespaceName}::createProgram();\n        ${info.instanceVariable}.advanced = false;`;
+        }),
+        cppProgramStartLines(model, providerInfo, 'state_').split('\n').map((line) => `    ${line}`).join('\n'),
+        ...(instantAtStart.length ? ['        {', '            const std::vector<double> read = state_;', ...instantAtStart, '        }'] : []),
+        '    }',
+        ''
+    ].join('\n') : '';
+    // At the step's end: the clocks that tick, then the programs' values into Update states, reading the states as the engine's update
+    // phase reads them (Rate states at the step's end, Update states at its start).
+    const instantAtEnd = cppProgramInstantLines(model, providerInfo, 'currentTime + globalTimeStep', false, 'state_').filter(Boolean);
+    const programStepEnd = instantAtEnd.length ? [
+        '        {',
+        '            std::vector<double> read = state_;',
+        ...updateStateIndexes(model).map((index) => `            read[${index}] = snapshot[${index}];`),
+        ...instantAtEnd,
+        '        }'
+    ].join('\n') : '';
+    // The FMU state: the states, the parameters, and each program's memory, word by word, with whether it has been advanced yet.
+    const programMemoryCapture = providers.filter((provider) => provider.program).map((provider) => {
+        const info = providerInfo.get(provider);
+        return [
+            `        snapshot.push_back(${info.instanceVariable}.advanced ? 1.0 : 0.0);`,
+            `        for (std::size_t at = 0; at < ${info.instanceVariable}.memory.size(); at += 8) {`,
+            '            double word = 0;',
+            `            std::memcpy(&word, ${info.instanceVariable}.memory.data() + at, 8);`,
+            '            snapshot.push_back(word);',
+            '        }'
+        ].join('\n');
+    }).join('\n');
+    const programMemoryRestore = providers.filter((provider) => provider.program).map((provider) => {
+        const info = providerInfo.get(provider);
+        return [
+            `        ${info.instanceVariable}.advanced = snapshot[cursor++] != 0.0;`,
+            `        for (std::size_t at = 0; at < ${info.instanceVariable}.memory.size(); at += 8) std::memcpy(${info.instanceVariable}.memory.data() + at, &snapshot[cursor++], 8);`
+        ].join('\n');
     }).join('\n');
 
     const parameterSwitchCases = parameterVariables.map((variable) => (
@@ -201,14 +259,16 @@ export function generateFmiModel(document) {
         '    std::vector<double> captureState() const override {',
         '        std::vector<double> snapshot = state_;',
         parameterVariables.map((variable) => `        snapshot.push_back(parameterValue_${variable.valueReference});`).join('\n'),
+        programMemoryCapture,
         '        return snapshot;',
         '    }',
         '',
         '    void restoreState(const std::vector<double>& snapshot) override {',
         '        for (std::size_t index = 0; index < state_.size(); ++index) state_[index] = snapshot[index];',
         parameterVariables.map((variable, index) => `        parameterValue_${variable.valueReference} = snapshot[state_.size() + ${index}];`).join('\n'),
+        programMemoryRestore ? `        std::size_t cursor = state_.size() + ${parameterVariables.length};\n${programMemoryRestore}` : '',
         '    }'
-    ].join('\n') : '';
+    ].filter(Boolean).join('\n') : '';
 
     const includes = [
         '#include "konjugate/simulationModel.hpp"',
@@ -216,7 +276,8 @@ export function generateFmiModel(document) {
         '#include <cmath>',
         '#include <cstddef>',
         stiff ? '#include <functional>' : '',
-        stiff ? '#include <limits>' : '',
+        programs.length ? '#include <cstring>' : '',
+        stiff || programs.length ? '#include <limits>' : '',
         '#include <memory>',
         '#include <stdexcept>',
         providers.length ? '#include <span>' : '',
@@ -230,7 +291,9 @@ export function generateFmiModel(document) {
         '',
         includes,
         '',
-        providers.length ? `${cppSdkNamespace}\n` : '',
+        providers.some((provider) => !provider.program) ? `${cppSdkNamespace}\n` : '',
+        // The program SDK (version 2) as it is, and the instance the engine keeps, for the programs in the current format.
+        programs.length ? `${programSdkCpp.replace(/^#pragma once\n/m, '')}\n\n${programRuntimeCpp}` : '',
         providerBlocks.join('\n'),
         stiff ? stiffPieces.headers : '',
         'namespace {',
@@ -240,6 +303,7 @@ export function generateFmiModel(document) {
         'public:',
         '    GeneratedModel() {',
         providerInitializers,
+        programs.length ? '        startPrograms();' : '',
         '        settle();',
         '    }',
         '',
@@ -248,7 +312,7 @@ export function generateFmiModel(document) {
         parameterSwitchCases,
         '            default: break;',
         '        }',
-        '        if (!started_) settle();',
+        programs.length ? '        if (!started_) {\n            startPrograms();\n            settle();\n        }' : '        if (!started_) settle();',
         '    }',
         '',
         '    double getOutput(int valueReference) const override {',
@@ -262,12 +326,14 @@ export function generateFmiModel(document) {
         '        started_ = true;',
         stiff ? '' : '        const std::vector<double> snapshot = state_;',
         stepBlocks,
+        programStepEnd,
         '    }',
         '',
         `    double globalTimeStep() const override { return ${doubleLiteral(globalTimeStep)}; }`,
         stateCaptureMethods,
         '',
         'private:',
+        programStartMethod,
         '    void settle() {',
         `        const double globalTimeStep = ${doubleLiteral(globalTimeStep)};`,
         '        const std::vector<double> snapshot = state_;',
@@ -282,6 +348,7 @@ export function generateFmiModel(document) {
         ] : []),
         '    bool started_ = false;',
         `    std::vector<double> state_ = { ${stateVariables.map((variable) => doubleLiteral(variable.start)).join(', ')} };`,
+        programs.length ? `    const std::vector<double> initialState_ = { ${stateVariables.map((variable) => doubleLiteral(variable.start)).join(', ')} };` : '',
         parameterMembers,
         providerMembers,
         '};',

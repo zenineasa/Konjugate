@@ -24,7 +24,9 @@ namespace konjugate {
 // the branch that holds. Abs, Min and Max likewise through the side that holds; a comparison has none.
 std::optional<CompiledExpression> differentiateExpression(const CompiledExpression& expression, std::size_t symbolIndex);
 
-// One equation's derivative with respect to one of its bindings, added into one entry of the Jacobian (or, for the time, into df/dt).
+// One equation's derivative with respect to one of its bindings, added into one entry of the Jacobian (or, for the time, into df/dt);
+// or a program's, when the program supplies its own Jacobian (`supplied`: its jacobian() at the stage point, taken through its ports,
+// for binding `binding`; docs/proposals/programSdkV2.md, Jacobians for Rodas4).
 struct JacobianTerm {
     std::size_t node = 0;
     std::size_t task = 0;
@@ -33,6 +35,8 @@ struct JacobianTerm {
     // The entry it is added into, or for a time term the row (position) of df/dt.
     std::size_t target = 0;
     bool negate = false;
+    bool supplied = false;
+    std::size_t binding = 0;
 };
 
 // What is worked out exactly, compiled once from the stage terms (after event location has made their conditions read latches).
@@ -46,11 +50,14 @@ struct JacobianPlan {
     // df/dt: the derivatives with respect to a time binding, in the same order; usable only when `exactTime`.
     std::vector<JacobianTerm> timeTerms;
     bool exactTime = false;
-    // The equations differentiated, and the derivatives they gave.
+    // The equations differentiated, and the derivatives they gave; the programs that supplied their own.
     std::size_t differentiatedTerms = 0;
+    std::size_t suppliedTerms = 0;
 };
 
-// `providers`, as for stageReads: a version 2 program's declared dependencies narrow the columns it makes finite differences.
+// `providers`, as for stageReads: a version 2 program's declared dependencies narrow the columns it makes finite differences, and a
+// program that supplies its own Jacobian (ProviderEvaluator::suppliesJacobian) leaves its columns exact, its derivatives terms beside the
+// equations'.
 JacobianPlan compileJacobianPlan(const ExecutionPlan& plan, const WholeModelPlan& whole, const integrators::StiffSystem& system,
                                  const ProviderEvaluator* providers = nullptr);
 
@@ -59,7 +66,7 @@ JacobianPlan compileJacobianPlan(const ExecutionPlan& plan, const WholeModelPlan
 void evaluateExactJacobian(const ExecutionPlan& plan, const WholeModelPlan& whole, const JacobianPlan& jacobianPlan, double time,
                            const std::vector<double>& states, const EntityValues& liveParameterValues,
                            const std::vector<ParameterSchedule>& activeSchedules, const std::vector<double>* latches,
-                           std::vector<double>& jacobian, std::vector<double>* dT);
+                           std::vector<double>& jacobian, std::vector<double>* dT, ProviderEvaluator* providers = nullptr);
 
 // For the stability analysis: every equation term of `tasks` differentiated exactly at its symbols, `valueOf` giving each binding's
 // value (parameters from `parameters`, the time `time`), and each derivative with respect to a binding `stateOf` maps to a state

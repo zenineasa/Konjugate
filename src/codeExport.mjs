@@ -24,7 +24,7 @@
 
 import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
-import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
+import { saysKinds, stateKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
 import { differentiateNode } from './expressionDerivative.mjs';
 import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
@@ -256,7 +256,11 @@ export function buildModel(sourceDocument, options = {}) {
     // Rates and Updates (docs/proposals/ratesAndUpdates.md): the exported loop works values out as a file that says no kind
     // runs, settling every node, so a file that says its kinds is written as that file, and refused when it means something
     // else (an Update worked out once per step, a relationship's single equation setting a value, an Update reading itself).
+    // The Update states, as the file says them, before its kinds are taken away: a node's program in the current format sets one at the
+    // update instant rather than adding a rate to it (docs/proposals/programSdkV2.md).
+    const updateStateIds = new Set();
     if (saysKinds(document.nodes ?? [])) {
+        for (const [stateId, entry] of stateKinds(document.nodes ?? [], document.edges ?? [])) if (entry?.kind === 'update') updateStateIds.add(Number(stateId));
         const legacy = withoutKinds(document.nodes ?? [], document.edges ?? []);
         if (legacy.reason) throw new Error(`${legacy.reason}, which code export cannot write yet.`);
         document.nodes = legacy.nodes;
@@ -300,11 +304,12 @@ export function buildModel(sourceDocument, options = {}) {
                 implementation: term.implementation ?? null,
                 negate: false,
                 parameters: term.parameters ?? [],
-                identifierField: programmable ? 'key' : 'symbol'
+                identifierField: programmable ? 'key' : 'symbol',
+                owner: { id: term.id, text: `node ${plan.node.name}'s own part`, seed: term.implementation?.seed ?? 0 }
             }, stateRecord, schedules));
         }
         plan.algebraic = orderAlgebraicTasks(plan);
-        if (plan.node.implementation) plan.nodeProvider = buildNodeProvider(plan, stateRecord, schedules);
+        if (plan.node.implementation) plan.nodeProvider = buildNodeProvider(plan, stateRecord, schedules, updateStateIds);
     }
 
     for (const node of enabledNodes) {
@@ -328,11 +333,12 @@ export function buildModel(sourceDocument, options = {}) {
         const bindings = programmable ? edge.implementation.bindings : edge.equationModel.bindings;
         const mathJson = programmable ? null : edge.equationModel.mathJson;
         const identifierField = programmable ? 'key' : 'symbol';
+        const owner = { id: edge.id, text: `relationship ${nodeById.get(edge.source.nodeId)?.name} → ${nodeById.get(edge.target.nodeId)?.name}`, seed: edge.implementation?.seed ?? 0 };
         if (outputPlan) {
             outputPlan.contributions.push(buildContribution({
                 entityLabel: `relationship "${edge.name}"`, ownerPlan: outputPlan, alwaysLocal: false,
                 bindings, outputStateId, mathJson, implementation: edge.implementation ?? null, negate: false,
-                parameters: edge.parameters ?? [], identifierField
+                parameters: edge.parameters ?? [], identifierField, owner
             }, stateRecord, schedules));
         }
         if (edge.directionality === 'bidirectional') {
@@ -349,7 +355,7 @@ export function buildModel(sourceDocument, options = {}) {
                 otherPlan.contributions.push(buildContribution({
                     entityLabel: `relationship "${edge.name}"`, ownerPlan: otherPlan, alwaysLocal: false,
                     bindings, outputStateId: otherStateId, mathJson, implementation: edge.implementation ?? null, negate: true,
-                    parameters: edge.parameters ?? [], identifierField
+                    parameters: edge.parameters ?? [], identifierField, owner
                 }, stateRecord, schedules));
             }
         }
@@ -359,7 +365,7 @@ export function buildModel(sourceDocument, options = {}) {
     if (!options.wholeModel) {
         for (const plan of nodePlans) if (plan.node.numerics?.integration === 'verlet') plan.verletKicked = verletParts(plan);
     }
-    return { nodePlans, globalStateCount: globalIndex, stateRecord, schedules: schedules.list };
+    return { nodePlans, globalStateCount: globalIndex, stateRecord, schedules: schedules.list, updateStateIds };
 }
 
 // A Verlet node's two parts, as engine/src/executionPlan.cpp's assignVerletParts finds them: the states before the first one whose
@@ -419,7 +425,7 @@ function verletGroups(plan) {
 // terms held from the substep's start; the first part half a step with its rates at the start, the second a whole step with its rates
 // at the middle, the first the other half with its rates at the end, which are the next substep's at its start. Each block sets its
 // own stepTime, the instant a time binding or a schedule reads.
-export function cppNodeSubstepLines(plan, emitContribution) {
+export function cppNodeSubstepLines(plan, emitContribution, { nodeLines = [], afterSubstep = [] } = {}) {
     const stateCount = plan.node.states.length;
     const lines = (contributions) => contributions.map(emitContribution).join('\n');
     if (!plan.verletKicked) {
@@ -429,9 +435,11 @@ export function cppNodeSubstepLines(plan, emitContribution) {
             '            const double stepTime = currentTime + substep * nodeTimeStep;',
             `            double derivative[${stateCount}] = {};`,
             lines(plan.contributions),
+            ...nodeLines,
             `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
+            ...afterSubstep,
             '        }'
-        ].join('\n');
+        ].filter(Boolean).join('\n');
     }
     const groups = verletGroups(plan);
     const block = (time, contributions, after) => [
@@ -463,6 +471,7 @@ export function cppNodeSubstepLines(plan, emitContribution) {
         block('startTime + halfStep', groups.drift, groups.drifted.map((index) => `            state[${index}] += nodeTimeStep * (derivative[${index}] + held[${index}]);`)),
         block('currentTime + (substep + 1) * nodeTimeStep', groups.kick, [copy('kick')]),
         ...kick,
+        ...afterSubstep,
         '        }'
     ].filter(Boolean).join('\n');
 }
@@ -617,7 +626,7 @@ function parameterSymbol(parameter, time, schedules) {
 }
 
 function buildContribution(spec, stateRecord, schedules) {
-    const { entityLabel, ownerPlan, alwaysLocal, algebraic = false, bindings, outputStateId, mathJson, implementation, negate, parameters, identifierField } = spec;
+    const { entityLabel, ownerPlan, alwaysLocal, algebraic = false, bindings, outputStateId, mathJson, implementation, negate, parameters, identifierField, owner } = spec;
     const outputLocalIndex = ownerPlan.localIndexByStateId.get(outputStateId);
     if (outputLocalIndex === undefined) throw new Error(`The ${entityLabel} targets a state that is not on its own node.`);
     const symbols = new Map();
@@ -649,18 +658,25 @@ function buildContribution(spec, stateRecord, schedules) {
     const boundStateIds = (bindings ?? [])
         .filter((binding) => (binding.kind === 'state' || binding.kind === undefined) && (!used || used.has(binding[identifierField])))
         .map((binding) => binding.stateId);
-    return { entityLabel, outputStateId, outputLocalIndex, negate, symbols, mathJson, implementation, boundStateIds, algebraic,
-        outputUnit: stateRecord.get(outputStateId)?.state.unit ?? '' };
+    // A program's bindings to states, by key: what Stiff's Jacobian structure reads (narrowed by its declared dependencies).
+    const stateBindings = (bindings ?? []).filter((binding) => binding.kind === 'state' || binding.kind === undefined)
+        .map((binding) => ({ key: binding[identifierField], stateId: binding.stateId }));
+    return { entityLabel, outputStateId, outputLocalIndex, negate, symbols, mathJson, implementation, boundStateIds, algebraic, stateBindings,
+        outputUnit: stateRecord.get(outputStateId)?.state.unit ?? '', programOwner: implementation ? owner : null, plan: ownerPlan };
 }
 
-function buildNodeProvider(plan, stateRecord, schedules) {
+function buildNodeProvider(plan, stateRecord, schedules, updateStateIds = new Set()) {
     const implementation = plan.node.implementation;
     const symbols = new Map();
     for (const binding of implementation.bindings ?? []) {
         // A shared parameter, baked into the binding by resolveSharedParameters, read at the substep's start.
         if (binding.kind === 'parameter') {
             if (!binding.parameter) throw new Error(`The computational-node provider on node "${plan.node.name}" binds a parameter that is not a shared one.`);
-            symbols.set(binding.key, parameterSymbol(binding.parameter, 'start', schedules));
+            symbols.set(binding.key, { ...parameterSymbol(binding.parameter, 'start', schedules), unit: binding.parameter.unit ?? '' });
+            continue;
+        }
+        if (binding.kind === 'time') {
+            symbols.set(binding.key, { time: 'start', comment: 'simulation time', unit: 's' });
             continue;
         }
         const record = stateRecord.get(binding.stateId);
@@ -668,15 +684,21 @@ function buildNodeProvider(plan, stateRecord, schedules) {
         // Its own node's state as the node advances, another node's from the step's snapshot, as the engine reads them.
         const localIndex = plan.localIndexByStateId.get(binding.stateId);
         symbols.set(binding.key, localIndex !== undefined
-            ? { text: `state[${localIndex}]`, comment: `${plan.node.name}.${record.state.name}` }
-            : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}` });
+            ? { text: `state[${localIndex}]`, comment: `${plan.node.name}.${record.state.name}`, unit: record.state.unit ?? '' }
+            : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}`, unit: record.state.unit ?? '' });
     }
     const outputs = (implementation.outputs ?? []).map((output) => {
         const localIndex = plan.localIndexByStateId.get(output.stateId);
         if (localIndex === undefined) throw new Error(`A computational-node provider output on node "${plan.node.name}" targets a state not on this node.`);
-        return { key: output.key, localIndex, setsValue: output.setsValue === true };
+        // A program in the current format sets an Update state (the file's kind, or setsValue) at the update instant.
+        const update = implementation.providerApiVersion === 2 && updateStateIds.has(Number(output.stateId));
+        return { key: output.key, localIndex, setsValue: output.setsValue === true || update, unit: stateRecord.get(output.stateId)?.state.unit ?? '',
+            globalIndex: stateRecord.get(output.stateId)?.globalIndex };
     });
-    return { entityLabel: `computational-node provider on node "${plan.node.name}"`, implementation, symbols, outputs };
+    const stateBindings = (implementation.bindings ?? []).filter((binding) => binding.kind !== 'parameter' && binding.kind !== 'time')
+        .map((binding) => ({ key: binding.key, stateId: binding.stateId }));
+    return { entityLabel: `computational-node provider on node "${plan.node.name}"`, implementation, symbols, outputs, plan, stateBindings,
+        programOwner: { id: plan.node.id, text: `node ${plan.node.name}`, seed: implementation.seed ?? 0 } };
 }
 
 // ---- provider blocking + registry: validates every provider-bearing entity up front (no partial
@@ -684,7 +706,7 @@ function buildNodeProvider(plan, stateRecord, schedules) {
 
 export function collectProviders(model, kind) {
     const providers = [];
-    const visit = (owner) => {
+    const visit = (owner, nodeProgram = false) => {
         if (!owner.implementation) return;
         const providerKind = owner.implementation.kind;
         if (providerKind === 'plugin') {
@@ -693,28 +715,29 @@ export function collectProviders(model, kind) {
         if (providerKind !== 'cpp' && providerKind !== 'python') {
             throw new Error(`The ${owner.entityLabel} has an unrecognized provider kind "${providerKind}".`);
         }
-        // A program in the current program format (version 2) keeps its memory with the engine and is converted at its ports; code
-        // export does not write that yet, so it refuses rather than write a program that would run differently.
+        // A program in the current program format (version 2): one instance, kept as the engine keeps it (programEntries), converted
+        // at its ports. A term's program has one output; a node's program may have several.
         if (programSourceVersion(providerKind, owner.implementation.source) === 2) {
             const declared = programDeclarations(providerKind, owner.implementation.source);
-            if (declared.keepsMemory) {
-                throw new Error(`The program of the ${owner.entityLabel} remembers something between steps, or has a clock, which code export cannot write yet -- export blocked.`);
-            }
-            if (declared.ownInitialize || declared.node || declared.outputs.length !== 1) {
-                throw new Error(`The program of the ${owner.entityLabel} has an initialize() of its own or several outputs, which code export cannot write yet -- export blocked.`);
+            if (!nodeProgram && (declared.node || declared.outputs.length !== 1)) {
+                throw new Error(`The program of the ${owner.entityLabel} has several outputs, which code export cannot write yet -- export blocked.`);
             }
             owner.program = declared;
         }
         if (providerKind !== kind) {
             throw new Error(`The ${owner.entityLabel} is implemented in ${providerKind === 'cpp' ? 'C++' : 'Python'}, but export to ${kind === 'cpp' ? 'C++' : 'Python'} was requested -- export blocked. Provider source is never auto-translated between languages.`);
         }
+        // The far end of a two-way relationship written as a program in the current format is the same program, one instance.
+        if (owner.program && owner.negate) return;
         providers.push(owner);
     };
     for (const plan of model.nodePlans) {
         for (const contribution of [...plan.algebraic, ...plan.contributions]) visit(contribution);
         if (plan.nodeProvider) {
-            if (kind === 'cpp') throw new Error(`The computational-node provider on node "${plan.node.name}" has no C++ equivalent in the engine -- export to C++ is blocked for this model.`);
-            visit(plan.nodeProvider);
+            const current = programSourceVersion(plan.nodeProvider.implementation.kind, plan.nodeProvider.implementation.source) === 2;
+            if (kind === 'cpp' && !current) throw new Error(`The computational-node provider on node "${plan.node.name}" has no C++ equivalent in the engine -- export to C++ is blocked for this model.`);
+            visit(plan.nodeProvider, true);
+            if (current && plan.verletKicked) throw new Error(`Node "${plan.node.name}" is integrated with Verlet and has a program of its own, which code export cannot write yet -- export blocked.`);
         }
     }
     return providers;
@@ -748,13 +771,25 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     const wholeModel = method !== 'nodeByNode';
     const model = buildModel(document, { wholeModel });
     const providers = collectProviders(model, kind);
-    // A program in the current format takes every stage of a whole-model method, which code export does not write yet.
+    // Programs in the current format take every stage of a whole-model method, are advanced after every step it accepts, and reject a
+    // step they refuse, as the engine calls them (programEntries). What the export does not write yet is refused by name.
     const currentFormat = providers.find((provider) => provider.program);
-    if (wholeModel && currentFormat) {
-        throw new Error(`The program of the ${currentFormat.entityLabel} is in the current program format, which code export cannot write under ${integrationMethod(method).name} yet -- export blocked.`);
+    for (const { task } of programEntries(model)) {
+        if ((method === 'rodas4' || method === 'bdf') && task.program.ownJacobian) {
+            throw new Error(`The program of the ${task.entityLabel} gives its own Jacobian, which Stiff uses and code export cannot write yet -- export blocked.`);
+        }
+        if (task.algebraic && task.program.clock) {
+            throw new Error(`The program of the ${task.entityLabel} sets a value and has a clock, which code export cannot write yet -- export blocked.`);
+        }
+    }
+    // A program that remembers is advanced between its node's substeps and at the end of each global step, and under a whole-model method
+    // a refusal rejects the step: the export writes these to run in one thread.
+    if (currentFormat && parallelism !== 'serial' && (wholeModel || programsRemember(model))) {
+        const { task } = programEntries(model).find(({ task: entry, node }) => wholeModel || entry.program.keepsMemory || entry.program.ownInitialize || node);
+        throw new Error(`The program of the ${task.entityLabel} is in the current program format, which code export writes to run in one thread${wholeModel ? ` under ${integrationMethod(method).name}` : ' when it remembers something, has a clock or sets an Update'}: choose "serial".`);
     }
     if (wholeModel) {
-        const nodeProvider = model.nodePlans.find((plan) => plan.nodeProvider);
+        const nodeProvider = model.nodePlans.find((plan) => plan.nodeProvider && !plan.nodeProvider.program);
         if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which code export cannot write under ${integrationMethod(method).name} yet.`);
     }
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
@@ -1002,7 +1037,7 @@ function cppProgramCall(task, info, timeName, valueName, rate) {
     const { values, output } = programCall(task, task.program, 'cpp', task.outputUnit, rate);
     return [
         values.length ? `            const double programInputs[] = { ${values.join(', ')} };` : '            const double* programInputs = nullptr;',
-        `            double ${valueName} = static_cast<const konjugate::sdk::v2::Relationship&>(*${info.instanceVariable}).evaluate(${timeName}, konjugate::sdk::v2::Inputs(programInputs, nullptr, nullptr));`,
+        `            double ${valueName} = ${info.instanceVariable}.evaluate(${timeName}, programInputs);`,
         output ? `            ${valueName} = ${valueName} * ${output.scale} + ${output.offset};` : ''
     ].filter(Boolean);
 }
@@ -1043,6 +1078,7 @@ export function emitCppProviderContribution(contribution, info) {
 // running them concurrently (openmp/stdThread) or on separate processes (mpi) needs no locking.
 function cppNodeIntegratorLambdas(model, providerInfo) {
     return model.nodePlans.map((plan, nodeIndex) => {
+        const nodeProgram = plan.nodeProvider?.program ? [emitCppNodeProgram(plan.nodeProvider, providerInfo.get(plan.nodeProvider))] : [];
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
         const emitContribution = (contribution) => (contribution.implementation
@@ -1055,7 +1091,7 @@ function cppNodeIntegratorLambdas(model, providerInfo) {
             `    // Node: ${plan.node.name}`,
             `    const auto integrateNode${nodeIndex} = [&]() {`,
             `        double state[${stateCount}] = { ${seed} };`,
-            cppNodeSubstepLines(plan, emitContribution),
+            cppNodeSubstepLines(plan, emitContribution, { nodeLines: nodeProgram, afterSubstep: cppProgramAdvanceLines(plan, providerInfo, model) }),
             cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    };'
@@ -1121,7 +1157,9 @@ function mpiSetupLines(model) {
 
 // The node's states a stage adds a rate to (those its Rate terms reach), as local indexes, in order.
 function integratedLocalIndexes(plan) {
-    return [...new Set(plan.contributions.map((contribution) => contribution.outputLocalIndex))].sort((left, right) => left - right);
+    // A node's program in the current format takes part in the stages: its rate outputs are integrated too.
+    const programRates = plan.nodeProvider?.program ? plan.nodeProvider.outputs.filter((output) => !output.setsValue).map((output) => output.localIndex) : [];
+    return [...new Set([...plan.contributions.map((contribution) => contribution.outputLocalIndex), ...programRates])].sort((left, right) => left - right);
 }
 
 // Per state of the model, whether the method integrates it: 1, or 0 for a state that holds through the stages.
@@ -1158,13 +1196,18 @@ function emitCppStageProviderContribution(contribution, info) {
 }
 
 // Each node's rates at a stage, from the stage's states: its own read as `state`, the others' as `snapshot`, both the same stage values.
-function cppStageLambdas(model, providerInfo) {
+function cppStageLambdas(model, providerInfo, rejection) {
     return model.nodePlans.map((plan, nodeIndex) => {
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
-        const contributionLines = plan.contributions.map((contribution) => (
-            contribution.implementation ? emitCppStageProviderContribution(contribution, providerInfo.get(contribution)) : emitCppRegularContribution(contribution)
-        )).join('\n');
+        const contributionLines = [
+            ...plan.contributions.map((contribution) => (
+                contribution.program ? emitCppStageProgramContribution(contribution, providerInfo.get(contribution), rejection)
+                    : contribution.implementation ? emitCppStageProviderContribution(contribution, providerInfo.get(contribution)) : emitCppRegularContribution(contribution)
+            )),
+            // A node's own program in the current format, after every term, as the engine orders them.
+            ...(plan.nodeProvider?.program ? [emitCppNodeProgram(plan.nodeProvider, providerInfo.get(plan.nodeProvider), rejection)] : [])
+        ].join('\n');
         const rateLines = integratedLocalIndexes(plan).map((local) => (
             `        rates[${model.stateRecord.get(plan.node.states[local].id).globalIndex}] = derivative[${local}];`
         )).join('\n');
@@ -1213,11 +1256,24 @@ function absoluteTolerancesOf(model, runAbsolute) {
 // program is never known to be pure), so it reads none. The Jacobian's pattern is built from these.
 function stageReadsOf(model) {
     const reads = Array.from({ length: model.globalStateCount }, () => []);
+    // A program in the current format reads every state it is bound to, or those its output declares it depends on (as the engine's
+    // stageReads narrows them); a program in the older format is held, and read nothing within the step.
+    const programReads = (task, output) => task.stateBindings.filter((binding) => !output?.dependsOn || output.dependsOn.includes(binding.key))
+        .map((binding) => model.stateRecord.get(binding.stateId).globalIndex);
     for (const plan of model.nodePlans) {
         for (const contribution of plan.contributions) {
-            if (contribution.implementation) continue;
+            if (contribution.implementation && !contribution.program) continue;
             const output = model.stateRecord.get(plan.node.states[contribution.outputLocalIndex].id).globalIndex;
+            if (contribution.program) {
+                reads[output].push(...programReads(contribution, contribution.program.outputs[0]));
+                continue;
+            }
             for (const stateId of contribution.boundStateIds) reads[output].push(model.stateRecord.get(stateId).globalIndex);
+        }
+        const task = plan.nodeProvider?.program ? plan.nodeProvider : null;
+        for (const output of task?.outputs ?? []) {
+            if (output.setsValue) continue;
+            reads[output.globalIndex].push(...programReads(task, task.program.outputs.find((port) => port.key === output.key)));
         }
     }
     return reads.map((list) => [...new Set(list)].sort((left, right) => left - right));
@@ -1226,9 +1282,10 @@ function stageReadsOf(model) {
 // The stiff methods' exact Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF), as compileJacobianPlan in
 // engine/src/jacobianAssembly.cpp works it out: every equation into an integrated state differentiated (src/expressionDerivative.mjs)
 // with respect to each state it binds and the time, node by node, each node's terms in order, each term's bindings in order, each
-// derivative added into its entry of the Jacobian (laid out as makeStiffSystem lays it out) or of df/dt. A program is held through the
-// stages here, so no column is left to finite differences. df/dt is exact unless a parameter that follows a stored schedule is
-// differentiated through. Null when the run asks for finite differences.
+// derivative added into its entry of the Jacobian (laid out as makeStiffSystem lays it out) or of df/dt. A program in the older format is
+// held through the stages, so it reads no column; one in the current format is evaluated at every stage, so each column it reads (narrowed
+// to its declared dependencies) is left to finite differences, and df/dt with it, as the engine leaves them. df/dt is exact unless a
+// parameter that follows a stored schedule is differentiated through. Null when the run asks for finite differences.
 function exactJacobianOf(model, stageReads, jacobianMethod) {
     if (jacobianMethod === 'finiteDifference') return null;
     const integrated = integratedFlags(model);
@@ -1244,11 +1301,35 @@ function exactJacobianOf(model, stageReads, jacobianMethod) {
     });
     const rowStart = [0];
     rows.forEach((columns) => rowStart.push(rowStart.at(-1) + columns.length));
+    const exactColumn = new Array(count).fill(1);
+    let opaque = false;
+    const programReads = (task, output) => {
+        for (const binding of task.stateBindings) {
+            if (output?.dependsOn && !output.dependsOn.includes(binding.key)) continue;
+            const column = position[model.stateRecord.get(binding.stateId).globalIndex];
+            if (column >= 0) exactColumn[column] = 0;
+        }
+    };
+    for (const plan of model.nodePlans) {
+        for (const contribution of plan.contributions) {
+            if (!contribution.program) continue;
+            opaque = true;
+            programReads(contribution, contribution.program.outputs[0]);
+        }
+        if (plan.nodeProvider?.program) {
+            opaque = true;
+            for (const output of plan.nodeProvider.outputs) {
+                if (!output.setsValue) programReads(plan.nodeProvider, plan.nodeProvider.program.outputs.find((port) => port.key === output.key));
+            }
+        }
+    }
     const entryOf = (row, column) => {
         const found = rows[row].indexOf(column);
         if (found < 0) throw new Error('A derivative falls outside the Jacobian\'s pattern.');
         return rowStart[row] + found;
     };
+    // No column the equations alone reach: finite differences throughout, as the engine then takes them (it sets up no exact columns).
+    if (!exactColumn.some(Boolean)) return null;
     let scheduled = false;
     const nodes = model.nodePlans.map((plan) => {
         const terms = [];
@@ -1264,7 +1345,7 @@ function exactJacobianOf(model, stageReads, jacobianMethod) {
                     continue;
                 }
                 const time = symbol.time !== undefined;
-                if (!time && !(position[symbol.globalIndex] >= 0)) continue;
+                if (!time && !(position[symbol.globalIndex] >= 0 && exactColumn[position[symbol.globalIndex]])) continue;
                 const derivative = differentiateNode(compiled, key);
                 if (!derivative) continue;
                 (time ? timeTerms : terms).push({ contribution, expression: derivative, negate: contribution.negate,
@@ -1273,7 +1354,7 @@ function exactJacobianOf(model, stageReads, jacobianMethod) {
         }
         return { plan, terms, timeTerms };
     });
-    return { nodes, exactTime: !scheduled };
+    return { nodes, exactTime: !opaque && !scheduled, exactColumn };
 }
 
 // The exact Jacobian in C++: a lambda per node adding its terms' derivatives, read from the node's states as its stage reads them, and
@@ -1310,7 +1391,10 @@ function cppExactJacobianLines(model, exactJacobian) {
         '    std::vector<double>* jacobianEntries = nullptr;',
         '    std::vector<double>* jacobianTime = nullptr;',
         ...lambdas,
-        '    konjugate::integrators::useExactColumns(system, std::vector<unsigned char>(system.integratedStates.size(), 1));',
+        exactJacobian.exactColumn.every(Boolean)
+            ? '    konjugate::integrators::useExactColumns(system, std::vector<unsigned char>(system.integratedStates.size(), 1));'
+            // A program in the current format reads these columns: they are left to finite differences.
+            : `    konjugate::integrators::useExactColumns(system, std::vector<unsigned char>{ ${exactJacobian.exactColumn.join(', ')} });`,
         `    system.exactTime = ${exactJacobian.exactTime};`,
         '    system.exact = [&](double time, const std::vector<double>& states, std::vector<double>& jacobian, std::vector<double>* dT) {',
         '        stepTime = time;',
@@ -1354,7 +1438,9 @@ function pythonExactJacobianLines(model, exactJacobian) {
         '                d_t[index] = 0.0',
         ...body,
         '',
-        '    use_exact_columns(system, [1] * len(system.integrated_states))',
+        exactJacobian.exactColumn.every(Boolean)
+            ? '    use_exact_columns(system, [1] * len(system.integrated_states))'
+            : `    use_exact_columns(system, [${exactJacobian.exactColumn.join(', ')}])`,
         `    system.exact_time = ${exactJacobian.exactTime ? 'True' : 'False'}`,
         '    system.exact = exact_jacobian'
     ];
@@ -1362,6 +1448,8 @@ function pythonExactJacobianLines(model, exactJacobian) {
 
 // Whether an equation evaluated at stages uses the time, or a parameter that follows a stored schedule: then Stiff works out df/dt.
 function stagesReadTime(model) {
+    // A program in the current format is given the time at every stage, so df/dt is worked out, as the engine works it out.
+    if (model.nodePlans.some((plan) => plan.nodeProvider?.program || plan.contributions.some((contribution) => contribution.program))) return true;
     return model.nodePlans.some((plan) => plan.contributions.some((contribution) => {
         if (contribution.implementation) return false;
         const used = mathJsonSymbols(contribution.mathJson);
@@ -1554,6 +1642,20 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
     const adaptive = meta.method === 'dormandPrince54';
     const bdf = meta.method === 'bdf';
     const stiff = meta.method === 'rodas4' || bdf;
+    // Programs in the current format: evaluated at every stage, advanced after every step the method accepts (through its events), their
+    // clocks ticking and their Updates set at each global step's end.
+    const programs = programEntries(model).length > 0;
+    const events = programs ? 'programEvents' : located ? 'switching' : null;
+    const withEvents = events ? 'WithEvents' : '';
+    const eventsArgument = events ? ` ${events},` : '';
+    const noEvents = adaptive ? 'DormandPrince54NoEvents' : bdf ? 'BdfNoEvents' : 'Rodas4NoEvents';
+    const programEventLines = programs && (adaptive || stiff) ? [
+        located ? null : `        konjugate::integrators::${noEvents} noEvents;`,
+        `        ProgramStepEvents<std::remove_reference_t<decltype(${located ? 'switching' : 'noEvents'})>, decltype(advancePrograms)> programEvents{${located ? 'switching' : 'noEvents'}, advancePrograms};`
+    ].filter(Boolean) : [];
+    const rungeKutta4Call = (start, size, steps, evaluate) => (located
+        ? `konjugate::integrators::rungeKutta4GlobalStepWithEvents(${start}, ${size}, ${steps}, globalState, integrated, switching, ${evaluate});`
+        : `konjugate::integrators::rungeKutta4GlobalStep(${start}, ${size}, ${steps}, globalState, integrated, ${evaluate});`);
     return [
         `    // ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
         '    // stage values. Values set from other states (Updates) hold through the stages and are set at each global step\'s end.',
@@ -1567,7 +1669,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         '    [[maybe_unused]] std::size_t stageIndex = 0;',
         '    double stepTime = 0;',
         ...cppSwitchingLines(model, meta.switching ?? []),
-        cppStageLambdas(model, providerInfo),
+        cppStageLambdas(model, providerInfo, adaptive || stiff ? 'konjugate::integrators::StageRejected' : 'std::runtime_error'),
         `    std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
         '    const auto evaluateStage = [&](std::size_t internalStep, std::size_t stage, double time, const std::vector<double>& states, std::vector<double>& rates) {',
         '        stageStep = internalStep;',
@@ -1632,14 +1734,18 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
             '        return kept;',
             '    };'
         ] : []),
+        ...(programs ? cppAdvanceProgramsLambda(model, providerInfo) : []),
+        programs && bdf ? '    bool programMemoryTicked = false;' : null,
         '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
         '    for (std::size_t step = 0; step < steps; ++step) {',
         '        const double currentTime = step * globalTimeStep;',
+        programs ? '        const std::vector<double> snapshot = globalState;' : null,
         located ? '        switching.beginGlobalStep(currentTime, globalState);' : null,
+        ...programEventLines,
         adaptive
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                `        konjugate::integrators::dormandPrince54GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
-                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,${located ? ' switching,' : ''}`,
+                `        konjugate::integrators::dormandPrince54GlobalStep${withEvents}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
+                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,${eventsArgument}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
             : bdf
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
@@ -1647,19 +1753,36 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 '        const auto around = breakpointsWithin(currentTime - globalTimeStep, currentTime + globalTimeStep);',
                 '        const bool restart = std::any_of(around.begin(), around.end(), [&](double time) {',
                 '            return std::abs(time - currentTime) <= std::max(1e-9 * globalTimeStep, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(currentTime));',
-                `        })${located ? ' || switching.latches != bdfLatches' : ''};`,
-                `        konjugate::integrators::bdfGlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance, breakpointsWithin(currentTime, endTime), {}, restart,`,
-                `            history, statistics,${located ? ' switching,' : ''} evaluateAdaptive, [](double, const std::vector<double>&) {});`,
-                ...(located ? ['        bdfLatches = switching.latches;'] : [])].join('\n')
+                `        })${located ? ' || switching.latches != bdfLatches' : ''}${programs ? ' || programMemoryTicked' : ''};`,
+                programs ? '        programMemoryTicked = false;' : null,
+                `        konjugate::integrators::bdfGlobalStep${withEvents}(currentTime, endTime, globalState, system, tolerance, breakpointsWithin(currentTime, endTime), {}, restart,`,
+                `            history, statistics,${eventsArgument} evaluateAdaptive, [](double, const std::vector<double>&) {});`,
+                ...(located ? ['        bdfLatches = switching.latches;'] : [])].filter((line) => line !== null).join('\n')
             : stiff
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                `        konjugate::integrators::rodas4GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
-                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,${located ? ' switching,' : ''}`,
+                `        konjugate::integrators::rodas4GlobalStep${withEvents}(currentTime, endTime, globalState, system, tolerance,`,
+                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,${eventsArgument}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
-            : located
-                ? '        konjugate::integrators::rungeKutta4GlobalStepWithEvents(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, switching, evaluateStage);'
-                : '        konjugate::integrators::rungeKutta4GlobalStep(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage);',
+            : programs
+                // A program that remembers is advanced after every internal step: the global step taken as its internal steps one at a
+                // time, the same arithmetic in the same order, as the engine takes it.
+                ? ['        if (programsAdvanceEachStep) {',
+                    '            const double internal = globalTimeStep / static_cast<double>(stepsPerGlobalStep);',
+                    '            for (std::size_t internalStep = 0; internalStep < stepsPerGlobalStep; ++internalStep) {',
+                    '                const double start = currentTime + static_cast<double>(internalStep) * internal;',
+                    '                const auto evaluateInternal = [&](std::size_t, std::size_t stage, double time, const std::vector<double>& states, std::vector<double>& rates) {',
+                    '                    evaluateStage(internalStep, stage, time, states, rates);',
+                    '                };',
+                    `                ${rungeKutta4Call('start', 'internal', '1', 'evaluateInternal')}`,
+                    '                const double end = internalStep + 1 == stepsPerGlobalStep ? (step + 1) * globalTimeStep : currentTime + static_cast<double>(internalStep + 1) * internal;',
+                    '                advancePrograms(end, internal, globalState);',
+                    '            }',
+                    '        } else {',
+                    `            ${rungeKutta4Call('currentTime', 'globalTimeStep', 'stepsPerGlobalStep', 'evaluateStage')}`,
+                    '        }'].join('\n')
+                : `        ${rungeKutta4Call('currentTime', 'globalTimeStep', 'stepsPerGlobalStep', 'evaluateStage')}`,
         ...cppWholeModelUpdateLines(model, providerInfo),
+        ...(programs ? cppProgramStepEndLines(model, providerInfo, bdf) : []),
         '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
         '    }'
     ].filter((line) => line !== null);
@@ -1680,6 +1803,7 @@ function generateCpp(model, providers, meta, document) {
         return `namespace ${namespaceName} {\n${source}\n}\n`;
     });
 
+    shareProgramInstances(model, providerInfo);
     const isMpi = meta.parallelism === 'mpi';
     const nodeCount = model.nodePlans.length;
     const nodeLambdas = cppNodeIntegratorLambdas(model, providerInfo);
@@ -1688,7 +1812,7 @@ function generateCpp(model, providers, meta, document) {
 
     const providerDeclarations = providers.map((provider) => {
         const info = providerInfo.get(provider);
-        if (provider.program) return `    auto ${info.instanceVariable} = ${info.namespaceName}::createProgram();`;
+        if (provider.program) return `    ProgramInstance ${info.instanceVariable};\n    ${info.instanceVariable}.program = ${info.namespaceName}::createProgram();`;
         return `    auto ${info.instanceVariable} = ${info.namespaceName}::createRelationshipProvider();\n    ${info.instanceVariable}->initialize({});`;
     }).join('\n');
 
@@ -1696,10 +1820,12 @@ function generateCpp(model, providers, meta, document) {
         '#include <algorithm>',
         '#include <cmath>',
         '#include <cstddef>',
+        providers.some((provider) => provider.program) ? '#include <cstring>' : '',
         '#include <fstream>',
         '#include <functional>',
         '#include <iomanip>',
         '#include <iostream>',
+        '#include <limits>',
         meta.parallelism === 'mpi' ? '#include <mpi.h>' : '',
         '#include <memory>',
         providers.length ? '#include <span>' : '',
@@ -1748,7 +1874,7 @@ function generateCpp(model, providers, meta, document) {
         '',
         providers.some((provider) => !provider.program) ? `${cppSdkNamespace}\n` : '',
         // The program SDK (version 2) as it is, for the programs in the current format.
-        providers.some((provider) => provider.program) ? `${programSdkCpp.replace(/^#pragma once\n/m, '')}\n` : '',
+        providers.some((provider) => provider.program) ? `${programSdkCpp.replace(/^#pragma once\n/m, '')}\n\n${programRuntimeCpp}` : '',
         providerBlocks.join('\n'),
         cppScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
@@ -1776,6 +1902,7 @@ function generateCpp(model, providers, meta, document) {
         isMpi ? mpiSetupLines(model) : null,
         providerDeclarations,
         `    std::vector<double> globalState = { ${initialStateLiterals(model)} };`,
+        ...cppProgramStartAndInstant(model, providerInfo),
         cppSettleLines(model, providerInfo),
         outputSetupLines.join('\n'),
         '    writeRow(0);',
@@ -1787,6 +1914,7 @@ function generateCpp(model, providers, meta, document) {
             nodeLambdas.split('\n').map((line) => `    ${line}`).join('\n'),
             `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
             dispatchLines.join('\n'),
+            ...cppProgramStepEndLines(model, providerInfo),
             '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
             '    }'
         ]),
@@ -1866,7 +1994,7 @@ function emitPythonRegularContribution(contribution) {
 function pythonProgramCall(task, info, timeName, valueName, rate) {
     const { values, output } = programCall(task, task.program, 'python', task.outputUnit, rate);
     return [
-        `        ${valueName} = float(${info.instanceVariable}.evaluate(${timeName}, describe(type(${info.instanceVariable})).view([${values.join(', ')}], {})))`,
+        `        ${valueName} = float(${info.instanceVariable}.evaluate(${timeName}, [${values.join(', ')}]))`,
         output ? `        ${valueName} = ${valueName} * ${output.scale} + ${output.offset}` : ''
     ].filter(Boolean);
 }
@@ -1961,11 +2089,14 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
             ? emitPythonProviderContribution(contribution, providerInfo.get(contribution))
             : emitPythonRegularContribution(contribution));
         const contributionLines = plan.contributions.map(emitContribution).join('\n');
-        const nodeProviderLines = plan.nodeProvider ? emitPythonNodeProvider(plan.nodeProvider, providerInfo.get(plan.nodeProvider)) : '';
+        const nodeProviderLines = !plan.nodeProvider ? ''
+            : plan.nodeProvider.program ? emitPythonNodeProgram(plan.nodeProvider, providerInfo.get(plan.nodeProvider))
+            : emitPythonNodeProvider(plan.nodeProvider, providerInfo.get(plan.nodeProvider));
+        const advanceLines = pythonProgramAdvanceLines(plan, providerInfo, model);
         // Once, after the last update, as the engine does (see cppAlgebraicLines).
         const algebraicLines = plan.algebraic.map((task) => emitPythonAlgebraicTask(task, providerInfo.get(task))).join('\n');
         const algebraicAtEnd = algebraicLines && ['    algebraic_time = current_time + global_time_step', algebraicLines.split('\n').map((line) => line.replace(/^    /, '')).join('\n')].join('\n');
-        const hasPendingAlgebraic = plan.nodeProvider?.outputs.some((output) => output.setsValue);
+        const hasPendingAlgebraic = !plan.nodeProvider?.program && plan.nodeProvider?.outputs.some((output) => output.setsValue);
         const commitLines = plan.node.states.map((state, index) => (
             `    global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`
         )).join('\n');
@@ -1973,6 +2104,7 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
             `    # Node: ${plan.node.name}`,
             `    state = [${seed}]`,
             pythonNodeSubstepLines(plan, emitContribution),
+            ...advanceLines,
             algebraicAtEnd,
             commitLines
         ].filter(Boolean).join('\n') : [
@@ -1988,6 +2120,7 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
             hasPendingAlgebraic ? '        for index, value in pending_algebraic:\n            if not math.isfinite(value): raise RuntimeError("An algebraic output produced a non-finite value.")\n            state[index] = value' : '',
             `        for index in range(${stateCount}):`,
             '            state[index] += node_time_step * derivative[index]',
+            ...advanceLines,
             algebraicAtEnd,
             commitLines
         ].filter(Boolean).join('\n');
@@ -2055,6 +2188,8 @@ function pythonSwitchingLines(model, functions) {
 
 function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) {
     const located = meta.switching?.length > 0;
+    const rejection = meta.method === 'rungeKutta4' ? 'RuntimeError' : 'StageRejected';
+    const programs = programEntries(model).length > 0;
     const stageBlocks = model.nodePlans.map((plan, nodeIndex) => {
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
         const body = [
@@ -2062,8 +2197,10 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
             `        state = [${seed}]`,
             `        derivative = [0.0] * ${plan.node.states.length}`,
             ...plan.contributions.map((contribution) => (
-                contribution.implementation ? emitPythonStageProviderContribution(contribution, providerInfo.get(contribution)) : emitPythonRegularContribution(contribution)
+                contribution.program ? emitPythonStageProgramContribution(contribution, providerInfo.get(contribution), rejection)
+                    : contribution.implementation ? emitPythonStageProviderContribution(contribution, providerInfo.get(contribution)) : emitPythonRegularContribution(contribution)
             )),
+            ...(plan.nodeProvider?.program ? [emitPythonNodeProgram(plan.nodeProvider, providerInfo.get(plan.nodeProvider), rejection)] : []),
             ...integratedLocalIndexes(plan).map((local) => `        rates[${model.stateRecord.get(plan.node.states[local].id).globalIndex}] = derivative[${local}]`)
         ].join('\n');
         if (!isMpi) return body;
@@ -2080,6 +2217,11 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
     const adaptive = meta.method === 'dormandPrince54';
     const bdf = meta.method === 'bdf';
     const stiff = meta.method === 'rodas4' || bdf;
+    const events = programs ? 'program_events' : located ? 'switching' : null;
+    const eventsArgument = events ? `, ${events}` : '';
+    const rungeKutta4Call = (start, size, steps, evaluate) => (located
+        ? `runge_kutta_4_global_step_with_events(${start}, ${size}, ${steps}, global_state, integrated, switching, ${evaluate})`
+        : `runge_kutta_4_global_step(${start}, ${size}, ${steps}, global_state, integrated, ${evaluate})`);
     const schedulesBreakpoints = model.schedules.length
         ? ['        times = sorted(time for _hold, schedule_times, _values in PARAMETER_SCHEDULES for time in schedule_times if from_time < time < to_time)']
         : ['        times = []'];
@@ -2139,32 +2281,46 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
             '        return kept',
             ''
         ] : []),
+        ...(programs ? pythonAdvanceProgramsLines(model, providerInfo) : []),
+        programs ? `    program_events = ProgramStepEvents(${located ? 'switching' : 'None'}, advance_programs)` : '',
+        programs && bdf ? '    program_memory_ticked = False' : '',
         '    steps = math.ceil(target_time / global_time_step - 1e-9)',
         '    for step in range(steps):',
         '        current_time = step * global_time_step',
+        programs ? '        snapshot = list(global_state)' : '',
         located ? '        switching.begin_global_step(current_time, global_state)' : '',
         adaptive
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        dormand_prince_54_global_step(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,',
                 '                                      [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,',
-                `                                      lambda _time, _values: None${located ? ', switching' : ''})`].join('\n')
+                `                                      lambda _time, _values: None${eventsArgument})`].join('\n')
             : bdf
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        # The table starts again at order 1 where a schedule turns a corner at this very instant, as the engine starts it.',
                 '        around = breakpoints_within(current_time - global_time_step, current_time + global_time_step)',
-                `        restart = any(abs(time - current_time) <= max(1e-9 * global_time_step, 1e3 * STIFF_EPSILON * abs(current_time)) for time in around)${located ? ' or switching.latches != bdf_latches' : ''}`,
+                `        restart = any(abs(time - current_time) <= max(1e-9 * global_time_step, 1e3 * STIFF_EPSILON * abs(current_time)) for time in around)${located ? ' or switching.latches != bdf_latches' : ''}${programs ? ' or program_memory_ticked' : ''}`,
+                programs ? '        program_memory_ticked = False' : '',
                 '        bdf_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance, breakpoints_within(current_time, end_time), [],',
-                `                        restart, history, evaluate_adaptive, lambda _time, _values: None${located ? ', switching' : ''})`,
-                ...(located ? ['        bdf_latches = list(switching.latches)'] : [])].join('\n')
+                `                        restart, history, evaluate_adaptive, lambda _time, _values: None${eventsArgument})`,
+                ...(located ? ['        bdf_latches = list(switching.latches)'] : [])].filter(Boolean).join('\n')
             : stiff
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        rodas_4_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,',
                 '                            [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, reads_time, controller, evaluate_adaptive,',
-                `                            lambda _time, _values: None${located ? ', switching' : ''})`].join('\n')
-            : located
-                ? '        runge_kutta_4_global_step_with_events(current_time, global_time_step, steps_per_global_step, global_state, integrated, switching, evaluate_stage)'
-                : '        runge_kutta_4_global_step(current_time, global_time_step, steps_per_global_step, global_state, integrated, evaluate_stage)',
-        ...updateBlocks
+                `                            lambda _time, _values: None${eventsArgument})`].join('\n')
+            : programs
+                ? ['        if programs_advance_each_step:',
+                    '            internal = global_time_step / float(steps_per_global_step)',
+                    '            for internal_step in range(steps_per_global_step):',
+                    '                start = current_time + float(internal_step) * internal',
+                    `                ${rungeKutta4Call('start', 'internal', '1', 'lambda _step, stage, time, values, rates, internal_step=internal_step: evaluate_stage(internal_step, stage, time, values, rates)')}`,
+                    '                end = (step + 1) * global_time_step if internal_step + 1 == steps_per_global_step else current_time + float(internal_step + 1) * internal',
+                    '                advance_programs(end, internal, global_state)',
+                    '        else:',
+                    `            ${rungeKutta4Call('current_time', 'global_time_step', 'steps_per_global_step', 'evaluate_stage')}`].join('\n')
+                : `        ${rungeKutta4Call('current_time', 'global_time_step', 'steps_per_global_step', 'evaluate_stage')}`,
+        ...updateBlocks,
+        ...(programs ? pythonProgramStepEndLines(model, providerInfo, bdf) : [])
     ];
 }
 
@@ -2191,13 +2347,14 @@ function generatePython(model, providers, meta, document) {
         return withoutImport.replace(pattern, `class ${uniqueName}(`);
     });
 
+    shareProgramInstances(model, providerInfo);
     const isMpi = meta.parallelism === 'mpi';
     const nodeCount = model.nodePlans.length;
     const nodeBlocks = pythonNodeBlockLines(model, providerInfo, isMpi);
 
     const providerInstances = providers.map((provider) => {
         const info = providerInfo.get(provider);
-        if (provider.program) return `    ${info.instanceVariable} = ${info.className}()`;
+        if (provider.program) return `    ${info.instanceVariable} = ProgramInstance(${info.className})`;
         return [
             `    ${info.instanceVariable} = ${info.className}()`,
             `    ${info.instanceVariable}.initialize(InitializationContext(0))`
@@ -2241,7 +2398,7 @@ function generatePython(model, providers, meta, document) {
         '',
         providers.some((provider) => !provider.program) ? `${pythonSdkModule}\n` : '',
         // The program SDK (version 2) as it is, for the programs in the current format.
-        providers.some((provider) => provider.program) ? `# --- vendored from engine/sdk/python/konjugate/v2 (the program SDK) ---\n${programSdkPython}\n# --- end of the program SDK ---\n` : '',
+        providers.some((provider) => provider.program) ? `# --- vendored from engine/sdk/python/konjugate/v2 (the program SDK) ---\n${programSdkPython}\n# --- end of the program SDK ---\n\n\n${programRuntimePython}\n` : '',
         providerBlocks.join('\n\n\n'),
         '',
         pythonScheduleLines(model),
@@ -2259,6 +2416,7 @@ function generatePython(model, providers, meta, document) {
         isMpi ? pythonMpiSetupLines(model) : '',
         providerInstances,
         `    global_state = [${initialStateLiterals(model)}]`,
+        ...pythonProgramStartAndInstant(model, providerInfo),
         pythonSettleLines(model, providerInfo),
         outputSetupLines.join('\n'),
         '    write_row(0)',
@@ -2268,7 +2426,8 @@ function generatePython(model, providers, meta, document) {
             '        snapshot = list(global_state)',
             '        current_time = step * global_time_step',
             nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
-            ...gatherLines
+            ...gatherLines,
+            ...pythonProgramStepEndLines(model, providerInfo)
         ]),
         '        if (step + 1) % output_every_step == 0:',
         '            write_row((step + 1) * global_time_step)',
@@ -2402,28 +2561,41 @@ const programKey = (attribute) => attribute.replace(/_([a-z0-9])/g, (_match, let
 
 export function programDeclarations(kind, source) {
     const text = String(source ?? '');
-    const declared = { inputs: [], outputs: [], node: false, keepsMemory: false, ownInitialize: false };
+    const declared = { inputs: [], outputs: [], node: false, keepsMemory: false, ownInitialize: false, ownJacobian: false };
     if (kind === 'cpp') {
         declared.node = /:\s*public\s+(?:k|konjugate::sdk::v2)::Node\b/.test(text);
         const ns = '(?:k|konjugate::sdk::v2)::';
-        for (const match of text.matchAll(new RegExp(`${ns}(Input|Parameter|Constant|Output)\\s+\\w+\\s*\\{\\s*this\\s*,\\s*"([^"]+)"(?:\\s*,\\s*"([^"]*)")?(?:\\s*,\\s*${ns}optional\\(\\s*([^)]+?)\\s*\\))?`, 'g'))) {
-            const port = { key: match[2], unit: match[3] ?? '', ...(match[4] !== undefined ? { default: Number(match[4]) } : {}) };
+        const members = new Map();
+        for (const match of text.matchAll(new RegExp(`${ns}(Input|Parameter|Constant|Output)\\s+(\\w+)\\s*\\{\\s*this\\s*,\\s*"([^"]+)"(?:\\s*,\\s*"([^"]*)")?(?:\\s*,\\s*${ns}optional\\(\\s*([^)]+?)\\s*\\))?(?:\\s*,\\s*${ns}dependsOn\\(([^)]*)\\))?`, 'g'))) {
+            const port = { key: match[3], unit: match[4] ?? '', ...(match[5] !== undefined ? { default: Number(match[5]) } : {}) };
+            if (match[1] !== 'Output') members.set(match[2], match[3]);
+            if (match[1] === 'Output' && match[6] !== undefined) port.dependsOn = match[6].split(',').map((name) => name.trim()).filter(Boolean).map((name) => members.get(name) ?? name);
             (match[1] === 'Output' ? declared.outputs : declared.inputs).push(port);
         }
         declared.keepsMemory = new RegExp(`${ns}(Memory|Clock)\\b`).test(text);
         declared.ownInitialize = /\bvoid\s+initialize\s*\(/.test(text);
+        declared.ownJacobian = /\bvoid\s+jacobian\s*\(/.test(text);
+        declared.clock = new RegExp(`${ns}Clock\\b`).test(text);
     } else {
         declared.node = /^class\s+\w+\s*\(\s*(?:\w+\.)?Node\s*\)/m.test(text);
-        for (const match of text.matchAll(/^[ \t]+(\w+)\s*=\s*(Input|Parameter|Constant|Output)\(([^)]*)\)/gm)) {
+        const attributes = new Map();
+        for (const match of text.matchAll(/^[ \t]+(\w+)\s*=\s*(Input|Parameter|Constant|Output)\(((?:[^()]|\([^()]*\))*)\)/gm)) {
             const argumentsText = match[3];
             const unit = /^\s*(["'])(.*?)\1/.exec(argumentsText)?.[2] ?? /\bunit\s*=\s*(["'])(.*?)\1/.exec(argumentsText)?.[2] ?? '';
             const name = /\bname\s*=\s*(["'])(.*?)\1/.exec(argumentsText)?.[2];
             const fallback = /\bdefault\s*=\s*([-+0-9.eE]+)/.exec(argumentsText)?.[1];
             const port = { key: name ?? programKey(match[1]), unit, ...(fallback !== undefined ? { default: Number(fallback) } : {}) };
+            if (match[2] !== 'Output') attributes.set(match[1], port.key);
+            const depends = /\bdepends_on\s*=\s*[([]([^)\]]*)[)\]]/.exec(argumentsText)?.[1];
+            if (match[2] === 'Output' && depends !== undefined) {
+                port.dependsOn = [...depends.matchAll(/(["'])(.*?)\1/g)].map((item) => attributes.get(item[2]) ?? programKey(item[2]));
+            }
             (match[2] === 'Output' ? declared.outputs : declared.inputs).push(port);
         }
         declared.keepsMemory = /=\s*(Memory|Random|Clock)\(/.test(text);
         declared.ownInitialize = /^\s+def\s+initialize\s*\(/m.test(text);
+        declared.ownJacobian = /^\s+def\s+jacobian\s*\(/m.test(text);
+        declared.clock = /=\s*Clock\(/.test(text);
     }
     return declared;
 }
@@ -2467,4 +2639,534 @@ function programCall(task, declared, language, stateUnit, rate) {
     });
     const output = portConversion(declared.outputs[0]?.unit, rate ? perSecondUnit(stateUnit) : stateUnit, rate, `The output of the program of the ${task.entityLabel}`);
     return { values, output: output ? { scale: literal(output.scale), offset: literal(output.offset) } : null };
+}
+
+// ---- Programs that remember, in exported code (docs/codeExport.md, Programs in the current format) ----------------------------------
+// Each program is one instance, as the engine keeps it: started before the run with its inputs there (its memory set from its
+// declarations, a Random seeded from what it belongs to, initialize() called), evaluated with its memory, advanced after every substep
+// that ends (a program with memory and no clock) or at every tick of its clock at the end of a global step, a node's program setting its
+// Update states at the update instant; in the engine's order, so the export gives the engine's numbers.
+
+// Every program in the current format once, in the order the engine starts them (ProviderRuntime::initialize): node by node, a node's
+// terms (rates, then values), then its own program. The far end of a two-way relationship is the same program, not another.
+export function programEntries(model) {
+    const entries = [];
+    for (const plan of model.nodePlans) {
+        for (const task of [...plan.contributions, ...plan.algebraic]) if (task.program && !task.negate) entries.push({ task, plan, node: false });
+        if (plan.nodeProvider?.program) entries.push({ task: plan.nodeProvider, plan, node: true });
+    }
+    return entries;
+}
+
+// The far end of a two-way relationship uses the instance of the program it is the far end of.
+export function shareProgramInstances(model, providerInfo) {
+    const byOwner = new Map();
+    for (const { task } of programEntries(model)) byOwner.set(task.programOwner.id, providerInfo.get(task));
+    for (const plan of model.nodePlans) {
+        for (const task of plan.contributions) {
+            if (task.program && task.negate && !providerInfo.has(task)) providerInfo.set(task, byOwner.get(task.programOwner.id));
+        }
+    }
+}
+
+// The states the update phase sets (Update states): read at their values from the step's start by the programs' ticks and Updates, as
+// the engine reads them before its update phase.
+export function updateStateIndexes(model) {
+    const indexes = new Set();
+    for (const plan of model.nodePlans) {
+        for (const task of plan.algebraic) indexes.add(model.stateRecord.get(task.outputStateId).globalIndex);
+        if (plan.nodeProvider?.program) for (const output of plan.nodeProvider.outputs) if (output.setsValue) indexes.add(output.globalIndex);
+    }
+    return [...indexes].sort((left, right) => left - right);
+}
+
+// Whether any program in the current format keeps memory, has a clock or sets an Update: the export then runs node by node in one thread.
+function programsRemember(model) {
+    return programEntries(model).some(({ task, node }) => task.program.keepsMemory || task.program.ownInitialize || node);
+}
+
+// A node program's inputs (programCall's) and each of its outputs' conversion into its state's unit.
+function nodeProgramCall(task, language) {
+    const { values } = programCall(task, task.program, language, '', false);
+    const outputs = task.outputs.map((output) => {
+        const index = task.program.outputs.findIndex((port) => port.key === output.key);
+        if (index < 0) throw new Error(`The program of the ${task.entityLabel} has no output ‘${output.key}’ -- export blocked.`);
+        const rate = !output.setsValue;
+        const conversion = portConversion(task.program.outputs[index].unit, rate ? perSecondUnit(output.unit) : output.unit, rate,
+            `Output ‘${output.key}’ of the program of the ${task.entityLabel}`);
+        return { ...output, index, conversion: conversion ? { scale: doubleLiteral(conversion.scale), offset: doubleLiteral(conversion.offset) } : null };
+    });
+    return { values, outputs };
+}
+
+const boundFlags = (task) => task.program.inputs.map((port) => (task.symbols.has(port.key) ? 1 : 0));
+
+export const programRuntimeCpp = `// A program in the current format as the engine keeps it: the program, its memory in whole 8-byte slots, which of its inputs are
+// bound, its clock's period and whether advance() has been called yet.
+struct ProgramInstance {
+    std::unique_ptr<konjugate::sdk::v2::Program> program;
+    std::vector<std::byte> memory;
+    std::vector<unsigned char> bound;
+    double clockPeriod = 0;
+    bool advanced = false;
+    // Before the run, with every input's value at its start: memory from its declarations, a Random seeded from what the program
+    // belongs to (ownerId) and its seed, then initialize().
+    void start(std::uint64_t instanceId, const char* owner, std::uint64_t ownerId, std::uint64_t seed, const double* values) {
+        const auto& registry = program->registry();
+        memory.assign(std::max<std::size_t>(registry.memorySize, 8), std::byte{0});
+        for (const auto& field : registry.memory) {
+            std::memcpy(memory.data() + field.offset, field.initial.data(), field.initial.size());
+            if (field.type == konjugate::sdk::v2::detail::MemoryType::random) {
+                konjugate::sdk::v2::seedRandom(memory.data(), field.offset, konjugate::sdk::v2::randomSeed(ownerId, seed, field.name));
+            }
+        }
+        konjugate::sdk::v2::Setup setup{instanceId, owner, 0.0, values};
+        konjugate::sdk::v2::MemoryWriter writer(memory.data());
+        program->initialize(setup, writer);
+        clockPeriod = registry.clockConstant ? values[*registry.clockConstant] : registry.clockPeriod;
+    }
+    // advance() after every step for a program with memory and no clock; at its clock's ticks for one with a clock.
+    [[nodiscard]] bool advancesEachStep() const { return program->registry().memorySize > 0 && clockPeriod == 0; }
+    [[nodiscard]] bool ticksAt(double time) const {
+        if (!(clockPeriod > 0)) return false;
+        const double ticks = time / clockPeriod;
+        const double whole = std::round(ticks);
+        return std::abs(ticks - whole) <= 1e-9 * std::max(1.0, std::abs(whole));
+    }
+    [[nodiscard]] konjugate::sdk::v2::Inputs inputs(const double* values) const { return {values, memory.data(), bound.data()}; }
+    [[nodiscard]] double evaluate(double time, const double* values) const {
+        return static_cast<const konjugate::sdk::v2::Relationship&>(*program).evaluate(time, inputs(values));
+    }
+    void evaluate(double time, const double* values, double* outputs, std::size_t count) const {
+        std::fill(outputs, outputs + count, std::numeric_limits<double>::quiet_NaN());
+        konjugate::sdk::v2::Outputs written(outputs);
+        static_cast<const konjugate::sdk::v2::Node&>(*program).evaluate(time, inputs(values), written);
+    }
+    void advance(double time, double size, const double* values) {
+        konjugate::sdk::v2::MemoryWriter writer(memory.data());
+        program->advance(konjugate::sdk::v2::Step{time, size, !advanced}, inputs(values), writer);
+        advanced = true;
+    }
+};
+
+// A whole-model method's events (its switching conditions, or none) with the programs advanced after every step it accepts: whether
+// their memory changed, so the next step's first stage is evaluated again. A step rejected, or taken again to land on an event, never
+// reaches accepted().
+template <typename Inner, typename Accepted>
+struct ProgramStepEvents {
+    Inner& inner;
+    Accepted onAccepted;
+    const std::vector<double>& latches = latchesFor(inner);
+    static const std::vector<double>& latchesFor(const Inner& events) {
+        if constexpr (requires { events.latches; }) return events.latches;
+        else {
+            static const std::vector<double> none;
+            return none;
+        }
+    }
+    bool active() const { return inner.active(); }
+    void beginStep(double time, const std::vector<double>& states) { inner.beginStep(time, states); }
+    template <typename At>
+    bool locate(double from, double to, At&& at, double& when) { return inner.locate(from, to, std::forward<At>(at), when); }
+    void fire(double time) { inner.fire(time); }
+    bool accepted(double time, double step, const std::vector<double>& states) { return onAccepted(time, step, states); }
+};
+`;
+
+export const programRuntimePython = `class ProgramInstance:
+    """A program in the current format as the engine keeps it: the program, its memory, its clock's period and whether advance() has
+    been called yet."""
+
+    def __init__(self, program_class):
+        self.program = program_class()
+        self.description = describe(program_class)
+        self.store = None
+        self.clock_period = 0.0
+        self.advanced = False
+
+    def start(self, instance_id, owner, owner_id, seed, values):
+        """Before the run, with every input's value at its start: memory from its declarations, a Random seeded from what the program
+        belongs to (owner_id) and its seed, then initialize()."""
+        description = self.description
+        self.store = description.initial_memory(owner_id, seed)
+        constants = {port.attribute: values[port.index] for port in description.inputs}
+        self.program.initialize(Setup(instance_id, owner, 0.0, constants), description.writer(self.store))
+        _freeze(self.program)
+        clock = description.clock
+        if clock is not None:
+            period = clock.period
+            self.clock_period = values[period.index] if getattr(period, "index", None) is not None else float(period)
+
+    def advances_each_step(self):
+        return self.description.memory_size > 0 and self.clock_period == 0.0
+
+    def ticks_at(self, time):
+        if not self.clock_period > 0:
+            return False
+        ticks = time / self.clock_period
+        whole = round(ticks)
+        return abs(ticks - whole) <= 1e-9 * max(1.0, abs(whole))
+
+    def evaluate(self, time, values):
+        return self.program.evaluate(time, self.description.view(values, self.store))
+
+    def advance(self, time, size, values):
+        self.program.advance(Step(time, size, not self.advanced), self.description.view(values, self.store), self.description.writer(self.store))
+        self.advanced = True
+
+    def memory(self):
+        return self.description.pack(self.store)
+
+
+class ProgramStepEvents:
+    """A whole-model method's events (its switching conditions, or none) with the programs advanced after every step it accepts:
+    whether their memory changed. A step rejected, or taken again to land on an event, never reaches accepted()."""
+
+    def __init__(self, inner, on_accepted):
+        self.inner = inner
+        self.on_accepted = on_accepted
+
+    @property
+    def latches(self):
+        return getattr(self.inner, "latches", None)
+
+    def active(self):
+        return self.inner is not None and self.inner.active()
+
+    def begin_step(self, time, states):
+        self.inner.begin_step(time, states)
+
+    def locate(self, from_time, to_time, at):
+        return self.inner.locate(from_time, to_time, at)
+
+    def fire(self, time):
+        self.inner.fire(time)
+
+    def accepted(self, time, step, states):
+        return self.on_accepted(time, step, states)
+`;
+
+// The lines that give a program's inputs at an instant other than the one its call site reads at: `time` the instant's expression, the
+// node's states and the snapshot from `states`, a vector of every state (C++), or a list (Python).
+function cppProgramScope(plan, model, states, time) {
+    return [
+        `                [[maybe_unused]] const std::vector<double>& snapshot = ${states};`,
+        `                [[maybe_unused]] double state[${plan.node.states.length}] = { ${plan.node.states.map((state) => `${states}[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')} };`,
+        `                [[maybe_unused]] const double stepTime = ${time};`,
+        '                [[maybe_unused]] const double algebraicTime = stepTime;'
+    ];
+}
+
+function pythonProgramScope(plan, model, states, time) {
+    return [
+        `        snapshot = ${states}`,
+        `        state = [${plan.node.states.map((state) => `${states}[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')}]`,
+        `        step_time = ${time}`,
+        '        algebraic_time = step_time'
+    ];
+}
+
+const programValues = (task, language) => (task.outputs && task.program.node ? nodeProgramCall(task, language).values : programCall(task, task.program, language, '', false).values);
+
+// Every program started, with its inputs at the run's start, from the initial states: before anything evaluates it.
+export function cppProgramStartLines(model, providerInfo, states = 'globalState') {
+    return programEntries(model).map(({ task, plan }, index) => {
+        const info = providerInfo.get(task);
+        const values = programValues(task, 'cpp');
+        return [
+            `    // Start: the program of the ${task.entityLabel}`,
+            '    {',
+            ...cppProgramScope(plan, model, states, '0.0').map((line) => line.slice(8)),
+            `        ${info.instanceVariable}.bound = { ${boundFlags(task).join(', ') || ''} };`,
+            values.length ? `        const double programInputs[] = { ${values.join(', ')} };` : '        const double* programInputs = nullptr;',
+            `        ${info.instanceVariable}.start(${index + 1}, "${task.programOwner.text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}", ${task.programOwner.id}, ${task.programOwner.seed}, programInputs);`,
+            '    }'
+        ].join('\n');
+    }).join('\n');
+}
+
+function pythonProgramStartLines(model, providerInfo) {
+    return programEntries(model).map(({ task, plan }, index) => {
+        const info = providerInfo.get(task);
+        return [
+            `    # Start: the program of the ${task.entityLabel}`,
+            ...pythonProgramScope(plan, model, 'global_state', '0.0').map((line) => line.slice(4)),
+            `    ${info.instanceVariable}.start(${index + 1}, "${pythonStringContents(task.programOwner.text)}", ${task.programOwner.id}, ${task.programOwner.seed}, [${programValues(task, 'python').join(', ')}])`
+        ].join('\n');
+    }).join('\n');
+}
+
+// advance() for a node's programs with memory and no clock, after a substep, at its end, with the states it reached (C++, inside the
+// substep loop, after the states are updated).
+export function cppProgramAdvanceLines(plan, providerInfo, model) {
+    const entries = programEntries(model).filter((entry) => entry.plan === plan);
+    if (!entries.length) return [];
+    return [
+        '            {',
+        '                [[maybe_unused]] const double stepTime = currentTime + (substep + 1) * nodeTimeStep;',
+        '                [[maybe_unused]] const double algebraicTime = stepTime;',
+        ...entries.map(({ task }) => {
+            const info = providerInfo.get(task);
+            const values = programValues(task, 'cpp');
+            return [
+                `                if (${info.instanceVariable}.advancesEachStep()) {`,
+                values.length ? `                    const double programInputs[] = { ${values.join(', ')} };` : '                    const double* programInputs = nullptr;',
+                `                    ${info.instanceVariable}.advance(stepTime, nodeTimeStep, programInputs);`,
+                '                }'
+            ].join('\n');
+        }),
+        '            }'
+    ];
+}
+
+function pythonProgramAdvanceLines(plan, providerInfo, model) {
+    const entries = programEntries(model).filter((entry) => entry.plan === plan);
+    if (!entries.length) return [];
+    return [
+        '        step_time = current_time + (substep + 1) * node_time_step',
+        '        algebraic_time = step_time',
+        ...entries.map(({ task }) => {
+            const info = providerInfo.get(task);
+            return [
+                `        if ${info.instanceVariable}.advances_each_step():`,
+                `            ${info.instanceVariable}.advance(step_time, node_time_step, [${programValues(task, 'python').join(', ')}])`
+            ].join('\n');
+        })
+    ];
+}
+
+// A node's program at a substep: its rate outputs added to their states' derivatives (its Update outputs are set at the update instant).
+export function emitCppNodeProgram(task, info, rejection = 'std::runtime_error') {
+    const { values, outputs } = nodeProgramCall(task, 'cpp');
+    const count = task.program.outputs.length;
+    const label = cppText(`The program of the ${task.entityLabel}`);
+    return [
+        '            {',
+        ...commentLines(task.symbols, '                ', '//'),
+        values.length ? `                const double programInputs[] = { ${values.join(', ')} };` : '                const double* programInputs = nullptr;',
+        `                double programOutputs[${count}];`,
+        `                try { ${info.instanceVariable}.evaluate(stepTime, programInputs, programOutputs, ${count}); }`,
+        `                catch (const konjugate::sdk::v2::OutOfDomain& refusal) { throw ${rejection}(std::string("${label} refused its inputs at t = ") + std::to_string(stepTime) + " s: " + refusal.what()); }`,
+        ...outputs.filter((output) => !output.setsValue).flatMap((output) => [
+            `                const double output${output.index} = ${output.conversion ? `programOutputs[${output.index}] * ${output.conversion.scale} + ${output.conversion.offset}` : `programOutputs[${output.index}]`};`,
+            `                if (!std::isfinite(output${output.index})) throw ${rejection}("${label} gave a value for '${output.key}' that is not a finite number.");`,
+            `                derivative[${output.localIndex}] += output${output.index};`
+        ]),
+        '            }'
+    ].join('\n');
+}
+
+function emitPythonNodeProgram(task, info, rejection = 'RuntimeError') {
+    const { values, outputs } = nodeProgramCall(task, 'python');
+    const label = pythonStringContents(`The program of the ${task.entityLabel}`);
+    return [
+        ...commentLines(task.symbols, '        ', '#'),
+        '        try:',
+        `            program_outputs = ${info.instanceVariable}.evaluate(step_time, [${values.join(', ')}])`,
+        '        except OutOfDomain as refusal:',
+        `            raise ${rejection}(f"${label} refused its inputs at t = {step_time!r} s: {refusal}") from None`,
+        ...outputs.filter((output) => !output.setsValue).flatMap((output) => [
+            `        output_value = ${output.conversion ? `float(program_outputs[${output.index}]) * ${output.conversion.scale} + ${output.conversion.offset}` : `float(program_outputs[${output.index}])`}`,
+            `        if not math.isfinite(output_value): raise ${rejection}("${label} gave a value for '${output.key}' that is not a finite number.")`,
+            `        derivative[${output.localIndex}] += output_value`
+        ])
+    ].join('\n');
+}
+
+// At an instant every node has reached (the run's start, or a global step's end): every clock that ticks there, then every node
+// program's Update outputs, both reading the states before the update phase: `read` (C++ vector, Python list) built by the caller.
+export function cppProgramInstantLines(model, providerInfo, time, trackTicks = false, states = 'globalState') {
+    const lines = [];
+    for (const { task, plan } of programEntries(model)) {
+        const info = providerInfo.get(task);
+        const values = programValues(task, 'cpp');
+        lines.push(
+            `            if (${info.instanceVariable}.ticksAt(${time})) {`,
+            ...cppProgramScope(plan, model, 'read', time),
+            values.length ? `                const double programInputs[] = { ${values.join(', ')} };` : '                const double* programInputs = nullptr;',
+            trackTicks ? `                const auto before = ${info.instanceVariable}.memory;` : '',
+            `                ${info.instanceVariable}.advance(stepTime, ${info.instanceVariable}.clockPeriod, programInputs);`,
+            // BDF's table starts again at the next global step where a tick changed memory, as the engine starts it.
+            trackTicks ? `                if (${info.instanceVariable}.memory != before) programMemoryTicked = true;` : '',
+            '            }'
+        );
+    }
+    for (const { task, plan, node } of programEntries(model)) {
+        if (!node || !task.outputs.some((output) => output.setsValue)) continue;
+        const info = providerInfo.get(task);
+        const { values, outputs } = nodeProgramCall(task, 'cpp');
+        const count = task.program.outputs.length;
+        lines.push(
+            '            {',
+            ...cppProgramScope(plan, model, 'read', time),
+            values.length ? `                const double programInputs[] = { ${values.join(', ')} };` : '                const double* programInputs = nullptr;',
+            `                double programOutputs[${count}];`,
+            `                ${info.instanceVariable}.evaluate(stepTime, programInputs, programOutputs, ${count});`,
+            ...outputs.filter((output) => output.setsValue).flatMap((output) => [
+                `                const double output${output.index} = ${output.conversion ? `programOutputs[${output.index}] * ${output.conversion.scale} + ${output.conversion.offset}` : `programOutputs[${output.index}]`};`,
+                `                if (!std::isfinite(output${output.index})) throw std::runtime_error("The program of the ${task.entityLabel.replace(/"/g, '\\"')} gave a value for '${output.key}' that is not a finite number.");`,
+                `                ${states}[${output.globalIndex}] = output${output.index};`
+            ]),
+            '            }'
+        );
+    }
+    return lines;
+}
+
+function pythonProgramInstantLines(model, providerInfo, time, trackTicks = false) {
+    const lines = [];
+    for (const { task, plan } of programEntries(model)) {
+        const info = providerInfo.get(task);
+        lines.push(
+            `    if ${info.instanceVariable}.ticks_at(${time}):`,
+            ...pythonProgramScope(plan, model, 'read', time),
+            ...(trackTicks ? [`        before = ${info.instanceVariable}.memory()`] : []),
+            `        ${info.instanceVariable}.advance(step_time, ${info.instanceVariable}.clock_period, [${programValues(task, 'python').join(', ')}])`,
+            ...(trackTicks ? [`        if ${info.instanceVariable}.memory() != before:`, '            program_memory_ticked = True'] : [])
+        );
+    }
+    for (const { task, plan, node } of programEntries(model)) {
+        if (!node || !task.outputs.some((output) => output.setsValue)) continue;
+        const info = providerInfo.get(task);
+        const { values, outputs } = nodeProgramCall(task, 'python');
+        lines.push(
+            ...pythonProgramScope(plan, model, 'read', time).map((line) => line.slice(4)),
+            `    program_outputs = ${info.instanceVariable}.evaluate(step_time, [${values.join(', ')}])`,
+            ...outputs.filter((output) => output.setsValue).flatMap((output) => [
+                `    output_value = ${output.conversion ? `float(program_outputs[${output.index}]) * ${output.conversion.scale} + ${output.conversion.offset}` : `float(program_outputs[${output.index}])`}`,
+                `    if not math.isfinite(output_value): raise RuntimeError("The program of the ${pythonStringContents(task.entityLabel)} gave a value for '${output.key}' that is not a finite number.")`,
+                `    global_state[${output.globalIndex}] = output_value`
+            ])
+        );
+    }
+    return lines;
+}
+
+// The programs started, then their first tick and Update values, from the initial states (before the run's Updates are settled), as
+// the engine starts a run (Simulation::startPrograms).
+function cppProgramStartAndInstant(model, providerInfo) {
+    if (!programEntries(model).length) return [];
+    const instant = cppProgramInstantLines(model, providerInfo, '0.0').filter(Boolean);
+    return [
+        cppProgramStartLines(model, providerInfo),
+        ...(instant.length ? ['    // The programs\' clocks\' first tick, then their values into Update states.', '    {', '        const std::vector<double> read = globalState;', ...instant.map((line) => line.slice(4)), '    }'] : [])
+    ];
+}
+
+// At a global step's end, before its row: the clocks that tick, then the programs' values into Update states, reading the states as the
+// engine's update phase reads them (Rate states at the step's end, Update states at its start).
+function cppProgramStepEndLines(model, providerInfo, trackTicks = false) {
+    const instant = cppProgramInstantLines(model, providerInfo, '(step + 1) * globalTimeStep', trackTicks).filter(Boolean);
+    if (!instant.length) return [];
+    return [
+        '        {',
+        '            std::vector<double> read = globalState;',
+        ...updateStateIndexes(model).map((index) => `            read[${index}] = snapshot[${index}];`),
+        ...instant,
+        '        }'
+    ];
+}
+
+function pythonProgramStartAndInstant(model, providerInfo) {
+    if (!programEntries(model).length) return [];
+    const instant = pythonProgramInstantLines(model, providerInfo, '0.0');
+    return [
+        pythonProgramStartLines(model, providerInfo),
+        ...(instant.length ? ["    # The programs' clocks' first tick, then their values into Update states.", '    read = list(global_state)', ...instant] : [])
+    ];
+}
+
+function pythonProgramStepEndLines(model, providerInfo, trackTicks = false) {
+    const instant = pythonProgramInstantLines(model, providerInfo, '(step + 1) * global_time_step', trackTicks);
+    if (!instant.length) return [];
+    return [
+        '        # The clocks that tick at the step\'s end, then the programs\' values into Update states, reading the states as the update phase does.',
+        '        read = list(global_state)',
+        ...updateStateIndexes(model).map((index) => `        read[${index}] = snapshot[${index}]`),
+        ...instant.map((line) => `    ${line}`)
+    ];
+}
+
+const cppText = (text) => text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+
+// A term written as a program in the current format, at a stage: evaluated there with its memory, as an equation is (it is pure by its
+// shape). A refusal (OutOfDomain) or a value that is not a finite number rejects the step under Adaptive and Stiff (`rejection`, the
+// methods' StageRejected), and stops the run under Runge–Kutta 4.
+function emitCppStageProgramContribution(contribution, info, rejection) {
+    const { values, output } = programCall(contribution, contribution.program, 'cpp', contribution.outputUnit, true);
+    const label = cppText(`The program of the ${contribution.entityLabel}`);
+    return [
+        '        {',
+        ...commentLines(contribution.symbols, '            ', '//'),
+        values.length ? `            const double programInputs[] = { ${values.join(', ')} };` : '            const double* programInputs = nullptr;',
+        '            double contributionValue = 0;',
+        `            try { contributionValue = ${info.instanceVariable}.evaluate(stepTime, programInputs); }`,
+        `            catch (const konjugate::sdk::v2::OutOfDomain& refusal) { throw ${rejection}(std::string("${label} refused its inputs at t = ") + std::to_string(stepTime) + " s: " + refusal.what()); }`,
+        `            if (!std::isfinite(contributionValue)) throw ${rejection}("${label} gave a value that is not a finite number.");`,
+        output ? `            contributionValue = contributionValue * ${output.scale} + ${output.offset};` : '',
+        contribution.negate ? '            contributionValue = -contributionValue;' : '',
+        `            derivative[${contribution.outputLocalIndex}] += contributionValue;`,
+        '        }'
+    ].filter(Boolean).join('\n');
+}
+
+function emitPythonStageProgramContribution(contribution, info, rejection) {
+    const { values, output } = programCall(contribution, contribution.program, 'python', contribution.outputUnit, true);
+    const label = pythonStringContents(`The program of the ${contribution.entityLabel}`);
+    return [
+        ...commentLines(contribution.symbols, '        ', '#'),
+        '        try:',
+        `            contribution_value = float(${info.instanceVariable}.evaluate(step_time, [${values.join(', ')}]))`,
+        '        except OutOfDomain as refusal:',
+        `            raise ${rejection}(f"${label} refused its inputs at t = {step_time!r} s: {refusal}") from None`,
+        `        if not math.isfinite(contribution_value): raise ${rejection}("${label} gave a value that is not a finite number.")`,
+        output ? `        contribution_value = contribution_value * ${output.scale} + ${output.offset}` : '',
+        contribution.negate ? '        contribution_value = -contribution_value' : '',
+        `        derivative[${contribution.outputLocalIndex}] += contribution_value`
+    ].filter(Boolean).join('\n');
+}
+
+// advance() for every program with memory and no clock after a step a whole-model method accepted, at its end, reading the states it
+// reached; whether any program's memory changed (as the engine's advanceProgramsAfter).
+function cppAdvanceProgramsLambda(model, providerInfo) {
+    return [
+        '    const auto advancePrograms = [&](double time, double size, const std::vector<double>& reached) {',
+        '        bool changed = false;',
+        ...programEntries(model).map(({ task, plan }) => {
+            const info = providerInfo.get(task);
+            const values = programValues(task, 'cpp');
+            return [
+                `        if (${info.instanceVariable}.advancesEachStep()) {`,
+                `            const auto before = ${info.instanceVariable}.memory;`,
+                ...cppProgramScope(plan, model, 'reached', 'time').map((line) => line.slice(4)),
+                values.length ? `            const double programInputs[] = { ${values.join(', ')} };` : '            const double* programInputs = nullptr;',
+                `            ${info.instanceVariable}.advance(stepTime, size, programInputs);`,
+                `            changed = changed || ${info.instanceVariable}.memory != before;`,
+                '        }'
+            ].join('\n');
+        }),
+        '        return changed;',
+        '    };',
+        `    const bool programsAdvanceEachStep = ${programEntries(model).map(({ task }) => `${providerInfo.get(task).instanceVariable}.advancesEachStep()`).join(' || ')};`
+    ];
+}
+
+function pythonAdvanceProgramsLines(model, providerInfo) {
+    return [
+        '    def advance_programs(time, size, reached):',
+        '        changed = False',
+        ...programEntries(model).map(({ task, plan }) => {
+            const info = providerInfo.get(task);
+            return [
+                `        if ${info.instanceVariable}.advances_each_step():`,
+                `            before = ${info.instanceVariable}.memory()`,
+                ...pythonProgramScope(plan, model, 'reached', 'time').map((line) => `    ${line}`),
+                `            ${info.instanceVariable}.advance(step_time, size, [${programValues(task, 'python').join(', ')}])`,
+                `            changed = changed or ${info.instanceVariable}.memory() != before`
+            ].join('\n');
+        }),
+        '        return changed',
+        '',
+        `    programs_advance_each_step = ${programEntries(model).map(({ task }) => `${providerInfo.get(task).instanceVariable}.advances_each_step()`).join(' or ')}`
+    ];
 }

@@ -88,10 +88,17 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
             transferList: files.filter((file) => file.data).map((file) => file.data.buffer),
             resourceLimits: { maxOldGenerationSizeMb: binaryBytes ? 1536 : 512 }
         });
-        const timer = setTimeout(() => {
-            worker.terminate();
-            reject(new Error(`The importer did not finish within ${timeoutMilliseconds / 1000} seconds.`));
-        }, timeoutMilliseconds);
+        // The importer's time is counted from when its thread is running, not from when it was asked for: on a busy machine a worker
+        // can take over a second just to start, which is the machine's time, not the importer's.
+        let timer = null;
+        let settled = false;
+        worker.once('online', () => {
+            if (settled) return;
+            timer = setTimeout(() => {
+                worker.terminate();
+                reject(new Error(`The importer did not finish within ${timeoutMilliseconds / 1000} seconds.`));
+            }, timeoutMilliseconds);
+        });
         worker.on('message', (message) => {
             // Progress, while it works: passed on, checked, and never taken for the result.
             if (message?.progress) {
@@ -99,6 +106,7 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
                 if (progress && onProgress) onProgress(progress);
                 return;
             }
+            settled = true;
             clearTimeout(timer);
             worker.terminate();
             if (!message.ok) return reject(new Error(`The importer failed: ${message.message}`));
@@ -108,7 +116,7 @@ export function runImporter({ addonDirectory, importer, files, options = {}, tim
                 reject(error);
             }
         });
-        worker.once('error', (error) => { clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
+        worker.once('error', (error) => { settled = true; clearTimeout(timer); reject(new Error(`The importer failed: ${error.message}`)); });
     });
 }
 

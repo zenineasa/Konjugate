@@ -535,9 +535,12 @@ try {
     await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, openmp)', 'cpp', 'openmp', { compilerArgs: openmpCompilerArgs });
     await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, stdThread)', 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
     if (mpiAvailable) await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'C++ (Runge–Kutta 4, mpi)', 'cpp', 'mpi', { runViaMpi: 5 });
+    else console.log('  (skipping Runge–Kutta 4 mpi variant: mpic++/mpirun not found on PATH)');
     await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'Python (Runge–Kutta 4)', 'python');
     if (await commandExists(process.env.MPIRUN || 'mpirun') && (await execute(python, ['-c', 'import mpi4py'])).code === 0) {
         await exportAndCompare(rungeKutta4Document, rungeKutta4Result, orderedStateIds, 'Python (Runge–Kutta 4, mpi)', 'python', 'mpi', { runViaMpi: 5 });
+    } else {
+        console.log('  (skipping Runge–Kutta 4 python mpi variant: mpirun/mpi4py not available)');
     }
     // A program adding a rate, held through the step as the engine holds it, in each language.
     const feedSource = (kind) => (kind === 'cpp' ? `#include <konjugate/relationshipProvider.hpp>
@@ -618,6 +621,7 @@ class Feed(RelationshipProvider):
             await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, serial)`, 'cpp');
             await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, stdThread)`, 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
             if (mpiAvailable) await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, mpi)`, 'cpp', 'mpi', { runViaMpi: 5 });
+            else console.log(`  (skipping ${label} mpi variant: mpic++/mpirun not found on PATH)`);
         }
         if (kinds.includes('python')) await exportAndCompare(exported, reference, stateOrder, `Python (${label})`, 'python');
         return reference;
@@ -669,6 +673,7 @@ class Feed(RelationshipProvider):
     await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, openmp)', 'cpp', 'openmp', { compilerArgs: openmpCompilerArgs });
     await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, stdThread)', 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
     if (mpiAvailable) await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, mpi)', 'cpp', 'mpi', { runViaMpi: 5 });
+    else console.log('  (skipping Verlet mpi variant: mpic++/mpirun not found on PATH)');
     await exportAndCompare(verlet, verletReference, verletStates, 'Python (Verlet)', 'python');
     // Not just close: the export takes the engine's steps, so its numbers are the engine's but for the 15 digits C++ prints.
     const verletCsv = parseCsv(await readFile(join(directory, `rk4${verletSerial}.csv`), 'utf8'));

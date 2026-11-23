@@ -163,30 +163,7 @@ Timing runs need a quiet machine. Before timing, the runner looks for Konjugate'
 
 ## Running on release in CI
 
-The accuracy benchmarks are suitable for CI, but no workflow runs them yet. To run them on every published release, a workflow like this one would do it (not active; add it to `.github/workflows/` when wanted):
-
-```yaml
-name: Benchmarks
-on:
-  release:
-    types: [published]
-jobs:
-  accuracy:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: npm ci
-      - run: npm run setup
-      - run: npm run benchmark:accuracy
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: benchmark-accuracy
-          path: out/benchmarks/accuracy/
-```
+Every release runs the accuracy benchmarks: the release workflow (`.github/workflows/release.yml`) runs `node benchmarks/run.mjs --accuracy` on each of its macOS and Linux runners, in its `releaseChecks` job beside the builds, as one of its release checks (`scripts/runReleaseChecks.mjs`, with the code and FMU export fidelity checks; `npm run test:release` runs the same locally). A failing check fails the release, and the job's summary page names it. Each runner's report (`out/benchmarks/accuracy/`) is kept with the workflow run for 30 days, as `benchmark-accuracy-<os>-<arch>`, passed or failed.
 
 Timing is deliberately not part of it: a shared CI runner's timings say more about the runner than about Konjugate.
 

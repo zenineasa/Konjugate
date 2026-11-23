@@ -9854,6 +9854,15 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind !== 'playwright' && 'stands in for an installed plugin, which the desktop bridge does not let a test replace' });
 
+    // A button on the tour's card is pressed once it is there to press: shown, and not disabled. The card's step can move on while the
+    // action before is still finishing (a node just made is still being moved clear of the others), and until it has, the card's
+    // buttons are disabled: a click then is lost, as a person's would be, and the test waited for a step that never came.
+    const waitForTourButton = async (selector) => {
+        if (!selector.startsWith('.tourFloating')) return;
+        await waitFor(window, `(() => { const button = document.querySelector(${JSON.stringify(selector)}); return Boolean(button) && !button.hidden && !button.disabled; })()`,
+            `The tour's ${selector} was not there to press.`, 15000);
+    };
+
     await run('the guided tour takes a new user from an empty canvas to a first run, and can be skipped or gone back in', async () => {
         const step = () => evaluate(window, `window.__debugTour.step()`);
         const waitForStep = async (id) => {
@@ -9862,7 +9871,10 @@ export async function runInteractionTests(driver) {
                 throw new Error(`${error.message} ${facts}`);
             }
         };
-        const press = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        const press = async (selector) => {
+            await waitForTourButton(selector);
+            await evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        };
         const fill = () => press('.tourFloating .tourSecondary');
         const emptyDocument = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
         const start = async () => {
@@ -9955,7 +9967,10 @@ export async function runInteractionTests(driver) {
 
     // ---- Tutorials (docs/proposals/tutorials.md): the list, and each tutorial that starts from an example, played the whole way.
     const tutorialHelpers = () => {
-        const press = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        const press = async (selector) => {
+            await waitForTourButton(selector);
+            await evaluate(window, `document.querySelector(${JSON.stringify(selector)}).click()`);
+        };
         const waitForStep = async (id, timeout = 15000) => {
             try { await waitFor(window, `window.__debugTour.step() === ${JSON.stringify(id)}`, `The tutorial did not reach "${id}".`, timeout); } catch (error) {
                 const facts = await evaluate(window, `JSON.stringify({ tutorial: window.__debugTour.tutorial(), step: window.__debugTour.step(), status: document.querySelector('#statusText').textContent, tuning: document.querySelector('#parameterTuningStatus')?.textContent, blockers: window.__debugTour.blockers() })`);

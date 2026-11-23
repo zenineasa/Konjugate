@@ -276,8 +276,85 @@ jobs:
                       make verifyPackagedInteraction
                   fi
 
+    # Every release checks that what it exports gives the engine's own numbers (C++ in each parallel mode and Python, under every
+    # integration method; the FMU through FMPy and through the engine's own FMI driver), and that the accuracy benchmarks still meet
+    # their thresholds (scripts/runReleaseChecks.mjs, `npm run test:release` locally). A job of its own, beside the builds rather than
+    # in them: it builds just the engine and runs the checks (about ten minutes of checks), while each build job packages the app and
+    # runs the interaction tests for far longer, so the release waits no longer for it; the release job needs both. On the macOS and
+    # Linux runners the builds use, where the checks' GCC/Clang-style compilers are; Open MPI is installed on Linux only, and required
+    # there, so its modes are checked on every release and said to be skipped on macOS. Windows is said to be left out below.
+    releaseChecks:
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [macos-latest, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm]
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 120
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24.19.0
+                  cache: npm
+            - uses: actions/setup-python@v5
+              with:
+                  python-version: '3.x'
+            # See the build job: vcpkg's cache in GitHub's own Actions cache needs these two variables.
+            - name: Export GitHub Actions cache environment variables
+              uses: actions/github-script@v7
+              with:
+                  script: |
+                      core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+                      core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            - name: Install release check prerequisites
+              # metis on macOS for the engine, as in the build job; libomp for the exported C++'s OpenMP mode; FMPy, the independent
+              # FMI simulator; Open MPI and mpi4py on Linux for the MPI modes.
+              shell: bash
+              run: |
+                  python -m pip install fmpy
+                  if [ "$RUNNER_OS" = Linux ]; then
+                      sudo apt-get update
+                      sudo apt-get install -y --no-install-recommends libopenmpi-dev openmpi-bin
+                      python -m pip install mpi4py
+                  else
+                      brew install metis libomp
+                  fi
+            - name: Install the pinned CMake
+              shell: bash
+              run: |
+                  python -m pip install cmake==4.3.4
+                  cmake --version | head -n1 | grep -q "version 4.3.4"
+            - run: npm ci
+            - name: Build the engine
+              run: make engine
+            - name: Release checks (code export, FMU export, accuracy benchmarks)
+              timeout-minutes: 45
+              shell: bash
+              env:
+                  PYTHON: python
+                  # Open MPI's shared-memory transport copies between ranks with a system call a virtual machine may refuse; plain
+                  # copies are as correct, and these runs are tiny.
+                  OMPI_MCA_btl_vader_single_copy_mechanism: none
+              run: |
+                  if [ "$RUNNER_OS" = Linux ]; then require=mpi,fmpy; else require=fmpy; fi
+                  node scripts/runReleaseChecks.mjs --require "$require"
+            - uses: actions/upload-artifact@v4
+              # The accuracy benchmarks' report (plots, checks, results), passed or not. Named so it never matches release-*.
+              if: always()
+              with:
+                  name: benchmark-accuracy-${{ runner.os }}-${{ runner.arch }}
+                  path: out/benchmarks/accuracy/
+                  retention-days: 30
+                  if-no-files-found: ignore
+
+    releaseChecksWindows:
+        # Said, not silently left out: the code export checks compile with GCC/Clang-style flags, which MSVC does not take.
+        runs-on: ubuntu-latest
+        steps:
+            - run: echo "::notice title=Release checks::Not run on Windows (the code export checks compile with GCC/Clang-style flags); they run on this release's macOS and Linux runners."
+
     release:
-        needs: build
+        needs: [build, releaseChecks]
         # Manual (workflow_dispatch) runs only build and upload artifacts for inspection -- only
         # an actual tag push publishes a GitHub Release.
         if: startsWith(github.ref, 'refs/tags/v')

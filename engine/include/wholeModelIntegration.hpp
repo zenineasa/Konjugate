@@ -20,15 +20,15 @@
 
 namespace konjugate {
 
-enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54 };
+enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4 };
 
 struct IntegrationSettings {
     IntegrationMethod method = IntegrationMethod::nodeByNode;
-    // Runge–Kutta 4: how many steps of the method make one global step. Dormand–Prince 5(4): absent (0 here), the steps are chosen
-    // by the error control; set, that many equal steps with the error control off, for checking the method's order.
+    // Runge–Kutta 4: how many steps of the method make one global step. Dormand–Prince 5(4) and Rodas4: absent (0 here), the steps
+    // are chosen by the error control; set, that many equal steps with the error control off, for checking the method's order.
     std::size_t stepsPerGlobalStep = 1;
-    // Dormand–Prince 5(4): the run's tolerances (`tolerance.relative` and `tolerance.absolute`, absent meaning 1e-6 and 1e-9); a state
-    // may set its own absolute tolerance (absoluteTolerances).
+    // Dormand–Prince 5(4) and Rodas4: the run's tolerances (`tolerance.relative` and `tolerance.absolute`, absent meaning 1e-6 and
+    // 1e-9); a state may set its own absolute tolerance (absoluteTolerances).
     double relativeTolerance = 1e-6;
     double absoluteTolerance = 1e-9;
 };
@@ -39,10 +39,14 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
 
 // Whether the method chooses its own steps (Dormand–Prince 5(4) with its error control on).
 bool isAdaptive(const IntegrationSettings& settings) noexcept;
+// Whether the stiff method chooses its own steps (Rodas4 with its error control on).
+bool isStiff(const IntegrationSettings& settings) noexcept;
+// Whether the method has tolerances and a step-size controller (Dormand–Prince 5(4) or Rodas4).
+bool hasTolerance(IntegrationMethod method) noexcept;
 
-// The name a run configuration and a result give the method: nodeByNode, rungeKutta4 or dormandPrince54.
+// The name a run configuration and a result give the method: nodeByNode, rungeKutta4, dormandPrince54 or rodas4.
 std::string_view integrationMethodName(IntegrationMethod method) noexcept;
-// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit nodes included), rungeKutta4 or dormandPrince54.
+// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit nodes included), rungeKutta4, dormandPrince54 or rodas4.
 std::string_view solverKindName(IntegrationMethod method) noexcept;
 // The method's number of new evaluations a step (Dormand–Prince's seventh stage is the next step's first).
 std::size_t integrationMethodStages(IntegrationMethod method) noexcept;
@@ -63,6 +67,13 @@ std::vector<double> scheduleBreakpoints(const ExecutionPlan& plan, const std::ve
 std::string encodeAdaptiveSolverState(double proposedStep, double previousError);
 // The record read back; false (and nothing changed) when it is empty or not a record this engine wrote.
 bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, double& previousError);
+
+// Rodas4's hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next, the last
+// accepted step's error and the last accepted step itself (Gustafsson's predictive controller reads both). Empty when `proposedStep`
+// is not positive.
+std::string encodeStiffSolverState(double proposedStep, double previousError, double previousStep);
+// The record read back; false (and nothing changed) when it is empty or not a record this engine wrote.
+bool decodeStiffSolverState(const std::string& record, double& proposedStep, double& previousError, double& previousStep);
 
 // The project document's `requires`: features a model needs that change its numbers, each named. An engine refuses, by name, any
 // it does not know, rather than running the model as if the feature were not there. Absent from every document that needs none.
@@ -100,6 +111,16 @@ struct WholeModelPlan {
 
 // `providers` says which programs are known to be pure (ProviderEvaluator::declaredPure); with none, no program is.
 WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEvaluator* providers);
+
+// Under Rodas4, per state of the plan, the states its derivative reads at a stage (docs/proposals/integrators.md, Jacobians for
+// Rodas4): from the model's graph, every state an equation into it uses, and every state a pure program into it binds (a pure node
+// program: every state it binds, into each of its outputs). A held program and a stepped node are constants within the step and read
+// none. The Jacobian's pattern is built from these, so it is known exactly before the run.
+std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole);
+// Whether anything evaluated at stages may depend on the time within a step: an equation using the time or a parameter that follows a
+// stored schedule, or a pure program (which is given the time). Rodas4 then works out df/dt; a recorded intervention active in a step
+// is added by the caller.
+bool stagesReadTime(const ExecutionPlan& plan, const WholeModelPlan& whole);
 
 struct NodeStageResult {
     // The node's derivatives at the stage: (the node's own state index, value), each state at most once.

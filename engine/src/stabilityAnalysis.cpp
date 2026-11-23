@@ -2,6 +2,7 @@
 
 #include "stabilityAnalysis.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/rodas4.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
@@ -344,6 +345,33 @@ double dormandPrince54LargestStableStep(std::complex<double> eigenvalue) {
     return explicitLargestStableStep<integrators::DormandPrince54Tableau>(eigenvalue);
 }
 
+std::complex<double> rodas4StabilityFunction(std::complex<double> z) {
+    // One step of Rodas4 on y' = lambda y from y = 1 with h = 1 and z = lambda: its Jacobian is z, its matrix 1 / gamma - z, and df/dt is
+    // zero, so each stage solves k_i (1 / gamma - z) = z Y_i + sum_j C[i][j] k_j; the step ends at Y_6 + k_6.
+    using T = integrators::Rodas4Tableau;
+    const std::complex<double> matrix = 1.0 / T::gamma - z;
+    std::complex<double> k[T::stages];
+    std::complex<double> stage = 1.0;
+    for (std::size_t row = 0; row < T::stages; ++row) {
+        if (row >= 1 && row <= 4) {
+            stage = 1.0;
+            for (std::size_t column = 0; column < row; ++column) stage += T::a[row][column] * k[column];
+        } else if (row == 5) {
+            stage += k[4];
+        }
+        std::complex<double> right = z * stage;
+        for (std::size_t column = 0; column < row; ++column) right += T::C[row][column] * k[column];
+        k[row] = right / matrix;
+    }
+    return stage + k[T::stages - 1];
+}
+
+double rodas4LargestStableStep(std::complex<double> eigenvalue) {
+    // L-stable: |R(z)| <= 1 over the whole left half-plane and R(z) -> 0 far into it, so no step is too large for a decaying mode. A
+    // growing mode (positive real part) grows in the model itself, whatever the step.
+    return eigenvalue.real() > 0 ? 0.0 : std::numeric_limits<double>::infinity();
+}
+
 namespace {
 
 bool isEquationOnlyForStages(const NodeExecutionPlan& node) {
@@ -358,8 +386,9 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit,
     IntegrationMethod method) {
     const bool dormandPrince = method == IntegrationMethod::dormandPrince54;
-    const auto stabilityFunction = dormandPrince ? dormandPrince54StabilityFunction : rungeKutta4StabilityFunction;
-    const auto largestStableStep = dormandPrince ? dormandPrince54LargestStableStep : rungeKutta4LargestStableStep;
+    const bool rodas = method == IntegrationMethod::rodas4;
+    const auto stabilityFunction = rodas ? rodas4StabilityFunction : dormandPrince ? dormandPrince54StabilityFunction : rungeKutta4StabilityFunction;
+    const auto largestStableStep = rodas ? rodas4LargestStableStep : dormandPrince ? dormandPrince54LargestStableStep : rungeKutta4LargestStableStep;
     // Adaptive (no steps per global step) is judged at the global step, the largest step it may take.
     const bool adaptive = dormandPrince && stepsPerGlobalStep == 0;
     stepsPerGlobalStep = std::max<std::size_t>(1, stepsPerGlobalStep);

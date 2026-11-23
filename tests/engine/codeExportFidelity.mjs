@@ -377,7 +377,7 @@ try {
     for (let time = 0; time <= targetTime + 1e-9; time += outputInterval) expectedTimes.push(Number(time.toFixed(10)));
 
     let comparisons = 0;
-    const compareRowsAgainstEngine = (rows, label, reference = engineResult, stateOrder = orderedStateIds) => {
+    const compareRowsAgainstEngine = (rows, label, reference = engineResult, stateOrder = orderedStateIds, tolerances = { absolute: absoluteTolerance, relative: relativeTolerance }) => {
         for (const time of expectedTimes) {
             const engineSample = reference.samples.find((sample) => Math.abs(sample.time - time) < 1e-6);
             assert.ok(engineSample, `The real engine did not emit a sample at ${time} s.`);
@@ -389,7 +389,7 @@ try {
                 const value = row[index + 1];
                 assert.ok(Number.isFinite(engineValue) && Number.isFinite(value),
                     `Non-finite value for state ${stateId} at ${time} s (engine=${engineValue}, ${label}=${value}).`);
-                assert.ok(closeEnough(value, engineValue, absoluteTolerance, relativeTolerance),
+                assert.ok(closeEnough(value, engineValue, tolerances.absolute, tolerances.relative),
                     `${label} diverges from the real engine for state ${stateId} at ${time} s: engine=${engineValue}, ${label}=${value}.`);
                 comparisons += 1;
             });
@@ -523,7 +523,7 @@ try {
                 : await execute(python, [`${base}.py`, ...runArgs]);
             assert.equal(run.code, 0, `The ${label} program must run.`);
         }
-        compareRowsAgainstEngine(parseCsv(await readFile(csvPath, 'utf8')), label, reference, stateOrder);
+        compareRowsAgainstEngine(parseCsv(await readFile(csvPath, 'utf8')), label, reference, stateOrder, options.tolerances);
     };
     const rungeKutta4Document = { ...structuredClone(document), runConfigurations: [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }] };
     await writeFile(configurationPath, JSON.stringify({ name: 'fidelity', targetTime, globalTimeStep, outputInterval, ...rungeKutta4 }));
@@ -604,7 +604,7 @@ class Feed(RelationshipProvider):
     }
     // --- 5. Adaptive, Dormand–Prince 5(4) (docs/proposals/integrators.md): the error control, its tolerances, and its steps landing on
     // where a stored schedule jumps inside a global step, as the engine lands them; and at fixed steps, its error control off ---
-    const runAndCompareAll = async (doc, configuration, label, stateOrder, kinds = ['cpp', 'python']) => {
+    const runAndCompareAll = async (doc, configuration, label, stateOrder, kinds = ['cpp', 'python'], tolerances = undefined) => {
         const path = join(directory, `${label.replace(/\W+/g, '')}.kjt`);
         const resultPath = join(directory, `${label.replace(/\W+/g, '')}.bin`);
         const runConfigurationPath = join(directory, `${label.replace(/\W+/g, '')}.json`);
@@ -615,15 +615,15 @@ class Feed(RelationshipProvider):
         }));
         assert.equal((await execute(executable, ['run', path, '--configuration', runConfigurationPath, '--output', resultPath])).code, 0, `The engine must run ${label}.`);
         const reference = decodeResultFile(await readFile(resultPath));
-        assert.equal(reference.integration?.method, 'dormandPrince54');
+        assert.equal(reference.integration?.method, configuration.method);
         const exported = { ...structuredClone(doc), exportDefaultTargetTime: targetTime, runConfigurations: [{ id: 900, globalTimeStep, outputInterval, ...configuration }], activeRunConfigurationId: 900 };
         if (kinds.includes('cpp')) {
-            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, serial)`, 'cpp');
-            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, stdThread)`, 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
-            if (mpiAvailable) await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, mpi)`, 'cpp', 'mpi', { runViaMpi: 5 });
+            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, serial)`, 'cpp', 'serial', { tolerances });
+            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, stdThread)`, 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'], tolerances });
+            if (mpiAvailable) await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, mpi)`, 'cpp', 'mpi', { runViaMpi: 5, tolerances });
             else console.log(`  (skipping ${label} mpi variant: mpic++/mpirun not found on PATH)`);
         }
-        if (kinds.includes('python')) await exportAndCompare(exported, reference, stateOrder, `Python (${label})`, 'python');
+        if (kinds.includes('python')) await exportAndCompare(exported, reference, stateOrder, `Python (${label})`, 'python', 'serial', { tolerances });
         return reference;
     };
     const adaptive = { method: 'dormandPrince54', tolerance: { relative: 1e-8, absolute: 1e-10 } };
@@ -651,6 +651,22 @@ class Feed(RelationshipProvider):
     for (const kind of ['cpp', 'python']) {
         const feed = feedDocument(kind);
         const reference = await runAndCompareAll(feed, adaptive, `Adaptive, held ${kind} program`, [11, 21], [kind]);
+        assert.equal(reference.integration.heldTerms.length, 1);
+    }
+
+    // --- 6. Stiff, Rodas4: its Jacobian from the graph, coloured finite differences and Konjugate's own LU, written as the engine has them;
+    // its steps landing on a schedule's jumps; at fixed steps, its error control off; and a held program in each language ---
+    const stiff = { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } };
+    // The fixture's driver switches its rate where its state crosses 1.4, a corner no method lands on. Stiff's Jacobian is a finite
+    // difference, which turns the last-bit difference between an exported expression and the engine's into about 1e-8 of an entry, and
+    // across that corner the error control can then accept a step one program rejects: the two take equally valid steps, within the
+    // tolerance's reach of each other (seen: 1.6e-6 relative), not to the last bits. Everywhere else they agree to 1e-10 or better.
+    const fixtureStiff = await runAndCompareAll(structuredClone(document), stiff, 'Stiff', orderedStateIds, ['cpp', 'python'], { absolute: 1e-5, relative: 1e-5 });
+    assert.ok(fixtureStiff.integration.jacobians >= targetTime / globalTimeStep, 'Stiff works out a Jacobian at least once a global step.');
+    await runAndCompareAll(structuredClone(document), { method: 'rodas4', stepsPerGlobalStep: 3 }, 'Rodas4 at fixed steps', orderedStateIds);
+    await runAndCompareAll(scheduled, stiff, 'Stiff, scheduled', [11, 21]);
+    for (const kind of ['cpp', 'python']) {
+        const reference = await runAndCompareAll(feedDocument(kind), stiff, `Stiff, held ${kind} program`, [11, 21], [kind]);
         assert.equal(reference.integration.heldTerms.length, 1);
     }
 

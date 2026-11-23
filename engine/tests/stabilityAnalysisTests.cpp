@@ -3,6 +3,9 @@
 #include "executionPlan.hpp"
 #include "stabilityAnalysis.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/rodas4.hpp"
+#include <Eigen/Dense>
+#include <random>
 #include <boost/property_tree/json_parser.hpp>
 #include <cmath>
 #include <complex>
@@ -568,6 +571,140 @@ void assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion() {
     require(judgedApart && judgedApart->perNode && judgedApart->stable, "Above the dense limit, each node is judged on its own.");
 }
 
+
+// Rodas4 is L-stable (docs/proposals/integrators.md): |R(z)| <= 1 over the left half-plane, R -> 0 far into it, and R(z) agrees with
+// exp(z) to fourth order near 0.
+void rodas4StabilityFunctionIsLStableAndFourthOrder() {
+    for (const double radius : {0.1, 1.0, 10.0, 1e3, 1e6}) {
+        for (int angle = 0; angle <= 180; ++angle) {
+            const double theta = M_PI / 2 + M_PI * angle / 180.0;
+            const auto z = std::polar(radius, theta);
+            require(std::abs(konjugate::rodas4StabilityFunction(z)) <= 1.0 + 1e-12, "Rodas4 must be A-stable.");
+        }
+    }
+    require(std::abs(konjugate::rodas4StabilityFunction({-1e8, 0})) < 1e-6, "Rodas4 must be L-stable: R(-infinity) = 0.");
+    const double error1 = std::abs(konjugate::rodas4StabilityFunction({-0.01, 0}) - std::exp(-0.01));
+    const double error2 = std::abs(konjugate::rodas4StabilityFunction({-0.005, 0}) - std::exp(-0.005));
+    require(std::log2(error1 / error2) > 4.8, "R(z) - exp(z) must be O(z^5): Rodas4 is of order four.");
+    require(std::isinf(konjugate::rodas4LargestStableStep({-1e9, 3.0})) && konjugate::rodas4LargestStableStep({0.5, 0}) == 0,
+        "Rodas4 has no step limit for a decaying mode, and none can hold a growing one.");
+}
+
+// Konjugate's own LU, dense and sparse, against Eigen's (the reference the tests check it against, not the implementation), on a
+// sparse, unsymmetric matrix of the shape Rodas4 factorises; and the colouring never puts two columns sharing a row in one colour.
+void ownLinearSolveAgreesWithEigen() {
+    namespace integrators = konjugate::integrators;
+    std::mt19937 generator(7);
+    std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+    for (const std::size_t size : {std::size_t{5}, std::size_t{60}, std::size_t{400}}) {
+        integrators::SparsityRows rows(size);
+        for (std::size_t row = 0; row < size; ++row) {
+            std::set<std::size_t> columns{row, (row + 1) % size, (row * 13 + 5) % size};
+            rows[row].assign(columns.begin(), columns.end());
+        }
+        Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(size), static_cast<Eigen::Index>(size));
+        std::vector<double> entries;
+        std::vector<double> dense(size * size, 0.0);
+        for (std::size_t row = 0; row < size; ++row) {
+            for (const auto column : rows[row]) {
+                // Rows of a third of the matrix have off-diagonal entries far larger than their diagonal, as a state whose rate many
+                // others feed has, so partial pivoting interchanges rows.
+                const double value = (row == column ? 4.0 : (row % 3 == 0 ? 50.0 : 0.0)) + uniform(generator);
+                entries.push_back(value);
+                dense[row * size + column] = value;
+                matrix(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(column)) = value;
+            }
+        }
+        std::vector<double> right(size);
+        Eigen::VectorXd eigenRight(static_cast<Eigen::Index>(size));
+        for (std::size_t index = 0; index < size; ++index) eigenRight(static_cast<Eigen::Index>(index)) = right[index] = uniform(generator);
+        const Eigen::VectorXd expected = matrix.partialPivLu().solve(eigenRight);
+        integrators::DenseLu denseLu;
+        require(denseLu.factor(dense, size), "The dense LU must factorise a regular matrix.");
+        auto fromDense = right;
+        denseLu.solve(fromDense);
+        // The sparse LU pivots on the diagonal: where a pivot is too small it says so (the stiff method then solves densely), and
+        // otherwise agrees.
+        integrators::SparseLu sparseLu;
+        sparseLu.analyse(rows);
+        auto fromSparse = fromDense;
+        if (sparseLu.factor(entries)) {
+            fromSparse = right;
+            sparseLu.solve(fromSparse);
+        }
+        for (std::size_t index = 0; index < size; ++index) {
+            const double reference = expected(static_cast<Eigen::Index>(index));
+            require(std::abs(fromDense[index] - reference) <= 1e-10 * (1 + std::abs(reference)), "The dense LU must agree with Eigen's.");
+            require(std::abs(fromSparse[index] - reference) <= 1e-10 * (1 + std::abs(reference)), "The sparse LU must agree with Eigen's.");
+        }
+        std::size_t colours = 0;
+        const auto colour = integrators::colourColumns(rows, colours);
+        for (const auto& columns : rows) {
+            for (std::size_t first = 0; first < columns.size(); ++first) {
+                for (std::size_t second = first + 1; second < columns.size(); ++second) {
+                    require(colour[columns[first]] != colour[columns[second]], "Two columns sharing a row must not share a colour.");
+                }
+            }
+        }
+        require(colours <= 9, "A pattern with three entries a row needs only a few colours.");
+    }
+    // On a diagonally dominant matrix, the stiff method's usual case, the sparse LU factorises and agrees with Eigen.
+    {
+        const std::size_t size = 300;
+        integrators::SparsityRows rows(size);
+        Eigen::MatrixXd matrix = Eigen::MatrixXd::Zero(size, size);
+        std::vector<double> entries;
+        for (std::size_t row = 0; row < size; ++row) {
+            std::set<std::size_t> columns{row, (row + 7) % size, (row * 11 + 3) % size};
+            rows[row].assign(columns.begin(), columns.end());
+            for (const auto column : rows[row]) {
+                const double value = (row == column ? 6.0 : 0.0) + uniform(generator);
+                entries.push_back(value);
+                matrix(static_cast<Eigen::Index>(row), static_cast<Eigen::Index>(column)) = value;
+            }
+        }
+        Eigen::VectorXd eigenRight = Eigen::VectorXd::LinSpaced(static_cast<Eigen::Index>(size), -1.0, 1.0);
+        const Eigen::VectorXd expected = matrix.partialPivLu().solve(eigenRight);
+        integrators::SparseLu sparseLu;
+        sparseLu.analyse(rows);
+        require(sparseLu.factor(entries), "The sparse LU must factorise a diagonally dominant matrix.");
+        std::vector<double> values(eigenRight.data(), eigenRight.data() + size);
+        sparseLu.solve(values);
+        for (std::size_t index = 0; index < size; ++index) {
+            require(std::abs(values[index] - expected(static_cast<Eigen::Index>(index))) <= 1e-12, "The sparse LU must agree with Eigen's.");
+        }
+    }
+    // A singular matrix is said to be so, not solved.
+    integrators::DenseLu singular;
+    require(!singular.factor({1.0, 2.0, 2.0, 4.0}, 2), "A singular matrix must not factorise.");
+}
+
+// Rodas4 at fixed steps is of order four on a smooth problem whose Jacobian is not constant, its finite differences included.
+void rodas4IsFourthOrderAtFixedSteps() {
+    namespace integrators = konjugate::integrators;
+    const auto run = [](std::size_t steps) {
+        auto system = integrators::makeRodas4System({1, 1}, {{1}, {0, 1}}, {{0, 1}});
+        integrators::Rodas4Tolerance tolerance{1e-6, {1e-9, 1e-9}};
+        integrators::Rodas4Controller controller;
+        integrators::Rodas4Statistics statistics;
+        std::vector<double> states{1.0, 0.0};
+        integrators::rodas4GlobalStep(0.0, 2.0, states, system, tolerance, {}, {}, steps, true, controller, statistics,
+            [](std::size_t, double time, const std::vector<double>& values, std::vector<double>& rates) {
+                rates[0] = -values[1] + 0.1 * std::sin(time);
+                rates[1] = values[0] - 0.5 * values[1] * values[1];
+            }, [](double, const std::vector<double>&) {});
+        return states;
+    };
+    const auto reference = run(2048);
+    double previous = 0;
+    for (const std::size_t steps : {std::size_t{8}, std::size_t{16}, std::size_t{32}}) {
+        const auto states = run(steps);
+        const double error = std::hypot(states[0] - reference[0], states[1] - reference[1]);
+        if (previous > 0) require(std::log2(previous / error) > 3.8 && std::log2(previous / error) < 4.3, "Rodas4 must be of order four.");
+        previous = error;
+    }
+}
+
 }
 
 int main() {
@@ -592,6 +729,9 @@ int main() {
         dormandPrince54StabilityFunctionIsItsPolynomial();
         dormandPrince54DenseOutputIsFourthOrder();
         assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion();
+        rodas4StabilityFunctionIsLStableAndFourthOrder();
+        ownLinearSolveAgreesWithEigen();
+        rodas4IsFourthOrderAtFixedSteps();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());
         return 1;

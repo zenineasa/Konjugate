@@ -562,8 +562,8 @@ test('under Runge–Kutta 4 a node\'s integration does not apply, so a semi-impl
     semi.runConfigurations[0].method = 'rungeKutta4';
     assert.match(generateStandaloneProgram(semi, 'cpp'), /rungeKutta4GlobalStep/);
     const unknown = singleNodeSourceTermModel();
-    unknown.runConfigurations[0].method = 'rodas4';
-    assert.throws(() => generateStandaloneProgram(unknown, 'python'), /method “rodas4” is not one this version of Konjugate can export/);
+    unknown.runConfigurations[0].method = 'bdf15';
+    assert.throws(() => generateStandaloneProgram(unknown, 'python'), /method “bdf15” is not one this version of Konjugate can export/);
 });
 
 // Adaptive (docs/proposals/integrators.md): the engine's own Dormand–Prince header, its tolerances, a state's own absolute one, and
@@ -616,4 +616,32 @@ test('a Verlet node is written as the engine steps it: the first part in half st
     damped.nodes[1].sourceTerms[0].expressionModel.bindings.push({ kind: 'state', nodeId: 2, stateId: 21, symbol: 'v' });
     damped.nodes[1].sourceTerms[0].expressionModel.mathJson = ['Add', ['Multiply', '-1', 'k', 'x'], ['Negate', 'v']];
     assert.throws(() => generateStandaloneProgram(damped, 'python'), /Node "Mass" cannot be integrated with Verlet: the rate of V reads V itself\. Verlet splits/);
+});
+
+// Stiff, Rodas4 (docs/proposals/integrators.md): the engine's own header and its linear algebra pasted in, the Jacobian's structure from
+// the model's graph, and the Python port carried for the Python export.
+test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers, byte for byte', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { linearSolveCpp, rodas4Cpp, rodas4Python } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/rodas4.hpp', import.meta.url), 'utf8');
+    const linear = await readFile(new URL('../engine/include/konjugate/integrators/linearSolve.hpp', import.meta.url), 'utf8');
+    assert.equal(rodas4Cpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/rodas4.hpp has it.');
+    assert.equal(linearSolveCpp, linear, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/linearSolve.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'rodas4';
+    document.runConfigurations[0].tolerance = { relative: 1e-8 };
+    document.nodes[0].states[0].numerics = { absoluteTolerance: 0.001 };
+    const source = generateStandaloneProgram(document, 'cpp');
+    assert.ok(source.includes(linear.replace(/^#pragma once\n/m, '')), 'The linear algebra header must be pasted in, less its #pragma once.');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')), 'The Rodas4 header must be pasted in, less its #pragma once and include.');
+    assert.match(source, /Reproduces one Stiff run/);
+    assert.match(source, /Rodas4Tolerance tolerance\{ 1e-8, \{ 0\.001 \} \}/);
+    assert.match(source, /stageReads = \{ \{ 0 \} \}/);
+    assert.match(source, /rodas4GlobalStep\(currentTime, endTime, globalState, system, tolerance,/);
+    assert.doesNotMatch(source, /dormandPrince54GlobalStep|rungeKutta4GlobalStep/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.ok(python.includes(rodas4Python));
+    assert.match(python, /stage_reads = \[\[0\]\]/);
+    assert.match(python, /rodas_4_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,/);
 });

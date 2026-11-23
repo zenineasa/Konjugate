@@ -1015,9 +1015,9 @@
                     <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
                     <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
                 </section>
-                <!-- Under Adaptive (docs/proposals/integrators.md) each state may set its own absolute tolerance, in its own unit. -->
+                <!-- Under Adaptive or Stiff (docs/proposals/integrators.md) each state may set its own absolute tolerance, in its own unit. -->
                 <section id="nodeToleranceSection" hidden>
-                    <p class="builderHint"><b>Absolute tolerance.</b> Adaptive keeps each state's error within its absolute tolerance, in the state's own unit, plus the run's relative tolerance of its size. Leave a state empty to use the run's (<span id="nodeRunAbsoluteTolerance">1e-9</span>).</p>
+                    <p class="builderHint"><b>Absolute tolerance.</b> <span id="nodeToleranceMethodName">Adaptive</span> keeps each state's error within its absolute tolerance, in the state's own unit, plus the run's relative tolerance of its size. Leave a state empty to use the run's (<span id="nodeRunAbsoluteTolerance">1e-9</span>).</p>
                     <div id="nodeStateTolerances"></div>
                 </section>
                 <section id="nodeUpdatesSection">
@@ -1297,8 +1297,8 @@
                     <button id="parameterTuningGoalReplay" type="button" aria-pressed="false">Replay a data log</button>
                 </div>
                 <p id="parameterTuningGoalHint" class="builderHint">Fit this model's tunable parameters against measured data. Mark a parameter "Tunable" with bounds in its relationship's editor first, then import a CSV of measured signals here.</p>
-                <!-- Tuning runs with the model's own method (docs/proposals/integrators.md, decision 8); under Adaptive it says what that means. -->
-                <p id="parameterTuningMethodNote" class="builderHint" hidden>This model is run with Adaptive (<button id="parameterTuningRunSettings" class="helpFeedbackLink" type="button">Run settings ›</button>), and so is every trial: each chooses its own steps, so a small change to a parameter can change the steps taken and make the fit's error a little rough. If the fit struggles to settle, use a tighter tolerance or Runge–Kutta 4.</p>
+                <!-- Tuning runs with the model's own method (docs/proposals/integrators.md, decision 8); under Adaptive or Stiff it says what that means. -->
+                <p id="parameterTuningMethodNote" class="builderHint" hidden>This model is run with <span id="parameterTuningMethodName">Adaptive</span> (<button id="parameterTuningRunSettings" class="helpFeedbackLink" type="button">Run settings ›</button>), and so is every trial: each chooses its own steps, so a small change to a parameter can change the steps taken and make the fit's error a little rough. If the fit struggles to settle, use a tighter tolerance or Runge–Kutta 4.</p>
                 <label id="parameterTuningFileChooser" class="geometrySourceButton">
                     <input id="parameterTuningFile" type="file" accept=".csv">
                     <span id="parameterTuningFileLabel">↥ Choose CSV file</span>

@@ -125,6 +125,11 @@ double rungeKutta4LargestStableStep(std::complex<double> eigenvalue);
 std::complex<double> dormandPrince54StabilityFunction(std::complex<double> z);
 double dormandPrince54LargestStableStep(std::complex<double> eigenvalue);
 
+// Rodas4's stability function, from its coefficients (one step on y' = lambda y): L-stable, so |R(z)| <= 1 over the left half-plane and
+// R(z) -> 0 as z -> -infinity. Its largest stable step is unbounded for a mode that decays or oscillates, and 0 for one that grows.
+std::complex<double> rodas4StabilityFunction(std::complex<double> z);
+double rodas4LargestStableStep(std::complex<double> eigenvalue);
+
 // The stability analysis under a whole-model method (docs/proposals/integrators.md, Stability analysis): the eigenvalues of the
 // whole model's Jacobian -- every integrated state against every other, the coupling between nodes included, which a node's own
 // Jacobian leaves out -- judged by the method's stability function at its step, globalTimeStep / stepsPerGlobalStep. Updates are held

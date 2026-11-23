@@ -6,8 +6,8 @@
 // A benchmark model is a committed .kjt. A run may apply a variant to it first, and only these, recorded with every result:
 //   integration  every node's numerics.integration ("explicit", "semiImplicit" or "verlet")
 //   substeps     every node's numerics.substepsPerGlobalStep
-//   method       the run's method ("rungeKutta4" or "dormandPrince54"; docs/proposals/integrators.md), its stepsPerGlobalStep and
-//                Adaptive's tolerance, set on the run configuration the engine is given rather than on the model
+//   method       the run's method ("rungeKutta4", "dormandPrince54" or "rodas4"; docs/proposals/integrators.md), its stepsPerGlobalStep
+//                and the tolerance of Adaptive and Stiff, set on the run configuration the engine is given rather than on the model
 //
 // A run executes on the serial backend unless `execution` (docs/parallelExecution.md) chooses another, as the scaling benchmarks do.
 
@@ -127,6 +127,10 @@ export function createEngine(executable, workDirectory) {
                     // Dormand–Prince: the steps it took and rejected, and its evaluations of the whole model.
                     ...(result.integration?.steps !== undefined ? {
                         methodSteps: result.integration.steps, rejectedSteps: result.integration.rejectedSteps, modelEvaluations: result.integration.evaluations
+                    } : {}),
+                    // Rodas4: its Jacobians (each one evaluation per colour of the model's structure) and factorisations.
+                    ...(result.integration?.jacobians !== undefined ? {
+                        jacobians: result.integration.jacobians, factorisations: result.integration.factorisations
                     } : {})
                 },
                 timing: measure ? {

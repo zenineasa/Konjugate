@@ -23,11 +23,12 @@ test('a configuration that names no method is Euler node by node, one step per g
     assert.equal(integrationMethod('rungeKutta4').name, 'Runge–Kutta 4');
     assert.equal(integrationMethod('nodeByNode').name, 'Euler, node by node');
     assert.equal(integrationMethod('dormandPrince54').name, 'Adaptive');
-    assert.equal(integrationMethod('rodas4'), null);
+    assert.equal(integrationMethod('rodas4').name, 'Stiff');
+    assert.equal(integrationMethod('bdf15'), null);
 });
 
 test('an unknown method and steps out of range are refused by name', () => {
-    assert.match(integrationMethodProblem('rodas4', 1), /“rodas4” is not one this version of Konjugate knows/);
+    assert.match(integrationMethodProblem('bdf15', 1), /“bdf15” is not one this version of Konjugate knows/);
     assert.match(integrationMethodProblem('rungeKutta4', 0), /whole number from 1 through 10,000/);
     assert.match(integrationMethodProblem('rungeKutta4', 2.5), /whole number/);
     assert.equal(integrationMethodProblem('rungeKutta4', 10000), null);

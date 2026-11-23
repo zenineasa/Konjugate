@@ -1,0 +1,29 @@
+{
+    "title": "Prothero–Robinson",
+    "summary": "dy/dt = λ (y - sin t) + cos t from y = 0, whose solution is sin t: Rodas4 at fixed steps is fourth order when the problem is not stiff (λ = -1), and when it is (λ = -1e6, -1e4) its error is proportional to h / |λ|, first order in h but divided by the stiffness; and the steps Stiff and Adaptive take at the same tolerance on the stiff case.",
+    "targetTime": 4,
+    "outputInterval": 0.5,
+    "cases": {
+        "stiff": { "globalTimeSteps": [0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625] },
+        "moderate": { "globalTimeSteps": [0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625] },
+        "control": { "globalTimeSteps": [0.5, 0.25, 0.125, 0.0625, 0.03125, 0.015625] }
+    },
+    "explicitComparison": {
+        "run": { "targetTime": 1, "globalTimeStep": 0.5, "outputInterval": 0.5 },
+        "variants": [
+            { "method": "rodas4", "tolerance": { "relative": 1e-6, "absolute": 1e-9 } },
+            { "method": "dormandPrince54", "tolerance": { "relative": 1e-6, "absolute": 1e-9 } }
+        ]
+    },
+    "thresholds": {
+        "orderStiff": { "min": 0.9, "max": 1.5 },
+        "errorStiff": { "max": 3e-08 },
+        "orderModerate": { "min": 0.9, "max": 1.5 },
+        "errorModerate": { "max": 3e-06 },
+        "orderControl": { "min": 3.9, "max": 4.3 },
+        "errorControl": { "max": 3e-05 },
+        "stiffnessScaling": { "max": 0.1 },
+        "stiffToleranceError": { "max": 1e-06 },
+        "explicitStepRatio": { "min": 10000 }
+    }
+}

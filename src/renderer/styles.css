@@ -1050,6 +1050,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .validationIssue i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }
 .validationIssue.error i { background: #d96f78; }
 .validationIssue strong, .validationIssue small { display: block; user-select: text; }
+/* "Use Stiff", after a finding that says the model is stiff (validation issues and stability findings alike). */
+.useStiffMethod { display: block; margin: 0 12px 10px 28px; padding: 4px 10px; color: #7cd9cc; background: #17262f; border: 1px solid #2f5850; border-radius: 4px; cursor: pointer; }
+.useStiffMethod:hover { background: #1e313b; }
 .validationIssue strong { color: #becdd3; font-size: 8px; line-height: 1.4; }
 .validationIssue small { margin-top: 3px; color: #5f747f; font-size: 7px; text-transform: capitalize; }
 .validationEmpty { margin: 0; padding: 16px 13px; color: #648079; font-size: 8px; }

@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { defaultTolerance as defaultIntegrationTolerance, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { defaultTolerance as defaultIntegrationTolerance, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -6184,7 +6184,31 @@ function renderValidationStatus() {
         button.innerHTML = `<i></i><span><strong>${escapeHtml(item.message)}</strong><small>${escapeHtml(item.location.kind)}${item.location.field ? ` · ${escapeHtml(item.location.field)}` : ''}</small></span>`;
         button.addEventListener('click', () => navigateToValidationIssue(item));
         container.appendChild(button);
+        if (item.code === 'numericsStiffModel' && methodOf(activeRunConfiguration()) !== stiffIntegrationMethod) container.appendChild(useStiffButton());
     });
+}
+
+// "Use Stiff", offered where a finding says the model is stiff (docs/proposals/integrators.md, In the app): one click sets the active run
+// configuration's method to Stiff, its tolerances kept, as one undoable step.
+function useStiffButton() {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'useStiffMethod';
+    button.textContent = 'Use Stiff';
+    button.title = integrationMethod(stiffIntegrationMethod).description;
+    button.addEventListener('click', () => useStiffMethod());
+    return button;
+}
+
+async function useStiffMethod() {
+    // The model is locked while a result is shown: close it first, as applying a substep fix does.
+    if (activeResult) await discardResultPlayback();
+    const before = structuredClone(activeRunConfiguration());
+    const after = withIntegrationMethod(before, stiffIntegrationMethod, 1, toleranceOf(before));
+    if (JSON.stringify(before) === JSON.stringify(after)) return;
+    applyRunConfiguration(after);
+    recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
+    $('#statusText').textContent = 'The model now runs with Stiff (Run settings).';
 }
 
 function formatResultTime(time) {
@@ -6610,6 +6634,13 @@ function renderExecutionSummary() {
             plural(integration.evaluations ?? 0, 'evaluation')} of the model${integration.smallestStep !== undefined
             ? `; steps from ${formatResultTime(integration.smallestStep)} to ${formatResultTime(integration.largestStep)}` : ''}.`);
     }
+    // Stiff's linear algebra: its Jacobians (each a few evaluations, one per colour of the model's structure) and factorisations.
+    if (integration?.jacobians !== undefined) {
+        const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 ? '' : 's'}`;
+        methodLines.push(`${plural(integration.jacobians, 'Jacobian')} (${plural(integration.jacobianColours ?? 0, 'colour')}), ${
+            plural(integration.factorisations ?? 0, 'factorisation')} of ${plural(integration.linearSystemSize ?? 0, 'equation')}${
+            integration.sparse ? ', sparse' : ''}.`);
+    }
     const nodeName = (nodeId) => model.nodes.find((node) => node.id === nodeId)?.name ?? `Node ${nodeId}`;
     if (integration?.steppedNodeIds?.length) {
         methodLines.push(`${integration.steppedNodeIds.length === 1 ? '1 node' : `${integration.steppedNodeIds.length} nodes`} stepped on their own, coupled to the rest at first order: ${nameList(integration.steppedNodeIds.map(nodeName))}.`);
@@ -6738,6 +6769,7 @@ function renderStabilityFindings() {
         button.innerHTML = `<i></i><span><strong>${escapeHtml(subject)}</strong><small>${escapeHtml(finding.message)} · ${escapeHtml(when)}</small></span>`;
         button.addEventListener('click', () => navigateToStabilityFinding(finding));
         list.appendChild(button);
+        if (finding.code === 'adaptiveStepsLimitedByStiffness') list.appendChild(useStiffButton());
     });
 
     const nodeIdsWithFindings = new Set(findings.map((finding) => finding.nodeId));
@@ -8578,7 +8610,7 @@ function updateRunMethodFields() {
     }
     const steps = Number($('#runStepsPerGlobalStep').value);
     $('#runGlobalStepMeaning').textContent = method.tolerance
-        ? 'Updates, controls and samples happen at every global step; Adaptive chooses smaller steps within it, as many as the tolerance asks for, every node together. A state may set its own absolute tolerance (Numerics tab).'
+        ? `Updates, controls and samples happen at every global step; ${method.name} chooses smaller steps within it, as many as the tolerance asks for, every node together. A state may set its own absolute tolerance (Numerics tab).`
         : method.stepsPerGlobalStep
         ? `Updates, controls and samples happen at every global step; the method takes ${steps > 1 ? `${steps} steps` : 'one step'} within it, every node together.`
         : 'Updates, controls and samples happen at every global step; each node takes its own substeps within it (Numerics tab).';
@@ -10997,7 +11029,9 @@ function openParameterTuning() {
         applySavedTuningSetup();
     }
     // Tuning runs with the model's own method (docs/proposals/integrators.md, decision 8): under Adaptive, the card says what that means.
-    $('#parameterTuningMethodNote').hidden = !integrationMethod(methodOf(activeRunConfiguration()))?.tolerance;
+    const tuningMethod = integrationMethod(methodOf(activeRunConfiguration()));
+    $('#parameterTuningMethodNote').hidden = !tuningMethod?.tolerance;
+    $('#parameterTuningMethodName').textContent = tuningMethod?.name ?? '';
     $('#parameterTuning').classList.remove('hidden');
 }
 $('#parameterTuningRunSettings').addEventListener('click', () => openRunDialog());
@@ -13609,6 +13643,7 @@ function renderNodeTolerances(node, definition, configuration) {
     const method = integrationMethod(methodOf(configuration));
     $('#nodeToleranceSection').hidden = !method?.tolerance || !definition.states.length;
     if ($('#nodeToleranceSection').hidden) return;
+    $('#nodeToleranceMethodName').textContent = method.name;
     const runAbsolute = toleranceOf(configuration).absolute;
     $('#nodeRunAbsoluteTolerance').textContent = String(runAbsolute);
     $('#nodeStateTolerances').replaceChildren(...definition.states.map((state) => {

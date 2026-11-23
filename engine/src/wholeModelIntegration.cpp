@@ -17,12 +17,13 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     if (method == "nodeByNode") settings.method = IntegrationMethod::nodeByNode;
     else if (method == "rungeKutta4") settings.method = IntegrationMethod::rungeKutta4;
     else if (method == "dormandPrince54") settings.method = IntegrationMethod::dormandPrince54;
+    else if (method == "rodas4") settings.method = IntegrationMethod::rodas4;
     else {
         throw std::runtime_error("The run's method \"" + method + "\" is not one this version of Konjugate knows (it knows nodeByNode, "
-            "rungeKutta4 and dormandPrince54); open the model in the version that wrote it, or choose another method.");
+            "rungeKutta4, dormandPrince54 and rodas4); open the model in the version that wrote it, or choose another method.");
     }
-    // Dormand–Prince chooses its own steps unless it is told how many to take.
-    if (settings.method == IntegrationMethod::dormandPrince54) settings.stepsPerGlobalStep = 0;
+    // Dormand–Prince and Rodas4 choose their own steps unless told how many to take.
+    if (settings.method == IntegrationMethod::dormandPrince54 || settings.method == IntegrationMethod::rodas4) settings.stepsPerGlobalStep = 0;
     if (const auto steps = configuration.get_optional<std::string>("stepsPerGlobalStep")) {
         char* end = nullptr;
         const auto value = std::strtod(steps->c_str(), &end);
@@ -53,10 +54,19 @@ bool isAdaptive(const IntegrationSettings& settings) noexcept {
     return settings.method == IntegrationMethod::dormandPrince54 && settings.stepsPerGlobalStep == 0;
 }
 
+bool isStiff(const IntegrationSettings& settings) noexcept {
+    return settings.method == IntegrationMethod::rodas4 && settings.stepsPerGlobalStep == 0;
+}
+
+bool hasTolerance(IntegrationMethod method) noexcept {
+    return method == IntegrationMethod::dormandPrince54 || method == IntegrationMethod::rodas4;
+}
+
 std::string_view integrationMethodName(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::rodas4: return "rodas4";
     case IntegrationMethod::nodeByNode: break;
     }
     return "nodeByNode";
@@ -66,6 +76,7 @@ std::string_view solverKindName(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::rodas4: return "rodas4";
     case IntegrationMethod::nodeByNode: break;
     }
     return "explicitEuler";
@@ -75,6 +86,8 @@ std::size_t integrationMethodStages(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return 4;
     case IntegrationMethod::dormandPrince54: return 6;
+    // Rodas4: six stages, and the Jacobian's evaluations besides (one per colour of the model's structure), not counted here.
+    case IntegrationMethod::rodas4: return 6;
     case IntegrationMethod::nodeByNode: break;
     }
     return 1;
@@ -208,6 +221,37 @@ bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, 
     return true;
 }
 
+// Version 1 of Rodas4's record: a byte 1, then the proposed step, the previous error and the previous step as IEEE doubles,
+// little-endian.
+std::string encodeStiffSolverState(double proposedStep, double previousError, double previousStep) {
+    if (!(proposedStep > 0)) return {};
+    std::string record(25, '\0');
+    record[0] = 1;
+    for (const auto [offset, value] : {std::pair{1, proposedStep}, std::pair{9, previousError}, std::pair{17, previousStep}}) {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &value, sizeof bits);
+        for (int byte = 0; byte < 8; ++byte) record[static_cast<std::size_t>(offset + byte)] = static_cast<char>((bits >> (8 * byte)) & 0xffU);
+    }
+    return record;
+}
+
+bool decodeStiffSolverState(const std::string& record, double& proposedStep, double& previousError, double& previousStep) {
+    if (record.size() != 25 || record[0] != 1) return false;
+    double values[3];
+    for (int which = 0; which < 3; ++which) {
+        std::uint64_t bits = 0;
+        for (int byte = 7; byte >= 0; --byte) bits = (bits << 8) | static_cast<unsigned char>(record[static_cast<std::size_t>(1 + 8 * which + byte)]);
+        std::memcpy(&values[which], &bits, sizeof bits);
+    }
+    if (!(values[0] > 0) || !std::isfinite(values[0]) || !(values[1] > 0) || !std::isfinite(values[1]) || !(values[2] >= 0) || !std::isfinite(values[2])) {
+        return false;
+    }
+    proposedStep = values[0];
+    previousError = values[1];
+    previousStep = values[2];
+    return true;
+}
+
 void checkRequiredFeatures(const boost::property_tree::ptree& document) {
     const auto required = document.get_child_optional("requires");
     if (!required) return;
@@ -260,6 +304,80 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
         whole.nodes.push_back(std::move(compiled));
     }
     return whole;
+}
+
+namespace {
+
+// The bindings an equation's expression uses, by position: the node editor binds every state of a node to each of its terms, but only
+// the ones the expression names can change its value (code export reads an equation's states the same way).
+void markUsedBindings(const CompiledExpression& expression, std::vector<unsigned char>& used) {
+    if (expression.operation == ExpressionOperation::symbol && expression.symbolIndex < used.size()) used[expression.symbolIndex] = 1;
+    for (const auto& argument : expression.arguments) markUsedBindings(argument, used);
+}
+
+std::vector<unsigned char> usedBindings(const ContributionTask& task) {
+    std::vector<unsigned char> used(task.bindings.size(), task.implementation == ContributionImplementation::equation ? 0 : 1);
+    if (task.implementation == ContributionImplementation::equation) markUsedBindings(task.expression, used);
+    return used;
+}
+
+// The plan's index of the state a binding reads, or none for a parameter or the time.
+std::size_t boundState(const NodeExecutionPlan& node, const CompiledBinding& binding) {
+    if (binding.source == BindingSource::localState) return node.stateIndexes.at(binding.valueIndex);
+    if (binding.source == BindingSource::synchronizationSnapshot) return binding.valueIndex;
+    return std::numeric_limits<std::size_t>::max();
+}
+
+}
+
+std::vector<std::vector<std::size_t>> stageReads(const ExecutionPlan& plan, const WholeModelPlan& whole) {
+    std::vector<std::vector<std::size_t>> reads(plan.initialStates.size());
+    for (std::size_t index = 0; index < plan.nodes.size(); ++index) {
+        const auto& wholeNode = whole.nodes[index];
+        if (wholeNode.stepped) continue;
+        const auto& node = plan.nodes[index];
+        for (const auto& task : wholeNode.stageNode.contributions) {
+            const auto output = node.stateIndexes.at(task.outputStateIndex);
+            const auto used = usedBindings(task);
+            for (std::size_t binding = 0; binding < task.bindings.size(); ++binding) {
+                const auto state = used[binding] ? boundState(node, task.bindings[binding]) : std::numeric_limits<std::size_t>::max();
+                if (state != std::numeric_limits<std::size_t>::max()) reads[output].push_back(state);
+            }
+        }
+        if (const auto& provider = wholeNode.stageNode.nodeProvider) {
+            for (const auto& output : provider->outputs) {
+                for (const auto& binding : provider->bindings) {
+                    const auto state = boundState(node, binding);
+                    if (state != std::numeric_limits<std::size_t>::max()) reads[node.stateIndexes.at(output.stateIndex)].push_back(state);
+                }
+            }
+        }
+    }
+    for (auto& list : reads) {
+        std::sort(list.begin(), list.end());
+        list.erase(std::unique(list.begin(), list.end()), list.end());
+    }
+    return reads;
+}
+
+bool stagesReadTime(const ExecutionPlan& plan, const WholeModelPlan& whole) {
+    for (std::size_t index = 0; index < plan.nodes.size(); ++index) {
+        const auto& wholeNode = whole.nodes[index];
+        if (wholeNode.stepped) continue;
+        if (wholeNode.stageNode.nodeProvider) return true;
+        for (const auto& task : wholeNode.stageNode.contributions) {
+            if (task.implementation != ContributionImplementation::equation) return true;
+            const auto used = usedBindings(task);
+            for (std::size_t binding = 0; binding < task.bindings.size(); ++binding) {
+                if (!used[binding]) continue;
+                const auto& compiled = task.bindings[binding];
+                if (compiled.source == BindingSource::simulationTime) return true;
+                if (compiled.source == BindingSource::parameter && compiled.parameterIndex < task.parameters.size() &&
+                    task.parameters[compiled.parameterIndex].schedule) return true;
+            }
+        }
+    }
+    return false;
 }
 
 NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeModelNode& stageNode, const StateValues& stageStates,

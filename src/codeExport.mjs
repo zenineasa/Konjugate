@@ -26,7 +26,7 @@ import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
-import { dormandPrince54Cpp, dormandPrince54Python, rungeKutta4Cpp, rungeKutta4Python } from './integratorSources.mjs';
+import { dormandPrince54Cpp, dormandPrince54Python, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp, rungeKutta4Python } from './integratorSources.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -687,11 +687,14 @@ export function generateStandaloneProgram(document, kind, options = {}) {
         globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1, parallelism, method, stepsPerGlobalStep: stepsPerGlobalStepOf(runConfiguration),
         // Adaptive (Dormand–Prince 5(4)): its tolerances, every state's absolute one (its own where it sets one), and its fixed steps,
         // when a run configuration turns its error control off with steps per global step (0: the error control chooses).
-        ...(method === 'dormandPrince54' ? {
+        // Stiff (Rodas4) the same, with what its Jacobian is built from: the states each state's derivative reads, and whether a stage
+        // reads the time.
+        ...(method === 'dormandPrince54' || method === 'rodas4' ? {
             tolerance: toleranceOf(runConfiguration),
             absoluteTolerances: absoluteTolerancesOf(model, toleranceOf(runConfiguration).absolute),
             fixedSteps: runConfiguration?.stepsPerGlobalStep ?? 0
-        } : {})
+        } : {}),
+        ...(method === 'rodas4' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
     };
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
@@ -1099,6 +1102,30 @@ function absoluteTolerancesOf(model, runAbsolute) {
     return tolerances;
 }
 
+// Under Stiff, per state of the model, the states its derivative reads at a stage, as the engine works them out (stageReads in
+// engine/src/wholeModelIntegration.cpp): every state an equation into it uses. A program is held through the stages (a version 1
+// program is never known to be pure), so it reads none. The Jacobian's pattern is built from these.
+function stageReadsOf(model) {
+    const reads = Array.from({ length: model.globalStateCount }, () => []);
+    for (const plan of model.nodePlans) {
+        for (const contribution of plan.contributions) {
+            if (contribution.implementation) continue;
+            const output = model.stateRecord.get(plan.node.states[contribution.outputLocalIndex].id).globalIndex;
+            for (const stateId of contribution.boundStateIds) reads[output].push(model.stateRecord.get(stateId).globalIndex);
+        }
+    }
+    return reads.map((list) => [...new Set(list)].sort((left, right) => left - right));
+}
+
+// Whether an equation evaluated at stages uses the time, or a parameter that follows a stored schedule: then Stiff works out df/dt.
+function stagesReadTime(model) {
+    return model.nodePlans.some((plan) => plan.contributions.some((contribution) => {
+        if (contribution.implementation) return false;
+        const used = mathJsonSymbols(contribution.mathJson);
+        return [...contribution.symbols].some(([key, symbol]) => used.has(key) && (symbol.time !== undefined || symbol.schedule !== undefined));
+    }));
+}
+
 // The integrated states node by node, each node's in its order: the order the engine sums Adaptive's error norm in.
 function errorGroupsOf(model) {
     return model.nodePlans.map((plan) => integratedLocalIndexes(plan).map((local) => model.stateRecord.get(plan.node.states[local].id).globalIndex));
@@ -1119,11 +1146,12 @@ function cppStageDispatchLines(parallelism) {
 function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
     const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
     const adaptive = meta.method === 'dormandPrince54';
+    const stiff = meta.method === 'rodas4';
     return [
         `    // ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
         '    // stage values. Values set from other states (Updates) hold through the stages and are set at each global step\'s end.',
-        // Under Adaptive a program evaluated at stages is given the global step, as the engine gives it.
-        `    constexpr std::size_t stepsPerGlobalStep = ${adaptive ? 1 : meta.stepsPerGlobalStep};`,
+        // Under Adaptive and Stiff a program evaluated at stages is given the global step, as the engine gives it.
+        `    constexpr std::size_t stepsPerGlobalStep = ${adaptive || stiff ? 1 : meta.stepsPerGlobalStep};`,
         `    const std::vector<unsigned char> integrated = { ${integratedFlags(model).join(', ')} };`,
         providers.length ? `    double heldValue[${providers.length}] = {};` : null,
         '    const std::vector<double>* stageStates = nullptr;',
@@ -1141,15 +1169,26 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         '        stageRates = &rates;',
         cppStageDispatchLines(meta.parallelism).join('\n'),
         '    };',
-        ...(adaptive ? [
-            '    // Adaptive: its error norm summed node by node, in the engine\'s order; its tolerances; and the controller\'s memory, carried',
+        ...(adaptive || stiff ? [
+            `    // ${adaptive ? 'Adaptive' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and the controller's memory, carried`,
             '    // from one global step to the next. Its first evaluation of a global step is at its start, where held programs are evaluated.',
             `    const std::vector<std::vector<std::size_t>> errorGroups = { ${errorGroupsOf(model).map((group) => `{ ${group.join(', ')} }`).join(', ')} };`,
-            `    const konjugate::integrators::DormandPrince54Tolerance tolerance{ ${doubleLiteral(meta.tolerance.relative)}, { ${meta.absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
-            `    constexpr std::size_t fixedSteps = ${meta.fixedSteps};`,
-            '    konjugate::integrators::DormandPrince54Controller controller;',
-            '    konjugate::integrators::DormandPrince54Stiffness stiffness;',
-            '    konjugate::integrators::DormandPrince54Statistics statistics;',
+            ...(adaptive ? [
+                `    const konjugate::integrators::DormandPrince54Tolerance tolerance{ ${doubleLiteral(meta.tolerance.relative)}, { ${meta.absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
+                `    constexpr std::size_t fixedSteps = ${meta.fixedSteps};`,
+                '    konjugate::integrators::DormandPrince54Controller controller;',
+                '    konjugate::integrators::DormandPrince54Stiffness stiffness;',
+                '    konjugate::integrators::DormandPrince54Statistics statistics;'
+            ] : [
+                `    const konjugate::integrators::Rodas4Tolerance tolerance{ ${doubleLiteral(meta.tolerance.relative)}, { ${meta.absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
+                `    constexpr std::size_t fixedSteps = ${meta.fixedSteps};`,
+                '    // The Jacobian\'s structure from the model\'s graph: the states each state\'s derivative reads at a stage.',
+                `    const std::vector<std::vector<std::size_t>> stageReads = { ${meta.stageReads.map((reads) => `{ ${reads.join(', ')} }`).join(', ')} };`,
+                `    auto system = konjugate::integrators::makeRodas4System(integrated, stageReads, errorGroups);`,
+                `    constexpr bool readsTime = ${meta.stagesReadTime};`,
+                '    konjugate::integrators::Rodas4Controller controller;',
+                '    konjugate::integrators::Rodas4Statistics statistics;'
+            ]),
             '    const auto evaluateAdaptive = [&](std::size_t evaluation, double time, const std::vector<double>& states, std::vector<double>& rates) {',
             '        evaluateStage(0, evaluation, time, states, rates);',
             '    };',
@@ -1181,6 +1220,11 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
                 '        konjugate::integrators::dormandPrince54GlobalStep(currentTime, endTime, globalState, integrated, errorGroups, tolerance,',
                 '            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,',
+                '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
+            : stiff
+            ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
+                '        konjugate::integrators::rodas4GlobalStep(currentTime, endTime, globalState, system, tolerance,',
+                '            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,',
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
             : '        konjugate::integrators::rungeKutta4GlobalStep(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage);',
         ...cppWholeModelUpdateLines(model, providerInfo),
@@ -1272,6 +1316,9 @@ function generateCpp(model, providers, meta, document) {
         cppScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
         meta.method === 'dormandPrince54' ? `${dormandPrince54Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        // Stiff: Konjugate's own linear algebra, then the method, which includes it.
+        meta.method === 'rodas4' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        meta.method === 'rodas4' ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
         'int main(int argc, char** argv) {',
         isMpi ? '    MPI_Init(&argc, &argv);' : null,
         `    double targetTime = ${doubleLiteral(meta.defaultTargetTime)};`,
@@ -1544,13 +1591,14 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         ...plan.node.states.map((state, index) => `        global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`)
     ].join('\n'));
     const adaptive = meta.method === 'dormandPrince54';
+    const stiff = meta.method === 'rodas4';
     const schedulesBreakpoints = model.schedules.length
         ? ['        times = sorted(time for _hold, schedule_times, _values in PARAMETER_SCHEDULES for time in schedule_times if from_time < time < to_time)']
         : ['        times = []'];
     return [
         `    # ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
         "    # stage values. Values set from other states (Updates) hold through the stages and are set at each global step's end.",
-        `    steps_per_global_step = ${adaptive ? 1 : meta.stepsPerGlobalStep}`,
+        `    steps_per_global_step = ${adaptive || stiff ? 1 : meta.stepsPerGlobalStep}`,
         `    integrated = [${integratedFlags(model).map((flag) => (flag ? 'True' : 'False')).join(', ')}]`,
         providers.length ? `    held_value = [0.0] * ${providers.length}` : '',
         '',
@@ -1562,14 +1610,20 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
             '        rates[:] = [value for chunk in gathered_chunks for value in chunk]'
         ] : []),
         '',
-        ...(adaptive ? [
-            "    # Adaptive: its error norm summed node by node, in the engine's order; its tolerances; and the controller's memory, carried",
+        ...(adaptive || stiff ? [
+            `    # ${adaptive ? 'Adaptive' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and the controller's memory, carried`,
             '    # from one global step to the next. Its first evaluation of a global step is at its start, where held programs are evaluated.',
             `    error_groups = [${errorGroupsOf(model).map((group) => `[${group.join(', ')}]`).join(', ')}]`,
             `    relative_tolerance = ${doubleLiteral(meta.tolerance.relative)}`,
             `    absolute_tolerance = [${meta.absoluteTolerances.map(doubleLiteral).join(', ')}]`,
             `    fixed_steps = ${meta.fixedSteps}`,
-            '    controller = DormandPrince54Controller()',
+            ...(adaptive ? ['    controller = DormandPrince54Controller()'] : [
+                "    # The Jacobian's structure from the model's graph: the states each state's derivative reads at a stage.",
+                `    stage_reads = [${meta.stageReads.map((reads) => `[${reads.join(', ')}]`).join(', ')}]`,
+                '    system = make_rodas_4_system(integrated, stage_reads, error_groups)',
+                `    reads_time = ${meta.stagesReadTime ? 'True' : 'False'}`,
+                '    controller = Rodas4Controller()'
+            ]),
             '',
             '    def evaluate_adaptive(evaluation, step_time, snapshot, rates):',
             '        evaluate_stage(0, evaluation, step_time, snapshot, rates)',
@@ -1577,7 +1631,7 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
             '    # Where a stored schedule jumps or turns, as the engine finds them: every step lands there.',
             '    def breakpoints_within(from_time, to_time):',
             ...schedulesBreakpoints,
-            '        gap = max(1e-9 * (to_time - from_time), 1e3 * DP_EPSILON * max(abs(from_time), abs(to_time)))',
+            `        gap = max(1e-9 * (to_time - from_time), 1e3 * ${adaptive ? 'DP_EPSILON' : 'RODAS4_EPSILON'} * max(abs(from_time), abs(to_time)))`,
             '        kept = []',
             '        for time in times:',
             '            if time - from_time <= gap or to_time - time <= gap:',
@@ -1596,6 +1650,11 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
                 '        dormand_prince_54_global_step(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,',
                 '                                      [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,',
                 '                                      lambda _time, _values: None)'].join('\n')
+            : stiff
+            ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
+                '        rodas_4_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,',
+                '                            [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, reads_time, controller, evaluate_adaptive,',
+                '                            lambda _time, _values: None)'].join('\n')
             : '        runge_kutta_4_global_step(current_time, global_time_step, steps_per_global_step, global_state, integrated, evaluate_stage)',
         ...updateBlocks
     ];
@@ -1666,6 +1725,7 @@ function generatePython(model, providers, meta, document) {
         pythonScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Python}\n` : '',
         meta.method === 'dormandPrince54' ? `${dormandPrince54Python}\n` : '',
+        meta.method === 'rodas4' ? `${rodas4Python}\n` : '',
         'def run(target_time, output_path):',
         `    global_time_step = ${doubleLiteral(meta.globalTimeStep)}`,
         `    output_interval = ${doubleLiteral(meta.outputInterval)}`,

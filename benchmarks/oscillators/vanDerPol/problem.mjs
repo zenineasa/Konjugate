@@ -6,9 +6,10 @@
 // a slow drift along the cycle's flanks broken by fast jumps lasting a time of order 1/μ; at μ = 1000 the system is stiff: an explicit
 // method's step is bounded by stability (h < about 2/(3μ) on the slow flanks) rather than accuracy, about 2.4 million steps a period.
 //
-// mu1.kjt, mu10.kjt and mu1000.kjt are the same node with μ = 1, 10, 1000. μ = 1000 waits for Konjugate's stiff method (Rodas4,
-// docs/proposals/integrators.md); its model and reference are committed so that the stiff method is benchmarked by adding it to the case's
-// methods in benchmark.json.
+// mu1.kjt, mu10.kjt and mu1000.kjt are the same node with μ = 1, 10, 1000. μ = 1000 is run with Stiff (Rodas4, docs/proposals/
+// integrators.md): its trajectory and limit cycle as for the others, its error and work over a range of tolerances, and Adaptive over the
+// cycle's first 160 s beside it, the steps each takes there, to show what a stiff method is for. An explicit method is not run over a
+// whole cycle at μ = 1000: about 2.4 million steps.
 //
 // Reported, for each method in a case's methods (a variant and its global step): the trajectory's error against the reference over a few
 // cycles; the limit cycle's period and amplitude, measured after a long transient from Konjugate's own samples, against the reference's;
@@ -115,6 +116,49 @@ export async function evaluate({ engine, config }) {
         const cycleRun = engineRun(settings.cycleRun);
         const portrait = [];
         const timeSeries = [];
+        if (settings.toleranceStudy) {
+            // The error over the run and the work, over a range of tolerances: the steps taken and rejected, the evaluations of the model.
+            const study = settings.toleranceStudy;
+            const studyRun = engineRun(study.run);
+            const studyReference = exact.states.filter((_, index) => (index * 0.5) % study.run.outputInterval === 0);
+            const errors = [];
+            const work = [];
+            for (const relative of study.relativeTolerances) {
+                const variant = { ...study.variant, tolerance: { relative, absolute: relative * study.absoluteFraction } };
+                const result = await engine.run(modelPath(key), variant, studyRun);
+                const metrics = errorMetrics(trajectory(result, ids), studyReference);
+                errors.push(metrics.relativeError);
+                work.push(result.work.evaluations);
+                rows.push(resultRow({ caseName: `${title}: tolerance`, model: key, variant, run: studyRun, errors: metrics, work: result.work, unit: 'x, y = dx/dt',
+                    note: `${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model, ${result.work.jacobians} Jacobians` }));
+                if (relative === study.judgedTolerance) add(`${key}Steps${methodKey(study.variant)}`, result.work.methodSteps, `${title}: steps taken over ${study.run.targetTime} s at relative tolerance ${relative}, ${methodName(study.variant)}`);
+            }
+            const proportionality = observedOrder(study.relativeTolerances, errors);
+            add(`${key}ToleranceSlope${methodKey(study.variant)}`, proportionality.fitted, `${title}: slope of log error against log tolerance, ${methodName(study.variant)}, over ${study.relativeTolerances.length} tolerances`);
+            plots.push(linePlot({
+                id: `vanDerPol${key.slice(2)}Tolerance`, title: `${title}: error against tolerance`, subtitle: `Largest error relative to range over ${study.run.targetTime} s, and the work it took`,
+                xLabel: 'Relative tolerance', yLabel: 'Relative error', logX: true, logY: true,
+                series: [series(`Konjugate, ${methodName(study.variant)}`, study.variant.method, study.relativeTolerances, errors),
+                    series('Error equal to the tolerance', 'guide', study.relativeTolerances, study.relativeTolerances)]
+            }));
+        }
+        if (settings.explicitComparison) {
+            // Over the cycle's first stretch, at the same tolerance: the steps a stiff method takes against the steps an explicit adaptive
+            // method needs, held to small steps by stability on the slow flank.
+            const comparison = settings.explicitComparison;
+            const comparisonRun = engineRun(comparison.run);
+            const comparisonReference = exact.states.filter((_, index) => (index * 0.5) % comparison.run.outputInterval === 0 && index * 0.5 <= comparison.run.targetTime);
+            const steps = {};
+            for (const variant of comparison.variants) {
+                const result = await engine.run(modelPath(key), variant, comparisonRun);
+                const metrics = errorMetrics(trajectory(result, ids), comparisonReference);
+                steps[variant.method] = result.work.methodSteps;
+                rows.push(resultRow({ caseName: `${title}: first ${comparison.run.targetTime} s`, model: key, variant, run: comparisonRun, errors: metrics, work: result.work, unit: 'x, y = dx/dt',
+                    note: `${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model` }));
+            }
+            add(`${key}ExplicitStepRatio`, steps.dormandPrince54 / steps.rodas4, `${title}: steps Adaptive takes over the first ${comparison.run.targetTime} s for each step Stiff takes, at the same tolerance`);
+            notes.push(`μ = ${mu}, first ${comparison.run.targetTime} s at the same tolerance: Adaptive took ${steps.dormandPrince54.toLocaleString()} steps, Stiff ${steps.rodas4.toLocaleString()}; on the slow flank Adaptive's steps are held near 3.3/μ by stability, whatever its tolerance.`);
+        }
         for (const { variant, globalTimeStep } of settings.methods) {
             const method = methodKey(variant);
             const result = await engine.run(modelPath(key), variant, { ...run, globalTimeStep });
@@ -132,6 +176,7 @@ export async function evaluate({ engine, config }) {
             add(`${key}RelativeError${method}`, errors.relativeError, `${title}: largest error relative to range over ${run.targetTime} s, ${methodName(variant)}, ${stepLabel(globalTimeStep)}`);
             add(`${key}PeriodError${method}`, periodError, `${title}: limit-cycle period, relative error, ${methodName(variant)}, ${stepLabel(globalTimeStep)}`);
             add(`${key}AmplitudeError${method}`, amplitudeError, `${title}: limit-cycle amplitude, relative error, ${methodName(variant)}, ${stepLabel(globalTimeStep)}`);
+            if (mu >= 1000) notes.push(`μ = ${mu}: the amplitude is read from samples ${cycleRun.outputInterval} s apart, which cannot resolve the peak just after each jump (the jump lasts about 1/μ s), so its error (${amplitudeError.toExponential(2)}) is the sampling's, not the method's; the trajectory's error at the samples is ${errors.relativeError.toExponential(2)} of the range.`);
             const role = variant.method ?? variant.integration;
             portrait.push(series(`Konjugate, ${methodName(variant)}, ${stepLabel(globalTimeStep)}`, role, numeric.map((sample) => sample[0]), numeric.map((sample) => sample[1])));
             timeSeries.push(series(`Konjugate, ${methodName(variant)}, ${stepLabel(globalTimeStep)}`, role, result.times, numeric.map((sample) => sample[0])));
@@ -147,6 +192,7 @@ export async function evaluate({ engine, config }) {
 
         // Observed order over halvings of the step, against the reference at the same samples.
         const convergence = settings.convergence;
+        if (!convergence) continue;
         const convergenceRun = engineRun(convergence);
         const reference = exact.states.slice(0, Math.round(convergence.targetTime / convergence.outputInterval) + 1);
         const orderSeries = [];

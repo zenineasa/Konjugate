@@ -15,6 +15,10 @@ export const methodName = (variant = {}) => {
         if (variant.stepsPerGlobalStep) return `Dormand–Prince 5(4), error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step)`;
         return `Adaptive, Dormand–Prince 5(4)${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative})` : ''}`;
     }
+    if (variant.method === 'rodas4') {
+        if (variant.stepsPerGlobalStep) return `Rodas4, error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step)`;
+        return `Stiff, Rodas4${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative})` : ''}`;
+    }
     return variant.integration === 'semiImplicit' ? 'semi-implicit Euler' : 'explicit Euler';
 };
 

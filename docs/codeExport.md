@@ -14,7 +14,7 @@ The "Export simulation code" button in the title bar (next to "Export results as
 
 ## What is reproduced
 
-The generator targets exact numerical fidelity with the engine's own solver, for the method the active run configuration chooses: Explicit Euler node by node (the default), described first, or Runge–Kutta 4 or Adaptive (Dormand–Prince 5(4)) for the whole model, described after the list:
+The generator targets exact numerical fidelity with the engine's own solver, for the method the active run configuration chooses: Explicit Euler node by node (the default), described first, or Runge–Kutta 4, Adaptive (Dormand–Prince 5(4)) or Stiff (Rodas4) for the whole model, described after the list:
 
 - **Fixed-step, multi-rate integration.** Each node advances at `globalTimeStep / substepsPerGlobalStep`. A binding into a *different* node's state always reads a frozen snapshot taken at the start of the current global step; a binding into the *same* node's own state (or any source-term binding) reads that node's live, substep-updated value.
 - **Contribution order.** Contributions to the same state are summed in the same order the engine uses — a node's own source terms in their JSON order, then edges touching that node in document order — since floating-point addition is not associative.
@@ -31,6 +31,8 @@ The generator targets exact numerical fidelity with the engine's own solver, for
 
 **Adaptive** (`method: "dormandPrince54"`) is exported the same way, with the engine's `engine/include/konjugate/integrators/dormandPrince54.hpp` pasted in byte for byte and a line-for-line Python port: its error control with the run configuration's tolerances and each state's own absolute tolerance (`numerics.absoluteTolerance`), its error norm summed node by node in the engine's order, the controller's memory carried from one global step to the next, every step landing on the global step's end and on the times where a stored schedule's samples fall inside it, as the engine lands them; a term written as a program is evaluated at each global step's start and held. A run configuration that gives it `stepsPerGlobalStep` exports its fixed-step form, error control off. The C++ export reproduces the engine's arithmetic; the compiler may fuse a multiply and an add where the engine's build did not, or the reverse, so the exported program agrees with the engine to rounding, and an adaptive step decision a rounding apart can, rarely, give a different, equally valid step sequence within the tolerance.
 
+**Stiff** (`method: "rodas4"`) is exported the same way, with the engine's `engine/include/konjugate/integrators/linearSolve.hpp` and `rodas4.hpp` pasted in byte for byte and a line-for-line Python port of both: the Jacobian's structure from the model's graph (the states each state's derivative reads, written into the program as `stageReads`), the coloured finite differences, df/dt where an equation reads the time or a scheduled parameter, Konjugate's own dense LU (and, above 200 integrated states, its sparse LU with the same minimum-degree ordering), the error control with the run's tolerances and each state's own absolute tolerance, and every step landing as Adaptive's do. A finite-difference Jacobian divides a last-bit difference in a rate by a perturbation of about √ε of the state, so an exported expression that rounds differently from the engine's gives a Jacobian different in about its eighth digit: at fixed steps the exported program agrees with the engine to about 1e-12 (Python, which never fuses, to about 1e-10), and across a corner no step lands on (a rate that switches with a state) an error-controlled run may take different, equally valid steps, agreeing within the tolerance's reach.
+
 ## What is not supported
 
 Export is blocked outright, with an error naming the offending node or edge, when:
@@ -38,10 +40,10 @@ Export is blocked outright, with an error naming the offending node or edge, whe
 - **A provider is implemented in the other language.** A model with a C++ provider cannot be exported to Python, and vice versa — provider source is never auto-translated.
 - **A provider is an installed plugin reference** (`implementation.kind: "plugin"`), which has no embeddable source to paste in.
 - **A computational-node provider is exported to C++.** C++ computational-node execution does not exist in the engine either, so there is no C++ shape to generate.
-- **A node is a program of its own under Runge–Kutta 4 or Adaptive.** The engine steps such a node on its own when it is not pure; code export does not write that yet.
+- **A node is a program of its own under Runge–Kutta 4, Adaptive or Stiff.** The engine steps such a node on its own when it is not pure; code export does not write that yet.
 - **A node is integrated semi-implicitly** (`numerics.integration: "semiImplicit"`) under Euler, node by node; this applies to FMU export too.
 - **The run configuration names a method this version does not know**, refused by name.
-- **An FMU is exported from a run configuration that chooses Runge–Kutta 4 or Adaptive.** FMI export steps with Euler node by node; the methods inside `fmi2DoStep` are a later stage of [Integrators](proposals/integrators.md).
+- **An FMU is exported from a run configuration that chooses Runge–Kutta 4, Adaptive or Stiff.** FMI export steps with Euler node by node; the methods inside `fmi2DoStep` are a later stage of [Integrators](proposals/integrators.md).
 
 Beyond blocking, a few things are deliberately out of scope for the generated program itself:
 

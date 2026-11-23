@@ -1,11 +1,12 @@
 {
     "title": "Graph coupling: one node against three",
-    "summary": "Three damped masses joined by springs, written as one node and as three nodes coupled through the snapshot: the coupling error against the global step and the node substeps, Runge–Kutta 4, under which the three nodes are the one node and the error is fourth order, and Dormand–Prince 5(4), fifth order at fixed steps and, under Adaptive, the one-node model's steps.",
+    "summary": "Three damped masses joined by springs, written as one node and as three nodes coupled through the snapshot: the coupling error against the global step and the node substeps, Runge–Kutta 4, under which the three nodes are the one node and the error is fourth order, Dormand–Prince 5(4), fifth order at fixed steps and, under Adaptive, the one-node model's steps, and Rodas4, the one node to the bit and fourth order at fixed steps and, under Stiff, the one node within its tolerance.",
     "run": { "globalTimeStep": 0.015625, "targetTime": 16, "outputInterval": 0.125 },
     "globalTimeSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625],
     "substeps": [1, 2, 4, 8, 16],
     "orderSubsteps": 4,
     "dormandPrince54": { "globalTimeSteps": [0.125, 0.0625, 0.03125, 0.015625, 0.0078125], "adaptiveGlobalTimeStep": 0.125, "relativeTolerances": [1e-6, 1e-8, 1e-10] },
+    "rodas4": { "globalTimeSteps": [0.125, 0.0625, 0.03125, 0.015625, 0.0078125], "stiffGlobalTimeStep": 0.125, "relativeTolerances": [1e-6, 1e-8] },
     "timing": [
         { "label": "One node, h = 2^-10 s", "model": "monolithic", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0009765625, "targetTime": 64, "outputInterval": 0.125 } },
         { "label": "Three nodes, H = 2^-6 s with 16 substeps", "model": "split", "variant": { "integration": "explicit", "substeps": 16 }, "run": { "globalTimeStep": 0.015625, "targetTime": 64, "outputInterval": 0.125 } },
@@ -22,6 +23,10 @@
         "rungeKutta4FinestErrorOrder": { "min": 3.9, "max": 4.1 },
         "dormandPrince54ErrorOrder": { "min": 4.9, "max": 5.1 },
         "dormandPrince54FinestErrorOrder": { "min": 4.9, "max": 5.1 },
-        "adaptiveSplitDifference": { "max": 1e-12 }
+        "adaptiveSplitDifference": { "max": 1e-12 },
+        "rodas4SplitDifference": { "max": 1e-12 },
+        "rodas4ErrorOrder": { "min": 3.9, "max": 4.1 },
+        "rodas4FinestErrorOrder": { "min": 3.9, "max": 4.1 },
+        "stiffSplitDifference": { "max": 1 }
     }
 }

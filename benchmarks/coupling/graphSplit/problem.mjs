@@ -21,7 +21,11 @@
 // values, the coupling included, so the split model is the one-node model -- the same method on the same equations -- and its error
 // against the exact solution has the method's order, four, rather than the snapshot's one. Dormand–Prince 5(4) does the same at fifth
 // order with its error control off, and under Adaptive, its error control on, the split model still takes the one-node model's steps:
-// its error norm is summed node by node, so the two differ only by rounding.
+// its error norm is summed node by node, so the two differ only by rounding. Rodas4, the stiff method, does the same at fourth order with
+// its error control off, its Jacobian built from the graph's structure, and the split model is the one-node model to the bit: the same
+// equations give the same Jacobian whatever its colouring, and the same solves. Under Stiff, its error control on, the error norm is
+// summed node by node in the split model and in one group in the one-node model, so a rounding difference can tip a step's acceptance:
+// the two take equally valid steps and agree within the tolerance's reach, not to rounding.
 //
 // Reference: the system is linear, so it is exact by the matrix exponential.
 
@@ -229,6 +233,46 @@ export async function evaluate({ engine, config }) {
     }
     add('adaptiveSplitDifference', adaptiveDifference, 'Adaptive: the three-node model against the one-node model at the same tolerance, relative to range, largest over every tolerance (the error norm summed node by node)');
 
+    // Rodas4: at fixed steps, the split model against the one-node model and the order of its error in H; under Stiff, the split model
+    // against the one-node model at each tolerance.
+    const rodas = config.rodas4;
+    const rodasErrors = [];
+    let rodasDifference = 0;
+    for (const globalStep of rodas.globalTimeSteps) {
+        const stepRun = engineRun(config.run, { globalTimeStep: globalStep });
+        const variant = { method: 'rodas4', stepsPerGlobalStep: 1 };
+        const split = await engine.run(splitPath, variant, stepRun);
+        const splitNumeric = trajectory(split, splitIds);
+        const one = await engine.run(monolithicPath, variant, stepRun);
+        const difference = errorMetrics(splitNumeric, trajectory(one, monolithicIds)).relativeError;
+        rodasDifference = Math.max(rodasDifference, difference);
+        const total = errorMetrics(splitNumeric, exact);
+        rodasErrors.push(total.relativeError);
+        rows.push(resultRow({ caseName: 'split, three nodes', model: 'split', variant, run: stepRun, errors: total, work: split.work, unit: 'm, m/s',
+            note: `against one node at the same step ${difference.toExponential(2)}; ${split.work.jacobians} Jacobians` }));
+    }
+    add('rodas4SplitDifference', rodasDifference, 'Rodas4, error control off: the three-node model against the one-node model at the same step, relative to range, largest over every H');
+    const rodasOrder = observedOrder(rodas.globalTimeSteps, rodasErrors);
+    add('rodas4ErrorOrder', rodasOrder.fitted, 'Rodas4, error control off: observed order of the three-node model\'s error against the exact solution in H (fitted over all H)');
+    add('rodas4FinestErrorOrder', rodasOrder.finest, 'Rodas4, error control off: observed order of the three-node model\'s error from the finest halving of H');
+    rows.push(resultRow({ caseName: 'error order in H', model: 'split', variant: { method: 'rodas4', stepsPerGlobalStep: 1 }, observedOrder: rodasOrder.fitted,
+        note: `pairwise ${rodasOrder.pairwise.map((value) => value.toFixed(3)).join(', ')}` }));
+    let stiffDifference = 0;
+    const stiffRun = engineRun(config.run, { globalTimeStep: rodas.stiffGlobalTimeStep });
+    for (const relative of rodas.relativeTolerances) {
+        const variant = { method: 'rodas4', tolerance: { relative, absolute: relative * 1e-3 } };
+        const split = await engine.run(splitPath, variant, stiffRun);
+        const splitNumeric = trajectory(split, splitIds);
+        const one = await engine.run(monolithicPath, variant, stiffRun);
+        const difference = errorMetrics(splitNumeric, trajectory(one, monolithicIds)).relativeError;
+        stiffDifference = Math.max(stiffDifference, difference / relative);
+        rows.push(resultRow({
+            caseName: 'split, three nodes', model: 'split', variant, run: stiffRun, errors: errorMetrics(splitNumeric, exact), work: split.work, unit: 'm, m/s',
+            note: `against one node with the same tolerance ${difference.toExponential(2)}; ${split.work.methodSteps} steps (one node ${one.work.methodSteps}), ${split.work.rejectedSteps} rejected`
+        }));
+    }
+    add('stiffSplitDifference', stiffDifference, 'Stiff: the three-node model against the one-node model at the same tolerance, relative to range, over the relative tolerance, largest over every tolerance');
+
     const log2 = (value) => `2^${Math.log2(value)}`;
     plots.push(linePlot({
         id: 'couplingSubsteps', title: 'Substeps at a fixed global step', subtitle: `Error relative to range against the exact solution, H = ${log2(coarsest)} s`, xLabel: 'Substeps per global step (n)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.substeps,
@@ -244,18 +288,20 @@ export async function evaluate({ engine, config }) {
             .concat([series('First order (slope 1)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => couplingErrors[0] * step / config.globalTimeSteps[0]))])
     }));
     plots.push(linePlot({
-        id: 'couplingRungeKutta4', title: 'Three nodes under Runge–Kutta 4 and Dormand–Prince 5(4)', subtitle: 'Error of the three-node model against the exact solution, relative to range', xLabel: 'Global step H (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.globalTimeSteps,
+        id: 'couplingRungeKutta4', title: 'Three nodes under Runge–Kutta 4, Dormand–Prince 5(4) and Rodas4', subtitle: 'Error of the three-node model against the exact solution, relative to range', xLabel: 'Global step H (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.globalTimeSteps,
         series: [
             series('Explicit Euler, one substep', 'explicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:1`].total.relativeError)),
             series(`Explicit Euler, ${largestSubsteps} substeps`, 'semiImplicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:${largestSubsteps}`].total.relativeError)),
             series('Runge–Kutta 4, the whole model', 'rungeKutta4', config.globalTimeSteps, rungeKutta4Errors),
             series('Fourth order (slope 4)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => rungeKutta4Errors[0] * (step / config.globalTimeSteps[0]) ** 4)),
             series('Dormand–Prince 5(4), error control off', 'dormandPrince54', dormandPrince.globalTimeSteps, dormandPrinceErrors),
-            series('Fifth order (slope 5)', 'guide', dormandPrince.globalTimeSteps, dormandPrince.globalTimeSteps.map((step) => dormandPrinceErrors[0] * (step / dormandPrince.globalTimeSteps[0]) ** 5))
+            series('Fifth order (slope 5)', 'guide', dormandPrince.globalTimeSteps, dormandPrince.globalTimeSteps.map((step) => dormandPrinceErrors[0] * (step / dormandPrince.globalTimeSteps[0]) ** 5)),
+            series('Rodas4, error control off', 'rodas4', rodas.globalTimeSteps, rodasErrors)
         ]
     }));
     return { rows, checks, plots, notes: [
         'Under Runge–Kutta 4 every node reads every node\'s stage values, so the three-node model gives the one-node model\'s numbers: the coupling error substeps cannot remove is gone, and the error falls sixteen-fold per halving of the global step.',
-        'Dormand–Prince 5(4) does the same at fifth order, thirty-two-fold per halving; under Adaptive the three-node model chooses the one-node model\'s steps, so the two agree to rounding at every tolerance.'
+        'Dormand–Prince 5(4) does the same at fifth order, thirty-two-fold per halving; under Adaptive the three-node model chooses the one-node model\'s steps, so the two agree to rounding at every tolerance.',
+        'Rodas4 at fixed steps gives the three-node model the one-node model\'s bits, at fourth order. Under Stiff the two sum their error norm in different groups, so they may take different, equally valid steps: they agree within a small multiple of the tolerance, not to rounding.'
     ] };
 }

@@ -29,8 +29,19 @@ export const integrationMethods = Object.freeze([
         description: 'Chooses its own steps to keep the error within a tolerance, smaller where things change fast. Use it when you want an accurate answer without choosing the step.',
         stepsPerGlobalStep: false,
         tolerance: true
+    }),
+    Object.freeze({
+        id: 'rodas4',
+        name: 'Stiff',
+        summaryName: 'Stiff: Rodas4 (a six-stage Rosenbrock method, fourth order, with a third-order error estimate, L-stable)',
+        description: 'For models with very fast and very slow parts together (chemistry, stiff springs, circuits with tiny time constants), where the others need tiny steps. Solves a set of equations each step.',
+        stepsPerGlobalStep: false,
+        tolerance: true
     })
 ]);
+
+// The method a stiffness finding offers, by its id: "Use Stiff".
+export const stiffIntegrationMethod = 'rodas4';
 
 // Adaptive's tolerances when a run configuration does not say (docs/proposals/integrators.md, decision 4).
 export const defaultTolerance = Object.freeze({ relative: 1e-6, absolute: 1e-9 });

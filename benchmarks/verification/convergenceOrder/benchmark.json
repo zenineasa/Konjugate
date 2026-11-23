@@ -1,14 +1,14 @@
 {
     "title": "Convergence order",
-    "summary": "Error against global step over six halvings for the thermal network, both RLC circuits, the harmonic oscillator and the pendulum: the observed order of explicit and semi-implicit Euler, of Verlet on the oscillator and the pendulum, of Runge–Kutta 4 and of Dormand–Prince 5(4) at fixed steps over halvings of their own, before the error reaches rounding; and Adaptive's error against its tolerance from 1e-3 to 1e-10, with the work it took.",
+    "summary": "Error against global step over six halvings for the thermal network, both RLC circuits, the harmonic oscillator and the pendulum: the observed order of explicit and semi-implicit Euler, of Verlet on the oscillator and the pendulum, of Runge–Kutta 4, of Dormand–Prince 5(4) and of Rodas4 at fixed steps over halvings of their own, before the error reaches rounding; and the error of Adaptive and of Stiff against their tolerance from 1e-3 to 1e-10, with the work it took.",
     "cases": {
-        "thermal": { "globalTimeSteps": [64, 32, 16, 8, 4, 2], "targetTime": 16384, "outputInterval": 256, "methods": ["explicit", "rungeKutta4"], "rungeKutta4GlobalSteps": [64, 32, 16, 8, 4] },
-        "seriesRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4", "dormandPrince54"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125], "dormandPrince54GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625] },
-        "coupledRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4", "dormandPrince54"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125], "dormandPrince54GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625] },
-        "oscillator": { "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125], "targetTime": 16, "outputInterval": 0.25, "methods": ["explicit", "semiImplicit", "verlet", "rungeKutta4", "dormandPrince54"], "rungeKutta4GlobalSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125], "dormandPrince54GlobalSteps": [0.125, 0.0625, 0.03125, 0.015625, 0.0078125] },
-        "pendulum": { "globalTimeSteps": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625], "targetTime": 8, "outputInterval": 0.0625, "methods": ["explicit", "semiImplicit", "verlet", "rungeKutta4", "dormandPrince54"], "rungeKutta4GlobalSteps": [0.00390625, 0.001953125, 0.0009765625], "dormandPrince54GlobalSteps": [0.015625, 0.0078125, 0.00390625] }
+        "thermal": { "globalTimeSteps": [64, 32, 16, 8, 4, 2], "targetTime": 16384, "outputInterval": 256, "methods": ["explicit", "rungeKutta4", "rodas4"], "rungeKutta4GlobalSteps": [64, 32, 16, 8, 4], "rodas4GlobalSteps": [256, 128, 64, 32, 16] },
+        "seriesRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4", "dormandPrince54", "rodas4"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125], "dormandPrince54GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625], "rodas4GlobalSteps": [0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625] },
+        "coupledRlc": { "globalTimeSteps": [0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125, 0.000003814697265625, 0.0000019073486328125], "targetTime": 0.03125, "outputInterval": 0.00048828125, "methods": ["explicit", "semiImplicit", "rungeKutta4", "dormandPrince54", "rodas4"], "rungeKutta4GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125], "dormandPrince54GlobalSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625], "rodas4GlobalSteps": [0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625] },
+        "oscillator": { "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125], "targetTime": 16, "outputInterval": 0.25, "methods": ["explicit", "semiImplicit", "verlet", "rungeKutta4", "dormandPrince54", "rodas4"], "rungeKutta4GlobalSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125], "dormandPrince54GlobalSteps": [0.125, 0.0625, 0.03125, 0.015625, 0.0078125], "rodas4GlobalSteps": [0.25, 0.125, 0.0625, 0.03125, 0.015625, 0.0078125] },
+        "pendulum": { "globalTimeSteps": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125, 0.00006103515625], "targetTime": 8, "outputInterval": 0.0625, "methods": ["explicit", "semiImplicit", "verlet", "rungeKutta4", "dormandPrince54", "rodas4"], "rungeKutta4GlobalSteps": [0.00390625, 0.001953125, 0.0009765625], "dormandPrince54GlobalSteps": [0.015625, 0.0078125, 0.00390625], "rodas4GlobalSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625] }
     },
-    "toleranceStudy": { "relativeTolerances": [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "globalStepsPerRun": 16 },
+    "toleranceStudy": { "relativeTolerances": [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "globalStepsPerRun": 16, "stiff": true },
     "thresholds": {
         "thermalOrderExplicit": { "min": 0.95, "max": 1.1 },
         "thermalFinestOrderExplicit": { "min": 0.97, "max": 1.03 },
@@ -59,6 +59,26 @@
         "oscillatorToleranceSlope": { "min": 0.8, "max": 1.15 },
         "oscillatorToleranceFactor": { "max": 20 },
         "pendulumToleranceSlope": { "min": 0.8, "max": 1.15 },
-        "pendulumToleranceFactor": { "max": 20 }
+        "pendulumToleranceFactor": { "max": 20 },
+        "thermalOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "thermalFinestOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "seriesRlcOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "seriesRlcFinestOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "coupledRlcOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "coupledRlcFinestOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "oscillatorOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "oscillatorFinestOrderRodas4": { "min": 3.9, "max": 4.1 },
+        "pendulumOrderRodas4": { "min": 4.4, "max": 5.1 },
+        "pendulumFinestOrderRodas4": { "min": 4.3, "max": 5.1 },
+        "thermalStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
+        "thermalStiffToleranceFactor": { "max": 20 },
+        "seriesRlcStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
+        "seriesRlcStiffToleranceFactor": { "max": 20 },
+        "coupledRlcStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
+        "coupledRlcStiffToleranceFactor": { "max": 20 },
+        "oscillatorStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
+        "oscillatorStiffToleranceFactor": { "max": 20 },
+        "pendulumStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
+        "pendulumStiffToleranceFactor": { "max": 20 }
     }
 }

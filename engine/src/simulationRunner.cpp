@@ -12,6 +12,7 @@
 #include "taskExecutor.hpp"
 #include "wholeModelIntegration.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/rodas4.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
 #include <chrono>
@@ -952,14 +953,23 @@ private:
     integrators::DormandPrince54Stiffness adaptiveStiffness;
     integrators::DormandPrince54Statistics adaptiveStatistics;
     bool adaptiveStiffnessReported = false;
-    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive, nothing under every other method.
+    // Rodas4: the model's structure worked out once (the integrated states, the Jacobian's pattern from the graph, its colours and
+    // the sparse LU's ordering), the controller's memory (kept in checkpoints), the work done, and whether stages read the time.
+    std::optional<integrators::Rodas4System> stiffSystem;
+    integrators::Rodas4Controller stiffController;
+    integrators::Rodas4Statistics stiffStatistics;
+    bool stagesReadTimeAlways = false;
+    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive and Stiff, nothing under every other method.
     std::string solverState() const {
+        if (isStiff(integration)) return encodeStiffSolverState(stiffController.proposedStep, stiffController.previousError, stiffController.previousStep);
         return isAdaptive(integration) ? encodeAdaptiveSolverState(adaptiveController.proposedStep, adaptiveController.previousError) : std::string();
     }
     // The controller started afresh: its first step chosen again by the initial step algorithm.
     void resetSolverState(const std::string& record = {}) {
         adaptiveController = {};
         if (isAdaptive(integration)) decodeAdaptiveSolverState(record, adaptiveController.proposedStep, adaptiveController.previousError);
+        stiffController = {};
+        if (isStiff(integration)) decodeStiffSolverState(record, stiffController.proposedStep, stiffController.previousError, stiffController.previousStep);
     }
     std::chrono::steady_clock::time_point planningStartedAt;
     std::shared_ptr<const ExecutionPlan> plan;
@@ -1072,16 +1082,23 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     if (integration.method != IntegrationMethod::nodeByNode) {
         wholeModel = buildWholeModelPlan(executionPlan, providerRuntime.get());
         heldValues.resize(executionPlan.nodes.size());
+        // Rodas4's structure, from the graph: which states each state's derivative reads, so the Jacobian's pattern, its colours
+        // and the sparse LU's ordering are worked out once, here.
+        if (integration.method == IntegrationMethod::rodas4) {
+            stiffSystem = integrators::makeRodas4System(wholeModel.integrated, stageReads(executionPlan, wholeModel), wholeModel.errorGroups);
+            stagesReadTimeAlways = stagesReadTime(executionPlan, wholeModel);
+        }
         // A node's work a global step is its work an evaluation times the method's evaluations a step, not its substeps.
-        // Adaptive's steps a global step are not known before the run: one is assumed.
-        const auto evaluations = integrationMethodStages(integration.method) * std::max<std::size_t>(1, integration.stepsPerGlobalStep);
+        // Adaptive's and Stiff's steps a global step are not known before the run: one is assumed (Stiff's with its Jacobian's).
+        const auto evaluations = (integrationMethodStages(integration.method) + (stiffSystem ? stiffSystem->colours : 0)) *
+            std::max<std::size_t>(1, integration.stepsPerGlobalStep);
         executionSettings.estimatedOperationsPerSynchronization = 0;
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             const auto& node = executionPlan.nodes[index];
             executionSettings.estimatedOperationsPerSynchronization += node.estimatedOperationsPerSubstep *
                 (wholeModel.nodes[index].stepped ? node.substeps : evaluations);
         }
-        if (integration.method == IntegrationMethod::dormandPrince54) {
+        if (hasTolerance(integration.method)) {
             absoluteToleranceByState = absoluteTolerances(document, executionPlan, integration.absoluteTolerance);
         }
     }
@@ -1431,7 +1448,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
     // integrators.md): written only when the run used one, so a node-by-node result says what it always said.
     if (integration.method != IntegrationMethod::nodeByNode) {
         json << ",\"integration\":{\"method\":\"" << integrationMethodName(integration.method) << '"';
-        if (integration.method != IntegrationMethod::dormandPrince54 || integration.stepsPerGlobalStep) {
+        if (!hasTolerance(integration.method) || integration.stepsPerGlobalStep) {
             json << ",\"stepsPerGlobalStep\":" << integration.stepsPerGlobalStep;
         }
         // Dormand–Prince: its tolerances (under error control) and the work it did -- the steps it took and rejected, its evaluations
@@ -1448,6 +1465,23 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
                      << adaptiveStatistics.largestStep;
             }
             if (!std::isnan(adaptiveStiffness.detectedAt)) json << ",\"stiffnessDetectedAt\":" << adaptiveStiffness.detectedAt;
+        }
+        // Rodas4: the same, and its linear algebra -- the Jacobians worked out and the evaluations each took (one per colour), the
+        // factorisations, the size of the system, whether it was solved sparsely, and how often the sparse LU fell back to the dense.
+        if (integration.method == IntegrationMethod::rodas4) {
+            if (isStiff(integration)) {
+                json << ",\"tolerance\":{\"relative\":" << integration.relativeTolerance << ",\"absolute\":"
+                     << integration.absoluteTolerance << '}';
+            }
+            json << ",\"steps\":" << stiffStatistics.acceptedSteps << ",\"rejectedSteps\":" << stiffStatistics.rejectedSteps
+                 << ",\"evaluations\":" << stiffStatistics.evaluations;
+            if (stiffStatistics.acceptedSteps) {
+                json << ",\"smallestStep\":" << stiffStatistics.smallestStep << ",\"largestStep\":" << stiffStatistics.largestStep;
+            }
+            json << ",\"jacobians\":" << stiffStatistics.jacobians << ",\"jacobianColours\":" << (stiffSystem ? stiffSystem->colours : 0)
+                 << ",\"factorisations\":" << stiffStatistics.factorisations << ",\"linearSystemSize\":"
+                 << (stiffSystem ? stiffSystem->integratedStates.size() : 0) << ",\"sparse\":" << (stiffSystem && stiffSystem->sparse ? "true" : "false");
+            if (stiffStatistics.denseFallbacks) json << ",\"denseFallbacks\":" << stiffStatistics.denseFallbacks;
         }
         json << ",\"steppedNodeIds\":[";
         for (std::size_t index = 0; index < wholeModel.steppedNodes.size(); ++index) {
@@ -1804,6 +1838,21 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
                 "where its fastest parts have settled, which a looser tolerance will not make fewer.";
             stabilityFindings.push_back(std::move(finding));
         }
+    } else if (integration.method == IntegrationMethod::rodas4) {
+        // As Adaptive: landing on the global step's end and every corner of a schedule within it, the controller's memory carried on,
+        // the held programs evaluated at the first evaluation. df/dt is worked out when a stage may read the time, a recorded
+        // intervention included.
+        const auto breakpoints = isStiff(integration)
+            ? scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime, elapsed) : std::vector<double>{};
+        const auto acceptedBefore = stiffStatistics.acceptedSteps;
+        integrators::Rodas4Tolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
+        integrators::rodas4GlobalStep(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, integration.stepsPerGlobalStep,
+            stagesReadTimeAlways || !runControl.activeSchedules.empty(), stiffController, stiffStatistics,
+            [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
+                evaluateAt(evaluation == 0, time, stageStates, derivatives);
+            },
+            [](double, const Values&) {});
+        takenSteps = stiffStatistics.acceptedSteps - acceptedBefore;
     } else {
         integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated,
             [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {

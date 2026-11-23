@@ -127,6 +127,17 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
     const std::string methodName = integration.method == IntegrationMethod::dormandPrince54
         ? (adaptive ? "Adaptive" : "Dormand–Prince 5(4) at fixed steps") : "Runge–Kutta 4";
     std::ostringstream message;
+    if (integration.method == IntegrationMethod::rodas4) {
+        // Stiff is L-stable: no step is too large for a mode that decays, however fast, and a stiff model is what it is for. Only a
+        // mode that grows whatever the step is worth saying.
+        if (assessment->unconditionallyUnstable) {
+            message << "The model has a mode that grows whatever the step" << (symbol.empty() ? "" : " ('" + symbol + "' moves fastest)")
+                    << " -- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether this dynamics is "
+                    << "intentionally unstable.";
+            add(result, "numericsPotentiallyUnstable", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+        }
+        return;
+    }
     if (adaptive) {
         // Adaptive keeps itself stable by shrinking its steps; what matters is a mode no step can hold, or a stiff model whose
         // stability, not its accuracy, will set the steps.

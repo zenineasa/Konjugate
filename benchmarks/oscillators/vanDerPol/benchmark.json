@@ -1,6 +1,6 @@
 {
     "title": "Van der Pol oscillator",
-    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4, and Adaptive's error, period and amplitude against its tolerance with the work it took. μ = 1000 (stiff) waits for the stiff method.",
+    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4, and Adaptive's error, period and amplitude against its tolerance with the work it took. and μ = 1000 (stiff) with Stiff (Rodas4): its trajectory, limit cycle, error against tolerance and work, beside Adaptive over the cycle's first 160 s.",
     "cases": {
         "mu1": {
             "run": { "targetTime": 40, "outputInterval": 0.0625 },
@@ -42,8 +42,24 @@
         },
         "mu1000": {
             "run": { "targetTime": 3200, "outputInterval": 0.5 },
-            "pending": "Stiff: waits for Konjugate's stiff method (Rodas4, docs/proposals/integrators.md). An explicit method's step is bounded by stability, not accuracy, at about 2/(3μ) ≈ 7e-4 s on the slow flanks of a cycle 1614 s long: about 2.4 million steps a cycle, so it is not benchmarked with Euler or Runge–Kutta 4. The model (mu1000.kjt) and its reference are committed; the stiff method is added here as a method.",
-            "pendingMethod": "Rodas4 (stiff; not yet built)"
+            "cycleRun": { "targetTime": 8000, "outputInterval": 0.5 },
+            "methods": [
+                { "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8, "absolute": 1e-8 } }, "globalTimeStep": 0.5 }
+            ],
+            "toleranceStudy": {
+                "variant": { "method": "rodas4" },
+                "run": { "targetTime": 3200, "globalTimeStep": 16, "outputInterval": 16 },
+                "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9],
+                "absoluteFraction": 1,
+                "judgedTolerance": 1e-6
+            },
+            "explicitComparison": {
+                "run": { "targetTime": 160, "globalTimeStep": 16, "outputInterval": 16 },
+                "variants": [
+                    { "method": "rodas4", "tolerance": { "relative": 1e-6, "absolute": 1e-6 } },
+                    { "method": "dormandPrince54", "tolerance": { "relative": 1e-6, "absolute": 1e-6 } }
+                ]
+            }
         }
     },
     "timing": [
@@ -91,6 +107,12 @@
         "mu10ToleranceSlopeAdaptive": { "min": 0.85, "max": 1.2 },
         "mu10ToleranceFactorAdaptive": { "max": 25 },
         "mu10PeriodErrorAdaptive": { "max": 2e-8 },
-        "mu10AmplitudeErrorAdaptive": { "max": 1.5e-6 }
+        "mu10AmplitudeErrorAdaptive": { "max": 1.5e-6 },
+        "mu1000RelativeErrorRodas4": { "max": 1e-05 },
+        "mu1000PeriodErrorRodas4": { "max": 1e-04 },
+        "mu1000AmplitudeErrorRodas4": { "max": 0.015 },
+        "mu1000StepsRodas4": { "max": 1500 },
+        "mu1000ToleranceSlopeRodas4": { "min": 0.65, "max": 1.15 },
+        "mu1000ExplicitStepRatio": { "min": 1000 }
     }
 }

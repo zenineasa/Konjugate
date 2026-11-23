@@ -1,0 +1,31 @@
+{
+    "title": "Robertson chemical kinetics",
+    "summary": "Robertson's stiff kinetics from A = 1 to 1e11 s, as one node and as two, under Stiff (Rodas4) with an absolute tolerance per species: the concentrations at Hairer and Wanner's checkpoints against a SciPy Radau reference, the total A + B + C kept at 1, no concentration below zero, the steps it takes, the two-node model against the one-node model, and Adaptive over the first 40 s beside it.",
+    "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8 } },
+    "longRun": { "targetTime": 1e11, "globalTimeStep": 1e9, "outputInterval": 1e9 },
+    "explicitComparison": {
+        "run": { "targetTime": 40, "globalTimeStep": 40, "outputInterval": 40 },
+        "variants": [
+            { "method": "rodas4", "tolerance": { "relative": 1e-6 } },
+            { "method": "dormandPrince54", "tolerance": { "relative": 1e-6 } }
+        ]
+    },
+    "thresholds": {
+        "relativeErrorAOneNode": { "max": 2e-06 },
+        "relativeErrorBOneNode": { "max": 2e-06 },
+        "relativeErrorCOneNode": { "max": 1e-08 },
+        "conservationOneNode": { "max": 1e-13 },
+        "lowestConcentrationOneNode": { "min": -1e-18 },
+        "stepsOneNode": { "max": 2000 },
+        "relativeErrorATwoNodes": { "max": 2e-06 },
+        "relativeErrorBTwoNodes": { "max": 2e-06 },
+        "relativeErrorCTwoNodes": { "max": 1e-08 },
+        "conservationTwoNodes": { "max": 1e-13 },
+        "lowestConcentrationTwoNodes": { "min": -1e-18 },
+        "stepsTwoNodes": { "max": 2000 },
+        "splitDifference": { "max": 1e-06 },
+        "explicitStepRatio": { "min": 100 },
+        "referenceAgreement": { "max": 1e-09 },
+        "testSetAgreement": { "max": 1e-10 }
+    }
+}

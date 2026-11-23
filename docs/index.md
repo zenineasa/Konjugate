@@ -42,6 +42,7 @@ okf_version: "0.2"
 
 * [Model Assistant Guide](aiAssistantGuide.md) - Using the natural-language assistant to propose structured graph operations
 * [Graph Selection & Editing](graphEditing.md) - Canvas navigation, multi-node movement, and clipboard interactions
+* [Choosing a Method](choosingAMethod.md) - When to use each integration method, from the signs a run shows, each with the benchmark behind it; the guide the Run dialog's "?" shows
 * [Result Exploration](resultExploration.md) - Paced playback, parameter interventions, and scenario branching
 * [Causal Inference](causalInference.md) - Structure discovery and parameter tuning from measured time-series data
 * [Extensions Explorer](extensionsExplorer.md) - Discovering, installing, and managing extensions from the registry

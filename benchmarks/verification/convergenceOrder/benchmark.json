@@ -81,14 +81,14 @@
         "pendulumStiffToleranceSlope": { "min": 0.65, "max": 1.15 },
         "pendulumStiffToleranceFactor": { "max": 20 },
         "thermalBdfToleranceSlope": { "min": 0.6, "max": 1.05 },
-        "thermalBdfToleranceFactor": { "max": 400 },
+        "thermalBdfToleranceFactor": { "max": 20 },
         "seriesRlcBdfToleranceSlope": { "min": 0.6, "max": 1.05 },
-        "seriesRlcBdfToleranceFactor": { "max": 400 },
+        "seriesRlcBdfToleranceFactor": { "max": 20 },
         "coupledRlcBdfToleranceSlope": { "min": 0.6, "max": 1.05 },
-        "coupledRlcBdfToleranceFactor": { "max": 400 },
+        "coupledRlcBdfToleranceFactor": { "max": 20 },
         "oscillatorBdfToleranceSlope": { "min": 0.6, "max": 1.05 },
-        "oscillatorBdfToleranceFactor": { "max": 400 },
+        "oscillatorBdfToleranceFactor": { "max": 20 },
         "pendulumBdfToleranceSlope": { "min": 0.6, "max": 1.05 },
-        "pendulumBdfToleranceFactor": { "max": 400 }
+        "pendulumBdfToleranceFactor": { "max": 20 }
     }
 }

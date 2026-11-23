@@ -1782,7 +1782,15 @@ export async function runInteractionTests(driver) {
             solver.value = 'bdf';
             solver.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
-        assert.match(await evaluate(window, `document.querySelector('#runStiffSolverDescription').textContent`), /Keeps the work of solving its equations from step to step/);
+        assert.match(await evaluate(window, `document.querySelector('#runStiffSolverDescription').textContent`), /Factorises its equations less often, keeping them from step to step/);
+        // The solver's "?" opens Choosing a method over the Run dialog, Stiff's signs marked, each with its benchmark; Close goes back.
+        await evaluate(window, `document.querySelector('#runStiffSolverHelp').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#methodGuideDialog').open && document.querySelector('#runLaunchDialog').open`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#methodGuideTitle').textContent`), 'Choosing a method');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#methodGuideSigns .methodGuideHighlight')].map((item) => item.dataset.topic)`), ['stiff', 'stiff']);
+        assert.match(await evaluate(window, `document.querySelector('#methodGuideSigns').textContent`), /Energy grows in an oscillator.*Evidence: Harmonic oscillator ›/s);
+        await evaluate(window, `document.querySelector('#methodGuideClose').click()`);
+        assert.equal(await evaluate(window, `!document.querySelector('#methodGuideDialog').open && document.querySelector('#runLaunchDialog').open`), true);
         await evaluate(window, `document.querySelector('#saveRunConfiguration').click()`);
         assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'bdf' });
         await openRunDialog(window);

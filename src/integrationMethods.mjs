@@ -56,7 +56,7 @@ export const integrationMethods = Object.freeze([
 // and BDF for large models. Each is a method of its own in the file; only Rosenbrock's is the Method list's.
 export const stiffSolvers = Object.freeze([
     Object.freeze({ id: 'rodas4', name: 'Rosenbrock (best for most models)', description: 'Works out the equations afresh at every step: robust, and accurate for its tolerance.' }),
-    Object.freeze({ id: 'bdf', name: 'BDF (for large models, thousands of states)', description: 'Keeps the work of solving its equations from step to step, which pays on a large model. Less accurate for its tolerance, and best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
+    Object.freeze({ id: 'bdf', name: 'BDF (for large models, thousands of states)', description: 'Factorises its equations less often, keeping them from step to step: worth trying on a large model where that work is slow. Close to Rosenbrock\'s accuracy at the same tolerance; best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
 ]);
 
 // How Stiff works out its Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): exactly from the equations, the
@@ -87,6 +87,89 @@ export function bdfSuits(document) {
         || (node.sourceTerms ?? []).some((term) => term.setsValue === true || jumps(term.parameters)))) return false;
     if ((document?.edges ?? []).some((edge) => edge.enabled !== false && jumps(edge.parameters))) return false;
     return true;
+}
+
+// Choosing a method: the short guide the Run dialog's "?" opens (beside Method, the Stiff solver and a node's Integration), and the one
+// source of docs/choosingAMethod.md (methodGuideMarkdown; scripts/writeMethodGuide.mjs writes it, and a test checks it is current). Each
+// sign names what to try and the benchmark that shows it, a path under benchmarks/; a sign's topic is what it is shown first for (the
+// Stiff solver's "?", or a node's Integration).
+export const benchmarkEvidenceUrl = (path) => `https://github.com/zenineasa/Konjugate/tree/master/benchmarks/${path}`;
+export const methodGuide = Object.freeze({
+    title: 'Choosing a method',
+    lead: 'Start with Euler, node by node. Change the method when you see one of these signs.',
+    signs: Object.freeze([
+        Object.freeze({
+            sign: 'Halving the global step changes the results you care about.',
+            advice: 'Use Runge–Kutta 4, or Adaptive to have the steps chosen for you.',
+            evidence: Object.freeze([Object.freeze({ name: 'Convergence order', path: 'verification/convergenceOrder' })])
+        }),
+        Object.freeze({
+            sign: 'Energy grows in an oscillator that should keep it: a spring, a pendulum, an LC circuit.',
+            topic: 'integration',
+            advice: 'On the node\'s Numerics tab, set Integration to Semi-implicit Euler, or Verlet for second order.',
+            evidence: Object.freeze([Object.freeze({ name: 'Harmonic oscillator', path: 'mechanical/harmonicOscillator' }), Object.freeze({ name: 'Pendulum', path: 'mechanical/pendulum' })])
+        }),
+        Object.freeze({
+            sign: 'Results jump or lag at a switch: a PWM, a thermostat, a contact.',
+            advice: 'Use Runge–Kutta 4, Adaptive or Stiff: each finds the instant a condition switches and steps to it.',
+            evidence: Object.freeze([Object.freeze({ name: 'Switched circuits', path: 'electrical/switchedCircuits' }), Object.freeze({ name: 'Bouncing ball', path: 'mechanical/bouncingBall' })])
+        }),
+        Object.freeze({
+            sign: 'Tightly coupled nodes need many substeps, or disagree with the same model built as one node.',
+            advice: 'Use Runge–Kutta 4, Adaptive or Stiff, which step every node together.',
+            evidence: Object.freeze([Object.freeze({ name: 'Graph split', path: 'coupling/graphSplit' })])
+        }),
+        Object.freeze({
+            sign: 'The model check says the model is stiff, or Adaptive takes tiny steps and rejects many.',
+            topic: 'stiff',
+            advice: 'Use Stiff.',
+            evidence: Object.freeze([Object.freeze({ name: 'Robertson', path: 'chemistry/robertson' }), Object.freeze({ name: 'Van der Pol', path: 'oscillators/vanDerPol' }),
+                Object.freeze({ name: 'Prothero–Robinson', path: 'verification/protheroRobinson' })])
+        }),
+        Object.freeze({
+            sign: 'A stiff model with thousands of states is slow under Stiff.',
+            topic: 'stiff',
+            advice: 'Under Stiff, try the BDF solver, which factorises less often. Keep Rosenbrock if the model switches often.',
+            evidence: Object.freeze([Object.freeze({ name: 'Stiff network', path: 'scaling/stiffNetwork' })])
+        })
+    ]),
+    methods: Object.freeze([
+        Object.freeze({ name: 'Euler, node by node', use: 'The default. Each node steps on its own: quick, and fine for a first look. A node\'s Integration can be Explicit, Semi-implicit or Verlet.' }),
+        Object.freeze({ name: 'Semi-implicit Euler and Verlet', use: 'For a node that oscillates: its energy stays bounded instead of growing. Verlet is second order.' }),
+        Object.freeze({ name: 'Runge–Kutta 4', use: 'Smooth models, accurate at a step you choose.' }),
+        Object.freeze({ name: 'Adaptive', use: 'An accurate answer without choosing the step: it keeps the error within a tolerance.' }),
+        Object.freeze({ name: 'Stiff, Rosenbrock', use: 'Models with very fast and very slow parts together. Best for most stiff models.' }),
+        Object.freeze({ name: 'Stiff, BDF', use: 'Large stiff models, thousands of states, that switch rarely: it factorises less often than Rosenbrock, which pays where factorising is slow.' })
+    ])
+});
+
+// The guide as a documentation page (docs/choosingAMethod.md), its evidence linked to the benchmarks beside it.
+export function methodGuideMarkdown() {
+    const evidence = (item) => item.evidence.map((entry) => `[${entry.name}](../benchmarks/${entry.path})`).join(', ');
+    return [
+        '---',
+        'type: Guide',
+        `title: ${methodGuide.title}`,
+        'description: When to use each integration method, from the signs a run shows, with the benchmark behind each. Written from src/integrationMethods.mjs (methodGuide), which the Run dialog\'s "?" shows.',
+        'tags: [integration, methods, help, in-app]',
+        'status: stable',
+        '---',
+        '',
+        `# ${methodGuide.title}`,
+        '',
+        '<!-- Written by scripts/writeMethodGuide.mjs from src/integrationMethods.mjs (methodGuide); edit it there. -->',
+        '',
+        methodGuide.lead,
+        '',
+        '## Signs',
+        '',
+        ...methodGuide.signs.map((item) => `* **${item.sign}** ${item.advice} Evidence: ${evidence(item)}.`),
+        '',
+        '## The methods',
+        '',
+        ...methodGuide.methods.map((item) => `* **${item.name}**: ${item.use}`),
+        ''
+    ].join('\n');
 }
 
 // The method a stiffness finding offers, by its id: "Use Stiff".

@@ -28,6 +28,6 @@
         "rodas4ErrorOrder": { "min": 3.9, "max": 4.1 },
         "rodas4FinestErrorOrder": { "min": 3.9, "max": 4.1 },
         "stiffSplitDifference": { "max": 1 },
-        "bdfSplitDifference": { "max": 5 }
+        "bdfSplitDifference": { "max": 0.1 }
     }
 }

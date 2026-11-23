@@ -61,6 +61,7 @@ export async function evaluate({ engine, config }) {
             const crossover = { factorisations: null, jacobians: null, evaluations: null, time: null };
             const heated = family.jumps ? `heated in jumps every ${family.jumps.switchEvery} s` : '';
             const curve = { sizes: [], rodas: [], bdf: [] };
+            const errorRatios = [];
             for (const { size, run } of family.cases) {
                 const graph = generateGraph('grid', size);
                 const { document, stateIds } = graphDocument(graph, run);
@@ -104,13 +105,14 @@ export async function evaluate({ engine, config }) {
                     ['evaluations', rodas.work.modelEvaluations, bdf.work.modelEvaluations], ['time', rodas.milliseconds, bdf.milliseconds]]) {
                     if (crossover[key] === null && bdfValue < rodasValue) crossover[key] = graph.nodeCount;
                 }
+                errorRatios.push(bdf.errors.relativeError / Math.max(rodas.errors.relativeError, Number.MIN_VALUE));
                 curve.sizes.push(graph.nodeCount);
                 curve.rodas.push(rodas.milliseconds / 1000);
                 curve.bdf.push(bdf.milliseconds / 1000);
                 notes.push(`${heated ? `${heated[0].toUpperCase()}${heated.slice(1)}` : 'Smooth'}, ${graph.nodeCount} nodes over ${run.targetTime} s: Rodas4 ${rodas.work.methodSteps} steps, ${rodas.work.factorisations} factorisations, ${rodas.work.jacobians} Jacobians, ${rodas.work.modelEvaluations} evaluations, error ${rodas.errors.relativeError.toExponential(1)}, ${(rodas.milliseconds / 1000).toFixed(2)} s; BDF ${bdf.work.methodSteps} steps, ${bdf.work.factorisations} factorisations, ${bdf.work.jacobians} Jacobians, ${bdf.work.modelEvaluations} evaluations, error ${bdf.errors.relativeError.toExponential(1)}, ${(bdf.milliseconds / 1000).toFixed(2)} s.`);
             }
             const said = (size) => (size === null ? 'at no size measured' : `from ${size.toLocaleString()} nodes`);
-            notes.push(`Crossover, ${heated || 'smooth'}: BDF takes fewer factorisations ${said(crossover.factorisations)}, fewer Jacobians ${said(crossover.jacobians)}, fewer evaluations ${said(crossover.evaluations)}, and less engine time on this machine ${said(crossover.time)}; its error stays larger than Rodas4's at the same tolerance.`);
+            notes.push(`Crossover, ${heated || 'smooth'}: BDF takes fewer factorisations ${said(crossover.factorisations)}, fewer Jacobians ${said(crossover.jacobians)}, fewer evaluations ${said(crossover.evaluations)}, and less engine time on this machine ${said(crossover.time)}; at the same tolerance its error is ${Math.min(...errorRatios).toFixed(1)} to ${Math.max(...errorRatios).toFixed(1)} times Rodas4's.`);
             plots.push(linePlot({
                 id: `stiffNetwork${family.key[0].toUpperCase()}${family.key.slice(1)}Time`, title: `Thermal grid${heated ? `, ${heated}` : ''}: engine time against size`,
                 subtitle: 'Engine compute time on the machine that ran the benchmark (not checked)', xLabel: 'Nodes', yLabel: 'Seconds', logX: true, logY: true, xTicks: curve.sizes,

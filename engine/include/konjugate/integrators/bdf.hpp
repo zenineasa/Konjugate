@@ -74,6 +74,22 @@ struct BdfTolerance {
     std::vector<double> absolute;
 };
 
+// The tolerance BDF works to, for the one asked. BDF's estimate is of the error of the solution it keeps, as in SciPy's BDF and ode15s,
+// so each step spends about the whole tolerance; Rodas4 estimates the error of its third-order companion and keeps the fourth-order
+// solution, whose error is far smaller. At the same tolerance BDF's answer was therefore 10 to 200 times further out than Rodas4's
+// (docs/proposals/integrators.md, BDF, Error control). Working to 0.125 r^1.1 for a relative tolerance r, and the absolute tolerances
+// scaled by the same ratio, brings it within a few times Rodas4's error at every tolerance from 1e-3 to 1e-9 on Robertson, Van der Pol at
+// mu = 1000, HIRES, a stiff thermal grid and a spread of decays: a thirtieth of the tolerance at 1e-6. Never below 100 epsilon, where
+// the differences in the table are rounding, nor above the tolerance asked.
+inline BdfTolerance bdfWorkingTolerance(const BdfTolerance& asked) {
+    const double floor = 100.0 * std::numeric_limits<double>::epsilon();
+    const double relative = std::min(asked.relative, std::max(floor, 0.125 * std::pow(asked.relative, 1.1)));
+    const double ratio = relative / asked.relative;
+    BdfTolerance working{relative, asked.absolute};
+    for (auto& absolute : working.absolute) absolute *= ratio;
+    return working;
+}
+
 namespace bdfDetail {
 
 inline constexpr std::size_t newtonIterations = 4;
@@ -158,11 +174,12 @@ const std::vector<double>* latchesOf(const Events&, long) { return nullptr; }
 // where the condition flips; the right-hand side jumps there, so the derivative and the Jacobian are worked out again and the table starts
 // again at order 1, as after a schedule's corner.
 template <typename Events, typename Evaluate, typename Sample>
-void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<double>& states, StiffSystem& system, const BdfTolerance& tolerance,
+void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<double>& states, StiffSystem& system, const BdfTolerance& asked,
                              const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, bool restart, BdfHistory& history,
                              BdfStatistics& statistics, Events& events, Evaluate&& evaluate, Sample&& sample) {
     using namespace bdfDetail;
     static const BdfCoefficients coefficients;
+    const BdfTolerance tolerance = bdfWorkingTolerance(asked);
     constexpr std::size_t maximumOrder = BdfCoefficients::maximumOrder;
     const std::size_t count = states.size();
     const std::size_t n = system.integratedStates.size();

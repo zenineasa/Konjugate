@@ -142,7 +142,13 @@ export const startTutorialInPage = (id) => tutorialStarters.forEach((start) => s
 
 export const applicationInfo = {
     get: async () => ({ version }),
-    openWelcome: async () => { tourStarters.forEach((start) => start()); }
+    openWelcome: async () => { tourStarters.forEach((start) => start()); },
+    // As the desktop's: Konjugate's own repository pages only, in a new tab.
+    openExternal: async (url) => {
+        if (typeof url !== 'string' || !url.startsWith('https://github.com/zenineasa/Konjugate/')) return false;
+        window.open(url, '_blank', 'noopener');
+        return true;
+    }
 };
 
 // The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md). In the browser they are kept in its own storage and

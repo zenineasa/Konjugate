@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld('appUpdate', {
 contextBridge.exposeInMainWorld('applicationInfo', {
     get: () => ipcRenderer.invoke('applicationInfo'),
     openWelcome: () => ipcRenderer.invoke('applicationOpenWelcome'),
+    // Konjugate's own pages only (main's allowedExternalLinkPrefixes), such as a benchmark the method guide cites.
+    openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),
     restart: () => ipcRenderer.invoke('applicationRestart')
 });
 

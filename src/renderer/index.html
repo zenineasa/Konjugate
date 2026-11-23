@@ -706,10 +706,10 @@
             <section class="executionConfiguration">
                 <span class="configurationSectionTitle">Numerics</span>
                 <!-- The integration method (docs/proposals/integrators.md); names and descriptions from src/integrationMethods.mjs. -->
-                <label><span>Method</span><select id="runMethod"></select></label>
+                <label><span>Method <button id="runMethodHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="runMethod"></select></label>
                 <p id="runMethodDescription" class="runConfigurationScope"></p>
                 <!-- Stiff's solver (docs/proposals/integrators.md, BDF): Rosenbrock, the default, or BDF for large models. -->
-                <label id="runStiffSolverField" hidden><span>Solver</span><select id="runStiffSolver"></select></label>
+                <label id="runStiffSolverField" hidden><span>Solver <button id="runStiffSolverHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="runStiffSolver"></select></label>
                 <p id="runStiffSolverDescription" class="runConfigurationScope" hidden></p>
                 <!-- Stiff's Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): exact from the equations, the default. -->
                 <label id="runStiffJacobianField" hidden><span>Jacobian</span><select id="runStiffJacobian"></select></label>
@@ -740,6 +740,18 @@
             </details>
             <div class="passwordError" id="runLaunchError" role="alert"></div>
             <footer><button id="runLaunchCancel" type="button">Cancel</button><button id="saveRunConfiguration" type="button">Save settings</button><button id="startRunPaused" type="submit" hidden title="Start the run and hold it before its first step, so the live controls can be set before anything moves. Shown when online simulation is on.">Start paused</button><button id="startRun" class="doneButton" type="submit">Start</button></footer>
+        </form>
+    </dialog>
+    <!-- Choosing a method: the guide in src/integrationMethods.mjs (methodGuide), also docs/choosingAMethod.md. -->
+    <dialog id="methodGuideDialog" class="passwordDialog methodGuideDialog" aria-labelledby="methodGuideTitle">
+        <form method="dialog">
+            <span class="contextKicker">Numerics</span>
+            <strong id="methodGuideTitle"></strong>
+            <p id="methodGuideLead"></p>
+            <ul id="methodGuideSigns" class="methodGuideList"></ul>
+            <span class="configurationSectionTitle">The methods</span>
+            <ul id="methodGuideMethods" class="methodGuideList methodGuideMethods"></ul>
+            <footer><button id="methodGuideClose" class="doneButton" type="submit">Close</button></footer>
         </form>
     </dialog>
 
@@ -1011,7 +1023,7 @@
                     <!-- Under a whole-model method (docs/proposals/integrators.md) a node's substeps and integration are not used, unless it is stepped on its own. -->
                     <p id="nodeMethodNote" class="builderHint" hidden>This model is run with <span id="nodeMethodName">Runge–Kutta 4</span> (<button id="nodeMethodRunSettings" class="helpFeedbackLink" type="button">Run settings ›</button>); substeps and the node's integration don't apply, unless it is a program of its own, which is stepped on its own.</p>
                     <label class="editorField"><span>Substeps per global step</span><input id="editNodeSubsteps" type="number" min="1" max="10000" step="1"></label>
-                    <label class="editorField"><span>Integration</span><select id="editNodeIntegration">
+                    <label class="editorField"><span>Integration <button id="nodeIntegrationHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="editNodeIntegration">
                         <option value="explicit">Explicit Euler</option>
                         <option value="semiImplicit">Semi-implicit Euler (states in order)</option>
                         <option value="verlet">Verlet, second order (states in two parts)</option>

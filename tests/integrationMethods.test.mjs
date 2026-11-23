@@ -122,3 +122,22 @@ test('Stiff\'s Jacobian is written only when it is not the default, and only for
     assert.deepEqual(withIntegrationMethod({ ...configuration, method: 'rodas4', jacobian: 'finiteDifference' }, 'rungeKutta4', 1), { ...configuration, method: 'rungeKutta4' });
     assert.deepEqual(withIntegrationMethod({ ...configuration, jacobian: 'finiteDifference' }, 'rodas4', 1), { ...configuration, method: 'rodas4', jacobian: 'finiteDifference' });
 });
+
+test('the method guide is one source: docs/choosingAMethod.md is written from it, and each sign cites a benchmark that exists', async () => {
+    const { readFile, access } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const { methodGuide, methodGuideMarkdown, benchmarkEvidenceUrl } = await import('../src/integrationMethods.mjs');
+    const root = join(import.meta.dirname, '..');
+    assert.equal(await readFile(join(root, 'docs', 'choosingAMethod.md'), 'utf8'), methodGuideMarkdown(), 'Run node scripts/writeMethodGuide.mjs to bring docs/choosingAMethod.md up to date.');
+    for (const item of methodGuide.signs) {
+        assert.ok(item.evidence.length > 0, `"${item.sign}" cites its evidence.`);
+        assert.ok([undefined, 'stiff', 'integration'].includes(item.topic));
+        for (const benchmark of item.evidence) {
+            await access(join(root, 'benchmarks', benchmark.path, 'problem.mjs'));
+            assert.ok(benchmarkEvidenceUrl(benchmark.path).startsWith('https://github.com/zenineasa/Konjugate/tree/'));
+        }
+    }
+    // The guide covers every method the Run dialog offers, and both of Stiff's solvers.
+    const named = methodGuide.methods.map((item) => item.name).join(' ');
+    for (const name of ['Euler, node by node', 'Semi-implicit', 'Verlet', 'Runge–Kutta 4', 'Adaptive', 'Rosenbrock', 'BDF']) assert.ok(named.includes(name), `The guide names ${name}.`);
+});

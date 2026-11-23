@@ -196,6 +196,14 @@ input, select, textarea { user-select: text; }
 .passwordDialog footer button { height: 28px; padding: 0 10px; color: #82949f; background: transparent; border: 1px solid #2c3e48; border-radius: 4px; font-size: 8px; }
 .passwordDialog .doneButton:disabled { color: #53646d !important; background: #1a282f !important; border-color: #263740 !important; cursor: default; opacity: .7; }
 .runConfigurationDialog { width: 360px; }
+.inlineHelpButton { width: 14px; height: 14px; margin-left: 4px; font-size: 8px; line-height: 12px; vertical-align: middle; }
+.methodGuideDialog { width: min(440px, calc(100% - 16px)); }
+.methodGuideList { margin: 6px 0 12px; padding-left: 16px; color: #9db0b9; font-size: 9px; line-height: 1.55; }
+.methodGuideList li { margin-bottom: 6px; }
+.methodGuideList li strong { display: inline; margin: 0; color: #d8e4e9; font-size: 9px; }
+.methodGuideList li.methodGuideHighlight { color: #c8dde3; }
+.methodGuideList li.methodGuideHighlight::marker { color: var(--accent); }
+.methodGuideEvidence { color: #667b86; }
 .shapeLibraryDialog { width: 760px; }
 .shapeLibraryDialog #shapeLibrarySearch { box-sizing: border-box; width: 100%; height: 30px; padding: 0 9px; color: #aab9c1; background: #0a151d; border: 1px solid #2b3d48; border-radius: 4px; outline: 0; font-size: 9px; }
 .shapeLibraryDomains { display: flex; flex-wrap: wrap; gap: 5px; margin: 10px 0; }

@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { bdfSuits, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { bdfSuits, benchmarkEvidenceUrl, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodGuide, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -8787,6 +8787,46 @@ function updateRunMethodFields() {
 for (const solver of stiffSolvers) $('#runStiffSolver').append(new Option(solver.name, solver.id));
 for (const jacobian of stiffJacobians) $('#runStiffJacobian').append(new Option(jacobian.name, jacobian.id));
 $('#runStiffJacobian').addEventListener('change', updateRunMethodFields);
+
+// Choosing a method (src/integrationMethods.mjs, methodGuide): the "?" beside Method, the Stiff solver and a node's Integration open it,
+// the last two with their own signs marked; each sign's evidence opens its benchmark.
+function openMethodGuide(topic = null) {
+    $('#methodGuideTitle').textContent = methodGuide.title;
+    $('#methodGuideLead').textContent = methodGuide.lead;
+    $('#methodGuideSigns').replaceChildren(...methodGuide.signs.map((item) => {
+        const entry = document.createElement('li');
+        entry.dataset.topic = item.topic ?? '';
+        entry.classList.toggle('methodGuideHighlight', topic !== null && item.topic === topic);
+        const sign = document.createElement('strong');
+        sign.textContent = item.sign;
+        const evidence = document.createElement('span');
+        evidence.className = 'methodGuideEvidence';
+        evidence.append(' Evidence: ', ...item.evidence.flatMap((benchmark, index) => {
+            const link = document.createElement('button');
+            link.type = 'button';
+            link.className = 'helpFeedbackLink';
+            link.textContent = `${benchmark.name} ›`;
+            link.title = `The ${benchmark.name} benchmark, on GitHub`;
+            link.addEventListener('click', () => window.applicationInfo.openExternal?.(benchmarkEvidenceUrl(benchmark.path)));
+            return index ? [', ', link] : [link];
+        }));
+        entry.append(sign, ` ${item.advice}`, evidence);
+        return entry;
+    }));
+    $('#methodGuideMethods').replaceChildren(...methodGuide.methods.map((item) => {
+        const entry = document.createElement('li');
+        const name = document.createElement('strong');
+        name.textContent = item.name;
+        entry.append(name, `: ${item.use}`);
+        return entry;
+    }));
+    const dialog = $('#methodGuideDialog');
+    if (!dialog.open) dialog.showModal();
+    dialog.querySelector('.methodGuideHighlight')?.scrollIntoView({ block: 'nearest' });
+}
+$('#runMethodHelp').addEventListener('click', () => openMethodGuide());
+$('#runStiffSolverHelp').addEventListener('click', () => openMethodGuide('stiff'));
+$('#nodeIntegrationHelp').addEventListener('click', () => openMethodGuide('integration'));
 $('#runMethod').addEventListener('change', updateRunMethodFields);
 $('#runStiffSolver').addEventListener('change', updateRunMethodFields);
 $('#runStepsPerGlobalStep').addEventListener('input', updateRunMethodFields);

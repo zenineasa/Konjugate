@@ -11,6 +11,7 @@
 #include "providerRuntime.hpp"
 #include "taskExecutor.hpp"
 #include "wholeModelIntegration.hpp"
+#include "konjugate/integrators/dormandPrince54.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
 #include <chrono>
@@ -59,7 +60,8 @@ struct Sample { double time; Values states; Values parts; };
 // Each entry pairs a computational-node-provider-owning node's id with that provider instance's
 // opaque checkpoint() payload. Empty for a plan with no computational-node providers.
 using ProviderCheckpointStates = std::vector<std::pair<EntityId, std::vector<std::byte>>>;
-struct Checkpoint { std::string uuid; double time; Values states; ProviderCheckpointStates providerStates; };
+// `solverKind` is the method that made it, empty for this run's own; `solverState` its hidden state (solver_state), empty for none.
+struct Checkpoint { std::string uuid; double time; Values states; ProviderCheckpointStates providerStates; std::string solverState; std::string solverKind; };
 enum class PacingMode { fastest, realTime, limitedRatio };
 enum class RunState { running, paused, stopped };
 struct Pacing { PacingMode mode = PacingMode::fastest; double ratio = 1; };
@@ -129,6 +131,12 @@ std::vector<std::byte> decodeBase64Bytes(const std::string& encoded) {
     std::transform(decoded.begin(), decoded.end(), bytes.begin(),
         [](unsigned char byte) { return static_cast<std::byte>(byte); });
     return bytes;
+}
+
+// The same, for a method's solver_state, which the engine keeps as a byte string.
+std::string decodeBase64Text(const std::string& encoded) {
+    const auto bytes = decodeBase64Bytes(encoded);
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 PacingMode pacingModeFromString(const std::string& value) {
@@ -937,6 +945,22 @@ private:
     // values for the step in progress, one list per node.
     WholeModelPlan wholeModel;
     std::vector<std::vector<EvaluatedContribution>> heldValues;
+    // Dormand–Prince 5(4): every state's absolute tolerance, the controller's memory (kept in checkpoints), the stiffness test and the
+    // work done, for the result's summary.
+    std::vector<double> absoluteToleranceByState;
+    integrators::DormandPrince54Controller adaptiveController;
+    integrators::DormandPrince54Stiffness adaptiveStiffness;
+    integrators::DormandPrince54Statistics adaptiveStatistics;
+    bool adaptiveStiffnessReported = false;
+    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive, nothing under every other method.
+    std::string solverState() const {
+        return isAdaptive(integration) ? encodeAdaptiveSolverState(adaptiveController.proposedStep, adaptiveController.previousError) : std::string();
+    }
+    // The controller started afresh: its first step chosen again by the initial step algorithm.
+    void resetSolverState(const std::string& record = {}) {
+        adaptiveController = {};
+        if (isAdaptive(integration)) decodeAdaptiveSolverState(record, adaptiveController.proposedStep, adaptiveController.previousError);
+    }
     std::chrono::steady_clock::time_point planningStartedAt;
     std::shared_ptr<const ExecutionPlan> plan;
     const ExecutionPlan& executionPlan;
@@ -1049,12 +1073,16 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         wholeModel = buildWholeModelPlan(executionPlan, providerRuntime.get());
         heldValues.resize(executionPlan.nodes.size());
         // A node's work a global step is its work an evaluation times the method's evaluations a step, not its substeps.
-        const auto evaluations = integrationMethodStages(integration.method) * integration.stepsPerGlobalStep;
+        // Adaptive's steps a global step are not known before the run: one is assumed.
+        const auto evaluations = integrationMethodStages(integration.method) * std::max<std::size_t>(1, integration.stepsPerGlobalStep);
         executionSettings.estimatedOperationsPerSynchronization = 0;
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             const auto& node = executionPlan.nodes[index];
             executionSettings.estimatedOperationsPerSynchronization += node.estimatedOperationsPerSubstep *
                 (wholeModel.nodes[index].stepped ? node.substeps : evaluations);
+        }
+        if (integration.method == IntegrationMethod::dormandPrince54) {
+            absoluteToleranceByState = absoluteTolerances(document, executionPlan, integration.absoluteTolerance);
         }
     }
     const auto requestedPartitions = configuration.get<std::size_t>("execution.partitionCount", executionSettings.workerThreads);
@@ -1157,7 +1185,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     updateStates(startTime, false, globalTimeStep);
     partTable = recordedParts(executionPlan);
     samples = {{startTime, states, partsAt(startTime)}};
-    checkpoints = {{createUuid(), startTime, states, captureProviderStates()}};
+    checkpoints = {{createUuid(), startTime, states, captureProviderStates(), solverState()}};
     // A run extended from its last checkpoint ("Extend simulation"): the run it continues, up to that checkpoint, comes first in
     // this run's result, so the result file holds the whole run and not only the part since the restart -- what is exported,
     // saved, forked from and read back is then all of it. The app passes a copy of that run's result file.
@@ -1279,6 +1307,8 @@ void Simulation::prependContinuedResult(const std::filesystem::path& path) {
         earlier.time = checkpoint.time();
         earlier.states = toPlanOrder(checkpoint.values());
         earlier.providerStates = std::move(providerStates);
+        earlier.solverKind = checkpoint.solver_kind();
+        earlier.solverState = checkpoint.solver_state();
         earlierCheckpoints.push_back(std::move(earlier));
     }
     for (const auto& intervention : stored.header.interventions()) {
@@ -1300,6 +1330,11 @@ void Simulation::restoreStartCheckpoint(const boost::property_tree::ptree& check
         states[stateIndex->second] = stateItem.second.get<double>("value");
     }
     if (restored.size() != states.size()) throw std::runtime_error("The restart checkpoint is missing model states.");
+    // The controller's memory, when the checkpoint was made by the method this run uses (its solver_state, as base64): a run continued
+    // from it takes the steps the uninterrupted run took. Made by another method, or with none, the controller starts afresh.
+    if (checkpoint.get<std::string>("solver.kind", "") == solverKindName(integration.method)) {
+        resetSolverState(decodeBase64Text(checkpoint.get<std::string>("solver.state", "")));
+    }
 
     // Opaque provider-owned state (e.g. a controller's integral term) has no analog in the
     // ordinary numeric state vector restored above, so it must be restored explicitly and
@@ -1375,7 +1410,7 @@ void Simulation::captureBoundary() {
         appendStreamRecord("sample", currentTime, states);
     }
     if (currentTime > checkpoints.back().time + 1e-12) {
-        checkpoints.push_back({createUuid(), currentTime, states, captureProviderStates()});
+        checkpoints.push_back({createUuid(), currentTime, states, captureProviderStates(), solverState()});
         appendStreamRecord("checkpoint", currentTime, states, checkpoints.back().uuid);
     }
 }
@@ -1395,8 +1430,26 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
     // A whole-model method, with its settings, the nodes it stepped on their own and the programs it held (docs/proposals/
     // integrators.md): written only when the run used one, so a node-by-node result says what it always said.
     if (integration.method != IntegrationMethod::nodeByNode) {
-        json << ",\"integration\":{\"method\":\"" << integrationMethodName(integration.method) << "\",\"stepsPerGlobalStep\":"
-             << integration.stepsPerGlobalStep << ",\"steppedNodeIds\":[";
+        json << ",\"integration\":{\"method\":\"" << integrationMethodName(integration.method) << '"';
+        if (integration.method != IntegrationMethod::dormandPrince54 || integration.stepsPerGlobalStep) {
+            json << ",\"stepsPerGlobalStep\":" << integration.stepsPerGlobalStep;
+        }
+        // Dormand–Prince: its tolerances (under error control) and the work it did -- the steps it took and rejected, its evaluations
+        // of the model, its smallest and largest step -- and when its stiffness test first fired.
+        if (integration.method == IntegrationMethod::dormandPrince54) {
+            if (isAdaptive(integration)) {
+                json << ",\"tolerance\":{\"relative\":" << integration.relativeTolerance << ",\"absolute\":"
+                     << integration.absoluteTolerance << '}';
+            }
+            json << ",\"steps\":" << adaptiveStatistics.acceptedSteps << ",\"rejectedSteps\":" << adaptiveStatistics.rejectedSteps
+                 << ",\"evaluations\":" << adaptiveStatistics.evaluations;
+            if (adaptiveStatistics.acceptedSteps) {
+                json << ",\"smallestStep\":" << adaptiveStatistics.smallestStep << ",\"largestStep\":"
+                     << adaptiveStatistics.largestStep;
+            }
+            if (!std::isnan(adaptiveStiffness.detectedAt)) json << ",\"stiffnessDetectedAt\":" << adaptiveStiffness.detectedAt;
+        }
+        json << ",\"steppedNodeIds\":[";
         for (std::size_t index = 0; index < wholeModel.steppedNodes.size(); ++index) {
             json << (index ? "," : "") << executionPlan.nodes[wholeModel.steppedNodes[index]].nodeId;
         }
@@ -1542,10 +1595,11 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             auto* encoded = result.add_checkpoints();
             encoded->set_uuid(checkpoint.uuid);
             encoded->set_time(checkpoint.time);
-            // The method that made it. Runge–Kutta 4 has no hidden state, so solver_state stays empty: restarting from the
-            // checkpoint's states with the same method continues to the bit.
-            encoded->set_solver_kind(std::string(solverKindName(integration.method)));
+            // The method that made it, and its hidden state: none for Euler and Runge–Kutta 4, the controller's memory for Adaptive,
+            // so a run continued from it with the same method continues to the bit. A continued run's earlier checkpoints keep theirs.
+            encoded->set_solver_kind(checkpoint.solverKind.empty() ? std::string(solverKindName(integration.method)) : checkpoint.solverKind);
             encoded->set_solver_version(1);
+            if (!checkpoint.solverState.empty()) encoded->set_solver_state(checkpoint.solverState);
             for (const auto stateId : stateIds) {
                 encoded->add_values(checkpoint.states.at(executionPlan.stateIndexes.at(stateId)));
             }
@@ -1699,11 +1753,13 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     }
     auto reached = snapshot;
     const auto steps = integration.stepsPerGlobalStep;
-    const auto internalStep = synchronizationStep / static_cast<double>(steps);
-    StageRequest request{&wholeModel, &heldValues, 0, internalStep, false, synchronizationStep};
-    const auto evaluate = [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+    const auto internalStep = synchronizationStep / static_cast<double>(std::max<std::size_t>(1, steps));
+    // Programs evaluated at stages are given the method's step: Runge–Kutta 4's, or under Dormand–Prince the global step, its largest.
+    StageRequest request{&wholeModel, &heldValues, 0, integration.method == IntegrationMethod::rungeKutta4 ? internalStep : synchronizationStep,
+        false, synchronizationStep};
+    const auto evaluateAt = [&](bool atStart, double time, const Values& stageStates, Values& derivatives) {
         request.stageTime = time;
-        request.evaluateHeld = step == 0 && stage == 0;
+        request.evaluateHeld = atStart;
         const auto results = stepExecutor->evaluateStage(stageStates, runControl, request, providerRuntime.get());
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             const auto& wholeNode = wholeModel.nodes[index];
@@ -1716,7 +1772,41 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
             metrics.computeNanoseconds += results[index].computeNanoseconds;
         }
     };
-    integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, evaluate);
+    // The steps taken inside this global step, for each node's substep count.
+    std::size_t takenSteps = steps;
+    if (integration.method == IntegrationMethod::dormandPrince54) {
+        // Every step lands on the global step's end and on every corner of a schedule within it; the controller's memory carries
+        // from one global step to the next (and into checkpoints). The held programs are evaluated at the first evaluation, the
+        // global step's start.
+        const auto breakpoints = isAdaptive(integration)
+            ? scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime, elapsed) : std::vector<double>{};
+        const auto acceptedBefore = adaptiveStatistics.acceptedSteps;
+        integrators::DormandPrince54Tolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
+        // Samples stay on global steps, where Updates are set too: the dense output is not used for them (it is kept for event
+        // location), so no sample shows a Rate state between global steps beside an Update still at its value from the step's start.
+        integrators::dormandPrince54GlobalStep(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+            breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics,
+            [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
+                evaluateAt(evaluation == 0, time, stageStates, derivatives);
+            },
+            [](double, const Values&) {});
+        takenSteps = adaptiveStatistics.acceptedSteps - acceptedBefore;
+        // Hairer's stiffness test said so: once a run, as a finding about the whole model, with what to do about it.
+        if (!adaptiveStiffnessReported && !std::isnan(adaptiveStiffness.detectedAt)) {
+            adaptiveStiffnessReported = true;
+            DuringRunStabilityFinding finding;
+            finding.code = "adaptiveStepsLimitedByStiffness";
+            finding.globalTime = adaptiveStiffness.detectedAt;
+            finding.message = "This model looks stiff: Adaptive is taking steps limited by stability, not accuracy -- many small steps even "
+                "where its fastest parts have settled, which a looser tolerance will not make fewer.";
+            stabilityFindings.push_back(std::move(finding));
+        }
+    } else {
+        integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated,
+            [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+                evaluateAt(step == 0 && stage == 0, time, stageStates, derivatives);
+            });
+    }
     for (std::size_t position = 0; position < wholeModel.steppedNodes.size(); ++position) {
         const auto index = wholeModel.steppedNodes[position];
         const auto& node = executionPlan.nodes[index];
@@ -1730,7 +1820,7 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     }
     for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
         ++nodeMetrics[index].invocations;
-        if (!wholeModel.nodes[index].stepped) nodeMetrics[index].executedSubsteps += steps;
+        if (!wholeModel.nodes[index].stepped) nodeMetrics[index].executedSubsteps += takenSteps;
     }
     const auto synchronizationElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
         std::chrono::steady_clock::now() - synchronizationStartedAt).count();
@@ -1785,7 +1875,7 @@ void Simulation::recordStepOutput(std::size_t step, double elapsed) {
     // only the first and last checkpoints existed for an uninterrupted run, so "Fork here"
     // at an arbitrary scrubbed time silently snapped to the nearest of just those two.
     if (elapsed > checkpoints.back().time + 1e-12) {
-        checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates()});
+        checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates(), solverState()});
         appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
     }
     while (nextOutputTime <= elapsed + 1e-12) nextOutputTime += outputInterval;
@@ -1903,7 +1993,7 @@ std::uint32_t Simulation::advanceTo(double time, bool takeCheckpoints) {
             if (batch->times_size() >= 4096) flush();
         }
         if (const auto key = takeCheckpoints ? checkpointKey(elapsed) : -1; key >= 0) {
-            sessionCheckpoints[key] = Checkpoint{createUuid(), elapsed, states, captureProviderStates()};
+            sessionCheckpoints[key] = Checkpoint{createUuid(), elapsed, states, captureProviderStates(), solverState()};
             ++taken;
         }
     }
@@ -1935,6 +2025,8 @@ const ProviderCheckpointStates& Simulation::restoreCheckpoint(const protocol::Re
     states = checkpoint.states;
     restoreProviderStates(checkpoint.providerStates);
     for (const auto& [index, value] : overrides) states[index] = value;
+    // Back at a checkpoint as it was, the controller carries on as it did; with states replaced it starts afresh (Hairer's initial step).
+    resetSolverState(overrides.empty() ? checkpoint.solverState : std::string());
     currentTime = checkpoint.time;
     baseTime = checkpoint.time;
     stepsSinceBase = 0;
@@ -1960,6 +2052,7 @@ ProviderCheckpointStates Simulation::restoreState(const protocol::RestoreState& 
     const auto& stateIds = executionPlan.stateIds;
     for (std::size_t index = 0; index < stateIds.size(); ++index) states[executionPlan.stateIndexes.at(stateIds[index])] = command.values(static_cast<int>(index));
     restoreProviderStates(providerStates);
+    resetSolverState();
     currentTime = command.time();
     baseTime = command.time();
     stepsSinceBase = 0;

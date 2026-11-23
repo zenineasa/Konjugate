@@ -562,6 +562,34 @@ test('under Runge–Kutta 4 a node\'s integration does not apply, so a semi-impl
     semi.runConfigurations[0].method = 'rungeKutta4';
     assert.match(generateStandaloneProgram(semi, 'cpp'), /rungeKutta4GlobalStep/);
     const unknown = singleNodeSourceTermModel();
-    unknown.runConfigurations[0].method = 'dormandPrince54';
-    assert.throws(() => generateStandaloneProgram(unknown, 'python'), /method “dormandPrince54” is not one this version of Konjugate can export/);
+    unknown.runConfigurations[0].method = 'rodas4';
+    assert.throws(() => generateStandaloneProgram(unknown, 'python'), /method “rodas4” is not one this version of Konjugate can export/);
+});
+
+// Adaptive (docs/proposals/integrators.md): the engine's own Dormand–Prince header, its tolerances, a state's own absolute one, and
+// fixed steps when the run configuration turns the error control off.
+test('the C++ export pastes the engine\'s own Dormand–Prince 5(4) header, byte for byte, with the run\'s tolerances', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { dormandPrince54Cpp } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/dormandPrince54.hpp', import.meta.url), 'utf8');
+    assert.equal(dormandPrince54Cpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/dormandPrince54.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'dormandPrince54';
+    document.runConfigurations[0].tolerance = { relative: 1e-8 };
+    document.nodes[0].states[0].numerics = { absoluteTolerance: 0.001 };
+    const source = generateStandaloneProgram(document, 'cpp');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '')), 'The header must be pasted in, less its #pragma once.');
+    assert.match(source, /Reproduces one Adaptive run/);
+    assert.match(source, /DormandPrince54Tolerance tolerance\{ 1e-8, \{ 0\.001 \} \}/);
+    assert.match(source, /constexpr std::size_t fixedSteps = 0;/);
+    assert.match(source, /dormandPrince54GlobalStep\(currentTime, endTime, globalState, integrated, errorGroups, tolerance,/);
+    assert.doesNotMatch(source, /rungeKutta4GlobalStep/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /def dormand_prince_54_global_step\(/);
+    assert.match(python, /relative_tolerance = 1e-8/);
+    assert.match(python, /absolute_tolerance = \[0\.001\]/);
+    document.runConfigurations[0].stepsPerGlobalStep = 4;
+    assert.match(generateStandaloneProgram(document, 'cpp'), /constexpr std::size_t fixedSteps = 4;/);
+    assert.match(generateStandaloneProgram(document, 'python'), /fixed_steps = 4/);
 });

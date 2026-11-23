@@ -20,24 +20,49 @@
 
 namespace konjugate {
 
-enum class IntegrationMethod { nodeByNode, rungeKutta4 };
+enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54 };
 
 struct IntegrationSettings {
     IntegrationMethod method = IntegrationMethod::nodeByNode;
-    // Runge–Kutta 4 only: how many steps of the method make one global step.
+    // Runge–Kutta 4: how many steps of the method make one global step. Dormand–Prince 5(4): absent (0 here), the steps are chosen
+    // by the error control; set, that many equal steps with the error control off, for checking the method's order.
     std::size_t stepsPerGlobalStep = 1;
+    // Dormand–Prince 5(4): the run's tolerances (`tolerance.relative` and `tolerance.absolute`, absent meaning 1e-6 and 1e-9); a state
+    // may set its own absolute tolerance (absoluteTolerances).
+    double relativeTolerance = 1e-6;
+    double absoluteTolerance = 1e-9;
 };
 
-// The run configuration's `method` (absent: node by node) and `stepsPerGlobalStep` (absent: 1), refused by name when the method
-// is one this engine does not know, so a method added later is never silently run as another.
+// The run configuration's `method` (absent: node by node), `stepsPerGlobalStep` (absent: 1) and `tolerance`, refused by name when the
+// method is one this engine does not know, so a method added later is never silently run as another.
 IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptree& configuration);
 
-// The name a run configuration and a result give the method: nodeByNode or rungeKutta4.
+// Whether the method chooses its own steps (Dormand–Prince 5(4) with its error control on).
+bool isAdaptive(const IntegrationSettings& settings) noexcept;
+
+// The name a run configuration and a result give the method: nodeByNode, rungeKutta4 or dormandPrince54.
 std::string_view integrationMethodName(IntegrationMethod method) noexcept;
-// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit nodes included) or rungeKutta4.
+// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit nodes included), rungeKutta4 or dormandPrince54.
 std::string_view solverKindName(IntegrationMethod method) noexcept;
-// The method's number of stages a step.
+// The method's number of new evaluations a step (Dormand–Prince's seventh stage is the next step's first).
 std::size_t integrationMethodStages(IntegrationMethod method) noexcept;
+
+// Every state's absolute tolerance, in the plan's state order: a state's own `numerics.absoluteTolerance` where it sets one, and the
+// run's otherwise. Refused, naming the state, when one is not a finite positive number.
+std::vector<double> absoluteTolerances(const boost::property_tree::ptree& document, const ExecutionPlan& plan, double runAbsoluteTolerance);
+
+// The times strictly between `from` and `to` at which a schedule a stage can read jumps or turns a corner (docs/proposals/
+// integrators.md, Interventions, live control and pacing): a step's, ramp's or pulse's start and end, a piecewise schedule's samples,
+// and a square, triangle, sawtooth or noise waveform's corners; from the recorded interventions and input streams in `active` and
+// every shared parameter's stored schedule the plan reads. Sorted, with times closer together than rounding merged, and none
+// within rounding of `from` or `to`. An adaptive method lands a step on each.
+std::vector<double> scheduleBreakpoints(const ExecutionPlan& plan, const std::vector<ParameterSchedule>& active, double from, double to);
+
+// Dormand–Prince 5(4)'s hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next and
+// the previous step's error. Empty (the controller starts afresh) when `proposedStep` is not positive.
+std::string encodeAdaptiveSolverState(double proposedStep, double previousError);
+// The record read back; false (and nothing changed) when it is empty or not a record this engine wrote.
+bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, double& previousError);
 
 // The project document's `requires`: features a model needs that change its numbers, each named. An engine refuses, by name, any
 // it does not know, rather than running the model as if the feature were not there. Absent from every document that needs none.
@@ -62,6 +87,9 @@ struct HeldTerm {
 
 struct WholeModelPlan {
     std::vector<WholeModelNode> nodes;
+    // The integrated states node by node, in node order and each node's in its order: the order an adaptive method sums its error
+    // norm in, so every backend makes the same step-size decisions (docs/proposals/integrators.md, Determinism).
+    std::vector<std::vector<std::size_t>> errorGroups;
     // Per state of the plan: whether the method integrates it. Every other state holds its value through the stages.
     std::vector<unsigned char> integrated;
     // The plan's indexes of the stepped nodes, in node order.

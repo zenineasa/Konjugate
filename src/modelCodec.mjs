@@ -23,7 +23,7 @@ const nodeDocumentKeys = new Set([
     'id', 'name', 'shortName', 'type', 'description', 'subsystemId', 'enabled', 'numerics', 'position', 'rotation', 'scale',
     'states', 'sourceTerms', 'implementation', 'appearance', 'updates', 'updatesLimit'
 ]);
-const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning', 'kind']);
+const stateDocumentKeys = new Set(['id', 'name', 'symbol', 'initialValue', 'unit', 'tuning', 'kind', 'numerics']);
 const relationshipDocumentKeys = new Set([
     'id', 'groupId', 'name', 'description', 'source', 'target', 'directionality', 'enabled', 'equation', 'equationModel',
     'implementation', 'parameters', 'appearance'
@@ -84,6 +84,8 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
             ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
             // Rate or Update, when the file says it.
             ...(state.kind !== undefined ? { kind: state.kind } : {}),
+            // Its own numerics (an absolute tolerance for the adaptive method), when the file says any.
+            ...(state.numerics !== undefined ? { numerics: structuredClone(state.numerics) } : {}),
             // A state's other fields (its `definitionKey` in a component, a field from a newer Konjugate) are kept too.
             ...unknownFields(state, stateDocumentKeys)
         })),
@@ -121,7 +123,9 @@ export function nodeToDocument(definition, context) {
             unit: state.unit ?? '',
             // A tunable initial value: a fitting target with bounds, as for a parameter.
             ...(state.tuning ? { tuning: structuredClone(state.tuning) } : {}),
-            ...(state.kind !== undefined ? { kind: state.kind } : {})
+            ...(state.kind !== undefined ? { kind: state.kind } : {}),
+            // Written only while it holds something (docs/proposals/integrators.md: a state's absolute tolerance, only when set).
+            ...(state.numerics && Object.keys(state.numerics).length ? { numerics: structuredClone(state.numerics) } : {})
         })),
         sourceTerms: (definition.sourceTerms ?? []).map((term) => ({
             ...term,

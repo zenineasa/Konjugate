@@ -6,7 +6,7 @@
 
 import { integrationMethod, integrationMethodProblem } from '../integrationMethods.mjs';
 
-export function validateRunConfigurationValues({ globalTimeStep, outputInterval, execution, method, stepsPerGlobalStep }) {
+export function validateRunConfigurationValues({ globalTimeStep, outputInterval, execution, method, stepsPerGlobalStep, tolerance }) {
     const validExecution = Number.isInteger(execution.workerThreads) && execution.workerThreads >= 1 && execution.workerThreads <= 256 &&
         Number.isInteger(execution.partitionCount) && execution.partitionCount >= 1 && execution.partitionCount <= 256 &&
         Number.isFinite(execution.partitionCommunicationBias) && execution.partitionCommunicationBias >= 0 &&
@@ -20,8 +20,8 @@ export function validateRunConfigurationValues({ globalTimeStep, outputInterval,
         outputInterval < globalTimeStep || Math.abs(outputRatio - Math.round(outputRatio)) > 1e-9) {
         return 'Use positive values; output interval must be an integer multiple of the global timestep.';
     }
-    // The method, when the values name one; steps per global step only where the method has them.
-    if (method !== undefined) return integrationMethodProblem(method, integrationMethod(method)?.stepsPerGlobalStep ? stepsPerGlobalStep : 1);
+    // The method, when the values name one; steps per global step and tolerances only where the method has them.
+    if (method !== undefined) return integrationMethodProblem(method, integrationMethod(method)?.stepsPerGlobalStep ? stepsPerGlobalStep : 1, tolerance);
     return null;
 }
 

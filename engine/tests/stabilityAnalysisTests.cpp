@@ -2,6 +2,7 @@
 
 #include "executionPlan.hpp"
 #include "stabilityAnalysis.hpp"
+#include "konjugate/integrators/dormandPrince54.hpp"
 #include <boost/property_tree/json_parser.hpp>
 #include <cmath>
 #include <complex>
@@ -490,6 +491,40 @@ void rungeKutta4StabilityFunctionIsTheTaylorPolynomial() {
     require(konjugate::rungeKutta4LargestStableStep({0.5, 0.0}) == 0, "A growing mode has no stable step.");
 }
 
+// Dormand–Prince 5(4)'s fifth-order solution: R(z) is the Taylor polynomial to z^5 plus z^6 / 600, and its region reaches 3.3066 along
+// the negative real axis.
+void dormandPrince54StabilityFunctionIsItsPolynomial() {
+    using konjugate::dormandPrince54StabilityFunction;
+    for (const std::complex<double> z : {std::complex<double>{-1.0, 0.0}, {0.3, -2.0}, {-2.5, 1.5}}) {
+        const auto expected = 1.0 + z + z * z / 2.0 + z * z * z / 6.0 + z * z * z * z / 24.0 + z * z * z * z * z / 120.0 + z * z * z * z * z * z / 600.0;
+        require(std::abs(dormandPrince54StabilityFunction(z) - expected) < 1e-13, "R(z) must be the Taylor polynomial to z^5 plus z^6/600.");
+    }
+    require(std::abs(konjugate::dormandPrince54LargestStableStep({-1.0, 0.0}) - 3.306567892634945) < 1e-9, "The real-axis bound must be 3.3066.");
+    require(konjugate::dormandPrince54LargestStableStep({0.5, 0.0}) == 0, "A growing mode has no stable step.");
+}
+
+// Dormand–Prince 5(4)'s dense output, a continuous extension of order four: within one step from the exact solution, its error at the
+// step's middle falls about 32-fold (local order five) per halving of the step. Kept for event location; it writes no samples.
+void dormandPrince54DenseOutputIsFourthOrder() {
+    // y' = -y + sin 3t, y(0) = 1: y = 1.3 e^-t + (sin 3t - 3 cos 3t) / 10.
+    const auto exact = [](double t) { return (1.3 * std::exp(-t)) + (std::sin(3.0 * t) - 3.0 * std::cos(3.0 * t)) / 10.0; };
+    const auto evaluate = [](std::size_t, double t, const std::vector<double>& y, std::vector<double>& rates) { rates[0] = -y[0] + std::sin(3.0 * t); };
+    double previous = 0;
+    for (const double step : {0.2, 0.1, 0.05, 0.025}) {
+        std::vector<double> states{exact(0.0)};
+        konjugate::integrators::DormandPrince54Controller controller;
+        konjugate::integrators::DormandPrince54Stiffness stiffness;
+        konjugate::integrators::DormandPrince54Statistics statistics;
+        konjugate::integrators::DormandPrince54Tolerance tolerance{1e-6, {1e-9}};
+        double middle = 0;
+        konjugate::integrators::dormandPrince54GlobalStep(0.0, step, states, {1}, {{0}}, tolerance, {}, {step / 2}, 1, controller, stiffness, statistics,
+            evaluate, [&](double, const std::vector<double>& values) { middle = values[0]; });
+        const double error = std::abs(middle - exact(step / 2));
+        if (previous > 0) require(previous / error > 24 && previous / error < 40, "The dense output's error must fall about 32-fold per halving.");
+        previous = error;
+    }
+}
+
 // An undamped oscillator split over two nodes, x' = v and v' = -omega^2 x, each written as a relationship from the other node.
 boost::property_tree::ptree splitOscillatorProject(double omegaSquared) {
     std::ostringstream json;
@@ -554,6 +589,8 @@ int main() {
         assessNodeStabilityComputesRequiredSubsteps();
         assessNodeStabilityFlagsUnconditionalInstability();
         rungeKutta4StabilityFunctionIsTheTaylorPolynomial();
+        dormandPrince54StabilityFunctionIsItsPolynomial();
+        dormandPrince54DenseOutputIsFourthOrder();
         assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());

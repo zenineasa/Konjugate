@@ -6,8 +6,8 @@
 // A benchmark model is a committed .kjt. A run may apply a variant to it first, and only these, recorded with every result:
 //   integration  every node's numerics.integration ("explicit" or "semiImplicit")
 //   substeps     every node's numerics.substepsPerGlobalStep
-//   method       the run's method ("rungeKutta4"; docs/proposals/integrators.md), and its stepsPerGlobalStep, set on the run
-//                configuration the engine is given rather than on the model
+//   method       the run's method ("rungeKutta4" or "dormandPrince54"; docs/proposals/integrators.md), its stepsPerGlobalStep and
+//                Adaptive's tolerance, set on the run configuration the engine is given rather than on the model
 //
 // A run executes on the serial backend unless `execution` (docs/parallelExecution.md) chooses another, as the scaling benchmarks do.
 
@@ -89,7 +89,9 @@ export function createEngine(executable, workDirectory) {
             const index = runIndex++;
             const configurationPath = join(workDirectory, `run${index}.json`);
             const outputPath = join(workDirectory, `run${index}.bin`);
-            const method = variant?.method ? { method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}) } : {};
+            const method = variant?.method ? {
+                method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}), ...(variant.tolerance ? { tolerance: variant.tolerance } : {})
+            } : {};
             await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial', ...(execution ?? {}) } }));
             const engineArgs = ['run', modelAsIs ? modelPath : await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];
             const wrapper = measure ? memoryWrapper() : null;
@@ -114,7 +116,11 @@ export function createEngine(executable, workDirectory) {
                 work: {
                     globalSteps: result.globalSteps,
                     substeps: metrics.reduce((sum, node) => sum + Number(node.executedSubsteps), 0),
-                    evaluations: metrics.reduce((sum, node) => sum + Number(node.evaluatedContributions), 0)
+                    evaluations: metrics.reduce((sum, node) => sum + Number(node.evaluatedContributions), 0),
+                    // Dormand–Prince: the steps it took and rejected, and its evaluations of the whole model.
+                    ...(result.integration?.steps !== undefined ? {
+                        methodSteps: result.integration.steps, rejectedSteps: result.integration.rejectedSteps, modelEvaluations: result.integration.evaluations
+                    } : {})
                 },
                 timing: measure ? {
                     wallMilliseconds,

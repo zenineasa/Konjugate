@@ -1725,7 +1725,7 @@ export async function runInteractionTests(driver) {
         // Euler, node by node, by default: no steps per global step, and the line under the choice says what it is.
         await openRunDialog(window);
         assert.equal(await evaluate(window, `document.querySelector('#runMethod').value`), 'nodeByNode');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runMethod option')].map((option) => option.textContent)`), ['Euler, node by node', 'Runge–Kutta 4']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runMethod option')].map((option) => option.textContent)`), ['Euler, node by node', 'Runge–Kutta 4', 'Adaptive']);
         assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /Each node steps on its own/);
         assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), true);
         // Runge–Kutta 4 with two steps per global step, saved with the model.
@@ -1780,6 +1780,74 @@ export async function runInteractionTests(driver) {
         // The summary is drawn from the finished result, a moment after the run is shown as finished.
         await waitFor(window, `document.querySelector('#executionSummaryMethod').textContent.startsWith('Method:')`, 'The execution summary did not name the method.');
         assert.match(await evaluate(window, `document.querySelector('#executionSummaryMethod').textContent`), /^Method: Runge–Kutta 4 \(classical, four stages, fourth order\)\.$/);
+        await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
+    });
+
+    await run('the Run dialog\'s Adaptive shows its tolerances, saves only what is not the default, takes a state\'s own tolerance, and the result counts its steps', async () => {
+        await freshExample();
+        const activeConfiguration = `(() => { const project = window.__debugProject.serialize(); return project.runConfigurations.find((item) => item.id === project.activeRunConfigurationId); })()`;
+        const before = await evaluate(window, activeConfiguration);
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runRelativeToleranceField').hidden && document.querySelector('#runAbsoluteToleranceField').hidden`), true, 'Euler has no tolerances.');
+        // Adaptive: its line, its two tolerances at their defaults, no steps per global step.
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'dormandPrince54';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /Chooses its own steps to keep the error within a tolerance/);
+        assert.equal(await evaluate(window, `!document.querySelector('#runRelativeToleranceField').hidden && !document.querySelector('#runAbsoluteToleranceField').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), true);
+        assert.equal(Number(await evaluate(window, `document.querySelector('#runRelativeTolerance').value`)), 1e-6);
+        assert.equal(Number(await evaluate(window, `document.querySelector('#runAbsoluteTolerance').value`)), 1e-9);
+        assert.match(await evaluate(window, `document.querySelector('#runGlobalStepMeaning').textContent`), /Adaptive chooses smaller steps within it/);
+        // A tolerance out of range is said in plain words, and nothing is saved.
+        await evaluate(window, `(() => { const field = document.querySelector('#runRelativeTolerance'); field.value = '2'; document.querySelector('#saveRunConfiguration').click(); })()`);
+        assert.match(await evaluate(window, `document.querySelector('#runLaunchError').textContent`), /relative tolerance must be a number greater than 0 and less than 1/);
+        assert.deepEqual(await evaluate(window, activeConfiguration), before);
+        // Only the relative tolerance changed: only it is written.
+        await evaluate(window, `(() => { document.querySelector('#runRelativeTolerance').value = '1e-8'; document.querySelector('#saveRunConfiguration').click(); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runLaunchDialog').open`), false);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'dormandPrince54', tolerance: { relative: 1e-8 } });
+        // The Numerics tab offers each state its own absolute tolerance, written only when set.
+        const batteryLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`;
+        await settle(window, 'validation');
+        await waitFor(window, `Boolean(${batteryLabel})`, 'The Battery module label was not on the canvas.');
+        await evaluate(window, `${batteryLabel}.click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-editor-tab="numerics"]')) && !document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The node editor did not open.');
+        await evaluate(window, `document.querySelector('[data-editor-tab="numerics"]').click()`);
+        await waitFor(window, `!document.querySelector('#nodeToleranceSection').hidden`, 'The Numerics tab did not offer the states\' tolerances under Adaptive.');
+        assert.match(await evaluate(window, `document.querySelector('#nodeMethodNote').textContent`), /run with Adaptive/);
+        assert.equal(await evaluate(window, `document.querySelector('#nodeRunAbsoluteTolerance').textContent`), '1e-9');
+        const firstState = await evaluate(window, `(() => { const input = document.querySelector('#nodeStateTolerances input'); return { id: Number(input.dataset.toleranceState), placeholder: input.placeholder, value: input.value }; })()`);
+        assert.deepEqual({ placeholder: firstState.placeholder, value: firstState.value }, { placeholder: '1e-9', value: '' });
+        await evaluate(window, `(() => { const input = document.querySelector('#nodeStateTolerances input'); input.value = '0.001'; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        const stateNumerics = `window.__debugProject.serialize().nodes.flatMap((node) => node.states).find((state) => state.id === ${firstState.id}).numerics ?? null`;
+        assert.deepEqual(await evaluate(window, stateNumerics), { absoluteTolerance: 0.001 });
+        await evaluate(window, `(() => { const input = document.querySelector('#nodeStateTolerances input'); input.value = ''; input.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        assert.equal(await evaluate(window, stateNumerics), null, 'Emptied, the state writes no numerics.');
+        await evaluate(window, `document.querySelector('#nodeEditor [data-close-card]').click()`);
+        // The tuning card says what tuning under Adaptive means, with the way to the run settings.
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#parameterTuningMethodNote').hidden`), false);
+        assert.match(await evaluate(window, `document.querySelector('#parameterTuningMethodNote').textContent`), /use a tighter tolerance or Runge–Kutta 4/);
+        await evaluate(window, `document.querySelector('#parameterTuning [data-close-card]').click()`);
+        // A run under Adaptive: the execution summary names it and counts its work.
+        await openRunDialog(window);
+        assert.equal(Number(await evaluate(window, `document.querySelector('#runRelativeTolerance').value`)), 1e-8, 'The dialog opens with the saved tolerance.');
+        await evaluate(window, `(() => {
+            document.querySelector('#runTargetTime').value = '2';
+            document.querySelector('#runOnlineMode').checked = false;
+            document.querySelector('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#startRun').click();
+        })()`);
+        await waitFor(window, `document.querySelector('.resultMode small').textContent === 'Model locked'`, 'The Adaptive run did not complete.', 30000);
+        await evaluate(window, `document.querySelector('#executionSummaryButton').click()`);
+        // The card may still show the run before's summary for a moment: wait for this run's.
+        await waitFor(window, `document.querySelector('#executionSummaryMethod').textContent.startsWith('Method: Adaptive')`, 'The execution summary did not name Adaptive.');
+        assert.match(await evaluate(window, `document.querySelector('#executionSummaryMethod').textContent`),
+            /^Method: Adaptive: Dormand–Prince 5\(4\) \(seven stages, fifth order, with a fourth-order error estimate\), relative tolerance 1e-8, absolute 1e-9\. [\d,]+ steps? taken, [\d,]+ steps? rejected, [\d,]+ evaluations? of the model; steps from .+ s to .+ s\.$/);
         await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
     });
 

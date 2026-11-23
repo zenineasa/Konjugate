@@ -19,7 +19,9 @@
 //
 // Runge–Kutta 4 (docs/proposals/integrators.md) is applied to the whole model at once: at every stage each node reads every node's stage
 // values, the coupling included, so the split model is the one-node model -- the same method on the same equations -- and its error
-// against the exact solution has the method's order, four, rather than the snapshot's one.
+// against the exact solution has the method's order, four, rather than the snapshot's one. Dormand–Prince 5(4) does the same at fifth
+// order with its error control off, and under Adaptive, its error control on, the split model still takes the one-node model's steps:
+// its error norm is summed node by node, so the two differ only by rounding.
 //
 // Reference: the system is linear, so it is exact by the matrix exponential.
 
@@ -194,6 +196,39 @@ export async function evaluate({ engine, config }) {
     rows.push(resultRow({ caseName: 'error order in H', model: 'split', variant: { method: 'rungeKutta4' }, observedOrder: rungeKutta4Order.fitted,
         note: `pairwise ${rungeKutta4Order.pairwise.map((value) => value.toFixed(3)).join(', ')}` }));
 
+    // Dormand–Prince 5(4): at fixed steps, the order of the three-node model's error in H; under Adaptive, the split model against the
+    // one-node model at each tolerance.
+    const dormandPrince = config.dormandPrince54;
+    const dormandPrinceErrors = [];
+    for (const globalStep of dormandPrince.globalTimeSteps) {
+        const stepRun = engineRun(config.run, { globalTimeStep: globalStep });
+        const variant = { method: 'dormandPrince54', stepsPerGlobalStep: 1 };
+        const split = await engine.run(splitPath, variant, stepRun);
+        const total = errorMetrics(trajectory(split, splitIds), exact);
+        dormandPrinceErrors.push(total.relativeError);
+        rows.push(resultRow({ caseName: 'split, three nodes', model: 'split', variant, run: stepRun, errors: total, work: split.work, unit: 'm, m/s' }));
+    }
+    const dormandPrinceOrder = observedOrder(dormandPrince.globalTimeSteps, dormandPrinceErrors);
+    add('dormandPrince54ErrorOrder', dormandPrinceOrder.fitted, 'Dormand–Prince 5(4), error control off: observed order of the three-node model\'s error against the exact solution in H (fitted over all H)');
+    add('dormandPrince54FinestErrorOrder', dormandPrinceOrder.finest, 'Dormand–Prince 5(4), error control off: observed order of the three-node model\'s error from the finest halving of H');
+    rows.push(resultRow({ caseName: 'error order in H', model: 'split', variant: { method: 'dormandPrince54', stepsPerGlobalStep: 1 }, observedOrder: dormandPrinceOrder.fitted,
+        note: `pairwise ${dormandPrinceOrder.pairwise.map((value) => value.toFixed(3)).join(', ')}` }));
+    let adaptiveDifference = 0;
+    const adaptiveRun = engineRun(config.run, { globalTimeStep: dormandPrince.adaptiveGlobalTimeStep });
+    for (const relative of dormandPrince.relativeTolerances) {
+        const variant = { method: 'dormandPrince54', tolerance: { relative, absolute: relative * 1e-3 } };
+        const split = await engine.run(splitPath, variant, adaptiveRun);
+        const splitNumeric = trajectory(split, splitIds);
+        const one = await engine.run(monolithicPath, variant, adaptiveRun);
+        const difference = errorMetrics(splitNumeric, trajectory(one, monolithicIds)).relativeError;
+        adaptiveDifference = Math.max(adaptiveDifference, difference);
+        rows.push(resultRow({
+            caseName: 'split, three nodes', model: 'split', variant, run: adaptiveRun, errors: errorMetrics(splitNumeric, exact), work: split.work, unit: 'm, m/s',
+            note: `against one node with the same tolerance ${difference.toExponential(2)}; ${split.work.methodSteps} steps (one node ${one.work.methodSteps}), ${split.work.rejectedSteps} rejected`
+        }));
+    }
+    add('adaptiveSplitDifference', adaptiveDifference, 'Adaptive: the three-node model against the one-node model at the same tolerance, relative to range, largest over every tolerance (the error norm summed node by node)');
+
     const log2 = (value) => `2^${Math.log2(value)}`;
     plots.push(linePlot({
         id: 'couplingSubsteps', title: 'Substeps at a fixed global step', subtitle: `Error relative to range against the exact solution, H = ${log2(coarsest)} s`, xLabel: 'Substeps per global step (n)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.substeps,
@@ -209,13 +244,18 @@ export async function evaluate({ engine, config }) {
             .concat([series('First order (slope 1)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => couplingErrors[0] * step / config.globalTimeSteps[0]))])
     }));
     plots.push(linePlot({
-        id: 'couplingRungeKutta4', title: 'Three nodes under Runge–Kutta 4', subtitle: 'Error of the three-node model against the exact solution, relative to range', xLabel: 'Global step H (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.globalTimeSteps,
+        id: 'couplingRungeKutta4', title: 'Three nodes under Runge–Kutta 4 and Dormand–Prince 5(4)', subtitle: 'Error of the three-node model against the exact solution, relative to range', xLabel: 'Global step H (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.globalTimeSteps,
         series: [
             series('Explicit Euler, one substep', 'explicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:1`].total.relativeError)),
             series(`Explicit Euler, ${largestSubsteps} substeps`, 'semiImplicit', config.globalTimeSteps, config.globalTimeSteps.map((step) => table[`${step}:${largestSubsteps}`].total.relativeError)),
             series('Runge–Kutta 4, the whole model', 'rungeKutta4', config.globalTimeSteps, rungeKutta4Errors),
-            series('Fourth order (slope 4)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => rungeKutta4Errors[0] * (step / config.globalTimeSteps[0]) ** 4))
+            series('Fourth order (slope 4)', 'guide', config.globalTimeSteps, config.globalTimeSteps.map((step) => rungeKutta4Errors[0] * (step / config.globalTimeSteps[0]) ** 4)),
+            series('Dormand–Prince 5(4), error control off', 'dormandPrince54', dormandPrince.globalTimeSteps, dormandPrinceErrors),
+            series('Fifth order (slope 5)', 'guide', dormandPrince.globalTimeSteps, dormandPrince.globalTimeSteps.map((step) => dormandPrinceErrors[0] * (step / dormandPrince.globalTimeSteps[0]) ** 5))
         ]
     }));
-    return { rows, checks, plots, notes: ['Under Runge–Kutta 4 every node reads every node\'s stage values, so the three-node model gives the one-node model\'s numbers: the coupling error substeps cannot remove is gone, and the error falls sixteen-fold per halving of the global step.'] };
+    return { rows, checks, plots, notes: [
+        'Under Runge–Kutta 4 every node reads every node\'s stage values, so the three-node model gives the one-node model\'s numbers: the coupling error substeps cannot remove is gone, and the error falls sixteen-fold per halving of the global step.',
+        'Dormand–Prince 5(4) does the same at fifth order, thirty-two-fold per halving; under Adaptive the three-node model chooses the one-node model\'s steps, so the two agree to rounding at every tolerance.'
+    ] };
 }

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { integrationMethod, integrationMethodProblem, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, withIntegrationMethod } from '../src/integrationMethods.mjs';
+import { defaultTolerance, integrationMethod, integrationMethodProblem, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, toleranceOf, withIntegrationMethod, withStateAbsoluteTolerance } from '../src/integrationMethods.mjs';
 import { validateRunConfigurationValues } from '../src/renderer/runConfigurationValidation.mjs';
 
 const configuration = { id: 3, name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1, execution: { backend: 'automatic' } };
@@ -22,11 +22,12 @@ test('a configuration that names no method is Euler node by node, one step per g
     assert.equal(stepsPerGlobalStepOf({ ...configuration, method: 'rungeKutta4', stepsPerGlobalStep: 3 }), 3);
     assert.equal(integrationMethod('rungeKutta4').name, 'Runge–Kutta 4');
     assert.equal(integrationMethod('nodeByNode').name, 'Euler, node by node');
-    assert.equal(integrationMethod('dormandPrince54'), null);
+    assert.equal(integrationMethod('dormandPrince54').name, 'Adaptive');
+    assert.equal(integrationMethod('rodas4'), null);
 });
 
 test('an unknown method and steps out of range are refused by name', () => {
-    assert.match(integrationMethodProblem('dormandPrince54', 1), /“dormandPrince54” is not one this version of Konjugate knows/);
+    assert.match(integrationMethodProblem('rodas4', 1), /“rodas4” is not one this version of Konjugate knows/);
     assert.match(integrationMethodProblem('rungeKutta4', 0), /whole number from 1 through 10,000/);
     assert.match(integrationMethodProblem('rungeKutta4', 2.5), /whole number/);
     assert.equal(integrationMethodProblem('rungeKutta4', 10000), null);
@@ -35,6 +36,32 @@ test('an unknown method and steps out of range are refused by name', () => {
     assert.equal(validateRunConfigurationValues(values), null);
     assert.equal(validateRunConfigurationValues({ ...values, method: 'nodeByNode', stepsPerGlobalStep: 0 }), null, 'Euler ignores the hidden field.');
     assert.match(validateRunConfigurationValues({ ...values, method: 'rungeKutta4', stepsPerGlobalStep: 0 }), /Steps per global step/);
+});
+
+test('Adaptive writes its tolerance only where it is not the default, each number on its own, and has no steps per global step', () => {
+    assert.deepEqual(withIntegrationMethod(configuration, 'dormandPrince54', 1, defaultTolerance), { ...configuration, method: 'dormandPrince54' });
+    assert.deepEqual(withIntegrationMethod(configuration, 'dormandPrince54', 5, { relative: 1e-8, absolute: 1e-9 }),
+        { ...configuration, method: 'dormandPrince54', tolerance: { relative: 1e-8 } });
+    assert.deepEqual(withIntegrationMethod(configuration, 'dormandPrince54', 1, { relative: 1e-6, absolute: 1e-12 }),
+        { ...configuration, method: 'dormandPrince54', tolerance: { absolute: 1e-12 } });
+    // Another method has no tolerance to write, and going back takes it away.
+    assert.deepEqual(withIntegrationMethod({ ...configuration, method: 'dormandPrince54', tolerance: { relative: 1e-3 } }, 'rungeKutta4', 1, { relative: 1e-3 }),
+        { ...configuration, method: 'rungeKutta4' });
+    assert.deepEqual(toleranceOf(configuration), { relative: 1e-6, absolute: 1e-9 });
+    assert.deepEqual(toleranceOf({ tolerance: { absolute: 2 } }), { relative: 1e-6, absolute: 2 });
+    assert.match(integrationMethodProblem('dormandPrince54', 1, { relative: 1 }), /relative tolerance must be a number greater than 0 and less than 1/);
+    assert.match(integrationMethodProblem('dormandPrince54', 1, { absolute: 0 }), /absolute tolerance must be a number greater than 0/);
+    assert.equal(integrationMethodProblem('dormandPrince54', 1, { relative: 1e-3, absolute: 10 }), null);
+    const execution = { workerThreads: 1, partitionCount: 1, partitionCommunicationBias: 4, automaticParallelThreshold: 128, automaticMaximumPartitionCutFraction: 0.25 };
+    assert.match(validateRunConfigurationValues({ globalTimeStep: 0.01, outputInterval: 0.1, execution, method: 'dormandPrince54', stepsPerGlobalStep: 1, tolerance: { relative: -1 } }), /relative tolerance/);
+    // Samples stay on global steps under Adaptive too.
+    assert.match(validateRunConfigurationValues({ globalTimeStep: 1, outputInterval: 0.25, execution, method: 'dormandPrince54', stepsPerGlobalStep: 1 }), /integer multiple of the global timestep/);
+});
+
+test('a state says its own absolute tolerance only when it has one', () => {
+    const state = { id: 11, name: 'Level', symbol: 'level', initialValue: 1 };
+    assert.deepEqual(withStateAbsoluteTolerance(state, 1e-3), { ...state, numerics: { absoluteTolerance: 1e-3 } });
+    assert.deepEqual(withStateAbsoluteTolerance({ ...state, numerics: { absoluteTolerance: 1e-3 } }, undefined), state);
 });
 
 test('what cannot take stages is named before the run: a node that is a program is stepped, a term written as a program held', () => {

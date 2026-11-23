@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { defaultTolerance as defaultIntegrationTolerance, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -509,7 +509,8 @@ function hydrateProjectDocument(document) {
             execution: normalizeExecutionConfiguration(configuration.execution),
             // The integration method (docs/proposals/integrators.md), kept as the file says it: absent, Euler node by node.
             ...(configuration.method !== undefined ? { method: configuration.method } : {}),
-            ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {})
+            ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {}),
+            ...(configuration.tolerance !== undefined ? { tolerance: structuredClone(configuration.tolerance) } : {})
         }))
         : [defaultRunConfiguration()];
     return {
@@ -3168,6 +3169,7 @@ function renderNodeEditorModel(node) {
     const wholeModelMethod = methodOf(configuration) !== 'nodeByNode' ? integrationMethod(methodOf(configuration)) : null;
     $('#nodeMethodNote').hidden = !wholeModelMethod;
     if (wholeModelMethod) $('#nodeMethodName').textContent = wholeModelMethod.name;
+    renderNodeTolerances(node, definition, configuration);
     const stateContainer = $('#nodeEditorStates');
     stateContainer.replaceChildren();
     if (!definition.states.length) stateContainer.innerHTML = '<p class="emptyEditorState">No states defined</p>';
@@ -6595,7 +6597,15 @@ function renderExecutionSummary() {
     // The method the run integrated with, and what it stepped on its own or held (a result without one ran Euler, node by node).
     const integration = activeResult.integration;
     const methodLines = [`Method: ${integrationMethod(integration?.method)?.summaryName ?? integration?.method ?? 'Euler, node by node'}${
-        integration?.stepsPerGlobalStep > 1 ? `, ${integration.stepsPerGlobalStep} steps per global step` : ''}.`];
+        integration?.stepsPerGlobalStep > 1 ? `, ${integration.stepsPerGlobalStep} steps per global step` : ''}${
+        integration?.tolerance ? `, relative tolerance ${integration.tolerance.relative}, absolute ${integration.tolerance.absolute}` : ''}.`];
+    // Adaptive's work: the steps it took and rejected, its evaluations of the model, and the range of its steps.
+    if (integration?.steps !== undefined) {
+        const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 ? '' : 's'}`;
+        methodLines.push(`${plural(integration.steps, 'step')} taken, ${plural(integration.rejectedSteps ?? 0, 'step')} rejected, ${
+            plural(integration.evaluations ?? 0, 'evaluation')} of the model${integration.smallestStep !== undefined
+            ? `; steps from ${formatResultTime(integration.smallestStep)} to ${formatResultTime(integration.largestStep)}` : ''}.`);
+    }
     const nodeName = (nodeId) => model.nodes.find((node) => node.id === nodeId)?.name ?? `Node ${nodeId}`;
     if (integration?.steppedNodeIds?.length) {
         methodLines.push(`${integration.steppedNodeIds.length === 1 ? '1 node' : `${integration.steppedNodeIds.length} nodes`} stepped on their own, coupled to the rest at first order: ${nameList(integration.steppedNodeIds.map(nodeName))}.`);
@@ -6682,7 +6692,8 @@ function describeStabilityFinding(finding) {
     const node = model.nodes.find((candidate) => candidate.id === finding.nodeId);
     const nodeTitle = nodeObjects.get(finding.nodeId)?.userData?.definition?.title;
     const state = finding.stateId ? node?.states.find((candidate) => candidate.id === finding.stateId) : null;
-    const subject = state ? `${nodeTitle ?? 'Node'} · ${state.symbol}` : (nodeTitle ?? `Node ${finding.nodeId}`);
+    // A finding about the whole model (Adaptive's stiffness test) names no node.
+    const subject = state ? `${nodeTitle ?? 'Node'} · ${state.symbol}` : finding.nodeId ? (nodeTitle ?? `Node ${finding.nodeId}`) : 'The model';
     const when = stabilityGroupWhen({ count: finding.count ?? 1, firstTime: finding.firstTime ?? finding.globalTime, lastTime: finding.lastTime ?? finding.globalTime }, formatResultTime);
     return { subject, when };
 }
@@ -8375,7 +8386,12 @@ async function startSimulation() {
     const forkingFromSessionId = pendingFork ? previousResultSessionId : null;
     const tutorialRunBefore = tutorialRunModel;
     try {
-        const configuration = { ...activeRunConfiguration(), ...runLaunchSettings.configurationOverride };
+        const override = runLaunchSettings.configurationOverride;
+        // A continued run's method as the dialog has it, written as a saved configuration is: only what the method uses, and only where
+        // it is not the default (under Adaptive, steps per global step would turn its error control off).
+        const configuration = override
+            ? withIntegrationMethod({ ...activeRunConfiguration(), ...override }, override.method, override.stepsPerGlobalStep, override.tolerance)
+            : activeRunConfiguration();
         // Every instance as its component has it now, before the engine is given the flat graph.
         syncComponents();
         const runDocument = serializeProjectDocument();
@@ -8517,10 +8533,13 @@ function fillRunConfigurationFields({ continuing }) {
     const source = continuing && activeResult
         ? withIntegrationMethod({ ...saved, globalTimeStep: activeResult.globalTimeStep ?? saved.globalTimeStep, outputInterval: activeResult.outputInterval ?? saved.outputInterval },
             // A continued or forked run opens with the method its result ran with.
-            activeResult.integration?.method ?? 'nodeByNode', activeResult.integration?.stepsPerGlobalStep ?? 1)
+            activeResult.integration?.method ?? 'nodeByNode', activeResult.integration?.stepsPerGlobalStep ?? 1,
+            activeResult.integration?.tolerance ?? defaultIntegrationTolerance)
         : saved;
     $('#runMethod').value = integrationMethod(methodOf(source)) ? methodOf(source) : 'nodeByNode';
     $('#runStepsPerGlobalStep').value = stepsPerGlobalStepOf(source);
+    $('#runRelativeTolerance').value = toleranceOf(source).relative;
+    $('#runAbsoluteTolerance').value = toleranceOf(source).absolute;
     updateRunMethodFields();
     $('#runGlobalTimeStep').value = source.globalTimeStep;
     $('#runOutputInterval').value = source.outputInterval;
@@ -8549,8 +8568,14 @@ function updateRunMethodFields() {
     $('#runMethodDescription').textContent = method.description;
     $('#runStepsPerGlobalStepField').hidden = !method.stepsPerGlobalStep;
     $('#runStepsPerGlobalStep').disabled = !method.stepsPerGlobalStep;
+    for (const field of ['Relative', 'Absolute']) {
+        $(`#run${field}ToleranceField`).hidden = !method.tolerance;
+        $(`#run${field}Tolerance`).disabled = !method.tolerance;
+    }
     const steps = Number($('#runStepsPerGlobalStep').value);
-    $('#runGlobalStepMeaning').textContent = method.stepsPerGlobalStep
+    $('#runGlobalStepMeaning').textContent = method.tolerance
+        ? 'Updates, controls and samples happen at every global step; Adaptive chooses smaller steps within it, as many as the tolerance asks for, every node together. A state may set its own absolute tolerance (Numerics tab).'
+        : method.stepsPerGlobalStep
         ? `Updates, controls and samples happen at every global step; the method takes ${steps > 1 ? `${steps} steps` : 'one step'} within it, every node together.`
         : 'Updates, controls and samples happen at every global step; each node takes its own substeps within it (Numerics tab).';
     const participation = method.id === 'nodeByNode' ? { stepped: [], programs: [] } : stageParticipation(serializeProjectDocument());
@@ -8576,6 +8601,7 @@ function readRunConfigurationFields() {
         // Always named here, so a continued run's override says Euler too; saving writes it only when it is not the default.
         method: $('#runMethod').value,
         stepsPerGlobalStep: Number($('#runStepsPerGlobalStep').value),
+        tolerance: { relative: Number($('#runRelativeTolerance').value), absolute: Number($('#runAbsoluteTolerance').value) },
         execution: {
             backend: $('#runExecutionBackend').value,
             partitionAlgorithm: $('#runPartitionAlgorithm').value,
@@ -8592,7 +8618,7 @@ function readRunConfigurationFields() {
 // changed. Only ever used for an ordinary run: a result on screen keeps the model locked.
 function saveRunConfigurationFields(values) {
     const before = structuredClone(activeRunConfiguration());
-    const after = withIntegrationMethod({ ...before, ...structuredClone(values) }, values.method, values.stepsPerGlobalStep);
+    const after = withIntegrationMethod({ ...before, ...structuredClone(values) }, values.method, values.stepsPerGlobalStep, values.tolerance);
     if (JSON.stringify(before) === JSON.stringify(after)) return false;
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
@@ -10966,8 +10992,11 @@ function openParameterTuning() {
         resetParameterTuning();
         applySavedTuningSetup();
     }
+    // Tuning runs with the model's own method (docs/proposals/integrators.md, decision 8): under Adaptive, the card says what that means.
+    $('#parameterTuningMethodNote').hidden = !integrationMethod(methodOf(activeRunConfiguration()))?.tolerance;
     $('#parameterTuning').classList.remove('hidden');
 }
+$('#parameterTuningRunSettings').addEventListener('click', () => openRunDialog());
 
 // The Live twin button: the twin's own window, with this project's model and the twin's setup (docs/proposals/controlRoom.md). From
 // the tuning card's replay, the log it has open goes too, chosen as the twin's source. A twin window already open is brought to the front
@@ -13570,6 +13599,46 @@ $('#editNodeDescription').addEventListener('change', (event) => {
         snapshot.description = event.target.value.trim();
     });
 });
+// Under a method with a tolerance (Adaptive), each state's own absolute tolerance, in its own unit: empty uses the run's
+// (docs/proposals/integrators.md, decision 4). Shown only for such a method.
+function renderNodeTolerances(node, definition, configuration) {
+    const method = integrationMethod(methodOf(configuration));
+    $('#nodeToleranceSection').hidden = !method?.tolerance || !definition.states.length;
+    if ($('#nodeToleranceSection').hidden) return;
+    const runAbsolute = toleranceOf(configuration).absolute;
+    $('#nodeRunAbsoluteTolerance').textContent = String(runAbsolute);
+    $('#nodeStateTolerances').replaceChildren(...definition.states.map((state) => {
+        const label = document.createElement('label');
+        label.className = 'editorField';
+        const name = document.createElement('span');
+        name.textContent = `${state.symbol}${state.unit ? ` (${state.unit})` : ''}`;
+        const input = document.createElement('input');
+        Object.assign(input, { type: 'number', min: '0', step: 'any', placeholder: String(runAbsolute), value: state.numerics?.absoluteTolerance ?? '' });
+        input.dataset.toleranceState = String(state.id);
+        input.ariaLabel = `Absolute tolerance of ${state.symbol}`;
+        input.addEventListener('change', () => {
+            const text = input.value.trim();
+            const value = text === '' ? undefined : Number(text);
+            if (value !== undefined && !(Number.isFinite(value) && value > 0)) {
+                $('#editNodeError').textContent = 'An absolute tolerance must be a number greater than 0, or empty to use the run\'s.';
+                input.value = state.numerics?.absoluteTolerance ?? '';
+                return;
+            }
+            $('#editNodeError').textContent = '';
+            changeNodeModel(node, (snapshot) => {
+                const target = snapshot.states.find((candidate) => candidate.id === state.id);
+                const numerics = { ...(target.numerics ?? {}) };
+                delete numerics.absoluteTolerance;
+                if (value !== undefined) numerics.absoluteTolerance = value;
+                if (Object.keys(numerics).length) target.numerics = numerics;
+                else delete target.numerics;
+            });
+        });
+        label.append(name, input);
+        return label;
+    }));
+}
+
 $('#editNodeSubsteps').addEventListener('change', (event) => {
     if (!selectedNode) return;
     const substeps = Math.max(1, Math.min(10000, Math.trunc(Number(event.target.value) || 1)));

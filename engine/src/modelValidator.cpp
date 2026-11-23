@@ -114,16 +114,39 @@ std::string stateSymbol(const boost::property_tree::ptree& document, EntityId st
 // the step is chosen -- a global timestep, or steps per global step, rather than a node's substeps.
 void addWholeModelStability(ValidationResult& result, const boost::property_tree::ptree& document, const ExecutionPlan& plan,
                             double globalTimeStep, const IntegrationSettings& integration) {
-    const auto assessment = assessWholeModelStability(plan, plan.initialStates, globalTimeStep, integration.stepsPerGlobalStep);
+    const auto assessment = assessWholeModelStability(plan, plan.initialStates, globalTimeStep, integration.stepsPerGlobalStep, 400,
+        integration.method);
     if (!assessment) return;
     const auto configurationId = document.get<std::string>("activeRunConfigurationId", "");
     const auto symbol = stateSymbol(document, assessment->dominantStateId);
     const auto judged = assessment->perNode
         ? " (Judged node by node, each node's neighbours held: the model has " + std::to_string(assessment->stateCount) +
           " integrated states, more than the whole-model check takes.)" : std::string();
+    // The names the Run dialog gives the methods.
+    const auto adaptive = isAdaptive(integration);
+    const std::string methodName = integration.method == IntegrationMethod::dormandPrince54
+        ? (adaptive ? "Adaptive" : "Dormand–Prince 5(4) at fixed steps") : "Runge–Kutta 4";
     std::ostringstream message;
+    if (adaptive) {
+        // Adaptive keeps itself stable by shrinking its steps; what matters is a mode no step can hold, or a stiff model whose
+        // stability, not its accuracy, will set the steps.
+        if (assessment->unconditionallyUnstable) {
+            message << "The model has a mode that grows whatever the step" << (symbol.empty() ? "" : " ('" + symbol + "' moves fastest)")
+                    << " -- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether this dynamics is "
+                    << "intentionally unstable.";
+            add(result, "numericsPotentiallyUnstable", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+        } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {
+            message << "The model is stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio << "): Adaptive stays stable only with "
+                    << "steps of at most about ";
+            if (assessment->largestStableStep) message << *assessment->largestStableStep;
+            message << " s" << (symbol.empty() ? "" : " ('" + symbol + "' moves fastest)") << ", whatever its tolerance, so it will take "
+                    << "many small steps where its slowest parts need few.";
+            add(result, "numericsStiffModel", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+        }
+        return;
+    }
     if (!assessment->stable) {
-        message << "The model may be unstable with Runge–Kutta 4 at its step of " << assessment->stepSize << " s (amplification factor "
+        message << "The model may be unstable with " << methodName << " at its step of " << assessment->stepSize << " s (amplification factor "
                 << assessment->maxAmplificationFactor << " > 1 per step)";
         if (assessment->unconditionallyUnstable) {
             message << " -- " << (symbol.empty() ? "a state" : "'" + symbol + "'") << " has a mode that grows whatever the step, so no step "
@@ -131,12 +154,12 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
                     << "dynamics is intentionally unstable before adjusting numerics.";
         } else if (assessment->requiredStepsPerGlobalStep && assessment->largestStableStep) {
             message << " -- take at least " << *assessment->requiredStepsPerGlobalStep << " steps per global step (Run settings, Steps per "
-                    << "global step), or a global timestep of at most " << *assessment->largestStableStep * static_cast<double>(integration.stepsPerGlobalStep)
+                    << "global step), or a global timestep of at most " << *assessment->largestStableStep * static_cast<double>(assessment->stepsPerGlobalStep)
                     << " s" << (symbol.empty() ? "" : " ('" + symbol + "' moves fastest)") << ".";
         }
         add(result, "numericsPotentiallyUnstable", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
     } else if (assessment->stiffnessRatio && *assessment->stiffnessRatio > 1000) {
-        message << "The model is stable with Runge–Kutta 4 but stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio
+        message << "The model is stable with " << methodName << " but stiff (fastest/slowest rate ratio " << *assessment->stiffnessRatio
                 << ") -- its fastest dynamics set the step, much smaller than its slowest need.";
         add(result, "numericsStiffModel", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
     }
@@ -671,6 +694,15 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (*kind == "rate" || *kind == "update") declaredKinds[stateId] = *kind;
                 else add(result, "stateKindInvalid", "error", "State \"" + value(state, "name") + "\" has kind \"" + *kind +
                     "\": a state is a rate (it changes over time by what reaches it) or an update (what reaches it is its next value).", "node", id, "states");
+            }
+            // A state's own absolute tolerance for the adaptive method (docs/proposals/integrators.md): a finite positive number.
+            if (const auto tolerance = state.get_optional<std::string>("numerics.absoluteTolerance")) {
+                char* end = nullptr;
+                const auto parsed = std::strtod(tolerance->c_str(), &end);
+                if (tolerance->empty() || end != tolerance->c_str() + tolerance->size() || !std::isfinite(parsed) || !(parsed > 0)) {
+                    add(result, "stateAbsoluteToleranceInvalid", "error", "State \"" + value(state, "name") + "\"'s absolute tolerance must be a "
+                        "finite number greater than 0.", "node", id, "numerics");
+                }
             }
             // A state's initial value can be a fitting target too, with the same bounds as a parameter.
             if (state.get_child_optional("tuning")) {

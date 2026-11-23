@@ -10,6 +10,10 @@ import { errorMetrics } from './metrics.mjs';
 
 export const methodName = (variant = {}) => {
     if (variant.method === 'rungeKutta4') return `Runge–Kutta 4${variant.stepsPerGlobalStep > 1 ? ` (${variant.stepsPerGlobalStep} steps per global step)` : ''}`;
+    if (variant.method === 'dormandPrince54') {
+        if (variant.stepsPerGlobalStep) return `Dormand–Prince 5(4), error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step)`;
+        return `Adaptive, Dormand–Prince 5(4)${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative})` : ''}`;
+    }
     return variant.integration === 'semiImplicit' ? 'semi-implicit Euler' : 'explicit Euler';
 };
 

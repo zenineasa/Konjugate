@@ -3,8 +3,9 @@
 // Line plots as plain SVG, with no dependencies, so the report is one self-contained file and each plot also stands alone.
 //
 // A series' role fixes its colour and dash in every plot: the reference is always the first categorical colour, explicit Euler the
-// second, semi-implicit Euler the third (dashed), Runge–Kutta 4 the fourth (solid), a further series the fourth (dotted), and a guide line (such as slope 1) is a thin
-// muted dash. Colours come from CSS custom properties, so the same SVG follows the report's light and dark themes; a standalone SVG file
+// second, semi-implicit Euler the third (dashed), Runge–Kutta 4 the fourth (solid), Dormand–Prince 5(4) the first (long dashes: it is
+// drawn only in plots of error, which have no reference line), a further series the fourth (dotted), and a guide line (such as slope 1)
+// is a thin muted dash. Colours come from CSS custom properties, so the same SVG follows the report's light and dark themes; a standalone SVG file
 // carries the light values. Text is never drawn in a series colour.
 
 export const roleStyles = {
@@ -13,6 +14,7 @@ export const roleStyles = {
     semiImplicit: { colour: 'var(--series-3)', dash: '7 4' },
     extra: { colour: 'var(--series-4)', dash: '2 3' },
     rungeKutta4: { colour: 'var(--series-4)', dash: '' },
+    dormandPrince54: { colour: 'var(--series-1)', dash: '9 3' },
     slot1: { colour: 'var(--series-1)', dash: '' },
     slot2: { colour: 'var(--series-2)', dash: '' },
     slot3: { colour: 'var(--series-3)', dash: '7 4' },

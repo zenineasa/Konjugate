@@ -11,7 +11,10 @@
 //     docs/proposals/programSdkV2.md);
 //   - a node that is a program of its own is stepped on its own, as is one whose program sets its states' values (as an imported FMU),
 //     and the result names it;
-//   - an unknown method, a bad stepsPerGlobalStep and an unknown `requires` entry are refused by name.
+//   - an unknown method, a bad stepsPerGlobalStep and an unknown `requires` entry are refused by name;
+// and for Adaptive (Dormand–Prince 5(4) with error control): the same bits on every backend and worker count (its error norm summed
+// in node order), the split model as the one-node model, a run continued from a checkpoint (which keeps the controller's memory) to the
+// bit, the error following the tolerance, steps landing on a schedule's jumps, the stiffness finding, held programs, and its refusals.
 
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -114,7 +117,7 @@ try {
 
     // Refusals.
     for (const [configuration, message] of [
-        [{ ...timing, method: 'dormandPrince54' }, /method "dormandPrince54" is not one this version of Konjugate knows/],
+        [{ ...timing, method: 'rodas4' }, /method "rodas4" is not one this version of Konjugate knows/],
         [{ ...rungeKutta4, stepsPerGlobalStep: 0 }, /stepsPerGlobalStep must be an integer from 1 through 10000/],
         [{ ...rungeKutta4, stepsPerGlobalStep: 2.5 }, /stepsPerGlobalStep must be an integer from 1 through 10000/]
     ]) {
@@ -269,11 +272,130 @@ class Reading(NodeProvider):
     assert.equal(finding.location?.kind ?? finding.entityKind, 'runConfiguration');
     const stable = issues(await validate('stable', { method: 'rungeKutta4', globalTimeStep: 0.125, outputInterval: 0.125 }));
     assert.ok(!stable.some((issue) => issue.code === 'numericsPotentiallyUnstable'), 'A step inside the region must not be flagged.');
-    const unknownMethod = issues(await validate('unknownMethod', { method: 'dormandPrince54', globalTimeStep: 0.125, outputInterval: 0.125 }));
-    assert.ok(unknownMethod.some((issue) => issue.code === 'runConfigurationMethodInvalid' && /dormandPrince54/.test(issue.message)), 'An unknown method must be an error naming it.');
+    const unknownMethod = issues(await validate('unknownMethod', { method: 'rodas4', globalTimeStep: 0.125, outputInterval: 0.125 }));
+    assert.ok(unknownMethod.some((issue) => issue.code === 'runConfigurationMethodInvalid' && /rodas4/.test(issue.message)), 'An unknown method must be an error naming it.');
 
-    console.log('✓ whole-model integration: Runge–Kutta 4 gives the same bits on every backend and from a checkpoint, makes three nodes the one-node model, '
-        + 'holds programs through the stages, steps a node that is a program of its own, and refuses what it does not know.');
+    // --- Adaptive: Dormand–Prince 5(4) with error control ---
+    const adaptive = { ...timing, method: 'dormandPrince54' };
+    const adaptiveSerial = await run(split, { ...adaptive, execution: { backend: 'serial' } });
+    for (const execution of [{ backend: 'threadPool', workerThreads: 2 }, { backend: 'threadPool', workerThreads: 3 },
+        { backend: 'partitioned', partitionCount: 2, workerThreads: 2 }, { backend: 'partitioned', partitionCount: 3, workerThreads: 3 }]) {
+        assert.ok(sameBits(valuesOf(adaptiveSerial), valuesOf(await run(split, { ...adaptive, execution }))),
+            `Adaptive must give the serial backend's bits on ${execution.backend} with ${execution.workerThreads} workers: its error norm is summed in node order.`);
+    }
+    const summary = adaptiveSerial.integration;
+    assert.equal(summary.method, 'dormandPrince54');
+    assert.deepEqual(summary.tolerance, { relative: 1e-6, absolute: 1e-9 });
+    assert.equal(summary.stepsPerGlobalStep, undefined, 'Adaptive chooses its own steps.');
+    assert.ok(summary.steps >= timing.targetTime / timing.globalTimeStep, 'Adaptive lands on every global step, so takes at least one step a global step.');
+    assert.ok(Number.isInteger(summary.rejectedSteps) && summary.evaluations >= 6 * summary.steps, `The summary must count the work: ${JSON.stringify(summary)}`);
+    assert.ok(summary.largestStep <= timing.globalTimeStep * (1 + 1e-12), 'The global step is the largest step Adaptive takes.');
+    // The split model is the one-node model under Adaptive too.
+    const adaptiveWhole = valuesOf(await run(monolithic, { ...adaptive, execution: { backend: 'serial' } }));
+    const adaptiveParts = valuesOf(adaptiveSerial);
+    const adaptiveLargest = Math.max(...adaptiveWhole.map(Math.abs));
+    assert.ok(adaptiveParts.every((value, index) => Math.abs(value - adaptiveWhole[index]) <= 1e-12 * adaptiveLargest), 'Three nodes must give the one-node model\'s numbers under Adaptive.');
+    // Restart: the checkpoint keeps the controller's memory, so a run continued from it takes the uninterrupted run's steps, to the bit.
+    const adaptiveCheckpoint = adaptiveSerial.checkpoints.find((candidate) => candidate.time === timing.targetTime / 2);
+    assert.equal(adaptiveCheckpoint.solver.kind, 'dormandPrince54');
+    assert.ok(typeof adaptiveCheckpoint.solver.state === 'string' && adaptiveCheckpoint.solver.state.length > 0, 'An Adaptive checkpoint keeps the controller\'s memory as base64.');
+    const adaptiveResumed = await run(split, { ...adaptive, startCheckpoint: adaptiveCheckpoint });
+    assert.ok(sameBits(adaptiveResumed.samples.at(-1).states.map((state) => state.value), adaptiveSerial.samples.at(-1).states.map((state) => state.value)),
+        'An Adaptive run continued from its checkpoint must end on the uninterrupted run\'s bits.');
+    // Without the controller's memory (a checkpoint made by another method) the run starts the controller afresh and still agrees closely.
+    const afresh = await run(split, { ...adaptive, startCheckpoint: { ...adaptiveCheckpoint, solver: { kind: 'rungeKutta4', version: 1 } } });
+    const afreshEnd = afresh.samples.at(-1).states.map((state) => state.value);
+    assert.ok(afreshEnd.every((value, index) => Math.abs(value - adaptiveSerial.samples.at(-1).states[index].value) <= 1e-4), 'A controller started afresh must still keep to the tolerance.');
+    // Euler and Runge–Kutta 4 checkpoints keep no hidden state.
+    assert.equal(serial.checkpoints.at(-1).solver.state, undefined);
+
+    // The tolerance sets the error: y' = -y over 8 s against e^-t, each tighter tolerance closer, with more steps.
+    const decayDocument = decay(null);
+    const decayModel = await modelPath('adaptiveDecay', decayDocument);
+    let previous = null;
+    for (const relative of [1e-4, 1e-6, 1e-8, 1e-10]) {
+        const result = await run(decayModel, { targetTime: 8, globalTimeStep: 1, outputInterval: 1, method: 'dormandPrince54', tolerance: { relative, absolute: relative * 1e-3 } });
+        const error = Math.max(...result.samples.map((sample) => Math.abs(valueOf(sample, 11) - Math.exp(-sample.time))));
+        assert.ok(error <= 50 * relative, `At relative tolerance ${relative} the error must stay near it: ${error}.`);
+        if (previous) assert.ok(error < previous.error && result.integration.steps > previous.steps, 'A tighter tolerance must give a smaller error for more steps.');
+        previous = { error, steps: result.integration.steps };
+    }
+
+    // Samples stay on global steps under Adaptive too: an output interval finer than the global step is refused, as for every method.
+    const { code: finerCode, diagnostics: finerDiagnostics } = await attempt(decayModel, { targetTime: 4, globalTimeStep: 1, outputInterval: 0.25, method: 'dormandPrince54' });
+    assert.notEqual(finerCode, 0);
+    assert.match(finerDiagnostics, /outputInterval must be an integer multiple of globalTimeStep\./);
+
+    // Steps land on where a schedule jumps inside a global step: y' = -k y, k held at 0.5, then 3 from 0.73 s, then 1 from 1.31 s.
+    const scheduled = decay(null);
+    scheduled.sharedParameters = [{ id: 90, name: 'Rate', symbol: 'rate', value: 1, unit: '', mode: 'constant', schedule: { interpolation: 'hold', samples: [[0, 0.5], [0.73, 3], [1.31, 1]] } }];
+    scheduled.nodes[0].sourceTerms = [{ id: 101, state: 'y', expression: '-k y', parameters: [{ id: 501, name: 'Rate', symbol: 'k', value: 1, unit: '', mode: 'constant', sharedParameterId: 90 }],
+        expressionModel: { latex: '', bindings: [{ kind: 'parameter', parameterId: 501, symbol: 'k' }, { kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { stateId: 11 }, mathJson: ['Negate', ['Multiply', 'k', 'y']] } }];
+    const scheduledResult = await run(await modelPath('adaptiveScheduled', scheduled), { targetTime: 2, globalTimeStep: 0.5, outputInterval: 0.5, method: 'dormandPrince54', tolerance: { relative: 1e-9, absolute: 1e-12 } });
+    const exactAtTwo = Math.exp(-(0.5 * 0.73 + 3 * (1.31 - 0.73) + 1 * (2 - 1.31)));
+    assert.ok(Math.abs(valueOf(scheduledResult.samples.at(-1), 11) - exactAtTwo) <= 1e-8, 'Landing on a schedule\'s jumps, the step keeps the tolerance\'s accuracy.');
+    assert.ok(scheduledResult.integration.rejectedSteps <= 4, `Landing on the jumps, the steps must not be rejected again and again at them: ${JSON.stringify(scheduledResult.integration)}`);
+
+    // A stiff model: Hairer's test says so, once, as a finding about the whole model; and validation says what stability will hold it to.
+    const stiff = decay(null);
+    // y' = -1000 (y - cos t): y follows cos t, and its fast mode limits the steps.
+    stiff.nodes[0].sourceTerms[0] = { id: 101, state: 'y', expression: '-1000 (y - cos t)', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }, { kind: 'time', symbol: 't' }],
+        output: { stateId: 11 }, mathJson: ['Multiply', '-1000', ['Add', 'y', ['Negate', ['Cos', 't']]]] } };
+    const stiffResult = await run(await modelPath('adaptiveStiff', stiff), { targetTime: 4, globalTimeStep: 1, outputInterval: 1, method: 'dormandPrince54', tolerance: { relative: 1e-3, absolute: 1e-6 } });
+    const stiffFindings = stiffResult.stabilityFindings.filter((finding) => finding.code === 'adaptiveStepsLimitedByStiffness');
+    assert.equal(stiffFindings.length, 1, `The stiffness test must fire once: ${JSON.stringify(stiffResult.stabilityFindings)}`);
+    assert.match(stiffFindings[0].message, /looks stiff: Adaptive is taking steps limited by stability, not accuracy/);
+    assert.equal(stiffFindings[0].nodeId, 0);
+    assert.ok(Number.isFinite(stiffResult.integration.stiffnessDetectedAt));
+    const nonStiffFindings = adaptiveSerial.stabilityFindings?.filter((finding) => finding.code === 'adaptiveStepsLimitedByStiffness') ?? [];
+    assert.equal(nonStiffFindings.length, 0, 'The masses on springs are not stiff.');
+
+    // A program is held under Adaptive: evaluated once a global step, at its start.
+    const heldAdaptive = await run(await modelPath('pythonHeldAdaptive', decay({ kind: 'python', source: pythonFeed() })), { ...programTiming, method: 'dormandPrince54' });
+    assert.deepEqual(heldAdaptive.integration.heldTerms, [{ sourceId: 31, stateId: 21 }]);
+    for (let index = 1; index < heldAdaptive.samples.length; ++index) {
+        const expected = valueOf(heldAdaptive.samples[index - 1], 21) + programTiming.globalTimeStep * valueOf(heldAdaptive.samples[index - 1], 11);
+        assert.ok(Math.abs(valueOf(heldAdaptive.samples[index], 21) - expected) <= 1e-12, 'A held program must be read at the global step\'s start through every step.');
+    }
+
+    // Refusals by name: tolerances out of range, and a state's own absolute tolerance that is not a positive number.
+    for (const [configuration, message] of [
+        [{ ...adaptive, tolerance: { relative: 0 } }, /relative tolerance must be a number greater than 0 and less than 1/],
+        [{ ...adaptive, tolerance: { relative: 1 } }, /relative tolerance must be a number greater than 0 and less than 1/],
+        [{ ...adaptive, tolerance: { absolute: -1 } }, /absolute tolerance must be a finite number greater than 0/]
+    ]) {
+        const { code, diagnostics } = await attempt(split, configuration);
+        assert.notEqual(code, 0);
+        assert.match(diagnostics, message);
+    }
+    const badTolerance = decay(null);
+    badTolerance.nodes[0].states[0].numerics = { absoluteTolerance: 0 };
+    const badToleranceDocument = { ...badTolerance, runConfigurations: [{ id: 900, name: 'Run', globalTimeStep: 0.25, outputInterval: 0.25, method: 'dormandPrince54' }], activeRunConfigurationId: 900 };
+    const badReportPath = join(directory, 'badTolerance.report');
+    await execute(['validate', await modelPath('badTolerance', badToleranceDocument), '--report', badReportPath]);
+    assert.ok(issues(decodeValidationReport(await readFile(badReportPath))).some((issue) => issue.code === 'stateAbsoluteToleranceInvalid'), 'A state\'s tolerance must be checked.');
+    // A state's own absolute tolerance is used: loose ones on y and z let Adaptive take fewer steps than the run's would.
+    const loose = decay(null);
+    loose.nodes[0].states[0].numerics = { absoluteTolerance: 1e-2 };
+    loose.nodes[1].states[0].numerics = { absoluteTolerance: 1e-2 };
+    const looseSteps = (await run(await modelPath('looseTolerance', loose), { targetTime: 8, globalTimeStep: 8, outputInterval: 8, method: 'dormandPrince54', tolerance: { relative: 1e-12 } })).integration.steps;
+    const tightSteps = (await run(decayModel, { targetTime: 8, globalTimeStep: 8, outputInterval: 8, method: 'dormandPrince54', tolerance: { relative: 1e-12 } })).integration.steps;
+    assert.ok(looseSteps < tightSteps, `A state's own looser absolute tolerance must take fewer steps (${looseSteps} vs ${tightSteps}).`);
+
+    // Validation under Adaptive: a stiff model is said to be held to small steps by stability; no step is called unstable.
+    const stiffValidation = { ...stiff, runConfigurations: [{ id: 900, name: 'Run', globalTimeStep: 1, outputInterval: 1, method: 'dormandPrince54' }], activeRunConfigurationId: 900 };
+    stiffValidation.nodes[0].sourceTerms.push({ id: 102, state: 'y', expression: '0.001 y', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { stateId: 11 }, mathJson: ['Multiply', '0.001', 'y'] } });
+    stiffValidation.nodes[1].sourceTerms = [{ id: 201, state: 'z', expression: '-0.01 z', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId: 2, stateId: 21, symbol: 'z' }], output: { stateId: 21 }, mathJson: ['Multiply', '-0.01', 'z'] } }];
+    const stiffReportPath = join(directory, 'stiffValidation.report');
+    await execute(['validate', await modelPath('stiffValidation', stiffValidation), '--report', stiffReportPath]);
+    const stiffIssues = issues(decodeValidationReport(await readFile(stiffReportPath)));
+    assert.ok(!stiffIssues.some((issue) => issue.code === 'numericsPotentiallyUnstable'), 'Adaptive keeps itself stable: no step is called unstable.');
+    assert.ok(stiffIssues.some((issue) => issue.code === 'numericsStiffModel' && /Adaptive stays stable only with steps of at most about/.test(issue.message)),
+        `A stiff model must be named under Adaptive: ${JSON.stringify(stiffIssues)}`);
+
+    console.log('✓ whole-model integration: Runge–Kutta 4 and Adaptive give the same bits on every backend and from a checkpoint, make three nodes the one-node '
+        + 'model, hold programs through the stages and step a node that is a program of its own; Adaptive keeps to its tolerance, lands on a schedule\'s jumps '
+        + 'and says when a model is stiff; and what is not known is refused.');
 } finally {
     await rm(directory, { recursive: true, force: true });
 }

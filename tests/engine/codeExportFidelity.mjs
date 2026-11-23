@@ -598,6 +598,57 @@ class Feed(RelationshipProvider):
             await exportAndCompare(feed, reference, [11, 21], `${kind === 'cpp' ? 'C++' : 'Python'} (Runge–Kutta 4, held program)`, kind);
         }
     }
+    // --- 5. Adaptive, Dormand–Prince 5(4) (docs/proposals/integrators.md): the error control, its tolerances, and its steps landing on
+    // where a stored schedule jumps inside a global step, as the engine lands them; and at fixed steps, its error control off ---
+    const runAndCompareAll = async (doc, configuration, label, stateOrder, kinds = ['cpp', 'python']) => {
+        const path = join(directory, `${label.replace(/\W+/g, '')}.kjt`);
+        const resultPath = join(directory, `${label.replace(/\W+/g, '')}.bin`);
+        const runConfigurationPath = join(directory, `${label.replace(/\W+/g, '')}.json`);
+        await writeFile(path, await encodeProjectFile(JSON.stringify(doc)));
+        await writeFile(runConfigurationPath, JSON.stringify({
+            name: 'fidelity', targetTime, globalTimeStep, outputInterval, ...configuration,
+            providers: { cpp: { sdkPath: join(import.meta.dirname, '..', '..', 'engine') }, python: { sdkPath: join(import.meta.dirname, '..', '..', 'engine', 'sdk', 'python') } }
+        }));
+        assert.equal((await execute(executable, ['run', path, '--configuration', runConfigurationPath, '--output', resultPath])).code, 0, `The engine must run ${label}.`);
+        const reference = decodeResultFile(await readFile(resultPath));
+        assert.equal(reference.integration?.method, 'dormandPrince54');
+        const exported = { ...structuredClone(doc), exportDefaultTargetTime: targetTime, runConfigurations: [{ id: 900, globalTimeStep, outputInterval, ...configuration }], activeRunConfigurationId: 900 };
+        if (kinds.includes('cpp')) {
+            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, serial)`, 'cpp');
+            await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, stdThread)`, 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
+            if (mpiAvailable) await exportAndCompare(exported, reference, stateOrder, `C++ (${label}, mpi)`, 'cpp', 'mpi', { runViaMpi: 5 });
+        }
+        if (kinds.includes('python')) await exportAndCompare(exported, reference, stateOrder, `Python (${label})`, 'python');
+        return reference;
+    };
+    const adaptive = { method: 'dormandPrince54', tolerance: { relative: 1e-8, absolute: 1e-10 } };
+    const fixtureAdaptive = await runAndCompareAll(structuredClone(document), adaptive, 'Adaptive', orderedStateIds);
+    assert.ok(fixtureAdaptive.integration.steps >= targetTime / globalTimeStep, 'Adaptive must take at least one step a global step.');
+    await runAndCompareAll(structuredClone(document), { method: 'dormandPrince54', stepsPerGlobalStep: 3 }, 'Dormand–Prince at fixed steps', orderedStateIds);
+    // y' = -k y with k a shared parameter held at 0.5 until 0.73 s, then 3 until 1.31 s, then 1: both jumps inside a global step.
+    const scheduled = {
+        format: 'konjugate', version: 1, metadata: { projectName: 'Adaptive with a schedule' },
+        sharedParameters: [{ id: 90, name: 'Rate', symbol: 'rate', value: 1, unit: '', mode: 'constant', schedule: { interpolation: 'hold', samples: [[0, 0.5], [0.73, 3], [1.31, 1]] } }],
+        nodes: [
+            { id: 1, name: 'Source', states: [{ id: 11, name: 'Y', symbol: 'y', initialValue: 1, unit: '' }], sourceTerms: [{
+                id: 101, state: 'y', expression: '-k y', parameters: [{ id: 501, name: 'Rate', symbol: 'k', value: 1, unit: '', mode: 'constant', sharedParameterId: 90 }],
+                expressionModel: { latex: '', bindings: [{ kind: 'parameter', parameterId: 501, symbol: 'k' }, { kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { stateId: 11 }, mathJson: ['Negate', ['Multiply', 'k', 'y']] }
+            }] },
+            { id: 2, name: 'Sink', states: [{ id: 21, name: 'Z', symbol: 'z', initialValue: 0, unit: '', numerics: { absoluteTolerance: 1e-12 } }], sourceTerms: [] }
+        ],
+        edges: [{
+            id: 31, name: 'Feed', source: { nodeId: 1, stateId: 11 }, target: { nodeId: 2, stateId: 21 }, directionality: 'directed', parameters: [],
+            equation: 'y', equationModel: { latex: 'y', bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { role: 'target', stateId: 21 }, mathJson: 'y' }
+        }]
+    };
+    await runAndCompareAll(scheduled, adaptive, 'Adaptive, scheduled', [11, 21]);
+    // A held program under Adaptive: evaluated at the global step's start, in each language.
+    for (const kind of ['cpp', 'python']) {
+        const feed = feedDocument(kind);
+        const reference = await runAndCompareAll(feed, adaptive, `Adaptive, held ${kind} program`, [11, 21], [kind]);
+        assert.equal(reference.integration.heldTerms.length, 1);
+    }
+
     // A node that is a program of its own is refused by name under a whole-model method, for now.
     const nodeProgram = providerAlgebraicDocument('python');
     nodeProgram.runConfigurations = [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }];

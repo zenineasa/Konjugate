@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "stabilityAnalysis.hpp"
+#include "konjugate/integrators/dormandPrince54.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
@@ -235,9 +236,12 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
 }
 
 
-std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z) {
-    using Tableau = integrators::RungeKutta4Tableau;
-    // (I - zA) k = 1, by forward substitution (A is strictly lower triangular); R = 1 + z b^T k.
+namespace {
+
+// An explicit method's stability function, from its tableau: (I - zA) k = 1 by forward substitution (A is strictly lower triangular);
+// R = 1 + z b^T k.
+template <typename Tableau>
+std::complex<double> explicitStabilityFunction(std::complex<double> z) {
     std::complex<double> k[Tableau::stages];
     std::complex<double> result = 1.0;
     for (std::size_t row = 0; row < Tableau::stages; ++row) {
@@ -248,13 +252,15 @@ std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z) {
     return result;
 }
 
-double rungeKutta4LargestStableStep(std::complex<double> eigenvalue) {
+template <typename Tableau>
+double explicitLargestStableStep(std::complex<double> eigenvalue) {
     const auto magnitude = std::abs(eigenvalue);
     if (magnitude == 0) return std::numeric_limits<double>::infinity();
     if (eigenvalue.real() > 0) return 0;
     const auto direction = eigenvalue / magnitude;
-    const auto grows = [&](double reach) { return std::abs(rungeKutta4StabilityFunction(reach * direction)) > 1.0 + 1e-12; };
-    // Every explicit method's region is bounded: Runge–Kutta 4's reaches about 2.83 from the origin, so a scan to 8 finds its edge.
+    const auto grows = [&](double reach) { return std::abs(explicitStabilityFunction<Tableau>(reach * direction)) > 1.0 + 1e-12; };
+    // Every explicit method's region is bounded: Runge–Kutta 4's reaches about 2.83 from the origin and Dormand–Prince's about 3.4, so
+    // a scan to 8 finds its edge.
     constexpr double scanStep = 1e-3;
     double reach = 0;
     while (reach < 8 && !grows(reach + scanStep)) reach += scanStep;
@@ -265,6 +271,24 @@ double rungeKutta4LargestStableStep(std::complex<double> eigenvalue) {
         (grows(middle) ? outside : reach) = middle;
     }
     return reach / magnitude;
+}
+
+}
+
+std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z) {
+    return explicitStabilityFunction<integrators::RungeKutta4Tableau>(z);
+}
+
+double rungeKutta4LargestStableStep(std::complex<double> eigenvalue) {
+    return explicitLargestStableStep<integrators::RungeKutta4Tableau>(eigenvalue);
+}
+
+std::complex<double> dormandPrince54StabilityFunction(std::complex<double> z) {
+    return explicitStabilityFunction<integrators::DormandPrince54Tableau>(z);
+}
+
+double dormandPrince54LargestStableStep(std::complex<double> eigenvalue) {
+    return explicitLargestStableStep<integrators::DormandPrince54Tableau>(eigenvalue);
 }
 
 namespace {
@@ -278,7 +302,14 @@ bool isEquationOnlyForStages(const NodeExecutionPlan& node) {
 }
 
 std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
-    const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit) {
+    const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit,
+    IntegrationMethod method) {
+    const bool dormandPrince = method == IntegrationMethod::dormandPrince54;
+    const auto stabilityFunction = dormandPrince ? dormandPrince54StabilityFunction : rungeKutta4StabilityFunction;
+    const auto largestStableStep = dormandPrince ? dormandPrince54LargestStableStep : rungeKutta4LargestStableStep;
+    // Adaptive (no steps per global step) is judged at the global step, the largest step it may take.
+    const bool adaptive = dormandPrince && stepsPerGlobalStep == 0;
+    stepsPerGlobalStep = std::max<std::size_t>(1, stepsPerGlobalStep);
     if (!std::all_of(plan.nodes.begin(), plan.nodes.end(), isEquationOnlyForStages)) return std::nullopt;
     // The integrated states, in plan order, with their nodes: those a node's Rate terms add to.
     std::vector<std::size_t> integrated;
@@ -356,7 +387,7 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
         for (Eigen::Index index = 0; index < size; ++index) {
             auto eigenvalue = solver.eigenvalues()(index);
             if (std::abs(eigenvalue.real()) <= neutral) eigenvalue = {0.0, std::abs(eigenvalue.imag()) <= neutral ? 0.0 : eigenvalue.imag()};
-            const auto amplification = std::abs(rungeKutta4StabilityFunction(assessment.stepSize * eigenvalue));
+            const auto amplification = std::abs(stabilityFunction(assessment.stepSize * eigenvalue));
             if (amplification > dominantAmplification) {
                 dominantAmplification = amplification;
                 const Eigen::MatrixXcd vectors = solver.eigenvectors();
@@ -374,13 +405,15 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
                 if (!decaying || rate < slowest) slowest = rate;
                 ++decaying;
             }
-            const auto bound = rungeKutta4LargestStableStep(eigenvalue);
+            const auto bound = largestStableStep(eigenvalue);
             if (bound == 0) assessment.unconditionallyUnstable = true;
             largestStable = std::min(largestStable, bound);
         }
     }
     assessment.stable = assessment.maxAmplificationFactor <= 1.0 + 1e-6;
     if (decaying >= 2 && slowest > 0) assessment.stiffnessRatio = fastest / slowest;
+    // Adaptive keeps itself stable by taking smaller steps: what the analysis says is the step stability holds it to.
+    if (adaptive && std::isfinite(largestStable) && largestStable > 0) assessment.largestStableStep = largestStable;
     if (!assessment.stable) {
         if (assessment.unconditionallyUnstable) return assessment;
         assessment.unconditionallyUnstable = false;

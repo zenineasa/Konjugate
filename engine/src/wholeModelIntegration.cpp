@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstring>
+#include <limits>
 #include <set>
 #include <stdexcept>
 
@@ -14,10 +16,13 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     const auto method = configuration.get<std::string>("method", "nodeByNode");
     if (method == "nodeByNode") settings.method = IntegrationMethod::nodeByNode;
     else if (method == "rungeKutta4") settings.method = IntegrationMethod::rungeKutta4;
+    else if (method == "dormandPrince54") settings.method = IntegrationMethod::dormandPrince54;
     else {
-        throw std::runtime_error("The run's method \"" + method + "\" is not one this version of Konjugate knows (it knows nodeByNode and "
-            "rungeKutta4); open the model in the version that wrote it, or choose another method.");
+        throw std::runtime_error("The run's method \"" + method + "\" is not one this version of Konjugate knows (it knows nodeByNode, "
+            "rungeKutta4 and dormandPrince54); open the model in the version that wrote it, or choose another method.");
     }
+    // Dormand–Prince chooses its own steps unless it is told how many to take.
+    if (settings.method == IntegrationMethod::dormandPrince54) settings.stepsPerGlobalStep = 0;
     if (const auto steps = configuration.get_optional<std::string>("stepsPerGlobalStep")) {
         char* end = nullptr;
         const auto value = std::strtod(steps->c_str(), &end);
@@ -26,19 +31,181 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
         }
         settings.stepsPerGlobalStep = static_cast<std::size_t>(value);
     }
+    // A relative tolerance is a fraction, below 1; an absolute one is in the state's own unit, any finite positive number.
+    const auto positive = [&](const char* key, double fallback, bool fraction, const char* message) {
+        const auto text = configuration.get_optional<std::string>(key);
+        if (!text) return fallback;
+        char* end = nullptr;
+        const auto value = std::strtod(text->c_str(), &end);
+        if (text->empty() || end != text->c_str() + text->size() || !std::isfinite(value) || !(value > 0) || (fraction && !(value < 1))) {
+            throw std::runtime_error(message);
+        }
+        return value;
+    };
+    settings.relativeTolerance = positive("tolerance.relative", settings.relativeTolerance, true,
+        "The run's relative tolerance must be a number greater than 0 and less than 1.");
+    settings.absoluteTolerance = positive("tolerance.absolute", settings.absoluteTolerance, false,
+        "The run's absolute tolerance must be a finite number greater than 0.");
     return settings;
 }
 
+bool isAdaptive(const IntegrationSettings& settings) noexcept {
+    return settings.method == IntegrationMethod::dormandPrince54 && settings.stepsPerGlobalStep == 0;
+}
+
 std::string_view integrationMethodName(IntegrationMethod method) noexcept {
-    return method == IntegrationMethod::rungeKutta4 ? "rungeKutta4" : "nodeByNode";
+    switch (method) {
+    case IntegrationMethod::rungeKutta4: return "rungeKutta4";
+    case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::nodeByNode: break;
+    }
+    return "nodeByNode";
 }
 
 std::string_view solverKindName(IntegrationMethod method) noexcept {
-    return method == IntegrationMethod::rungeKutta4 ? "rungeKutta4" : "explicitEuler";
+    switch (method) {
+    case IntegrationMethod::rungeKutta4: return "rungeKutta4";
+    case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::nodeByNode: break;
+    }
+    return "explicitEuler";
 }
 
 std::size_t integrationMethodStages(IntegrationMethod method) noexcept {
-    return method == IntegrationMethod::rungeKutta4 ? 4 : 1;
+    switch (method) {
+    case IntegrationMethod::rungeKutta4: return 4;
+    case IntegrationMethod::dormandPrince54: return 6;
+    case IntegrationMethod::nodeByNode: break;
+    }
+    return 1;
+}
+
+std::vector<double> absoluteTolerances(const boost::property_tree::ptree& document, const ExecutionPlan& plan, double runAbsoluteTolerance) {
+    std::vector<double> tolerances(plan.initialStates.size(), runAbsoluteTolerance);
+    const auto nodes = document.get_child_optional("nodes");
+    if (!nodes) return tolerances;
+    for (const auto& node : *nodes) {
+        const auto states = node.second.get_child_optional("states");
+        if (!states) continue;
+        for (const auto& state : *states) {
+            const auto text = state.second.get_optional<std::string>("numerics.absoluteTolerance");
+            if (!text) continue;
+            const auto stateId = state.second.get<EntityId>("id", 0);
+            char* end = nullptr;
+            const auto value = std::strtod(text->c_str(), &end);
+            if (text->empty() || end != text->c_str() + text->size() || !std::isfinite(value) || !(value > 0)) {
+                throw std::runtime_error("State " + std::to_string(stateId) + "'s absolute tolerance must be a finite number greater than 0.");
+            }
+            const auto index = plan.stateIndexes.find(stateId);
+            if (index != plan.stateIndexes.end()) tolerances[index->second] = value;
+        }
+    }
+    return tolerances;
+}
+
+namespace {
+
+void addScheduleCorners(const ParameterSchedule& schedule, double from, double to, std::vector<double>& times) {
+    const auto add = [&](double time) { if (time > from && time < to) times.push_back(time); };
+    add(schedule.startTime);
+    switch (schedule.mode) {
+    case ParameterSchedule::Mode::step:
+        return;
+    case ParameterSchedule::Mode::ramp:
+    case ParameterSchedule::Mode::pulse:
+        add(schedule.startTime + schedule.duration);
+        return;
+    case ParameterSchedule::Mode::piecewise: {
+        const auto first = std::upper_bound(schedule.samples.begin(), schedule.samples.end(), from,
+            [](double time, const auto& sample) { return time < sample.first; });
+        for (auto sample = first; sample != schedule.samples.end() && sample->first < to; ++sample) add(sample->first);
+        return;
+    }
+    case ParameterSchedule::Mode::waveform:
+        break;
+    }
+    const double end = schedule.duration > 0 ? schedule.startTime + schedule.duration : std::numeric_limits<double>::infinity();
+    if (schedule.duration > 0) add(end);
+    if (!(schedule.frequency > 0) || !std::isfinite(schedule.frequency)) return;
+    // The fractions of a cycle at which the shape jumps or turns (waveformUnitValue); noise holds each value for a whole cycle,
+    // counted from the start without the phase.
+    std::vector<double> fractions;
+    double phase = schedule.phaseDegrees / 360.0;
+    switch (schedule.shape) {
+    case ParameterSchedule::Shape::sine: return;
+    case ParameterSchedule::Shape::square: fractions = {0.0, schedule.dutyCycle > 0 ? schedule.dutyCycle : 0.5}; break;
+    case ParameterSchedule::Shape::triangle: fractions = {0.25, 0.75}; break;
+    case ParameterSchedule::Shape::sawtooth: fractions = {0.5}; break;
+    case ParameterSchedule::Shape::noise: fractions = {0.0}; phase = 0; break;
+    }
+    const double windowStart = std::max(from, schedule.startTime);
+    const double windowEnd = std::min(to, end);
+    if (!(windowEnd > windowStart)) return;
+    const double firstCycle = std::floor((windowStart - schedule.startTime) * schedule.frequency + phase) - 1;
+    const double lastCycle = std::ceil((windowEnd - schedule.startTime) * schedule.frequency + phase) + 1;
+    for (double cycle = firstCycle; cycle <= lastCycle; ++cycle) {
+        for (const auto fraction : fractions) {
+            const double time = schedule.startTime + (cycle + fraction - phase) / schedule.frequency;
+            if (time > windowStart && time < windowEnd) add(time);
+        }
+    }
+}
+
+}
+
+std::vector<double> scheduleBreakpoints(const ExecutionPlan& plan, const std::vector<ParameterSchedule>& active, double from, double to) {
+    std::vector<double> times;
+    for (const auto& schedule : active) addScheduleCorners(schedule, from, to, times);
+    std::set<const ParameterSchedule*> stored;
+    const auto collect = [&](const std::vector<CompiledParameter>& parameters) {
+        for (const auto& parameter : parameters) if (parameter.schedule) stored.insert(parameter.schedule.get());
+    };
+    // Every stored schedule the model reads, Updates' and algebraic relationships' too (though stages hold those), as code export
+    // lands on every schedule it writes: the same breakpoints, so an exported program takes the engine's steps.
+    for (const auto& node : plan.nodes) {
+        for (const auto& task : node.contributions) collect(task.parameters);
+        for (const auto& task : node.algebraicTasks) collect(task.parameters);
+        if (node.nodeProvider) collect(node.nodeProvider->parameters);
+    }
+    for (const auto& relationship : plan.algebraicRelationships) collect(relationship.parameters);
+    for (const auto* schedule : stored) addScheduleCorners(*schedule, from, to, times);
+    // Sorted, so the order the schedules were visited in does not matter.
+    std::sort(times.begin(), times.end());
+    const double gap = std::max(1e-9 * (to - from), 1e3 * std::numeric_limits<double>::epsilon() * std::max(std::abs(from), std::abs(to)));
+    std::vector<double> kept;
+    for (const auto time : times) {
+        if (time - from <= gap || to - time <= gap) continue;
+        if (!kept.empty() && time - kept.back() <= gap) continue;
+        kept.push_back(time);
+    }
+    return kept;
+}
+
+// Version 1 of the record: a byte 1, then the proposed step and the previous error as IEEE doubles, little-endian.
+std::string encodeAdaptiveSolverState(double proposedStep, double previousError) {
+    if (!(proposedStep > 0)) return {};
+    std::string record(17, '\0');
+    record[0] = 1;
+    for (const auto [offset, value] : {std::pair{1, proposedStep}, std::pair{9, previousError}}) {
+        std::uint64_t bits = 0;
+        std::memcpy(&bits, &value, sizeof bits);
+        for (int byte = 0; byte < 8; ++byte) record[static_cast<std::size_t>(offset + byte)] = static_cast<char>((bits >> (8 * byte)) & 0xffU);
+    }
+    return record;
+}
+
+bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, double& previousError) {
+    if (record.size() != 17 || record[0] != 1) return false;
+    double values[2];
+    for (int which = 0; which < 2; ++which) {
+        std::uint64_t bits = 0;
+        for (int byte = 7; byte >= 0; --byte) bits = (bits << 8) | static_cast<unsigned char>(record[static_cast<std::size_t>(1 + 8 * which + byte)]);
+        std::memcpy(&values[which], &bits, sizeof bits);
+    }
+    if (!(values[0] > 0) || !std::isfinite(values[0]) || !(values[1] > 0) || !std::isfinite(values[1])) return false;
+    proposedStep = values[0];
+    previousError = values[1];
+    return true;
 }
 
 void checkRequiredFeatures(const boost::property_tree::ptree& document) {
@@ -89,6 +256,7 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
             compiled.integratedStates.push_back(node.stateIndexes.at(local));
             whole.integrated.at(node.stateIndexes.at(local)) = 1;
         }
+        whole.errorGroups.push_back(compiled.integratedStates);
         whole.nodes.push_back(std::move(compiled));
     }
     return whole;

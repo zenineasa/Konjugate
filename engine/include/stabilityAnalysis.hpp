@@ -3,6 +3,7 @@
 #pragma once
 
 #include "executionPlan.hpp"
+#include "wholeModelIntegration.hpp"
 #include <complex>
 #include <optional>
 
@@ -120,6 +121,10 @@ std::complex<double> rungeKutta4StabilityFunction(std::complex<double> z);
 // lambda = 0.
 double rungeKutta4LargestStableStep(std::complex<double> eigenvalue);
 
+// The same for Dormand–Prince 5(4)'s fifth-order solution, whose region reaches about 3.31 along the negative real axis.
+std::complex<double> dormandPrince54StabilityFunction(std::complex<double> z);
+double dormandPrince54LargestStableStep(std::complex<double> eigenvalue);
+
 // The stability analysis under a whole-model method (docs/proposals/integrators.md, Stability analysis): the eigenvalues of the
 // whole model's Jacobian -- every integrated state against every other, the coupling between nodes included, which a node's own
 // Jacobian leaves out -- judged by the method's stability function at its step, globalTimeStep / stepsPerGlobalStep. Updates are held
@@ -147,7 +152,7 @@ struct WholeModelStabilityAssessment {
 
 std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep,
-    std::size_t denseLimit = 400);
+    std::size_t denseLimit = 400, IntegrationMethod method = IntegrationMethod::rungeKutta4);
 
 std::optional<NodeStabilityAssessment> assessNodeStability(
     const NodeExecutionPlan& node,

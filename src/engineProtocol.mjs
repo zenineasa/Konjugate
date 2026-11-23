@@ -357,7 +357,8 @@ export function decodeResultHeaderPayload(buffer) {
                 else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = decodeUtf8(item.value);
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
                 // solver_state: a method's hidden state, to continue to the bit (docs/proposals/integrators.md); only when there is one.
-                else if (item.number === 7 && item.wireType === 2) checkpoint.solver.state = item.value;
+                // Base64, as providerStates' payloads, so the checkpoint goes back to the engine as a startCheckpoint verbatim.
+                else if (item.number === 7 && item.wireType === 2) checkpoint.solver.state = encodeBase64(item.value);
                 else if (item.number === 6 && item.wireType === 2) {
                     // Base64, not a raw byte array: this shape is meant to be reused verbatim as a
                     // startCheckpoint.providerStates entry on restart (mirroring how a decoded
@@ -443,7 +444,8 @@ export function decodeResultFile(buffer, { startTime = -Infinity, endTime = Infi
                 else if (item.number === 4 && item.wireType === 2) checkpoint.solver.kind = decodeUtf8(item.value);
                 else if (item.number === 5 && item.wireType === 0) checkpoint.solver.version = item.value;
                 // solver_state: a method's hidden state, to continue to the bit (docs/proposals/integrators.md); only when there is one.
-                else if (item.number === 7 && item.wireType === 2) checkpoint.solver.state = item.value;
+                // Base64, as providerStates' payloads, so the checkpoint goes back to the engine as a startCheckpoint verbatim.
+                else if (item.number === 7 && item.wireType === 2) checkpoint.solver.state = encodeBase64(item.value);
                 else if (item.number === 6 && item.wireType === 2) {
                     // Base64, not a raw byte array: this shape is meant to be reused verbatim as a
                     // startCheckpoint.providerStates entry on restart (mirroring how a decoded

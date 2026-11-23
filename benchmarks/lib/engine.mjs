@@ -20,11 +20,12 @@ import { performance } from 'node:perf_hooks';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
 import { decodeProjectFile, encodeProjectFile } from '../../src/projectFile.mjs';
 import { decodeValidationReport } from '../../src/reportProtocol.mjs';
+import { engineExecutable, repositoryRoot } from './shippedEngine.mjs';
 
-export const repositoryRoot = join(import.meta.dirname, '..', '..');
+export { repositoryRoot };
 
 export function resolveEngineExecutable(explicit) {
-    const candidate = explicit ?? process.env.KONJUGATE_ENGINE ?? join(repositoryRoot, 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
+    const candidate = explicit ?? process.env.KONJUGATE_ENGINE ?? engineExecutable;
     if (!existsSync(candidate)) throw new Error(`No engine at ${candidate}. Build it with npm run build:engine, or pass --engine <path>.`);
     return candidate;
 }

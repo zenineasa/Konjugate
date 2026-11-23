@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import { dirname, join } from 'node:path';
+import { shippedBuildType } from './shippedEngine.mjs';
 
 function command(file, args) {
     try {
@@ -99,8 +100,34 @@ export function busyProcesses() {
     return found;
 }
 
-// How the engine being timed was built, from the CMake cache beside it: its build type, compiler and that compiler's version, and the
-// flags of its build type. Null when the executable was not built by CMake in its own directory.
+// The flags konjugateEngine's own sources were actually compiled with, from compile_commands.json beside it (the development preset
+// exports it): the compiler's arguments without the compiler, include directories, macro definitions other than NDEBUG, warnings and
+// the input and output files. Null when there is no such file or no entry for the engine.
+function engineCompileFlags(directory) {
+    const path = join(directory, 'compile_commands.json');
+    if (!existsSync(path)) return null;
+    let entries;
+    try {
+        entries = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+        return null;
+    }
+    const entry = entries.find(({ file }) => /[\\/]engine[\\/]src[\\/]main\.cpp$/.test(file));
+    if (!entry) return null;
+    const words = entry.arguments ?? entry.command.match(/"[^"]*"|\S+/g).map((word) => word.replace(/^"|"$/g, ''));
+    const flags = [];
+    for (let index = 1; index < words.length; ++index) {
+        const word = words[index];
+        if (['-o', '-c', '-I', '-isystem', '-iquote', '-include', '-D', '-MF', '-MT', '-MQ'].includes(word)) ++index;
+        else if (word === '-arch') flags.push(`${word} ${words[++index]}`);
+        else if (word.startsWith('-') && !/^-(I|isystem|iquote|W|M|o)/.test(word) && (!word.startsWith('-D') || word === '-DNDEBUG')) flags.push(word);
+    }
+    return flags.join(' ') || null;
+}
+
+// How the engine being timed was built, from the CMake cache beside it: its build type, compiler and that compiler's version, the flags
+// of its build type, the flags its sources were actually compiled with, and whether it is the build the app ships (the development
+// preset's RelWithDebInfo). Null when the executable was not built by CMake in its own directory.
 export function engineBuild(executable) {
     const cachePath = join(dirname(executable), 'CMakeCache.txt');
     if (!existsSync(cachePath)) return null;
@@ -108,11 +135,23 @@ export function engineBuild(executable) {
     const entry = (name) => new RegExp(`^${name}:[A-Z]+=(.*)$`, 'm').exec(cache)?.[1] ?? null;
     const buildType = entry('CMAKE_BUILD_TYPE');
     const compiler = entry('CMAKE_CXX_COMPILER');
+    const compileFlags = engineCompileFlags(dirname(executable));
+    const flags = [entry('CMAKE_CXX_FLAGS'), buildType ? entry(`CMAKE_CXX_FLAGS_${buildType.toUpperCase()}`) : null].filter(Boolean).join(' ').trim() || null;
+    const optimisation = [...`${compileFlags ?? flags ?? ''}`.matchAll(/(?:^|\s)(-O\S*)/g)].at(-1)?.[1] ?? null;
     return {
         buildType, compiler,
         compilerVersion: compiler ? command(compiler, ['--version']).split('\n')[0] || null : null,
-        flags: [entry('CMAKE_CXX_FLAGS'), buildType ? entry(`CMAKE_CXX_FLAGS_${buildType.toUpperCase()}`) : null].filter(Boolean).join(' ').trim() || null
+        flags, compileFlags, optimisation, shipped: buildType === shippedBuildType
     };
+}
+
+// One line for a report: "RelWithDebInfo, -O2, the shipped build · <compiler> · <flags>". Older results, recorded before compileFlags,
+// optimisation and shipped, give what they have.
+export function describeEngineBuild(build) {
+    if (!build) return null;
+    const optimisation = build.optimisation ?? [...`${build.flags ?? ''}`.matchAll(/(?:^|\s)(-O\S*)/g)].at(-1)?.[1];
+    const kind = [build.buildType, optimisation, build.shipped ? 'the shipped build' : build.shipped === false ? 'not the shipped build' : null].filter(Boolean).join(', ');
+    return [kind, build.compilerVersion, build.compileFlags ?? build.flags].filter(Boolean).join(' · ');
 }
 
 // The computer's state at an instant, recorded at the start and end of a timing session: the load average, the power source and, on

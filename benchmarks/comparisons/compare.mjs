@@ -59,7 +59,8 @@ const quiet = options['wait-for-quiet'] ? createQuietGate() : null;
 // Phase 1 times the native tools together; OpenModelica, in a Linux container under Docker, runs as phase 2, apart (README, Comparisons).
 const phase = tools.size === 1 && tools.has('openmodelica') ? 'openmodelicaInDocker' : 'native';
 if (phase === 'native' && tools.has('openmodelica')) console.warn('OpenModelica runs in Docker, whose virtual machine disturbs the native tools: run it on its own, --tools openmodelica, with Docker quit for the rest.');
-const compileFlags = ['-std=c++20', '-O3', '-DNDEBUG'];
+// As the exported file's own header tells its user to compile it, the optimisation the shipped engine is built with too.
+const compileFlags = ['-std=c++20', '-O2', '-DNDEBUG'];
 const longRun = 20;
 const budget = 120;
 const oneThread = { ...juliaEnvironment(), OPENBLAS_NUM_THREADS: '1', OMP_NUM_THREADS: '1', VECLIB_MAXIMUM_THREADS: '1', MKL_NUM_THREADS: '1' };

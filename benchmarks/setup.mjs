@@ -4,7 +4,8 @@
 // rights (benchmarks/README.md, Reproduce these results). Into KONJUGATE_BENCHMARK_TOOLS (default ~/.konjugate-benchmarks), at the versions
 // pinned in comparisons/tools.mjs, comparisons/requirements.lock and comparisons/julia/Manifest.toml:
 //
-//   1. the engine, built in Release in out/engine-release (needs npm run setup's development dependencies);
+//   1. the engine the app ships, the development preset's RelWithDebInfo build (-O2) in out/engine, as npm run build:engine builds it, with
+//      a bounded number of compilers at once (needs npm run setup's development dependencies);
 //   2. uv, downloaded and checked against its SHA-256, which downloads the pinned standalone Python into the tool home and makes a virtual
 //      environment with exactly the packages of requirements.lock, every one checked against its hash;
 //   3. Julia, the official build, downloaded and checked against its SHA-256, with julia/Manifest.toml's packages instantiated and
@@ -17,12 +18,14 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import { join } from 'node:path';
 import {
     downloads, juliaEnvironment, juliaExecutable, juliaProject, juliaVersion, openModelicaImage, pythonExecutable, pythonVersion, requirementsLock, toolHome, uvEnvironment,
     uvExecutable, uvVersion
 } from './comparisons/tools.mjs';
-import { repositoryRoot } from './lib/engine.mjs';
+import { engineDirectory, engineExecutable, repositoryRoot, shippedBuildType } from './lib/shippedEngine.mjs';
+import { describeEngineBuild, engineBuild } from './lib/machine.mjs';
 
 const checkOnly = process.argv.includes('--check');
 const skip = (name) => process.argv.includes(`--skip-${name}`);
@@ -69,20 +72,38 @@ async function fetchAndUnpack({ url, sha256 }, destination) {
     console.log(`    checked (SHA-256 ${sha256.slice(0, 12)}…) and unpacked into ${destination}`);
 }
 
+// How many compilers a build runs at once: CMAKE_BUILD_PARALLEL_LEVEL when it is set, else one per processor but no more than one per
+// 2 GiB of memory, since an unbounded make -j started some 200 compilers on an 8 GB computer and stalled it in swap.
+function buildJobs() {
+    const set = Number.parseInt(process.env.CMAKE_BUILD_PARALLEL_LEVEL ?? '', 10);
+    if (Number.isInteger(set) && set > 0) return set;
+    return Math.max(1, Math.min(os.availableParallelism(), Math.floor(os.totalmem() / 2 ** 30 / 2)));
+}
+
+// The engine the app ships: the development preset's RelWithDebInfo build in out/engine, the one npm run build:engine builds and the
+// accuracy checks use, so accuracy, timing and the app run one engine. Only konjugateEngine is built, not the engine's tests.
 function engine() {
-    const buildDirectory = join(repositoryRoot, 'out', 'engine-release');
-    const executable = join(buildDirectory, 'konjugateEngine');
-    const cache = join(buildDirectory, 'CMakeCache.txt');
-    const release = existsSync(cache) && /^CMAKE_BUILD_TYPE:STRING=Release$/m.test(readFileSync(cache, 'utf8'));
-    if (checkOnly) return `${existsSync(executable) && release ? 'built in Release' : 'not built'} (${executable})`;
+    const cache = join(engineDirectory, 'CMakeCache.txt');
+    const buildType = existsSync(cache) ? /^CMAKE_BUILD_TYPE:STRING=(.*)$/m.exec(readFileSync(cache, 'utf8'))?.[1] ?? null : null;
+    const shipped = buildType === shippedBuildType;
+    if (checkOnly) {
+        if (!existsSync(engineExecutable)) return `not built (${engineExecutable}; npm run benchmark:setup or npm run build:engine builds it)`;
+        if (!shipped) return `NOT the shipped build: ${buildType ?? 'no CMake cache'}, not ${shippedBuildType} (${engineExecutable})`;
+        return `${describeEngineBuild(engineBuild(engineExecutable))} (${engineExecutable})`;
+    }
     if (!existsSync(join(repositoryRoot, '.tools', 'vcpkg', 'scripts', 'buildsystems', 'vcpkg.cmake'))) {
         throw new Error('The engine\'s development dependencies are not set up: run npm run setup first (once), then this again.');
     }
-    if (!release) run('cmake', ['--preset', 'development', '-B', buildDirectory, '-DCMAKE_BUILD_TYPE=Release'], { cwd: join(repositoryRoot, 'engine') });
+    const jobs = buildJobs();
+    console.log(`    at most ${jobs} compilers at once${process.env.CMAKE_BUILD_PARALLEL_LEVEL ? ' (CMAKE_BUILD_PARALLEL_LEVEL)' : ''}`);
+    // The development preset sets CMAKE_BUILD_TYPE itself, so configuring again puts a directory configured otherwise back to the shipped
+    // build; vcpkg, building the engine's dependencies the first time, is held to the same number of jobs.
+    const env = { VCPKG_MAX_CONCURRENCY: String(jobs), ...process.env };
+    if (!shipped) run('cmake', ['--preset', 'development'], { cwd: join(repositoryRoot, 'engine'), env });
     // Incremental: nothing is compiled when the build is current.
-    run('cmake', ['--build', buildDirectory, '--parallel'], { cwd: join(repositoryRoot, 'engine') });
+    run('cmake', ['--build', engineDirectory, '--config', shippedBuildType, '--target', 'konjugateEngine', '--parallel', String(jobs)], { cwd: join(repositoryRoot, 'engine'), env });
     run(process.execPath, [join(repositoryRoot, 'scripts', 'generateReportProtocol.mjs')]);
-    return `built in Release (${executable})`;
+    return `${describeEngineBuild(engineBuild(engineExecutable))} (${engineExecutable})`;
 }
 
 function lockedVersions() {
@@ -152,7 +173,7 @@ async function main() {
     if (!checkOnly) mkdirSync(toolHome, { recursive: true });
     console.log(`Konjugate performance benchmarks: ${checkOnly ? 'checking' : 'setting up'} the tools in ${toolHome}${process.env.KONJUGATE_BENCHMARK_TOOLS ? ' (KONJUGATE_BENCHMARK_TOOLS)' : ''}`);
     const steps = [
-        ['Engine (Release)', skip('engine') ? null : engine],
+        [`Engine (${shippedBuildType}, the shipped build)`, skip('engine') ? null : engine],
         [`Python ${pythonVersion} with SciPy`, python],
         [`Julia ${juliaVersion} with DifferentialEquations.jl`, julia],
         ['OpenModelica (optional, Docker)', skip('openmodelica') ? null : openModelica]

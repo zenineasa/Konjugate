@@ -7,9 +7,10 @@
 //   scaling       graph scalability (node benchmarks/run.mjs --full --only scaling/graphScalability)
 //   comparisons   Konjugate, its exported C++, SciPy and Julia, interleaved (node benchmarks/comparisons/compare.mjs)
 //
-// First the Release engine and the tools are brought up to date (benchmarks/setup.mjs), before anything is timed. Then, before each part:
-// a preflight that refuses to go on, saying why, unless the computer is on mains power, Docker is quit and no compiler, build tool,
-// Electron application (Agent Orchestrator, an editor), Konjugate app or test is running; and the idle computer measured for three minutes,
+// First the engine the app ships (out/engine, RelWithDebInfo, -O2) and the tools are brought up to date (benchmarks/setup.mjs), before
+// anything is timed. Then, before each part: a preflight that refuses to go on, saying why, unless the computer is on mains power, Docker
+// is quit and no compiler, build tool, Electron application (Agent Orchestrator, an editor), Konjugate app or test is running; and the
+// idle computer measured for three minutes,
 // every timed run of the part then waiting until the one-minute load average and the processor time of other processes are below that
 // baseline plus 1 (lib/quiet.mjs), and logging its time, load and Docker state. Everything runs under caffeinate, printing progress and the
 // time left.
@@ -37,6 +38,7 @@ import { writeComparisonReport } from './comparisons/report.mjs';
 import { comparisonProblems } from './comparisons/problems.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
 import { conditions, machineDetails, machineSlug } from './lib/machine.mjs';
+import { engineExecutable } from './lib/shippedEngine.mjs';
 import { preflight } from './lib/quiet.mjs';
 import { problems } from './problems.mjs';
 
@@ -50,7 +52,8 @@ const rounds = dryRun ? 1 : 5;
 const scalingUpTo = dryRun ? 1000 : null;
 const baselineSeconds = dryRun ? 0 : Number(options.baseline ?? 180);
 const dryRunProblems = ['robertson', 'vanDerPol', 'lorenz', 'rcNetwork', 'stiffGrid256', 'buck'];
-const engine = join(repositoryRoot, 'out', 'engine-release', 'konjugateEngine');
+// The engine the app ships (lib/shippedEngine.mjs): the one timed is the one the accuracy checks run and the app runs.
+const engine = engineExecutable;
 // About how long each part takes on an Apple M1 (8 GB), without waiting for quiet; a slower or busier computer takes longer.
 const expectedMinutes = dryRun ? { problems: 6, scaling: 4, comparisons: 25 } : { problems: 20, scaling: 110, comparisons: 150 };
 
@@ -145,7 +148,7 @@ async function main() {
     console.log(`Parts: ${parts.map((part) => `${part} (about ${clock(expectedMinutes[part] * 60000)})`).join(', ')}; about ${clock(total * 60000)} in all, longer when it waits for a quiet computer.`);
     if (!dryRun) console.log('Leave the computer alone, on mains power, with every other application closed, until it says Done.');
 
-    say('Bringing the Release engine and the tools up to date (benchmarks/setup.mjs)');
+    say('Bringing the shipped engine (out/engine, RelWithDebInfo) and the tools up to date (benchmarks/setup.mjs)');
     const setup = spawnSync(process.execPath, [join(repositoryRoot, 'benchmarks', 'setup.mjs'), '--skip-openmodelica'], { stdio: 'inherit' });
     if (setup.status !== 0) throw new Error('Setup did not complete; see above.');
 

@@ -3,6 +3,7 @@
 // The benchmark report: one self-contained HTML file (no network, no external scripts or fonts) holding every problem's checks, results
 // and plots, and for a --full run the timings and the machine they were measured on.
 
+import { describeEngineBuild } from './machine.mjs';
 import { darkTheme, escapeXml, formatNumber, layout, lightTheme, renderLegend, renderSvg } from './plots.mjs';
 
 const resultColumns = [
@@ -92,7 +93,7 @@ function machineList(machine) {
         ['Power', [power.source, power.batteryPercent ? `${power.batteryPercent} % battery` : null, power.lowPowerMode === null || power.lowPowerMode === undefined ? null : `Low Power Mode ${power.lowPowerMode ? 'on' : 'off'}`, power.governor ? `governor ${power.governor}` : null].filter(Boolean).join(' · ') || 'unknown'],
         ['Load average at start', machine.loadAverage.join(' / ')],
         ['Node.js', machine.node],
-        ...(machine.engineBuild ? [['Engine build', [machine.engineBuild.buildType, machine.engineBuild.compilerVersion, machine.engineBuild.flags].filter(Boolean).join(' · ')]] : [])
+        ...(machine.engineBuild ? [['Engine build', describeEngineBuild(machine.engineBuild)]] : [])
     ];
     return `<dl class="machine">${items.map(([term, value]) => `<dt>${escapeXml(term)}</dt><dd>${escapeXml(value)}</dd>`).join('')}</dl>`;
 }

@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { noisyWithinRun, writeComparisonReport } from './comparisons/report.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
-import { machineDetails, machineSlug } from './lib/machine.mjs';
+import { describeEngineBuild, machineDetails, machineSlug } from './lib/machine.mjs';
 import { timingStatistics } from './lib/metrics.mjs';
 import { darkTheme, formatNumber, lightTheme } from './lib/plots.mjs';
 
@@ -172,7 +172,7 @@ export async function combineSessions(machineDirectory, { sessions: chosen = nul
     const latestProblems = [...sessions].reverse().find((session) => existsSync(join(session.directory, 'problems', 'report.html')));
     const latestScaling = [...sessions].reverse().find((session) => existsSync(join(session.directory, 'scaling', 'report.html')));
     const reportPath = join(machineDirectory, 'report.html');
-    const machineText = machine ? [machine.model, machine.chip ?? machine.cpu, `${machine.logicalProcessors} cores`, `${Math.round(machine.memoryBytes / 2 ** 30)} GiB`, machine.operatingSystem, machine.engineBuild ? `engine ${machine.engineBuild.buildType}, ${machine.engineBuild.compilerVersion} ${machine.engineBuild.flags}` : null].filter(Boolean).join(' · ') : '';
+    const machineText = machine ? [machine.model, machine.chip ?? machine.cpu, `${machine.logicalProcessors} cores`, `${Math.round(machine.memoryBytes / 2 ** 30)} GiB`, machine.operatingSystem, machine.engineBuild ? `engine ${describeEngineBuild(machine.engineBuild)}` : null].filter(Boolean).join(' · ') : '';
     const sessionEntries = [...problems.sessions.map((entry) => ({ ...entry, part: 'problems' })), ...scaling.sessions.map((entry) => ({ ...entry, part: 'scaling' })),
         ...(comparisons?.sessions ?? []).map((entry) => ({ ...entry, part: entry.part }))].sort((a, b) => a.session.localeCompare(b.session));
     writeFileSync(reportPath, `<!DOCTYPE html>

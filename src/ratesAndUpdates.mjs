@@ -105,12 +105,32 @@ export function stateKinds(nodes, edges) {
     return kinds;
 }
 
-// How a node's Updates are worked out: 'settle' or 'oncePerStep', and the most sweeps a ring of them takes. Every node of a
-// file that says no kind settles.
-export function nodeUpdates(node, explicit) {
+const statedLimit = (item) => (Number.isSafeInteger(item?.updatesLimit) && item.updatesLimit > 0 ? item.updatesLimit : null);
+
+// The subsystems a node is in, at any depth, that settle their nodes' Updates, innermost first ("over a subsystem" in
+// docs/proposals/ratesAndUpdates.md). `subsystems` is the project's subsystem records.
+export function settlingSubsystems(node, subsystems = []) {
+    const byId = new Map((subsystems ?? []).map((subsystem) => [subsystem.id, subsystem]));
+    const found = [];
+    const seen = new Set();
+    for (let at = byId.get(node.subsystemId); at && !seen.has(at.id); at = byId.get(at.parentSubsystemId)) {
+        seen.add(at.id);
+        if (at.updates === 'settle') found.push(at);
+    }
+    return found;
+}
+
+// How a node's Updates are worked out: 'settle' or 'oncePerStep', and the most sweeps a ring of them takes -- the largest
+// the node or a settling subsystem it is in gives, 1000 when none gives one, as the engine reads it. Every node of a file
+// that says no kind settles. `setBy` is the innermost subsystem that settles it when the node does not say so itself.
+export function nodeUpdates(node, explicit, subsystems = []) {
+    const settlingAround = settlingSubsystems(node, subsystems);
+    const limits = [statedLimit(node), ...settlingAround.map(statedLimit)].filter((limit) => limit !== null);
+    const own = !explicit || node.updates === 'settle';
     return {
-        updates: !explicit ? 'settle' : node.updates === 'settle' ? 'settle' : 'oncePerStep',
-        limit: Number.isSafeInteger(node.updatesLimit) && node.updatesLimit > 0 ? node.updatesLimit : 1000
+        updates: own || settlingAround.length ? 'settle' : 'oncePerStep',
+        limit: limits.length ? Math.max(...limits) : 1000,
+        setBy: !own && settlingAround.length ? settlingAround[0] : null
     };
 }
 

@@ -32,7 +32,7 @@ The review accepted the recommendation on each question this proposal asked, wit
 | 11 | Values during results | Each part's value is recorded in a run, and chips show it while results are open. |
 | 12 | Outputs of one program | "output 1 of 2", in words. |
 | 13 | Relationship programs writing several states | Deferred. |
-| 14 | Linked components and kinds | Deferred. |
+| 14 | Linked components and kinds | Built 23 November 2026: a linked instance says its kinds as the model does, its file left as it is ([Subsystem components](subsystemComponents.md#states-kinds-in-linked-components)). |
 
 **Compatibility is a requirement, not a goal:** every `.kjt` and result a released version wrote opens, every bundled example and test model gives the same numbers to the bit, a file this version writes stays readable by older versions wherever a new feature is not used (a new field is written only when it is not its default, and the codec keeps passing through fields it does not know), and results from older versions open. The [Saved format](#saved-format) section lists every change, and [Compatibility tests](#compatibility-tests) how each is held.
 
@@ -287,7 +287,7 @@ Each stage keeps every interaction test and tutorial passing, changing a test on
 
 ## Open questions
 
-All fourteen were answered ([Decisions](#decisions)); 13 (a relationship program writing several states) and 14 (linked components and kinds) are deferred, and come back when relationship programs gain several outputs and when kinds are read per component.
+All fourteen were answered ([Decisions](#decisions)); 13 (a relationship program writing several states) is deferred, and comes back when relationship programs gain several outputs; 14 (linked components and kinds) was built later, see [Subsystem components](subsystemComponents.md#states-kinds-in-linked-components).
 
 ## Out of scope
 

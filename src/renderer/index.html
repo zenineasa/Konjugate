@@ -1025,6 +1025,7 @@
                         <option value="oncePerStep">Once per step</option>
                         <option value="settle">Settle within the step</option>
                     </select></label>
+                    <button id="editNodeUpdatesSetBy" class="setByProgram" type="button" hidden></button>
                     <p id="editNodeUpdatesHint" class="builderHint"></p>
                     <label class="editorField" id="editNodeUpdatesLimitField"><span>At most, sweeps of a ring</span><input id="editNodeUpdatesLimit" type="number" min="1" step="1" placeholder="1000"></label>
                 </section>
@@ -1162,6 +1163,13 @@
                 <p id="subsystemEditorSummary" class="builderHint"></p>
                 <h3>Boundary</h3>
                 <ul id="subsystemEditorPorts" class="subsystemPortList"></ul>
+                <h3>Updates</h3>
+                <label class="editorField"><span>Updates</span><select id="subsystemEditorUpdates">
+                    <option value="asEachNode">As each node says</option>
+                    <option value="settle">Settle within the step</option>
+                </select></label>
+                <p id="subsystemEditorUpdatesHint" class="builderHint"></p>
+                <label class="editorField" id="subsystemEditorUpdatesLimitField"><span>At most, sweeps of a ring</span><input id="subsystemEditorUpdatesLimit" type="number" min="1" step="1" placeholder="1000"></label>
             </section>
             <section id="subsystemEditorComponent">
                 <h3>Component</h3>

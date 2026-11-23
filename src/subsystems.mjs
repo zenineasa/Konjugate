@@ -2,6 +2,7 @@
 
 import { stripComponents } from './components.mjs';
 import { subsystemFromDocument } from './modelCodec.mjs';
+import { nodeUpdates, settlingSubsystems } from './ratesAndUpdates.mjs';
 
 // A subsystem's boundary is not stored: which relationships cross it is derived from the current edges and node membership
 // whenever it is needed (see subsystemBoundaryCrossings). A document written before that may still carry a `ports` array on
@@ -165,6 +166,16 @@ export function normalizeSubsystemName(name) {
 // (src/components.mjs), so subsystems never change how a model runs.
 export function executionProjectDocument(document) {
     const flattened = stripComponents(document);
+    // A node in a subsystem that settles its Updates settles them, with the limit the engine would give it from the
+    // subsystems (src/ratesAndUpdates.mjs), so the engine, validation and code export read it from the node alone.
+    if ((flattened.subsystems ?? []).some((subsystem) => subsystem.updates === 'settle')) {
+        flattened.nodes.forEach((node) => {
+            if (!settlingSubsystems(node, flattened.subsystems).length) return;
+            const { limit } = nodeUpdates(node, true, flattened.subsystems);
+            node.updates = 'settle';
+            if (limit !== 1000 || node.updatesLimit !== undefined) node.updatesLimit = limit;
+        });
+    }
     delete flattened.subsystems;
     flattened.nodes.forEach((node) => delete node.subsystemId);
     return flattened;

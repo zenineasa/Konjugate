@@ -61,6 +61,18 @@ So a node, or a subsystem, can ask for its Updates to **settle within the step**
 - **a ring that converges** settles on its fixed point -- the correct answer to the loops refused today;
 - **a ring that does not** stops at the limit, with a warning naming the ring rather than an error.
 
+### Across nodes, and over a subsystem
+
+**Across nodes, settling already settles the whole chain** (checked 23 November 2026, from `buildUpdatePhase` and `applyUpdates` in `engine/src/executionPlan.cpp`, and measured). The engine does not settle node by node: it puts every Update step of every settling node into one graph, model-wide, and works it out in dependency order, so a chain of Updates that crosses node boundaries settles in the same pass as one inside a node. A relationship's equation counts as a step of the node whose state it sets. A node boundary adds no step of lag; a node working its Updates out once per step does, and only where it is in the chain: a settling node reading it reads its new value, and it reads the settling nodes' values from the start of the step. Settling is done once for the whole model after the nodes are stepped, so the serial, thread-pool and partitioned backends give the same numbers. `tests/engine/updateChainAcrossNodes.mjs` shows it on three nodes in a row, First's $a = t$, Second's $b = a$, Third's $c = b$, in steps of 1 s:
+
+| Nodes settling | $a$ | $b$ | $c$ |
+| --- | --- | --- | --- |
+| all three (every backend), or a file that says no kind | $t$ | $t$ | $t$ |
+| none | $t$ | $t - 1$ | $t - 2$ |
+| First and Third, Second once per step | $t$ | $t - 1$ | $t - 1$ |
+
+**Over a subsystem, built 23 November 2026.** Before this only a node said `updates`, so settling a subsystem's chain meant setting each of its nodes to settle. Since a chain across settling nodes already settles as one, what a subsystem's setting adds is where it is chosen: a subsystem may say `"updates": "settle"` (and `updatesLimit`), absent meaning that it leaves its nodes as they say; a node settles when it, or any subsystem it is in at any depth, says so, and takes the largest limit the node or any such subsystem gives, 1000 when none gives one. Nothing an older file says changes meaning, a node in no settling subsystem is read exactly as before, and the field is written only when set. The engine never saw subsystems before a run (`executionProjectDocument` in `src/subsystems.mjs` drops them), so the rule is applied in both: the canvas writes it onto each node as it flattens the project (`settlingSubsystems` and `nodeUpdates` in `src/ratesAndUpdates.mjs`), so runs, validation and code export read it from the node, and the engine reads a node's `subsystemId` and the `subsystems` records (`compileExecutionPlan`), so a `.kjt` run from the command line gives the canvas's numbers. A component keeps the setting of its instance in its document's `component` block, so every instance of it settles alike and it is kept in a component file or My library; a subsystem inside a component keeps its own as a node does. The setting is on the subsystem's card, under Updates ("As each node says" or "Settle within the step", and the most sweeps of a ring), disabled inside a linked component, which is changed where it is edited; a node a subsystem settles shows its Updates setting as "set by subsystem Name ›", which opens the subsystem. Ring limits and the `updatesRing` and `ringDidNotSettle` warnings are as they were. `tests/engine/updateChainAcrossNodes.mjs` runs the chain above in a settling subsystem, and with Second and Third in a subsystem nested in a settling one, on all three backends and both ways of reading it: every sample is $a = b = c = t$, and a subsystem saying nothing leaves its nodes once per step.
+
 Because every sweep reads only the previous sweep, settling is as independent of the order of evaluation as a single Update is. Its cost is the sweeps: each sweep works out every Update in the region, so a chain $D$ links long costs about $D$ times as much as working it out once in order. Working out only what changed in the previous sweep removes most of that waste (see [Neural Toolbox, the bottleneck](neuralToolbox.md#the-bottleneck-to-solve-before-it-runs-efficiently)); it is an optimisation to make once settling exists, not a condition of it.
 
 ## Terms
@@ -110,7 +122,7 @@ Elsewhere: **causal-inference replay** (today a generated C++ program with the r
 
 ## Open questions
 
-- **Where settling is chosen**: per node, per subsystem, or both, and its default limit.
+- **Where settling is chosen**: per node, per subsystem, or both, and its default limit. Both are built: per node, and per subsystem as above, under [Across nodes, and over a subsystem](#across-nodes-and-over-a-subsystem).
 - **Whether a new model should default to "settle"** for nodes that relationships set values of, rather than "once per step" everywhere.
 - **Words.** "Rate" and "Update" in the editor; `kind` and `updates` in the file; how the README's headline equation is written with both.
 

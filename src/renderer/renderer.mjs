@@ -91,7 +91,7 @@ import { remapIds, createGraphFragment, remapGraphFragment, validateGraphFragmen
 import { parseSectionPath, sectionPaths, sectionPathText, sectionTree } from '../librarySections.mjs';
 import { buildUserComponentTemplate, buildUserTemplate, UnstorableSelectionError } from '../userLibrary.mjs';
 import { nodeFromDocument, nodeToDocument, relationshipFromDocument, relationshipToDocument, subsystemToDocument } from '../modelCodec.mjs';
-import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
+import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, settlingSubsystems, stateKinds, termsReachingStates } from '../ratesAndUpdates.mjs';
 import { displaySymbols, displaySymbolsToStored, foldedName, foldStates, mergeOwnParts, parameterForSymbol, readerLatexToStored, relationshipLatexInReaderNames, renameSymbols, shortNames, signedPart, stateInReaderNames, symbolsToAddAsParameters } from '../stateEquations.mjs';
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
@@ -2553,7 +2553,7 @@ const formatNumber = (value) => (Number.isFinite(Number(value)) ? String(Number(
 function stateOrderControl(node, state, equations) {
     const definition = node.userData.definition;
     const kind = equations.kinds.get(Number(state.id))?.kind ?? 'rate';
-    const settles = nodeUpdates(definition, equations.explicit).updates === 'settle';
+    const settles = nodeUpdates(definition, equations.explicit, liveSubsystems()).updates === 'settle';
     const element = document.createElement('span');
     element.className = 'stateOrder';
     const valueCaption = settles ? 'its value, worked out within each step' : 'its value, set after each step';
@@ -3074,11 +3074,22 @@ function setStateKind(node, stateId, kind) {
 
 // The node's Updates setting, on its Numerics tab.
 function renderNodeUpdatesSetting(definition, equations) {
-    const { updates } = nodeUpdates(definition, equations.explicit);
+    const { updates, setBy, limit } = nodeUpdates(definition, equations.explicit, liveSubsystems());
     $('#editNodeUpdates').value = updates;
+    // Settled by a subsystem it is in: said so, and the subsystem one click away, where it is changed. Off for a reason of
+    // its own, so the results lock leaves it off (applyInspectorReadOnly).
+    $('#editNodeUpdates').toggleAttribute('data-unavailable', Boolean(setBy));
+    $('#editNodeUpdates').disabled = Boolean(setBy) || Boolean(activeResult);
+    // The sweeps it takes when it says none: its subsystem's, or the default.
+    $('#editNodeUpdatesLimit').placeholder = String(definition.updatesLimit === undefined ? limit : 1000);
+    $('#editNodeUpdatesSetBy').hidden = !setBy;
+    $('#editNodeUpdatesSetBy').dataset.subsystem = setBy ? String(setBy.id) : '';
+    $('#editNodeUpdatesSetBy').innerHTML = setBy ? `set by subsystem <small>${escapeHtml(setBy.name)} ›</small>` : '';
     $('#editNodeUpdatesLimit').value = definition.updatesLimit ?? '';
     $('#editNodeUpdatesLimitField').hidden = updates !== 'settle';
-    $('#editNodeUpdatesHint').textContent = !equations.explicit
+    $('#editNodeUpdatesHint').textContent = setBy
+        ? `Its updates settle within the step because the subsystem ${setBy.name} settles those of every node in it. A chain of them, across its nodes, settles in one pass.`
+        : !equations.explicit
         ? 'This model does not say which states are rates and which are updates, so every node\'s updates settle within the step, as before. Choosing once per step here makes it say them, without changing its numbers.'
         : updates === 'settle'
             ? 'Its updates read each other as worked out in the same step: a chain of them settles in one pass, and a ring is worked out again and again until it settles, up to the number of sweeps below.'
@@ -13873,6 +13884,10 @@ $('#editNodeUpdates').addEventListener('change', (event) => {
         else delete target.updates;
     });
 });
+$('#editNodeUpdatesSetBy').addEventListener('click', (event) => {
+    const id = Number(event.currentTarget.dataset.subsystem);
+    if (subsystemById(id)) openSubsystemEditor(id);
+});
 $('#editNodeUpdatesLimit').addEventListener('change', (event) => {
     if (!selectedNode) return;
     const limit = Number(event.target.value);
@@ -18932,7 +18947,7 @@ function reconcileModel(current, next) {
             createSubsystemObject(definition);
             return;
         }
-        ['definitionId', 'parameterValues', 'definitionKey', 'extraFields'].forEach((key) => delete existing[key]);
+        ['definitionId', 'parameterValues', 'definitionKey', 'extraFields', 'updates', 'updatesLimit'].forEach((key) => delete existing[key]);
         Object.assign(existing, { ...definition, position: existing.position });
         existing.deleted = false;
         const object = subsystemObjects.get(definition.id);
@@ -19614,7 +19629,61 @@ function renderSubsystemEditor(id) {
     }));
     const locked = Boolean(activeResult);
     ['#subsystemEditorName', '#subsystemEditorDissolve', '#subsystemEditorDelete'].forEach((selector) => { $(selector).disabled = locked; });
+    renderSubsystemUpdatesSetting(subsystem, locked);
     renderSubsystemComponent(subsystem, locked);
+}
+
+// The subsystems on the canvas, as the rules for settling read them (src/ratesAndUpdates.mjs).
+function liveSubsystems() {
+    return model.subsystems.filter((subsystem) => !subsystem.deleted);
+}
+
+// The card's Updates setting (docs/proposals/ratesAndUpdates.md, over a subsystem): its nodes' Updates as each node says,
+// or settled within the step, every node in it at any depth. Inside a linked component it is the component's, changed
+// where the component is edited.
+function renderSubsystemUpdatesSetting(subsystem, locked) {
+    const settles = subsystem.updates === 'settle';
+    const linked = isInsideLinkedComponent(subsystem);
+    $('#subsystemEditorUpdates').value = settles ? 'settle' : 'asEachNode';
+    $('#subsystemEditorUpdatesLimit').value = subsystem.updatesLimit ?? '';
+    // Off inside a linked component for a reason of its own, so the results lock leaves it off (applyInspectorReadOnly).
+    ['#subsystemEditorUpdates', '#subsystemEditorUpdatesLimit'].forEach((selector) => {
+        $(selector).toggleAttribute('data-unavailable', linked);
+        $(selector).disabled = locked || linked;
+    });
+    $('#subsystemEditorUpdatesLimitField').hidden = !settles;
+    const around = settlingSubsystems({ subsystemId: subsystem.parentSubsystemId }, liveSubsystems())[0];
+    $('#subsystemEditorUpdatesHint').textContent = [
+        settles
+            ? 'Every node in it, at any depth, works its updates out within the step: a chain of them across its nodes settles in one pass, and a ring is worked out again and again until it settles, up to the number of sweeps below.'
+            : 'Each node in it works its updates out as its own Numerics tab says.',
+        !settles && around ? `Its nodes settle anyway, because ${around.name}, which it is in, settles them.` : null,
+        !saysKinds([...nodeObjects.values()].map((object) => object.userData.definition).filter((definition) => !definition.deleted)) ? 'This model does not say which states are rates and which are updates, so every node\'s updates settle within the step already, as before.' : null,
+        linked ? 'It is part of a linked component: change it where the component is edited.' : null
+    ].filter(Boolean).join(' ');
+}
+
+// Whether a subsystem is a linked component's instance, or inside one, whose contents are changed where it is edited.
+function isInsideLinkedComponent(subsystem) {
+    for (let at = subsystem; at; at = subsystemById(at.parentSubsystemId)) {
+        const definition = subsystemDefinitionOf(at);
+        if (definition?.link && !definition.link.editing) return true;
+    }
+    return false;
+}
+
+// Sets a subsystem's Updates setting in one undoable step, every other instance of its component following.
+function setSubsystemUpdates(id, change) {
+    applyDocumentChange((document_) => {
+        const record = (document_.subsystems ?? []).find((subsystem) => subsystem.id === id);
+        if (!record) return null;
+        change(record);
+        syncDefinitions(document_, { preferredSubsystemId: owningInstanceId(id) ?? id, allocateId: allocateModelEntityId });
+        return document_;
+    }, (after) => {
+        const record = after.subsystems.find((subsystem) => subsystem.id === id);
+        return record?.updates === 'settle' ? `${record.name}: its nodes' updates settle within the step` : `${record?.name ?? 'Subsystem'}: each node's updates as the node says`;
+    });
 }
 
 // The card's component section: how many instances share the definition, its ports and its exposed parameters.
@@ -19727,6 +19796,24 @@ $('#subsystemEditorName').addEventListener('change', (event) => {
 });
 $('#subsystemEditorName').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') event.target.blur();
+});
+$('#subsystemEditorUpdates').addEventListener('change', (event) => {
+    const id = currentSubsystemCardId();
+    if (id === null) return;
+    const settle = event.target.value === 'settle';
+    setSubsystemUpdates(id, (record) => {
+        if (settle) record.updates = 'settle';
+        else { delete record.updates; delete record.updatesLimit; }
+    });
+});
+$('#subsystemEditorUpdatesLimit').addEventListener('change', (event) => {
+    const id = currentSubsystemCardId();
+    if (id === null) return;
+    const limit = Number(event.target.value);
+    setSubsystemUpdates(id, (record) => {
+        if (Number.isSafeInteger(limit) && limit > 0) record.updatesLimit = limit;
+        else delete record.updatesLimit;
+    });
 });
 $('#subsystemEditorOpen').addEventListener('click', () => {
     const id = currentSubsystemCardId();

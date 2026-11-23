@@ -1099,12 +1099,51 @@ void assignVerletParts(NodeExecutionPlan& node, const std::unordered_map<EntityI
     }
 }
 
+// How a subsystem asks its nodes' Updates to be worked out (docs/proposals/ratesAndUpdates.md, over a subsystem): whether it
+// settles them, the sweeps it gives a ring if it says so, and the subsystem it is in.
+struct SubsystemUpdates {
+    bool settles = false;
+    std::optional<std::size_t> limit;
+    EntityId parent = 0;
+    bool hasParent = false;
+};
+
+std::unordered_map<EntityId, SubsystemUpdates> readSubsystemUpdates(const boost::property_tree::ptree& document) {
+    std::unordered_map<EntityId, SubsystemUpdates> subsystems;
+    const auto records = document.get_child_optional("subsystems");
+    if (!records) return subsystems;
+    // A file in which no subsystem says how its Updates are worked out is read exactly as before, its subsystems unread.
+    const auto saysUpdates = std::any_of(records->begin(), records->end(), [](const auto& item) {
+        return static_cast<bool>(item.second.get_child_optional("updates")) || static_cast<bool>(item.second.get_child_optional("updatesLimit"));
+    });
+    if (!saysUpdates) return subsystems;
+    for (const auto& item : *records) {
+        const auto& record = item.second;
+        SubsystemUpdates entry;
+        const auto updates = value(record, "updates");
+        if (!updates.empty() && updates != "oncePerStep" && updates != "settle") throw std::runtime_error("A subsystem's updates must be oncePerStep or settle.");
+        entry.settles = updates == "settle";
+        if (record.get_child_optional("updatesLimit")) {
+            entry.limit = record.get<std::size_t>("updatesLimit");
+            if (!*entry.limit) throw std::runtime_error("A subsystem's updatesLimit must be a positive whole number.");
+        }
+        const auto parent = value(record, "parentSubsystemId");
+        if (!parent.empty() && parent != "null") {
+            entry.parent = idValue(record, "parentSubsystemId");
+            entry.hasParent = true;
+        }
+        subsystems[idValue(record, "id")] = entry;
+    }
+    return subsystems;
+}
+
 }
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     checkRequiredFeatures(document);
     const auto sharedParameters = collectSharedParameters(document);
     const auto stateKinds = scanStateKinds(document);
+    const auto subsystemUpdates = readSubsystemUpdates(document);
     std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>> storedSchedules;
     ExecutionPlan plan;
     std::unordered_map<EntityId, std::size_t> nodeIndexes;
@@ -1137,8 +1176,23 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         const auto updates = value(node, "updates");
         if (!updates.empty() && updates != "oncePerStep" && updates != "settle") throw std::runtime_error("A node's updates must be oncePerStep or settle.");
         compiledNode.settles = stateKinds.legacy || updates == "settle";
-        compiledNode.settleLimit = node.get<std::size_t>("updatesLimit", 1000);
-        if (!compiledNode.settleLimit) throw std::runtime_error("A node's updatesLimit must be a positive whole number.");
+        // A node also settles when a subsystem it is in, at any depth, says so; its limit is the largest the node or any such
+        // subsystem gives, 1000 when none gives one. A node in no settling subsystem is as it says.
+        std::optional<std::size_t> limit;
+        if (node.get_child_optional("updatesLimit")) limit = node.get<std::size_t>("updatesLimit");
+        if (limit && !*limit) throw std::runtime_error("A node's updatesLimit must be a positive whole number.");
+        if (!subsystemUpdates.empty() && !value(node, "subsystemId").empty() && value(node, "subsystemId") != "null") {
+            auto at = subsystemUpdates.find(idValue(node, "subsystemId"));
+            for (std::size_t depth = 0; at != subsystemUpdates.end() && depth <= subsystemUpdates.size(); ++depth) {
+                if (at->second.settles) {
+                    compiledNode.settles = true;
+                    if (at->second.limit) limit = std::max(limit.value_or(0), *at->second.limit);
+                }
+                if (!at->second.hasParent) break;
+                at = subsystemUpdates.find(at->second.parent);
+            }
+        }
+        compiledNode.settleLimit = limit.value_or(1000);
         if (!compiledNode.substeps || compiledNode.substeps > 10000) {
             throw std::runtime_error("Node substepsPerGlobalStep must be an integer from 1 through 10000.");
         }

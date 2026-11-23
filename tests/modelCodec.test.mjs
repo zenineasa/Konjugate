@@ -121,3 +121,10 @@ test('a subsystem with only the required fields comes back with nothing invented
     const definition = subsystemFromDocument({ id: 3, name: 'Box', position: [0, 0, 0], terminalPositions: [{ edgeId: 'x', position: [0, 0, 0] }, { edgeId: 4, position: [1, 2] }, { edgeId: 5, position: ['1', 2, 3] }] });
     assert.deepEqual(definition.terminalPositions, [{ edgeId: 5, position: [1, 2, 3] }]);
 });
+
+test('a subsystem\'s updates setting passes through, and a subsystem without one is written without it', () => {
+    const settling = { id: 7, name: 'Chain', parentSubsystemId: null, position: [0, 0, 0], updates: 'settle', updatesLimit: 40 };
+    assert.deepEqual(subsystemToDocument(subsystemFromDocument(settling)), settling);
+    const plain = { id: 8, name: 'Plain', parentSubsystemId: null, position: [0, 0, 0] };
+    assert.deepEqual(subsystemToDocument(subsystemFromDocument(plain)), plain);
+});

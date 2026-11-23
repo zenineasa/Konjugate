@@ -209,7 +209,7 @@ export function relationshipToDocument(definition, context) {
 // crossing inside the subsystem, as `{ edgeId, position }` entries: a list naming the edge in an `...Id` field, so that
 // copying renumbers it as it does any reference (docs/designPrinciples.md). A subsystem without it lays its terminals out
 // itself. `ports`, written by earlier versions, is read past and not kept: the boundary is derived (subsystemBoundaryCrossings).
-const subsystemDocumentKeys = new Set(['id', 'name', 'parentSubsystemId', 'position', 'terminalPositions', 'ports', 'definitionId', 'parameterValues', 'definitionKey']);
+const subsystemDocumentKeys = new Set(['id', 'name', 'parentSubsystemId', 'position', 'terminalPositions', 'ports', 'definitionId', 'parameterValues', 'definitionKey', 'updates', 'updatesLimit']);
 
 const isPoint = (value) => Array.isArray(value) && value.length === 3 && value.every((item) => Number.isFinite(Number(item)));
 
@@ -228,6 +228,9 @@ export function subsystemFromDocument(subsystem) {
         ...(subsystem.definitionId != null ? { definitionId: subsystem.definitionId } : {}),
         ...(Array.isArray(subsystem.parameterValues) && subsystem.parameterValues.length ? { parameterValues: structuredClone(subsystem.parameterValues) } : {}),
         ...(subsystem.definitionKey != null ? { definitionKey: subsystem.definitionKey } : {}),
+        // Its nodes' Updates settled within the step (docs/proposals/ratesAndUpdates.md, over a subsystem), as a node's are.
+        ...(subsystem.updates !== undefined ? { updates: subsystem.updates } : {}),
+        ...(subsystem.updatesLimit !== undefined ? { updatesLimit: subsystem.updatesLimit } : {}),
         deleted: false,
         ...unknownFields(subsystem, subsystemDocumentKeys)
     };
@@ -248,6 +251,8 @@ export function subsystemToDocument(definition, { position = definition.position
         ...(terminalPositions.length ? { terminalPositions } : {}),
         ...(definition.definitionId != null ? { definitionId: definition.definitionId } : {}),
         ...(definition.parameterValues?.length ? { parameterValues: structuredClone(definition.parameterValues) } : {}),
-        ...(definition.definitionKey != null ? { definitionKey: definition.definitionKey } : {})
+        ...(definition.definitionKey != null ? { definitionKey: definition.definitionKey } : {}),
+        ...(definition.updates !== undefined ? { updates: definition.updates } : {}),
+        ...(definition.updatesLimit !== undefined ? { updatesLimit: definition.updatesLimit } : {})
     };
 }

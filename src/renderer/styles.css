@@ -2583,6 +2583,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .partChip.own { color: #dce8ec; background: #0f2a2c; border-color: #2c6a65; }
 .partChip.off, .ownPart.off { opacity: .55; border-style: dashed; }
 .setByProgram { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; color: #dce8ec; background: none; border: 1px solid #3a4d58; border-radius: 6px; font-size: 10px; cursor: pointer; }
+#editNodeUpdatesSetBy { margin: 0 0 8px; font-size: 10px; }
 .setByProgram small { color: #7d939c; font-size: 8px; }
 .stateFold { border-bottom: 1px solid #172630; padding: 7px 2px 8px; }
 .stateFoldStates { margin-left: 10px; }

@@ -18,6 +18,7 @@
 // - Shared parameters made from a definition carry `subsystemId`, the instance they belong to.
 
 import { collectEntityIds, remapIds } from './graphClipboard.mjs';
+import { sayKindsAlike } from './ratesAndUpdates.mjs';
 
 const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
 const clone = (value) => structuredClone(value);
@@ -25,6 +26,8 @@ const clone = (value) => structuredClone(value);
 // Fields of a nested subsystem record that belong to the document it is written in, not to the project it is expanded
 // into: they are left out when expanding and put back from the definition when writing back.
 const nestedStructuralKeys = ['definitionId', 'parameterValues', 'link'];
+// An instance's settling of its nodes' Updates (docs/proposals/ratesAndUpdates.md), kept in its component's `component` block.
+const componentUpdateKeys = ['updates', 'updatesLimit'];
 
 export const componentDocumentFormat = 'konjugate';
 
@@ -190,6 +193,8 @@ export function extractComponent(document, subsystemId, { base = null, name = nu
     const definitions = [...clone(base?.subsystemDefinitions ?? []), ...carried.map((item) => item.definition)];
     const component = clone(base?.component ?? { name: name ?? record.name ?? 'Component', ports: [] });
     if (name) component.name = name;
+    // Whether the component settles its nodes' Updates is the component's, set on any of its instances.
+    componentUpdateKeys.forEach((key) => { if (record[key] !== undefined) component[key] = clone(record[key]); else delete component[key]; });
     const result = {
         format: componentDocumentFormat,
         version: 1,
@@ -242,6 +247,7 @@ export function expandInstance(document, subsystemId, { allocateId = idAllocator
         entity.definitionKey = keys[index];
     });
     remapped.nodes.forEach((node) => { node.subsystemId = node.subsystemId == null ? subsystemId : node.subsystemId; });
+    componentUpdateKeys.forEach((key) => { if (source.component?.[key] !== undefined) record[key] = clone(source.component[key]); else delete record[key]; });
     remapped.subsystems.forEach((subsystem) => {
         if (subsystem.parentSubsystemId == null) subsystem.parentSubsystemId = subsystemId;
         nestedStructuralKeys.forEach((key) => delete subsystem[key]);
@@ -276,6 +282,11 @@ export function expandInstance(document, subsystemId, { allocateId = idAllocator
     const removedEdgeIds = next.edges.filter((edge) => !nodeIds.has(endpointNodeId(edge.source)) || !nodeIds.has(endpointNodeId(edge.target))).map((edge) => edge.id);
     next.edges = next.edges.filter((edge) => !removedEdgeIds.includes(edge.id));
     next.edgeGroups = next.edgeGroups.map((group) => ({ ...group, memberNodeIds: group.memberNodeIds.filter((id) => nodeIds.has(id)) })).filter((group) => group.memberNodeIds.length >= 2);
+    // The instance and the rest of the model say their states' kinds alike (docs/proposals/ratesAndUpdates.md), the side that
+    // says none made to say them as the engine reads it now, so neither side's numbers change: a component whose file says
+    // no kinds, in a model that says them, says them here, while its definition stays as its file has it.
+    const instanceNodeIds = new Set(remapped.nodes.map((node) => node.id));
+    sayKindsAlike(next.nodes.filter((node) => !instanceNodeIds.has(node.id)), remapped.nodes, next.edges);
     return { document: next, removedEdgeIds };
 }
 
@@ -318,7 +329,13 @@ export function syncDefinitions(document, { preferredSubsystemId = null, allocat
         if (!definition) continue;
         const extracts = instanceIds.map((id) => ({ id, ...extractComponent(document, id, { base: definition.document }) }));
         const baseText = canonical(definition.document);
-        const differing = extracts.filter((extract) => canonical(extract.document) !== baseText);
+        // A linked instance is as its definition has it when it is what expanding the definition again gives: its file's
+        // own form, or that form saying its kinds as the model does (expandInstance).
+        const asExpanded = (extract) => {
+            const { document: expanded } = expandInstance(document, extract.id, { allocateId: idAllocator(document) });
+            return canonical(extractComponent(expanded, extract.id, { base: definition.document }).document) === canonical(extract.document);
+        };
+        const differing = extracts.filter((extract) => canonical(extract.document) !== baseText && !(definition.link && !definition.link.editing && asExpanded(extract)));
         const valuesOf = (extract) => extract.parameterValues;
         // Parameter values are the instance's own: they never count as a change to the definition.
         extracts.forEach((extract) => {

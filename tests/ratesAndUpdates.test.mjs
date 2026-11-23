@@ -2,7 +2,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, stateKinds, termsReachingStates, withoutKinds } from '../src/ratesAndUpdates.mjs';
+import { nodeUpdates, sayKinds, sayKindsAlike, saysKinds, settlingSubsystems, stateKinds, termsReachingStates, withoutKinds } from '../src/ratesAndUpdates.mjs';
 import { nodeFromDocument, nodeToDocument } from '../src/modelCodec.mjs';
 
 // A tank whose level is a rate (an inflow term, and a bidirectional pipe to a second tank), a level gauge whose reading is set
@@ -44,7 +44,7 @@ test('a file that says no kind is read as the engine reads it, and every node se
     const kinds = stateKinds(nodes, edges);
     assert.deepEqual([11, 21, 31, 32].map((id) => kinds.get(id).kind), ['rate', 'update', 'rate', 'update']);
     assert.ok([...kinds.values()].every((kind) => !kind.said));
-    assert.deepEqual(nodeUpdates(nodes[0], false), { updates: 'settle', limit: 1000 });
+    assert.deepEqual(nodeUpdates(nodes[0], false), { updates: 'settle', limit: 1000, setBy: null });
 });
 
 test('saying the kinds keeps the numbers, and the file says none again as it was', () => {
@@ -150,4 +150,19 @@ test('a state\'s kind and a node\'s updates pass through the canvas unchanged', 
     assert.equal(written.updatesLimit, 50);
     const unsaid = nodeToDocument(nodeFromDocument({ ...document, updates: undefined, updatesLimit: undefined, states: [{ ...document.states[0], kind: undefined }] }, context), context);
     assert.ok(!('kind' in unsaid.states[0]) && !('updates' in unsaid), 'A file that says nothing is written saying nothing.');
+});
+
+test('a node in a subsystem that settles settles, with the largest limit given, and says which subsystem sets it', () => {
+    const subsystems = [
+        { id: 7, name: 'Outer', parentSubsystemId: null, updates: 'settle', updatesLimit: 50 },
+        { id: 8, name: 'Middle', parentSubsystemId: 7 },
+        { id: 9, name: 'Inner', parentSubsystemId: 8, updates: 'settle' }
+    ];
+    assert.deepEqual(settlingSubsystems({ subsystemId: 9 }, subsystems).map((item) => item.name), ['Inner', 'Outer']);
+    const inner = nodeUpdates({ subsystemId: 9 }, true, subsystems);
+    assert.deepEqual([inner.updates, inner.limit, inner.setBy?.name], ['settle', 50, 'Inner']);
+    assert.equal(nodeUpdates({ subsystemId: 9, updates: 'settle', updatesLimit: 80 }, true, subsystems).limit, 80);
+    assert.equal(nodeUpdates({ subsystemId: 9, updates: 'settle' }, true, subsystems).setBy, null, 'A node that says it settles is not set by its subsystem.');
+    assert.deepEqual(nodeUpdates({ subsystemId: null }, true, subsystems), { updates: 'oncePerStep', limit: 1000, setBy: null });
+    assert.deepEqual(nodeUpdates({ subsystemId: 8 }, true, [{ ...subsystems[0], updates: undefined }, subsystems[1]]).updates, 'oncePerStep');
 });

@@ -5,7 +5,7 @@ import test from 'node:test';
 import {
     componentDocumentOf, declarePort, describeComponentDocument, expandInstance, exposeParameter, extractComponent, instanceCount,
     instanceParameters, instancePorts, migrateLegacySubsystems, placeAnotherInstance, placeComponent, separateInstance,
-    setInstanceParameter, stripComponents, subsystemPath, syncDefinitions
+    refreshDefinition, setInstanceParameter, stripComponents, subsystemPath, syncDefinitions
 } from '../src/components.mjs';
 import { executionProjectDocument } from '../src/subsystems.mjs';
 
@@ -346,4 +346,67 @@ test('a pasted instance keeps its own parameter values, and a pasted linked inst
     // Into another project it arrives linked, with its cached copy.
     const elsewhere = pasteComponentCopy(target, linkedCopy, { position: [0, 0, 0] });
     assert.equal(elsewhere.document.subsystemDefinitions[0].link.path, '/p/Plant.kjt');
+});
+
+// docs/proposals/unifiedEntityEditors.md, decision 14: a linked component whose file says no kinds, in a model that says them.
+test('a linked component whose file says no kinds says them in a model that does, as its file is read, and keeps saying them', () => {
+    // Inside Gauge: Sensor's reading is set from Source's level by a relationship's equations, so it is an Update.
+    const gauge = migrateLegacySubsystems({
+        format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edgeGroups: [],
+        nodes: [node(1, 'Source', [state(2, 'level', 1)], 20), node(3, 'Sensor', [state(4, 'reading')], 20)],
+        edges: [{
+            id: 10, name: 'Read', directionality: 'directed', source: { nodeId: 1, stateId: 2 }, target: { nodeId: 3, stateId: 4 }, parameters: [],
+            equationModel: { bindings: [{ symbol: 'level', kind: 'state', role: 'source', nodeId: 1, stateId: 2 }], outputs: [{ role: 'target', stateId: 4, mathJson: 'level', setsValue: true }] }
+        }],
+        subsystems: [{ id: 20, name: 'Gauge', parentSubsystemId: null, position: [0, 0, 0] }]
+    });
+    const component = componentDocumentOf(gauge, 20);
+    const target = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [node(1, 'Other', [{ ...state(2, 'x'), kind: 'rate' }])], edges: [], subsystems: [], edgeGroups: [] };
+    const { document, subsystemId, definitionId } = placeComponent(target, component, { link: { kind: 'file', fileName: 'Gauge.kjt' } });
+    const placed = () => document.nodes.filter((item) => item.subsystemId === subsystemId);
+    const kindsOf = () => placed().map((item) => [item.name, item.states[0].kind, item.updates]);
+    assert.deepEqual(kindsOf(), [['Source', 'rate', undefined], ['Sensor', 'update', 'settle']], 'Placed, it says its kinds as its file is read: every node holding an Update settling.');
+    const definition = () => document.subsystemDefinitions.find((item) => item.id === definitionId).document;
+    assert.ok(definition().nodes.every((item) => item.states.every((entry) => entry.kind === undefined)), 'Its definition stays as its file has it.');
+    const report = syncDefinitions(document);
+    assert.deepEqual(report.reverted, [], 'Saying its kinds is not a change to put back.');
+    assert.deepEqual(kindsOf(), [['Source', 'rate', undefined], ['Sensor', 'update', 'settle']]);
+    // A change of its own is still put back, and it says its kinds again.
+    placed().find((item) => item.name === 'Source').states[0].initialValue = 5;
+    assert.deepEqual(syncDefinitions(document).reverted, [subsystemId]);
+    assert.equal(placed().find((item) => item.name === 'Source').states[0].initialValue, 1);
+    assert.deepEqual(kindsOf(), [['Source', 'rate', undefined], ['Sensor', 'update', 'settle']]);
+    // In a model that says none, it says none, as before.
+    const legacy = placeComponent({ ...target, nodes: [node(1, 'Other', [state(2, 'x')])] }, component, { link: { kind: 'file', fileName: 'Gauge.kjt' } });
+    assert.ok(legacy.document.nodes.every((item) => item.states.every((entry) => entry.kind === undefined) && item.updates === undefined));
+});
+
+test('a linked component\'s new version that says kinds makes a model that says none say them, so nothing outside it changes', () => {
+    const document = migrateLegacySubsystems(project());
+    document.subsystemDefinitions[0].link = { kind: 'file', fileName: 'Plant.kjt' };
+    const next = structuredClone(document.subsystemDefinitions[0].document);
+    next.nodes.forEach((item) => item.states.forEach((entry) => { entry.kind = 'rate'; }));
+    const { document: refreshed } = refreshDefinition(document, document.subsystemDefinitions[0].id, next);
+    const heater = refreshed.nodes.find((item) => item.name === 'Heater');
+    assert.equal(heater.states[0].kind, 'rate', 'The node outside says its kind too.');
+    assert.deepEqual(syncDefinitions(refreshed).reverted, []);
+});
+
+test('a component settles its nodes\' updates as its instance says, in every instance, and keeps it in its document', () => {
+    const document = migrateLegacySubsystems(project());
+    document.subsystems[0].updates = 'settle';
+    document.subsystems[0].updatesLimit = 40;
+    syncDefinitions(document, { preferredSubsystemId: 20 });
+    const definition = document.subsystemDefinitions[0];
+    assert.deepEqual([definition.document.component.updates, definition.document.component.updatesLimit], ['settle', 40]);
+    const { document: twice, subsystemId } = placeAnotherInstance(document, 20);
+    const other = twice.subsystems.find((item) => item.id === subsystemId);
+    assert.deepEqual([other.updates, other.updatesLimit], ['settle', 40], 'Another instance settles too.');
+    const placed = placeComponent({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] }, componentDocumentOf(document, 20));
+    assert.equal(placed.document.subsystems.find((item) => item.id === placed.subsystemId).updates, 'settle', 'Placed elsewhere, it settles.');
+    // Saying nothing again is a change to the component too.
+    delete document.subsystems[0].updates;
+    delete document.subsystems[0].updatesLimit;
+    syncDefinitions(document, { preferredSubsystemId: 20 });
+    assert.equal(document.subsystemDefinitions[0].document.component.updates, undefined);
 });

@@ -1,0 +1,46 @@
+{
+    "title": "Switching circuits",
+    "summary": "A synchronous buck converter, switched at 20 kHz and averaged, against its exact piecewise solution, and a half-wave rectifier with a piecewise-linear diode against an event-located SciPy solution, both cross-checked with ngspice: currents, voltages and energy, under explicit Euler and Runge–Kutta 4.",
+    "buck": {
+        "run": { "globalTimeStep": 9.5367431640625e-7, "targetTime": 0.0078125, "outputInterval": 0.00000762939453125 },
+        "globalTimeSteps": { "switched:explicit": [0.00000762939453125, 0.000003814697265625, 0.0000019073486328125, 9.5367431640625e-7, 4.76837158203125e-7, 2.384185791015625e-7], "switched:rungeKutta4": [0.00000762939453125, 0.000003814697265625, 0.0000019073486328125, 9.5367431640625e-7, 4.76837158203125e-7, 2.384185791015625e-7], "averaged:explicit": [0.00000762939453125, 0.000003814697265625, 0.0000019073486328125, 9.5367431640625e-7, 4.76837158203125e-7, 2.384185791015625e-7], "averaged:rungeKutta4": [0.00000762939453125, 0.000003814697265625, 0.0000019073486328125, 9.5367431640625e-7] }
+    },
+    "rectifier": {
+        "run": { "globalTimeStep": 0.0000152587890625, "targetTime": 0.125, "outputInterval": 0.00048828125 },
+        "globalTimeSteps": { "explicit": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125], "rungeKutta4": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125, 0.0000152587890625, 0.00000762939453125] }
+    },
+    "timing": [
+        { "label": "Buck, switched, 2^20 steps, explicit", "model": "buckSwitched", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 1.1920928955078125e-7, "targetTime": 0.125, "outputInterval": 0.0001220703125 } },
+        { "label": "Buck, switched, 2^20 steps, Runge–Kutta 4", "model": "buckSwitched", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 1.1920928955078125e-7, "targetTime": 0.125, "outputInterval": 0.0001220703125 } }
+    ],
+    "thresholds": {
+        "switchedExplicitRelativeError": { "max": 0.035 },
+        "switchedExplicitInputEnergyError": { "max": 0.029 },
+        "switchedExplicitEnergyBalanceDefect": { "max": 0.02 },
+        "switchedExplicitOrder": { "min": 1.03, "max": 1.26 },
+        "switchedRungeKutta4RelativeError": { "max": 0.011 },
+        "switchedRungeKutta4InputEnergyError": { "max": 0.0019 },
+        "switchedRungeKutta4EnergyBalanceDefect": { "max": 0.00008 },
+        "switchedRungeKutta4Order": { "min": 1.08, "max": 1.33 },
+        "averagedExplicitRelativeError": { "max": 0.0074 },
+        "averagedExplicitInputEnergyError": { "max": 0.00021 },
+        "averagedExplicitEnergyBalanceDefect": { "max": 0.00031 },
+        "averagedExplicitOrder": { "min": 0.95, "max": 1.1 },
+        "averagedRungeKutta4RelativeError": { "max": 1.1e-10 },
+        "averagedRungeKutta4InputEnergyError": { "max": 3.1e-12 },
+        "averagedRungeKutta4EnergyBalanceDefect": { "max": 1e-10 },
+        "averagedRungeKutta4Order": { "min": 3.9, "max": 4.1 },
+        "rectifierExplicitRelativeError": { "max": 0.0012 },
+        "rectifierExplicitDiodeEnergyError": { "max": 0.0034 },
+        "rectifierExplicitEnergyBalanceDefect": { "max": 0.0018 },
+        "rectifierExplicitOrder": { "min": 0.95, "max": 1.18 },
+        "rectifierRungeKutta4RelativeError": { "max": 0.0000041 },
+        "rectifierRungeKutta4DiodeEnergyError": { "max": 0.0000014 },
+        "rectifierRungeKutta4EnergyBalanceDefect": { "max": 6e-9 },
+        "rectifierRungeKutta4Order": { "min": 1.79, "max": 2.19 },
+        "buckReferenceAgreement": { "max": 1e-10 },
+        "buckAveragedReferenceAgreement": { "max": 1e-10 },
+        "buckNgspiceAgreement": { "max": 0.00003 },
+        "rectifierNgspiceAgreement": { "max": 5e-7 }
+    }
+}

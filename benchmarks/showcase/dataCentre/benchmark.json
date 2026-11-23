@@ -1,0 +1,26 @@
+{
+    "title": "Data centre (showcase)",
+    "summary": "Two rows of eight server racks, their aisles, an underfloor plenum, the room and three cooling units, as a graph of 26 nodes: a batch job and a cooling unit's failure, the rack inlet temperatures an operator watches and the heat each unit removes, against a model written independently in Python, with the energy balance from Konjugate's own states, under explicit Euler and Runge–Kutta 4.",
+    "run": { "globalTimeStep": 0.25, "targetTime": 1800, "outputInterval": 10 },
+    "globalTimeSteps": { "explicit": [1, 0.5, 0.25, 0.125], "rungeKutta4": [2, 1, 0.5, 0.25] },
+    "timing": [
+        { "label": "Data centre, 57,600 steps, explicit", "model": "dataCentre", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.03125, "targetTime": 1800, "outputInterval": 10 } },
+        { "label": "Data centre, 7,200 steps, Runge–Kutta 4", "model": "dataCentre", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.25, "targetTime": 1800, "outputInterval": 10 } }
+    ],
+    "thresholds": {
+        "relativeErrorExplicit": { "max": 0.0051 },
+        "inletErrorExplicit": { "max": 0.024 },
+        "crossingTimeErrorExplicit": { "max": 0.38 },
+        "heatRemovedErrorExplicit": { "max": 0.0000077 },
+        "energyBalanceExplicit": { "max": 1e-10 },
+        "orderExplicit": { "min": 0.95, "max": 1.1 },
+        "relativeErrorRungeKutta4": { "max": 0.0048 },
+        "inletErrorRungeKutta4": { "max": 0.0073 },
+        "crossingTimeErrorRungeKutta4": { "max": 0.05 },
+        "heatRemovedErrorRungeKutta4": { "max": 0.000024 },
+        "energyBalanceRungeKutta4": { "max": 1e-10 },
+        "orderRungeKutta4": { "min": 0.95, "max": 1.1 },
+        "referenceSelfAgreement": { "max": 3e-8 },
+        "graphSize": { "min": 26, "max": 26 }
+    }
+}

@@ -1,0 +1,50 @@
+{
+    "title": "Modelica Standard Library examples",
+    "summary": "Four examples from the Modelica Standard Library 4.1.0 (TwoMasses, CauerLowPassAnalog, Rotational First, Translational Oscillator), rebuilt as Konjugate graphs: against the Modelica Association's published reference results and against each example's exact solution, with the published results' own accuracy measured too, under explicit and semi-implicit Euler and Runge–Kutta 4.",
+    "examples": {
+        "twoMasses": { "methods": ["explicit", "rungeKutta4"], "globalTimeStep": { "explicit": 0.0005, "rungeKutta4": 0.002 }, "plotSignal": 0 },
+        "cauerLowPass": { "methods": ["explicit", "rungeKutta4"], "globalTimeStep": { "explicit": 0.0025, "rungeKutta4": 0.01 }, "orderSteps": { "explicit": [0.005, 0.0025, 0.00125], "rungeKutta4": [0.02, 0.01, 0.005] }, "plotSignal": 2 },
+        "first": { "methods": ["explicit", "semiImplicit", "rungeKutta4"], "globalTimeStep": { "explicit": 0.0000625, "semiImplicit": 0.0000625, "rungeKutta4": 0.0005 }, "orderSteps": { "explicit": [0.000125, 0.0000625, 0.00003125], "rungeKutta4": [0.002, 0.001, 0.0005] }, "plotSignal": 3 },
+        "oscillator": { "methods": ["explicit", "semiImplicit", "rungeKutta4"], "globalTimeStep": { "explicit": 0.0000625, "semiImplicit": 0.0000625, "rungeKutta4": 0.0005 }, "orderSteps": { "explicit": [0.000125, 0.0000625, 0.00003125], "rungeKutta4": [0.002, 0.001, 0.0005] }, "plotSignal": 0 }
+    },
+    "timing": [
+        { "label": "Cauer filter, 24,000 steps, explicit", "model": "cauerLowPass", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0025, "targetTime": 60, "outputInterval": 0.06 } },
+        { "label": "Rotational First, 16,000 steps, explicit", "model": "first", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0000625, "targetTime": 1, "outputInterval": 0.002 } }
+    ],
+    "thresholds": {
+        "twoMassesPublishedAccuracy": { "max": 0.000024 },
+        "twoMassesExactAgreement": { "max": 1e-10 },
+        "twoMassesPublishedExplicit": { "max": 0.0002 },
+        "twoMassesExactExplicit": { "max": 0.00021 },
+        "twoMassesPublishedRungeKutta4": { "max": 0.000024 },
+        "twoMassesExactRungeKutta4": { "max": 2.7e-13 },
+        "cauerLowPassPublishedAccuracy": { "max": 0.000033 },
+        "cauerLowPassExactAgreement": { "max": 1e-10 },
+        "cauerLowPassPublishedExplicit": { "max": 0.0026 },
+        "cauerLowPassExactExplicit": { "max": 0.0025 },
+        "cauerLowPassPublishedRungeKutta4": { "max": 0.0027 },
+        "cauerLowPassExactRungeKutta4": { "max": 0.0027 },
+        "cauerLowPassOrderExplicit": { "min": 0.95, "max": 1.1 },
+        "cauerLowPassOrderRungeKutta4": { "min": 0.95, "max": 1.1 },
+        "firstPublishedAccuracy": { "max": 0.0004 },
+        "firstExactAgreement": { "max": 1e-10 },
+        "firstPublishedExplicit": { "max": 0.017 },
+        "firstExactExplicit": { "max": 0.016 },
+        "firstPublishedSemiImplicit": { "max": 0.048 },
+        "firstExactSemiImplicit": { "max": 0.048 },
+        "firstPublishedRungeKutta4": { "max": 0.0004 },
+        "firstExactRungeKutta4": { "max": 1.1e-7 },
+        "firstOrderExplicit": { "min": 0.99, "max": 1.22 },
+        "firstOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "oscillatorPublishedAccuracy": { "max": 0.00061 },
+        "oscillatorExactAgreement": { "max": 2e-10 },
+        "oscillatorPublishedExplicit": { "max": 0.11 },
+        "oscillatorExactExplicit": { "max": 0.11 },
+        "oscillatorPublishedSemiImplicit": { "max": 0.0044 },
+        "oscillatorExactSemiImplicit": { "max": 0.004 },
+        "oscillatorPublishedRungeKutta4": { "max": 0.00061 },
+        "oscillatorExactRungeKutta4": { "max": 0.0000017 },
+        "oscillatorOrderExplicit": { "min": 1.0, "max": 1.24 },
+        "oscillatorOrderRungeKutta4": { "min": 3.9, "max": 4.1 }
+    }
+}

@@ -8,6 +8,7 @@ import { exampleOwnership } from '../../scripts/exampleOwnership.mjs';
 
 function latexOf(expression) {
     if (typeof expression === 'number') return String(expression);
+    if (expression === 't') return 't';
     if (typeof expression === 'string') return `\\mathrm{${expression}}`;
     const [operator, ...operands] = expression;
     const wrapped = (operand) => (Array.isArray(operand) && operand[0] === 'Add' ? `\\left(${latexOf(operand)}\\right)` : latexOf(operand));
@@ -23,6 +24,27 @@ function latexOf(expression) {
         case 'Power': return `{${wrapped(operands[0])}}^{${latexOf(operands[1])}}`;
         case 'Sin': return `\\sin\\left(${latexOf(operands[0])}\\right)`;
         case 'Cos': return `\\cos\\left(${latexOf(operands[0])}\\right)`;
+        case 'Exp': return `\\exp\\left(${latexOf(operands[0])}\\right)`;
+        case 'Ln': return `\\ln\\left(${latexOf(operands[0])}\\right)`;
+        case 'Tanh': return `\\tanh\\left(${latexOf(operands[0])}\\right)`;
+        case 'Sqrt': return `\\sqrt{${latexOf(operands[0])}}`;
+        case 'Abs': return `\\left|${latexOf(operands[0])}\\right|`;
+        case 'Max': return `\\max\\left(${latexOf(operands[0])}, ${latexOf(operands[1])}\\right)`;
+        case 'Min': return `\\min\\left(${latexOf(operands[0])}, ${latexOf(operands[1])}\\right)`;
+        case 'Less': return operands.map(latexOf).join(' < ');
+        case 'LessEqual': return operands.map(latexOf).join(' \\le ');
+        case 'Greater': return operands.map(latexOf).join(' > ');
+        case 'GreaterEqual': return operands.map(latexOf).join(' \\ge ');
+        case 'And': return operands.map(latexOf).join(' \\land ');
+        case 'Or': return operands.map(latexOf).join(' \\lor ');
+        // Cases: condition, value pairs, the last condition "True" (otherwise).
+        case 'Which': {
+            const branches = [];
+            for (let index = 0; index < operands.length; index += 2) {
+                branches.push(`${latexOf(operands[index + 1])} & ${operands[index] === 'True' ? '\\text{otherwise}' : latexOf(operands[index])}`);
+            }
+            return `\\begin{cases} ${branches.join(' \\\\ ')} \\end{cases}`;
+        }
         default: throw new Error(`No LaTeX form for ${operator}.`);
     }
 }
@@ -41,7 +63,9 @@ export function createModel(title) {
         const bindings = [];
         const parameters = [];
         for (const [symbol, use] of Object.entries(uses)) {
-            if (use.parameter) {
+            if (use.time) {
+                bindings.push({ kind: 'time', symbol });
+            } else if (use.parameter) {
                 const [name, value, unit] = use.parameter;
                 const parameterId = allocate();
                 parameters.push({ id: parameterId, name, symbol, value, unit, mode: 'constant' });
@@ -115,6 +139,8 @@ export function createModel(title) {
 
 export const state = (node, symbol) => ({ node, state: symbol });
 export const parameter = (name, value, unit) => ({ parameter: [name, value, unit] });
+// The simulation time in seconds; bind it to the symbol t (docs/projectSchema.md, time binding).
+export const time = { time: true };
 
 // MathJSON shorthands.
 export const sum = (...terms) => ['Add', ...terms];
@@ -123,3 +149,4 @@ export const difference = (left, right) => ['Add', left, ['Negate', right]];
 export const product = (...factors) => ['Multiply', ...factors];
 export const quotient = (numerator, denominator) => ['Divide', numerator, denominator];
 export const square = (term) => ['Power', term, 2];
+export const cases = (...conditionValuePairs) => ['Which', ...conditionValuePairs];

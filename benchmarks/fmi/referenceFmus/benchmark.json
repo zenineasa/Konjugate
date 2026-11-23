@@ -1,0 +1,22 @@
+{
+    "title": "FMI Reference FMUs",
+    "summary": "Four FMI 3.0 Reference FMUs from the Modelica Association (Dahlquist, VanDerPol, BouncingBall, Stair), imported into Konjugate as the app imports them and compared with FMPy's co-simulation of the same FMU, and the FMUs' own solver error against FMPy's model exchange with CVODE.",
+    "timing": [],
+    "thresholds": {
+        "DahlquistUnchanged": { "min": 1, "max": 1 },
+        "DahlquistOwnSolverError": { "max": 0.025 },
+        "VanDerPolUnchanged": { "min": 1, "max": 1 },
+        "VanDerPolOwnSolverError": { "max": 0.15 },
+        "BouncingBallUnchanged": { "min": 1, "max": 1 },
+        "BouncingBallOwnSolverError": { "max": 0.61 },
+        "StairUnchanged": { "min": 1, "max": 1 },
+        "StairOwnSolverError": { "max": 1e-12 },
+        "DahlquistModelExchangeAgainstExact": { "max": 1.1e-09 },
+        "StairModelExchangeAgainstExact": { "max": 1e-12 },
+        "importedAsPublished": { "min": 4, "max": 4 },
+        "DahlquistImportAgainstFmpy": { "max": 1e-12 },
+        "VanDerPolImportAgainstFmpy": { "max": 1e-12 },
+        "BouncingBallImportAgainstFmpy": { "max": 1e-12 },
+        "StairImportAgainstFmpy": { "max": 1e-12 }
+    }
+}

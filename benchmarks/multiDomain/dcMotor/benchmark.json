@@ -1,0 +1,30 @@
+{
+    "title": "DC motor under PID speed control",
+    "summary": "A DC motor as six nodes across four domains (controller, armature, rotor, winding, housing, ambient), its speed under PID control through a setpoint step, a voltage limit and a load step: every state and the step response against SciPy, and the energy booked between domains from Konjugate's own states, under explicit Euler and Runge–Kutta 4.",
+    "run": { "globalTimeStep": 0.000244140625, "targetTime": 12, "outputInterval": 0.015625 },
+    "globalTimeSteps": {
+        "explicit": [0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125],
+        "rungeKutta4": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625]
+    },
+    "timing": [
+        { "label": "DC motor, 2^17 steps, explicit", "model": "dcMotor", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.000091552734375, "targetTime": 12, "outputInterval": 0.015625 } },
+        { "label": "DC motor, 49,152 steps, Runge–Kutta 4", "model": "dcMotor", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.000244140625, "targetTime": 12, "outputInterval": 0.015625 } }
+    ],
+    "thresholds": {
+        "relativeErrorExplicit": { "max": 0.0047 },
+        "electromechanicalBalanceExplicit": { "max": 0.00016 },
+        "thermalBalanceExplicit": { "max": 1e-10 },
+        "supplyEnergyErrorExplicit": { "max": 0.000055 },
+        "riseTimeErrorExplicit": { "max": 0.0029 },
+        "loadDipErrorExplicit": { "max": 0.0029 },
+        "orderExplicit": { "min": 0.95, "max": 1.1 },
+        "relativeErrorRungeKutta4": { "max": 0.038 },
+        "electromechanicalBalanceRungeKutta4": { "max": 2.7e-7 },
+        "thermalBalanceRungeKutta4": { "max": 1e-10 },
+        "supplyEnergyErrorRungeKutta4": { "max": 0.000033 },
+        "riseTimeErrorRungeKutta4": { "max": 0.00034 },
+        "loadDipErrorRungeKutta4": { "max": 0.000095 },
+        "orderRungeKutta4": { "min": 0.95, "max": 1.1 },
+        "referenceSelfAgreement": { "max": 3e-9 }
+    }
+}

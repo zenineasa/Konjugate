@@ -1,0 +1,23 @@
+{
+    "title": "Fluid network",
+    "summary": "Three tanks in a loop joined by three pipes with inertia and friction, one with a pump and one with a valve that closes to 30 %: levels, flows and pressures against SciPy, and the water's total volume from Konjugate's own states, under explicit Euler and Runge–Kutta 4.",
+    "run": { "globalTimeStep": 0.0625, "targetTime": 600, "outputInterval": 2 },
+    "globalTimeSteps": { "explicit": [0.25, 0.125, 0.0625, 0.03125, 0.015625], "rungeKutta4": [0.125, 0.0625, 0.03125, 0.015625] },
+    "timing": [
+        { "label": "Fluid network, 2^16 steps, explicit", "model": "pipeNetwork", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0091552734375, "targetTime": 600, "outputInterval": 2 } },
+        { "label": "Fluid network, 9,600 steps, Runge–Kutta 4", "model": "pipeNetwork", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.0625, "targetTime": 600, "outputInterval": 2 } }
+    ],
+    "thresholds": {
+        "levelRelativeErrorExplicit": { "max": 0.0014 },
+        "flowRelativeErrorExplicit": { "max": 0.0096 },
+        "pressureRelativeErrorExplicit": { "max": 0.0074 },
+        "massConservationExplicit": { "max": 1e-10 },
+        "orderExplicit": { "min": 0.95, "max": 1.1 },
+        "levelRelativeErrorRungeKutta4": { "max": 2.2e-9 },
+        "flowRelativeErrorRungeKutta4": { "max": 1.5e-7 },
+        "pressureRelativeErrorRungeKutta4": { "max": 1.5e-8 },
+        "massConservationRungeKutta4": { "max": 1e-10 },
+        "orderRungeKutta4": { "min": 3.95, "max": 4.38 },
+        "referenceSelfAgreement": { "max": 5e-10 }
+    }
+}

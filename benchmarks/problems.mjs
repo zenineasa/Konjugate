@@ -16,6 +16,13 @@ import * as causalReconstruction from './causal/reconstruction/problem.mjs';
 import * as vanDerPol from './oscillators/vanDerPol/problem.mjs';
 import * as lorenz from './chaos/lorenz/problem.mjs';
 import * as doublePendulum from './mechanical/doublePendulum/problem.mjs';
+import * as switchedCircuits from './electrical/switchedCircuits/problem.mjs';
+import * as heatExchanger from './thermal/heatExchanger/problem.mjs';
+import * as pipeNetwork from './fluid/pipeNetwork/problem.mjs';
+import * as dcMotor from './multiDomain/dcMotor/problem.mjs';
+import * as dataCentre from './showcase/dataCentre/problem.mjs';
+import * as standardLibrary from './modelica/standardLibrary/problem.mjs';
+import * as referenceFmus from './fmi/referenceFmus/problem.mjs';
 
 export const problems = [
     { id: 'thermal/rcNetwork', directory: rcNetwork.directory, models: rcNetwork.models, evaluate: rcNetwork.evaluate },
@@ -29,5 +36,12 @@ export const problems = [
     { id: 'causal/reconstruction', directory: causalReconstruction.directory, models: causalReconstruction.models, evaluate: causalReconstruction.evaluate },
     { id: 'oscillators/vanDerPol', directory: vanDerPol.directory, models: vanDerPol.models, evaluate: vanDerPol.evaluate },
     { id: 'chaos/lorenz', directory: lorenz.directory, models: lorenz.models, evaluate: lorenz.evaluate },
-    { id: 'mechanical/doublePendulum', directory: doublePendulum.directory, models: doublePendulum.models, evaluate: doublePendulum.evaluate }
+    { id: 'mechanical/doublePendulum', directory: doublePendulum.directory, models: doublePendulum.models, evaluate: doublePendulum.evaluate },
+    { id: 'electrical/switchedCircuits', directory: switchedCircuits.directory, models: switchedCircuits.models, evaluate: switchedCircuits.evaluate },
+    { id: 'thermal/heatExchanger', directory: heatExchanger.directory, models: heatExchanger.models, evaluate: heatExchanger.evaluate },
+    { id: 'fluid/pipeNetwork', directory: pipeNetwork.directory, models: pipeNetwork.models, evaluate: pipeNetwork.evaluate },
+    { id: 'multiDomain/dcMotor', directory: dcMotor.directory, models: dcMotor.models, evaluate: dcMotor.evaluate },
+    { id: 'showcase/dataCentre', directory: dataCentre.directory, models: dataCentre.models, evaluate: dataCentre.evaluate },
+    { id: 'modelica/standardLibrary', directory: standardLibrary.directory, models: standardLibrary.models, evaluate: standardLibrary.evaluate },
+    { id: 'fmi/referenceFmus', directory: referenceFmus.directory, models: referenceFmus.models, evaluate: referenceFmus.evaluate }
 ];

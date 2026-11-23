@@ -13,6 +13,7 @@ import * as graphSplit from './coupling/graphSplit/problem.mjs';
 import * as convergenceOrder from './verification/convergenceOrder/problem.mjs';
 import * as protheroRobinson from './verification/protheroRobinson/problem.mjs';
 import * as graphScalability from './scaling/graphScalability/problem.mjs';
+import * as stiffNetwork from './scaling/stiffNetwork/problem.mjs';
 import * as causalReconstruction from './causal/reconstruction/problem.mjs';
 import * as vanDerPol from './oscillators/vanDerPol/problem.mjs';
 import * as robertson from './chemistry/robertson/problem.mjs';
@@ -37,6 +38,7 @@ export const problems = [
     { id: 'verification/protheroRobinson', directory: protheroRobinson.directory, models: protheroRobinson.models, evaluate: protheroRobinson.evaluate },
     { id: 'coupling/graphSplit', directory: graphSplit.directory, models: graphSplit.models, evaluate: graphSplit.evaluate },
     { id: 'scaling/graphScalability', directory: graphScalability.directory, models: graphScalability.models, evaluate: graphScalability.evaluate, measure: graphScalability.measure },
+    { id: 'scaling/stiffNetwork', directory: stiffNetwork.directory, models: stiffNetwork.models, evaluate: stiffNetwork.evaluate },
     { id: 'causal/reconstruction', directory: causalReconstruction.directory, models: causalReconstruction.models, evaluate: causalReconstruction.evaluate },
     { id: 'oscillators/vanDerPol', directory: vanDerPol.directory, models: vanDerPol.models, evaluate: vanDerPol.evaluate },
     { id: 'chemistry/robertson', directory: robertson.directory, models: robertson.models, evaluate: robertson.evaluate },

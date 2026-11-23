@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultTolerance, integrationMethod, integrationMethodProblem, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, toleranceOf, withIntegrationMethod, withStateAbsoluteTolerance } from '../src/integrationMethods.mjs';
+import { defaultTolerance, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, toleranceOf, withIntegrationMethod, withStateAbsoluteTolerance } from '../src/integrationMethods.mjs';
 import { validateRunConfigurationValues } from '../src/renderer/runConfigurationValidation.mjs';
 
 const configuration = { id: 3, name: 'Default', globalTimeStep: 0.01, outputInterval: 0.1, execution: { backend: 'automatic' } };
@@ -95,4 +95,20 @@ test('what cannot take stages is named before the run: a node that is a program 
     assert.deepEqual(current.programs, ["Tank's level"]);
     assert.equal(nameList(['a', 'b', 'c']), 'a, b and c');
     assert.equal(nameList(['a', 'b', 'c', 'd', 'e', 'f'], 4), 'a, b, c, d and 2 more');
+});
+
+test('Stiff\'s solvers: Rosenbrock by default and BDF for large models, BDF shown in the dialog as Stiff and suggested only where it suits', async () => {
+    const { bdfStateThreshold, bdfSuits, dialogMethodOf, stiffSolvers } = await import('../src/integrationMethods.mjs');
+    assert.deepEqual(stiffSolvers.map((solver) => solver.id), ['rodas4', 'bdf']);
+    assert.equal(integrationMethods.filter((method) => method.offered !== false).some((method) => method.id === 'bdf'), false, 'BDF is not a Method of its own.');
+    assert.equal(dialogMethodOf('bdf'), 'rodas4');
+    assert.equal(dialogMethodOf('dormandPrince54'), 'dormandPrince54');
+    assert.equal(withIntegrationMethod({ id: 1 }, 'bdf').method, 'bdf');
+    const states = (count) => Array.from({ length: count }, (_, index) => ({ id: index + 1, symbol: `x${index}`, initialValue: 0 }));
+    const large = { nodes: [{ id: 1, states: states(bdfStateThreshold), sourceTerms: [] }], edges: [] };
+    assert.equal(bdfSuits(large), true);
+    assert.equal(bdfSuits({ nodes: [{ id: 1, states: states(bdfStateThreshold - 1), sourceTerms: [] }], edges: [] }), false, 'Too few states.');
+    assert.equal(bdfSuits({ ...large, sharedParameters: [{ id: 9, schedule: { samples: [[0, 1]] } }] }), false, 'A stored schedule is a jump.');
+    assert.equal(bdfSuits({ nodes: [{ ...large.nodes[0], states: [...states(bdfStateThreshold), { id: 9999, symbol: 'u', kind: 'update' }] }], edges: [] }), false, 'An Update is a jump at every global step.');
+    assert.equal(bdfSuits({ ...large, edges: [{ id: 5, parameters: [{ id: 6, mode: 'live' }] }] }), false, 'A live parameter may be set at any global step.');
 });

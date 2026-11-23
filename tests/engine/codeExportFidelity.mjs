@@ -689,10 +689,16 @@ class Feed(RelationshipProvider):
         edges: []
     };
     for (const [label, configuration] of [['Runge–Kutta 4, events', { method: 'rungeKutta4', stepsPerGlobalStep: 2 }], ['Adaptive, events', { method: 'dormandPrince54', tolerance: { relative: 1e-9 } }],
-        ['Stiff, events', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }]]) {
+        ['Stiff, events', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }], ['BDF, events', { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }]]) {
         const reference = await runAndCompareAll(structuredClone(switchedDocument), configuration, label, [11, 21]);
         assert.ok(reference.integration.events >= 4, `The switches must be located: ${JSON.stringify(reference.integration.events)}.`);
     }
+    // --- 8. BDF: its table of differences carried from one global step to the next, its Jacobian and factorisation kept from step to
+    // step, written as the engine has them; the fixture's corner and the scheduled model's jumps as for Stiff; a held program ---
+    const bdf = { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } };
+    await runAndCompareAll(structuredClone(document), bdf, 'BDF', orderedStateIds, ['cpp', 'python'], { absolute: 1e-5, relative: 1e-5 });
+    await runAndCompareAll(scheduled, bdf, 'BDF, scheduled', [11, 21]);
+    for (const kind of ['cpp', 'python']) await runAndCompareAll(feedDocument(kind), bdf, `BDF, held ${kind} program`, [11, 21], [kind]);
 
     // A node that is a program of its own is refused by name under a whole-model method, for now.
     const nodeProgram = providerAlgebraicDocument('python');

@@ -1,6 +1,6 @@
 {
     "title": "Van der Pol oscillator",
-    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4, and Adaptive's error, period and amplitude against its tolerance with the work it took. and μ = 1000 (stiff) with Stiff (Rodas4): its trajectory, limit cycle, error against tolerance and work, beside Adaptive over the cycle's first 160 s.",
+    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4, and Adaptive's error, period and amplitude against its tolerance with the work it took. and μ = 1000 (stiff) with Stiff (Rodas4) and BDF: its trajectory, limit cycle, error against tolerance and work, beside Adaptive over the cycle's first 160 s.",
     "cases": {
         "mu1": {
             "run": { "targetTime": 40, "outputInterval": 0.0625 },
@@ -44,7 +44,8 @@
             "run": { "targetTime": 3200, "outputInterval": 0.5 },
             "cycleRun": { "targetTime": 8000, "outputInterval": 0.5 },
             "methods": [
-                { "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8, "absolute": 1e-8 } }, "globalTimeStep": 0.5 }
+                { "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8, "absolute": 1e-8 } }, "globalTimeStep": 0.5 },
+                { "variant": { "method": "bdf", "tolerance": { "relative": 1e-8, "absolute": 1e-8 } }, "globalTimeStep": 0.5 }
             ],
             "toleranceStudy": {
                 "variant": { "method": "rodas4" },
@@ -113,6 +114,9 @@
         "mu1000AmplitudeErrorRodas4": { "max": 0.015 },
         "mu1000StepsRodas4": { "max": 1500 },
         "mu1000ToleranceSlopeRodas4": { "min": 0.65, "max": 1.15 },
-        "mu1000ExplicitStepRatio": { "min": 1000 }
+        "mu1000ExplicitStepRatio": { "min": 1000 },
+        "mu1000RelativeErrorBdf": { "max": 0.001 },
+        "mu1000PeriodErrorBdf": { "max": 1e-04 },
+        "mu1000AmplitudeErrorBdf": { "max": 0.015 }
     }
 }

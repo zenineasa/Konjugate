@@ -1,7 +1,8 @@
 {
     "title": "Robertson chemical kinetics",
-    "summary": "Robertson's stiff kinetics from A = 1 to 1e11 s, as one node and as two, under Stiff (Rodas4) with an absolute tolerance per species: the concentrations at Hairer and Wanner's checkpoints against a SciPy Radau reference, the total A + B + C kept at 1, no concentration below zero, the steps it takes, the two-node model against the one-node model, and Adaptive over the first 40 s beside it.",
+    "summary": "Robertson's stiff kinetics from A = 1 to 1e11 s, as one node and as two, under Stiff (Rodas4) and BDF with an absolute tolerance per species: the concentrations at Hairer and Wanner's checkpoints against a SciPy Radau reference, the total A + B + C kept at 1, no concentration below zero, the steps it takes, the two-node model against the one-node model, and Adaptive over the first 40 s beside it.",
     "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8 } },
+    "bdfVariant": { "method": "bdf", "tolerance": { "relative": 1e-8 } },
     "longRun": { "targetTime": 1e11, "globalTimeStep": 1e9, "outputInterval": 1e9 },
     "explicitComparison": {
         "run": { "targetTime": 40, "globalTimeStep": 40, "outputInterval": 40 },
@@ -26,6 +27,19 @@
         "splitDifference": { "max": 1e-06 },
         "explicitStepRatio": { "min": 100 },
         "referenceAgreement": { "max": 1e-09 },
-        "testSetAgreement": { "max": 1e-10 }
+        "testSetAgreement": { "max": 1e-10 },
+        "relativeErrorAOneNodeBdf": { "max": 5e-05 },
+        "relativeErrorBOneNodeBdf": { "max": 5e-05 },
+        "relativeErrorCOneNodeBdf": { "max": 1e-07 },
+        "conservationOneNodeBdf": { "max": 1e-13 },
+        "lowestConcentrationOneNodeBdf": { "min": -1e-18 },
+        "stepsOneNodeBdf": { "max": 2500 },
+        "relativeErrorATwoNodesBdf": { "max": 5e-05 },
+        "relativeErrorBTwoNodesBdf": { "max": 5e-05 },
+        "relativeErrorCTwoNodesBdf": { "max": 1e-07 },
+        "conservationTwoNodesBdf": { "max": 1e-13 },
+        "lowestConcentrationTwoNodesBdf": { "min": -1e-18 },
+        "stepsTwoNodesBdf": { "max": 2500 },
+        "splitDifferenceBdf": { "max": 1e-06 }
     }
 }

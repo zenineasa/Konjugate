@@ -618,11 +618,35 @@ test('a Verlet node is written as the engine steps it: the first part in half st
     assert.throws(() => generateStandaloneProgram(damped, 'python'), /Node "Mass" cannot be integrated with Verlet: the rate of V reads V itself\. Verlet splits/);
 });
 
+// BDF (docs/proposals/integrators.md): the engine's own header and the stiff methods' shared machinery pasted in, and the Python port.
+test('the C++ export pastes the engine\'s own BDF and shared stiff headers, byte for byte', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { bdfCpp, bdfPython, stiffSystemCpp, stiffSystemPython } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/bdf.hpp', import.meta.url), 'utf8');
+    const shared = await readFile(new URL('../engine/include/konjugate/integrators/stiffSystem.hpp', import.meta.url), 'utf8');
+    assert.equal(bdfCpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/bdf.hpp has it.');
+    assert.equal(stiffSystemCpp, shared, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/stiffSystem.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'bdf';
+    document.runConfigurations[0].tolerance = { relative: 1e-8 };
+    const source = generateStandaloneProgram(document, 'cpp');
+    assert.ok(source.includes(shared.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')), 'The shared stiff header must be pasted in.');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')), 'The BDF header must be pasted in.');
+    assert.match(source, /Reproduces one Stiff \(BDF\) run/);
+    assert.match(source, /BdfTolerance tolerance\{ 1e-8, \{ 1e-9 \} \}/);
+    assert.match(source, /bdfGlobalStep\(currentTime, endTime, globalState, system, tolerance, breakpointsWithin\(currentTime, endTime\), \{\}, restart,/);
+    assert.doesNotMatch(source, /rodas4GlobalStep/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.ok(python.includes(stiffSystemPython) && python.includes(bdfPython));
+    assert.match(python, /bdf_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance/);
+});
+
 // Stiff, Rodas4 (docs/proposals/integrators.md): the engine's own header and its linear algebra pasted in, the Jacobian's structure from
 // the model's graph, and the Python port carried for the Python export.
 test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers, byte for byte', async () => {
     const { readFile } = await import('node:fs/promises');
-    const { linearSolveCpp, rodas4Cpp, rodas4Python } = await import('../src/integratorSources.mjs');
+    const { linearSolveCpp, rodas4Cpp, rodas4Python, stiffSystemPython } = await import('../src/integratorSources.mjs');
     const header = await readFile(new URL('../engine/include/konjugate/integrators/rodas4.hpp', import.meta.url), 'utf8');
     const linear = await readFile(new URL('../engine/include/konjugate/integrators/linearSolve.hpp', import.meta.url), 'utf8');
     assert.equal(rodas4Cpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/rodas4.hpp has it.');
@@ -633,7 +657,7 @@ test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers,
     document.nodes[0].states[0].numerics = { absoluteTolerance: 0.001 };
     const source = generateStandaloneProgram(document, 'cpp');
     assert.ok(source.includes(linear.replace(/^#pragma once\n/m, '')), 'The linear algebra header must be pasted in, less its #pragma once.');
-    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')), 'The Rodas4 header must be pasted in, less its #pragma once and include.');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')), 'The Rodas4 header must be pasted in, less its #pragma once and include.');
     assert.match(source, /Reproduces one Stiff run/);
     assert.match(source, /Rodas4Tolerance tolerance\{ 1e-8, \{ 0\.001 \} \}/);
     assert.match(source, /stageReads = \{ \{ 0 \} \}/);
@@ -641,7 +665,7 @@ test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers,
     assert.doesNotMatch(source, /dormandPrince54GlobalStep|rungeKutta4GlobalStep/);
     balanced(source, /\{/g, /\}/g);
     const python = generateStandaloneProgram(document, 'python');
-    assert.ok(python.includes(rodas4Python));
+    assert.ok(python.includes(stiffSystemPython) && python.includes(rodas4Python));
     assert.match(python, /stage_reads = \[\[0\]\]/);
     assert.match(python, /rodas_4_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,/);
 });

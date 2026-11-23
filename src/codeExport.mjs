@@ -26,8 +26,8 @@ import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
-import { dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
-    rungeKutta4Python } from './integratorSources.mjs';
+import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
+    rungeKutta4Python, stiffSystemCpp, stiffSystemPython } from './integratorSources.mjs';
 import { programSourceVersion } from './providerTemplate.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
@@ -742,8 +742,8 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     }
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const outputInterval = runConfiguration?.outputInterval ?? globalTimeStep;
-    // Event location, as the engine: under Runge–Kutta 4, Adaptive and Stiff (not Dormand–Prince or Rodas4 with the error control off).
-    const locating = method === 'rungeKutta4' || ((method === 'dormandPrince54' || method === 'rodas4') && !runConfiguration?.stepsPerGlobalStep);
+    // Event location, as the engine: under Runge–Kutta 4, Adaptive, Stiff and BDF (not Dormand–Prince or Rodas4 with the error control off).
+    const locating = method === 'rungeKutta4' || method === 'bdf' || ((method === 'dormandPrince54' || method === 'rodas4') && !runConfiguration?.stepsPerGlobalStep);
     const switching = locating ? latchConditions(model) : [];
     const meta = {
         switching,
@@ -752,12 +752,12 @@ export function generateStandaloneProgram(document, kind, options = {}) {
         // when a run configuration turns its error control off with steps per global step (0: the error control chooses).
         // Stiff (Rodas4) the same, with what its Jacobian is built from: the states each state's derivative reads, and whether a stage
         // reads the time.
-        ...(method === 'dormandPrince54' || method === 'rodas4' ? {
+        ...(method === 'dormandPrince54' || method === 'rodas4' || method === 'bdf' ? {
             tolerance: toleranceOf(runConfiguration),
             absoluteTolerances: absoluteTolerancesOf(model, toleranceOf(runConfiguration).absolute),
             fixedSteps: runConfiguration?.stepsPerGlobalStep ?? 0
         } : {}),
-        ...(method === 'rodas4' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
+        ...(method === 'rodas4' || method === 'bdf' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
     };
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
@@ -1243,7 +1243,8 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
     const located = meta.switching?.length > 0;
     const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
     const adaptive = meta.method === 'dormandPrince54';
-    const stiff = meta.method === 'rodas4';
+    const bdf = meta.method === 'bdf';
+    const stiff = meta.method === 'rodas4' || bdf;
     return [
         `    // ${integrationMethod(meta.method).summaryName}, the whole model at once: every node evaluated at each stage from every node's`,
         '    // stage values. Values set from other states (Updates) hold through the stages and are set at each global step\'s end.',
@@ -1268,7 +1269,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         cppStageDispatchLines(meta.parallelism).join('\n'),
         '    };',
         ...(adaptive || stiff ? [
-            `    // ${adaptive ? 'Adaptive' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and the controller's memory, carried`,
+            `    // ${adaptive ? 'Adaptive' : bdf ? 'BDF' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and ${bdf ? 'its table of differences' : 'the controller\'s memory'}, carried`,
             '    // from one global step to the next. Its first evaluation of a global step is at its start, where held programs are evaluated.',
             `    const std::vector<std::vector<std::size_t>> errorGroups = { ${errorGroupsOf(model).map((group) => `{ ${group.join(', ')} }`).join(', ')} };`,
             ...(adaptive ? [
@@ -1277,6 +1278,15 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 '    konjugate::integrators::DormandPrince54Controller controller;',
                 '    konjugate::integrators::DormandPrince54Stiffness stiffness;',
                 '    konjugate::integrators::DormandPrince54Statistics statistics;'
+            ] : bdf ? [
+                `    const konjugate::integrators::BdfTolerance tolerance{ ${doubleLiteral(meta.tolerance.relative)}, { ${meta.absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
+                '    // The Jacobian\'s structure from the model\'s graph: the states each state\'s derivative reads.',
+                `    const std::vector<std::vector<std::size_t>> stageReads = { ${meta.stageReads.map((reads) => `{ ${reads.join(', ')} }`).join(', ')} };`,
+                `    auto system = konjugate::integrators::makeStiffSystem(integrated, stageReads, errorGroups);`,
+                '    konjugate::integrators::BdfHistory history;',
+                '    konjugate::integrators::BdfStatistics statistics;',
+                // The conditions' latches the table was built under: one that flips at a global step's start starts it again, as in the engine.
+                ...(meta.switching?.length ? ['    std::vector<double> bdfLatches = switching.latches;'] : [])
             ] : [
                 `    const konjugate::integrators::Rodas4Tolerance tolerance{ ${doubleLiteral(meta.tolerance.relative)}, { ${meta.absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
                 `    constexpr std::size_t fixedSteps = ${meta.fixedSteps};`,
@@ -1320,6 +1330,16 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 `        konjugate::integrators::dormandPrince54GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
                 `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,${located ? ' switching,' : ''}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
+            : bdf
+            ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
+                '        // The table starts again at order 1 where a schedule turns a corner at this very instant, as the engine starts it.',
+                '        const auto around = breakpointsWithin(currentTime - globalTimeStep, currentTime + globalTimeStep);',
+                '        const bool restart = std::any_of(around.begin(), around.end(), [&](double time) {',
+                '            return std::abs(time - currentTime) <= std::max(1e-9 * globalTimeStep, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(currentTime));',
+                `        })${located ? ' || switching.latches != bdfLatches' : ''};`,
+                `        konjugate::integrators::bdfGlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance, breakpointsWithin(currentTime, endTime), {}, restart,`,
+                `            history, statistics,${located ? ' switching,' : ''} evaluateAdaptive, [](double, const std::vector<double>&) {});`,
+                ...(located ? ['        bdfLatches = switching.latches;'] : [])].join('\n')
             : stiff
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
                 `        konjugate::integrators::rodas4GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
@@ -1418,8 +1438,11 @@ function generateCpp(model, providers, meta, document) {
         meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
         meta.method === 'dormandPrince54' ? `${dormandPrince54Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
         // Stiff: Konjugate's own linear algebra, then the method, which includes it.
-        meta.method === 'rodas4' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
-        meta.method === 'rodas4' ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
+        // The stiff methods: Konjugate's own linear algebra and their shared machinery, then the method, each less its own includes.
+        meta.method === 'rodas4' || meta.method === 'bdf' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        meta.method === 'rodas4' || meta.method === 'bdf' ? `${stiffSystemCpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
+        meta.method === 'rodas4' ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n` : null,
+        meta.method === 'bdf' ? `${bdfCpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n` : null,
         meta.switching?.length ? `${eventsCpp.replace(/^#pragma once\n/m, '')}\n` : null,
         'int main(int argc, char** argv) {',
         isMpi ? '    MPI_Init(&argc, &argv);' : null,
@@ -1719,7 +1742,8 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         ...plan.node.states.map((state, index) => `        global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`)
     ].join('\n'));
     const adaptive = meta.method === 'dormandPrince54';
-    const stiff = meta.method === 'rodas4';
+    const bdf = meta.method === 'bdf';
+    const stiff = meta.method === 'rodas4' || bdf;
     const schedulesBreakpoints = model.schedules.length
         ? ['        times = sorted(time for _hold, schedule_times, _values in PARAMETER_SCHEDULES for time in schedule_times if from_time < time < to_time)']
         : ['        times = []'];
@@ -1740,13 +1764,19 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         ] : []),
         '',
         ...(adaptive || stiff ? [
-            `    # ${adaptive ? 'Adaptive' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and the controller's memory, carried`,
+            `    # ${adaptive ? 'Adaptive' : bdf ? 'BDF' : 'Stiff'}: its error norm summed node by node, in the engine's order; its tolerances; and ${bdf ? 'its table of differences' : "the controller's memory"}, carried`,
             '    # from one global step to the next. Its first evaluation of a global step is at its start, where held programs are evaluated.',
             `    error_groups = [${errorGroupsOf(model).map((group) => `[${group.join(', ')}]`).join(', ')}]`,
             `    relative_tolerance = ${doubleLiteral(meta.tolerance.relative)}`,
             `    absolute_tolerance = [${meta.absoluteTolerances.map(doubleLiteral).join(', ')}]`,
             `    fixed_steps = ${meta.fixedSteps}`,
-            ...(adaptive ? ['    controller = DormandPrince54Controller()'] : [
+            ...(adaptive ? ['    controller = DormandPrince54Controller()'] : bdf ? [
+                "    # The Jacobian's structure from the model's graph: the states each state's derivative reads.",
+                `    stage_reads = [${meta.stageReads.map((reads) => `[${reads.join(', ')}]`).join(', ')}]`,
+                '    system = make_stiff_system(integrated, stage_reads, error_groups)',
+                '    history = BdfHistory()',
+                ...(meta.switching?.length ? ['    bdf_latches = list(switching.latches)'] : [])
+            ] : [
                 "    # The Jacobian's structure from the model's graph: the states each state's derivative reads at a stage.",
                 `    stage_reads = [${meta.stageReads.map((reads) => `[${reads.join(', ')}]`).join(', ')}]`,
                 '    system = make_rodas_4_system(integrated, stage_reads, error_groups)',
@@ -1760,7 +1790,7 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
             '    # Where a stored schedule jumps or turns, as the engine finds them: every step lands there.',
             '    def breakpoints_within(from_time, to_time):',
             ...schedulesBreakpoints,
-            `        gap = max(1e-9 * (to_time - from_time), 1e3 * ${adaptive ? 'DP_EPSILON' : 'RODAS4_EPSILON'} * max(abs(from_time), abs(to_time)))`,
+            `        gap = max(1e-9 * (to_time - from_time), 1e3 * ${adaptive ? 'DP_EPSILON' : 'STIFF_EPSILON'} * max(abs(from_time), abs(to_time)))`,
             '        kept = []',
             '        for time in times:',
             '            if time - from_time <= gap or to_time - time <= gap:',
@@ -1780,6 +1810,14 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
                 '        dormand_prince_54_global_step(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,',
                 '                                      [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,',
                 `                                      lambda _time, _values: None${located ? ', switching' : ''})`].join('\n')
+            : bdf
+            ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
+                '        # The table starts again at order 1 where a schedule turns a corner at this very instant, as the engine starts it.',
+                '        around = breakpoints_within(current_time - global_time_step, current_time + global_time_step)',
+                `        restart = any(abs(time - current_time) <= max(1e-9 * global_time_step, 1e3 * STIFF_EPSILON * abs(current_time)) for time in around)${located ? ' or switching.latches != bdf_latches' : ''}`,
+                '        bdf_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance, breakpoints_within(current_time, end_time), [],',
+                `                        restart, history, evaluate_adaptive, lambda _time, _values: None${located ? ', switching' : ''})`,
+                ...(located ? ['        bdf_latches = list(switching.latches)'] : [])].join('\n')
             : stiff
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        rodas_4_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,',
@@ -1857,8 +1895,10 @@ function generatePython(model, providers, meta, document) {
         pythonScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Python}\n` : '',
         meta.method === 'dormandPrince54' ? `${dormandPrince54Python}\n` : '',
+        meta.method === 'rodas4' || meta.method === 'bdf' ? `${stiffSystemPython}\n` : '',
         meta.method === 'rodas4' ? `${rodas4Python}\n` : '',
         meta.switching?.length ? `${eventsPython}\n` : '',
+        meta.method === 'bdf' ? `${bdfPython}\n` : '',
         'def run(target_time, output_path):',
         `    global_time_step = ${doubleLiteral(meta.globalTimeStep)}`,
         `    output_interval = ${doubleLiteral(meta.outputInterval)}`,

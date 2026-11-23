@@ -273,6 +273,22 @@ export async function evaluate({ engine, config }) {
     }
     add('stiffSplitDifference', stiffDifference, 'Stiff: the three-node model against the one-node model at the same tolerance, relative to range, over the relative tolerance, largest over every tolerance');
 
+    // BDF: the split model against the one-node model at each tolerance, as for Stiff.
+    let bdfDifference = 0;
+    for (const relative of rodas.relativeTolerances) {
+        const variant = { method: 'bdf', tolerance: { relative, absolute: relative * 1e-3 } };
+        const split = await engine.run(splitPath, variant, stiffRun);
+        const splitNumeric = trajectory(split, splitIds);
+        const one = await engine.run(monolithicPath, variant, stiffRun);
+        const difference = errorMetrics(splitNumeric, trajectory(one, monolithicIds)).relativeError;
+        bdfDifference = Math.max(bdfDifference, difference / relative);
+        rows.push(resultRow({
+            caseName: 'split, three nodes', model: 'split', variant, run: stiffRun, errors: errorMetrics(splitNumeric, exact), work: split.work, unit: 'm, m/s',
+            note: `against one node with the same tolerance ${difference.toExponential(2)}; ${split.work.methodSteps} steps (one node ${one.work.methodSteps}), ${split.work.factorisations} factorisations`
+        }));
+    }
+    add('bdfSplitDifference', bdfDifference, 'BDF: the three-node model against the one-node model at the same tolerance, relative to range, over the relative tolerance, largest over every tolerance');
+
     const log2 = (value) => `2^${Math.log2(value)}`;
     plots.push(linePlot({
         id: 'couplingSubsteps', title: 'Substeps at a fixed global step', subtitle: `Error relative to range against the exact solution, H = ${log2(coarsest)} s`, xLabel: 'Substeps per global step (n)', yLabel: 'Relative error', logX: true, logY: true, xTicks: config.substeps,

@@ -39,8 +39,46 @@ export const integrationMethods = Object.freeze([
         description: 'For models with very fast and very slow parts together (chemistry, stiff springs, circuits with tiny time constants), where the others need tiny steps. Solves a set of equations each step.',
         stepsPerGlobalStep: false,
         tolerance: true
+    }),
+    Object.freeze({
+        id: 'bdf',
+        name: 'Stiff (BDF)',
+        summaryName: 'Stiff, BDF: numerical differentiation formulas of orders 1 to 5, the Jacobian and its factorisation kept from step to step',
+        description: 'For models with very fast and very slow parts together (chemistry, stiff springs, circuits with tiny time constants), where the others need tiny steps. Solves a set of equations each step.',
+        stepsPerGlobalStep: false,
+        tolerance: true,
+        // Not a Method of its own: the Run dialog offers it as Stiff's solver for large models (stiffSolvers).
+        offered: false
     })
 ]);
+
+// Stiff's solvers, the choice the Run dialog shows under Stiff (docs/proposals/integrators.md, BDF): the Rosenbrock method, the default,
+// and BDF for large models. Each is a method of its own in the file; only Rosenbrock's is the Method list's.
+export const stiffSolvers = Object.freeze([
+    Object.freeze({ id: 'rodas4', name: 'Rosenbrock (best for most models)', description: 'Works out the equations afresh at every step: robust, and accurate for its tolerance.' }),
+    Object.freeze({ id: 'bdf', name: 'BDF (for large models, thousands of states)', description: 'Keeps the work of solving its equations from step to step, which pays on a large model. Less accurate for its tolerance, and best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
+]);
+
+// The Method the Run dialog shows for a method: Stiff for each of Stiff's solvers.
+export function dialogMethodOf(method) {
+    return stiffSolvers.some((solver) => solver.id === method) ? 'rodas4' : method;
+}
+
+// Whether a stiff model suits BDF better than the Rosenbrock solver (the user's decision, docs/proposals/integrators.md, BDF): many
+// integrated states, and few discontinuities -- no stored schedules, no Updates or values set from other states, no live parameters,
+// and no node that is a program of its own (stepped, and read held, every global step) -- each of which starts BDF's history again.
+export const bdfStateThreshold = 2000;
+export function bdfSuits(document) {
+    const nodes = (document?.nodes ?? []).filter((node) => node.enabled !== false);
+    const states = nodes.reduce((sum, node) => sum + (node.states ?? []).filter((state) => state.kind !== 'update').length, 0);
+    if (states < bdfStateThreshold) return false;
+    if ((document?.sharedParameters ?? []).some((parameter) => parameter.schedule)) return false;
+    const jumps = (parameters) => (parameters ?? []).some((parameter) => parameter.mode === 'live' || parameter.schedule);
+    if (nodes.some((node) => node.implementation || (node.states ?? []).some((state) => state.kind === 'update')
+        || (node.sourceTerms ?? []).some((term) => term.setsValue === true || jumps(term.parameters)))) return false;
+    if ((document?.edges ?? []).some((edge) => edge.enabled !== false && jumps(edge.parameters))) return false;
+    return true;
+}
 
 // The method a stiffness finding offers, by its id: "Use Stiff".
 export const stiffIntegrationMethod = 'rodas4';

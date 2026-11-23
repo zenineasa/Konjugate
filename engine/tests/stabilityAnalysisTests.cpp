@@ -4,6 +4,7 @@
 #include "stabilityAnalysis.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
 #include "konjugate/integrators/rodas4.hpp"
+#include "konjugate/integrators/bdf.hpp"
 #include <Eigen/Dense>
 #include <random>
 #include <boost/property_tree/json_parser.hpp>
@@ -705,6 +706,44 @@ void rodas4IsFourthOrderAtFixedSteps() {
     }
 }
 
+
+// BDF on Robertson's kinetics to 1e11 s: the total kept at 1, the published values reached, its factorisation kept from step to step
+// (far fewer factorisations than steps) and its order raised to five; and a run continued from its table mid-way takes the same steps.
+void bdfKeepsItsFactorisationAndItsTable() {
+    namespace integrators = konjugate::integrators;
+    const auto robertson = [](std::size_t, double, const std::vector<double>& s, std::vector<double>& d) {
+        d[0] = -0.04 * s[0] + 1e4 * s[1] * s[2];
+        d[1] = 0.04 * s[0] - 1e4 * s[1] * s[2] - 3e7 * s[1] * s[1];
+        d[2] = 3e7 * s[1] * s[1];
+    };
+    const auto run = [&](integrators::BdfHistory& history, integrators::BdfStatistics& statistics, std::vector<double>& states, double from, double to) {
+        auto system = integrators::makeStiffSystem({1, 1, 1}, {{0, 1, 2}, {0, 1, 2}, {1}}, {{0, 1, 2}});
+        integrators::BdfTolerance tolerance{1e-8, {1e-12, 1e-18, 1e-12}};
+        double time = from;
+        for (double end = from * 10; time < to; end *= 10) {
+            integrators::bdfGlobalStep(time, std::min(end, to), states, system, tolerance, {}, {}, false, history, statistics, robertson,
+                [](double, const std::vector<double>&) {});
+            time = std::min(end, to);
+        }
+    };
+    integrators::BdfHistory history;
+    integrators::BdfStatistics statistics;
+    std::vector<double> states{1.0, 0.0, 0.0};
+    auto system = integrators::makeStiffSystem({1, 1, 1}, {{0, 1, 2}, {0, 1, 2}, {1}}, {{0, 1, 2}});
+    integrators::bdfGlobalStep(0.0, 0.4, states, system, integrators::BdfTolerance{1e-8, {1e-12, 1e-18, 1e-12}}, {}, {}, false, history, statistics,
+        robertson, [](double, const std::vector<double>&) {});
+    auto copy = history;
+    auto copyStates = states;
+    run(history, statistics, states, 0.4, 1e11);
+    require(std::abs(states[0] + states[1] + states[2] - 1.0) < 1e-13, "BDF must keep A + B + C at 1.");
+    require(std::abs(states[0] - 2.083340149701255e-08) < 1e-4 * 2.08e-8, "BDF must reach the published concentration of A at 1e11 s.");
+    require(statistics.factorisations * 3 < statistics.acceptedSteps, "BDF must keep its factorisation from step to step.");
+    require(statistics.highestOrder == 5, "BDF must raise its order to five on Robertson's kinetics.");
+    integrators::BdfStatistics again;
+    run(copy, again, copyStates, 0.4, 1e11);
+    require(copyStates == states, "BDF continued from a copy of its table must take the same steps, to the bit.");
+}
+
 }
 
 // An undamped oscillator on one node, x' = v and v' = -omega^2 x, with its speed listed first or second.
@@ -782,6 +821,7 @@ int main() {
         rodas4StabilityFunctionIsLStableAndFourthOrder();
         ownLinearSolveAgreesWithEigen();
         rodas4IsFourthOrderAtFixedSteps();
+        bdfKeepsItsFactorisationAndItsTable();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());
         return 1;

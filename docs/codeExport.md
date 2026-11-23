@@ -14,7 +14,7 @@ The "Export simulation code" button in the title bar (next to "Export results as
 
 ## What is reproduced
 
-The generator targets exact numerical fidelity with the engine's own solver, for the method the active run configuration chooses: Explicit Euler node by node (the default), described first, or Runge–Kutta 4, Adaptive (Dormand–Prince 5(4)) or Stiff (Rodas4) for the whole model, described after the list:
+The generator targets exact numerical fidelity with the engine's own solver, for the method the active run configuration chooses: Explicit Euler node by node (the default), described first, or Runge–Kutta 4, Adaptive (Dormand–Prince 5(4)), Stiff (Rodas4) or BDF for the whole model, described after the list:
 
 - **Fixed-step, multi-rate integration.** Each node advances at `globalTimeStep / substepsPerGlobalStep`. A binding into a *different* node's state always reads a frozen snapshot taken at the start of the current global step; a binding into the *same* node's own state (or any source-term binding) reads that node's live, substep-updated value.
 - **Contribution order.** Contributions to the same state are summed in the same order the engine uses — a node's own source terms in their JSON order, then edges touching that node in document order — since floating-point addition is not associative.
@@ -35,6 +35,8 @@ The generator targets exact numerical fidelity with the engine's own solver, for
 
 **Stiff** (`method: "rodas4"`) is exported the same way, with the engine's `engine/include/konjugate/integrators/linearSolve.hpp` and `rodas4.hpp` pasted in byte for byte and a line-for-line Python port of both: the Jacobian's structure from the model's graph (the states each state's derivative reads, written into the program as `stageReads`), the coloured finite differences, df/dt where an equation reads the time or a scheduled parameter, Konjugate's own dense LU (and, above 200 integrated states, its sparse LU with the same minimum-degree ordering), the error control with the run's tolerances and each state's own absolute tolerance, and every step landing as Adaptive's do. A finite-difference Jacobian divides a last-bit difference in a rate by a perturbation of about √ε of the state, so an exported expression that rounds differently from the engine's gives a Jacobian different in about its eighth digit: at fixed steps the exported program agrees with the engine to about 1e-12 (Python, which never fuses, to about 1e-10), and across a corner no step lands on (a rate that switches with a state) an error-controlled run may take different, equally valid steps, agreeing within the tolerance's reach.
 
+**BDF** (`method: "bdf"`) is exported the same way, with `engine/include/konjugate/integrators/bdf.hpp` pasted in beside the stiff methods' shared `stiffSystem.hpp` and `linearSolve.hpp`, and their Python ports: its table of differences carried from one global step to the next, its Jacobian and factorisation kept from step to step, and its table started again at order 1 where the engine starts it (a schedule's corner, inside a step or at a global step, and a state that changed between global steps, as an Update does). Its Newton iteration and error control make the same kind of decision Stiff's do, so the exported program agrees with the engine as Stiff's does: to rounding when the step sequence is the same, within the tolerance's reach where a last-bit difference tips a decision.
+
 ## What is not supported
 
 Export is blocked outright, with an error naming the offending node or edge, when:
@@ -42,10 +44,10 @@ Export is blocked outright, with an error naming the offending node or edge, whe
 - **A provider is implemented in the other language.** A model with a C++ provider cannot be exported to Python, and vice versa — provider source is never auto-translated.
 - **A provider is an installed plugin reference** (`implementation.kind: "plugin"`), which has no embeddable source to paste in.
 - **A computational-node provider is exported to C++.** C++ computational-node execution does not exist in the engine either, so there is no C++ shape to generate.
-- **A node is a program of its own under Runge–Kutta 4, Adaptive or Stiff.** The engine steps such a node on its own when it is not pure; code export does not write that yet.
+- **A node is a program of its own under a whole-model method** (Runge–Kutta 4, Adaptive, Stiff or BDF). The engine steps such a node on its own when it is not pure; code export does not write that yet.
 - **A node is integrated semi-implicitly** (`numerics.integration: "semiImplicit"`) under Euler, node by node; this applies to FMU export too.
 - **The run configuration names a method this version does not know**, refused by name.
-- **An FMU is exported from a run configuration that chooses Runge–Kutta 4, Adaptive or Stiff.** FMI export steps with Euler node by node; the methods inside `fmi2DoStep` are a later stage of [Integrators](proposals/integrators.md).
+- **An FMU is exported from a run configuration that chooses a whole-model method** (Runge–Kutta 4, Adaptive, Stiff or BDF). FMI export steps with Euler node by node; the methods inside `fmi2DoStep` are a later stage of [Integrators](proposals/integrators.md).
 
 Beyond blocking, a few things are deliberately out of scope for the generated program itself:
 

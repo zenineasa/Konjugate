@@ -64,7 +64,8 @@ try {
     const expected = [];
     // The edge at the run's very end has nothing after it to take effect in.
     for (let period = 0; period < 40; ++period) expected.push(...[period * 5e-5 + 2e-5, (period + 1) * 5e-5].filter((time) => time < timing.targetTime - 1e-12));
-    for (const method of [{ method: 'rungeKutta4' }, { method: 'dormandPrince54', tolerance: { relative: 1e-8 } }, { method: 'rodas4', tolerance: { relative: 1e-8 } }]) {
+    for (const method of [{ method: 'rungeKutta4' }, { method: 'dormandPrince54', tolerance: { relative: 1e-8 } }, { method: 'rodas4', tolerance: { relative: 1e-8 } },
+        { method: 'bdf', tolerance: { relative: 1e-8 } }]) {
         const serial = await run(buck, { ...timing, ...method, execution: { backend: 'serial' } });
         const integration = serial.integration;
         assert.equal(integration.switchingConditions, 2, 'The PWM\'s condition appears in two terms: two switching conditions.');
@@ -78,6 +79,8 @@ try {
         const checkpoint = serial.checkpoints[Math.floor(serial.checkpoints.length / 2)];
         assert.ok(checkpoint.solver.state, 'A checkpoint keeps the conditions\' latches.');
         const resumed = await run(buck, { ...timing, ...method, startCheckpoint: checkpoint });
+        // BDF starts its history again at every event, since the right-hand side jumps there.
+        if (method.method === 'bdf') assert.ok(integration.restarts >= expected.length, `BDF must start its history again at each edge: ${integration.restarts}.`);
         assert.ok(sameBits(resumed.samples.at(-1).states.map((state) => state.value), serial.samples.at(-1).states.map((state) => state.value)),
             `A ${method.method} run continued from its checkpoint must end on the uninterrupted run's bits.`);
     }
@@ -99,7 +102,7 @@ try {
     // Chattering: y' = -1 above zero and +1 below it slides along zero, switching back and forth; each global step stops locating after a
     // hundred events and reads the condition at each step's start, and the run says so once.
     const sliding = await modelPath('sliding', oneNode(['Which', ['Greater', 'y', '0'], '-1', 'True', '1'], 0.5));
-    for (const method of [{ method: 'rungeKutta4', stepsPerGlobalStep: 4 }, { method: 'dormandPrince54' }, { method: 'rodas4' }]) {
+    for (const method of [{ method: 'rungeKutta4', stepsPerGlobalStep: 4 }, { method: 'dormandPrince54' }, { method: 'rodas4' }, { method: 'bdf' }]) {
         const result = await run(sliding, { targetTime: 2, globalTimeStep: 0.25, outputInterval: 0.25, ...method });
         const findings = result.stabilityFindings.filter((finding) => finding.code === 'eventsChattering');
         assert.equal(findings.length, 1, `Chattering must be reported once under ${method.method}: ${JSON.stringify(result.stabilityFindings)}`);
@@ -109,7 +112,7 @@ try {
         assert.ok(Math.abs(result.integration.eventList[0].time - 0.5) <= 1e-9, `The first switch is at 0.5 s: ${result.integration.eventList[0].time}.`);
     }
 
-    console.log('✓ event location: the buck converter\'s every PWM edge located at its instant under Runge–Kutta 4, Adaptive and Stiff, the same bits on every '
+    console.log('✓ event location: the buck converter\'s every PWM edge located at its instant under Runge–Kutta 4, Adaptive, Stiff and BDF, the same bits on every '
         + 'backend and from a checkpoint; Euler unchanged and naming what it did not locate; models without conditions untouched; chattering bounded and reported.');
 } finally {
     await rm(directory, { recursive: true, force: true });

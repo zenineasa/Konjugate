@@ -1063,9 +1063,20 @@ private:
     std::vector<std::pair<double, std::size_t>> eventList;
     bool chatteringReported = false;
     std::vector<std::pair<EntityId, EntityId>> unlocated;
-    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive and Stiff, and the conditions' latches when
-    // events are located; nothing under every other method.
+    // BDF: its table of differences, order and step (kept in checkpoints), the work done, and the controls as they were at the last
+    // global step's end: a live parameter set or a new intervention starts its table again at order 1.
+    integrators::BdfHistory bdfHistory;
+    integrators::BdfStatistics bdfStatistics;
+    EntityValues bdfParameterValues;
+    std::size_t bdfSchedules = 0;
+    // The switching conditions' latches BDF's table was built under: a condition that flips at a global step's start starts it again.
+    std::vector<double> bdfLatches;
+    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive and Stiff, BDF's table under BDF, and the
+    // conditions' latches when events are located; nothing under every other method.
     std::string solverState() const {
+        if (integration.method == IntegrationMethod::bdf) {
+            return switching ? encodeBdfSolverState(bdfHistory, &switching->latches, &switching->armed) : encodeBdfSolverState(bdfHistory);
+        }
         if (switching) {
             const bool stiff = isStiff(integration);
             return encodeEventSolverState(stiff ? stiffController.proposedStep : isAdaptive(integration) ? adaptiveController.proposedStep : 0.0,
@@ -1079,6 +1090,19 @@ private:
     void resetSolverState(const std::string& record = {}) {
         adaptiveController = {};
         stiffController = {};
+        // BDF: its table (and, when events are located, the conditions' latches) from its own record.
+        bdfHistory = {};
+        bdfParameterValues = runControl.parameterValues;
+        bdfSchedules = runControl.activeSchedules.size();
+        if (integration.method == IntegrationMethod::bdf) {
+            if (switching) switching->reset();
+            if (stiffSystem && decodeBdfSolverState(record, stiffSystem->integratedStates.size(), executionPlan.initialStates.size(), bdfHistory,
+                    switching ? &switching->latches : nullptr, switching ? &switching->armed : nullptr) && switching) {
+                switching->established = true;
+            }
+            bdfLatches = switching ? switching->latches : std::vector<double>{};
+            return;
+        }
         if (switching) {
             switching->reset();
             double proposed = 0;
@@ -1215,8 +1239,8 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         heldValues.resize(executionPlan.nodes.size());
         // Rodas4's structure, from the graph: which states each state's derivative reads, so the Jacobian's pattern, its colours
         // and the sparse LU's ordering are worked out once, here.
-        if (integration.method == IntegrationMethod::rodas4) {
-            stiffSystem = integrators::makeRodas4System(wholeModel.integrated, stageReads(executionPlan, wholeModel, providerRuntime.get()), wholeModel.errorGroups);
+        if (integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf) {
+            stiffSystem = integrators::makeStiffSystem(wholeModel.integrated, stageReads(executionPlan, wholeModel, providerRuntime.get()), wholeModel.errorGroups);
             stagesReadTimeAlways = stagesReadTime(executionPlan, wholeModel);
         }
         // A node's work a global step is its work an evaluation times the method's evaluations a step, not its substeps.
@@ -1234,7 +1258,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         }
         // Switching conditions are located under Runge–Kutta 4, Adaptive and Stiff (not Dormand–Prince or Rodas4 with the error control
         // off, which is for measuring the method's order): their stage terms then read them latched.
-        if (integration.method == IntegrationMethod::rungeKutta4 || isAdaptive(integration) || isStiff(integration)) {
+        if (integration.method == IntegrationMethod::rungeKutta4 || isAdaptive(integration) || isStiff(integration) || integration.method == IntegrationMethod::bdf) {
             eventPlan = compileEventPlan(executionPlan, wholeModel);
             if (!eventPlan.functions.empty()) {
                 std::vector<unsigned char> comparisons;
@@ -1640,6 +1664,21 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
                  << (stiffSystem ? stiffSystem->integratedStates.size() : 0) << ",\"sparse\":" << (stiffSystem && stiffSystem->sparse ? "true" : "false");
             if (stiffStatistics.denseFallbacks) json << ",\"denseFallbacks\":" << stiffStatistics.denseFallbacks;
         }
+        // BDF: the same, its Newton iterations, the highest order it reached and how often its table started again at order 1.
+        if (integration.method == IntegrationMethod::bdf) {
+            json << ",\"tolerance\":{\"relative\":" << integration.relativeTolerance << ",\"absolute\":" << integration.absoluteTolerance << '}'
+                 << ",\"steps\":" << bdfStatistics.acceptedSteps << ",\"rejectedSteps\":" << bdfStatistics.rejectedSteps
+                 << ",\"evaluations\":" << bdfStatistics.evaluations;
+            if (bdfStatistics.acceptedSteps) {
+                json << ",\"smallestStep\":" << bdfStatistics.smallestStep << ",\"largestStep\":" << bdfStatistics.largestStep;
+            }
+            json << ",\"jacobians\":" << bdfStatistics.jacobians << ",\"jacobianColours\":" << (stiffSystem ? stiffSystem->colours : 0)
+                 << ",\"factorisations\":" << bdfStatistics.factorisations << ",\"newtonIterations\":" << bdfStatistics.newtonIterations
+                 << ",\"highestOrder\":" << bdfStatistics.highestOrder << ",\"restarts\":" << bdfStatistics.restarts
+                 << ",\"linearSystemSize\":" << (stiffSystem ? stiffSystem->integratedStates.size() : 0)
+                 << ",\"sparse\":" << (stiffSystem && stiffSystem->sparse ? "true" : "false");
+            if (bdfStatistics.denseFallbacks) json << ",\"denseFallbacks\":" << bdfStatistics.denseFallbacks;
+        }
         json << ",\"steppedNodeIds\":[";
         for (std::size_t index = 0; index < wholeModel.steppedNodes.size(); ++index) {
             json << (index ? "," : "") << executionPlan.nodes[wholeModel.steppedNodes[index]].nodeId;
@@ -1958,7 +1997,8 @@ void Simulation::checkProgramClocks() {
                 }
                 if (node.nodeProvider && node.nodeProvider->programVersion == 2) add(node.nodeId);
             }
-            throw std::runtime_error("Under " + std::string(integration.method == IntegrationMethod::rodas4 ? "Stiff" : "Adaptive") + ", a program that "
+            throw std::runtime_error("Under " + std::string(integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf ? "Stiff" : "Adaptive")
+                + ", a program that "
                 "remembers something from step to step is not advanced yet: " + names + ". Run with Runge–Kutta 4 or Euler, or give the "
                 "program a clock, which ticks at global steps under every method.");
         }
@@ -2065,8 +2105,9 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         false, synchronizationStep};
     // What a program's message names as where it was called from.
     auto& callContext = programCallContext();
-    callContext = {integration.method == IntegrationMethod::rungeKutta4 ? "Runge–Kutta 4" : isStiff(integration) || integration.method == IntegrationMethod::rodas4
-        ? "Stiff, Rodas4" : "Adaptive, Dormand–Prince 5(4)", 0, integrationMethodStages(integration.method)};
+    callContext = {integration.method == IntegrationMethod::rungeKutta4 ? "Runge–Kutta 4" : integration.method == IntegrationMethod::bdf ? "Stiff, BDF"
+        : isStiff(integration) || integration.method == IntegrationMethod::rodas4 ? "Stiff, Rodas4" : "Adaptive, Dormand–Prince 5(4)", 0,
+        integrationMethodStages(integration.method)};
     const auto evaluateAt = [&](bool atStart, double time, const Values& stageStates, Values& derivatives) {
         request.stageTime = time;
         request.evaluateHeld = atStart;
@@ -2142,6 +2183,33 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
                 readsTime, stiffController, stiffStatistics, evaluateRodas, [](double, const Values&) {});
         }
         takenSteps = stiffStatistics.acceptedSteps - acceptedBefore;
+    } else if (integration.method == IntegrationMethod::bdf) {
+        // As Stiff: landing on the global step's end and every corner of a schedule within it, the held programs evaluated at the first
+        // evaluation. Its table carries on from the last global step unless the controls changed there: a live parameter set, a new
+        // intervention, or a schedule turning a corner at this very instant.
+        const auto breakpoints = scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime, elapsed);
+        const auto around = scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime - globalTimeStep, currentTime + globalTimeStep);
+        const bool cornerHere = std::any_of(around.begin(), around.end(), [&](double time) {
+            return std::abs(time - currentTime) <= std::max(1e-9 * globalTimeStep, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(currentTime));
+        });
+        const bool restart = cornerHere || runControl.parameterValues != bdfParameterValues || runControl.activeSchedules.size() != bdfSchedules
+            || (switching && switching->latches != bdfLatches);
+        const auto acceptedBefore = bdfStatistics.acceptedSteps;
+        integrators::BdfTolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
+        const auto evaluateBdf = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
+            evaluateAt(evaluation == 0, time, stageStates, derivatives);
+        };
+        if (switching) {
+            integrators::bdfGlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, restart, bdfHistory, bdfStatistics,
+                *switching, evaluateBdf, [](double, const Values&) {});
+        } else {
+            integrators::bdfGlobalStep(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, restart, bdfHistory, bdfStatistics,
+                evaluateBdf, [](double, const Values&) {});
+        }
+        bdfParameterValues = runControl.parameterValues;
+        bdfSchedules = runControl.activeSchedules.size();
+        if (switching) bdfLatches = switching->latches;
+        takenSteps = bdfStatistics.acceptedSteps - acceptedBefore;
     } else {
         const auto evaluateRungeKutta = [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
             callContext.stage = stage + 1;

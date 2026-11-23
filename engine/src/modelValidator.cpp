@@ -160,7 +160,7 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
     const std::string methodName = integration.method == IntegrationMethod::dormandPrince54
         ? (adaptive ? "Adaptive" : "Dormand–Prince 5(4) at fixed steps") : "Runge–Kutta 4";
     std::ostringstream message;
-    if (integration.method == IntegrationMethod::rodas4) {
+    if (integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf) {
         // Stiff is L-stable: no step is too large for a mode that decays, however fast, and a stiff model is what it is for. Only a
         // mode that grows whatever the step is worth saying.
         if (assessment->unconditionallyUnstable) {
@@ -168,6 +168,14 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
                     << " -- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether this dynamics is "
                     << "intentionally unstable.";
             add(result, "numericsPotentiallyUnstable", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
+        } else if (integration.method == IntegrationMethod::bdf && assessment->largestDecayingAngleDegrees > 51.0) {
+            // BDF's orders 3 to 5 are stable only for modes within 80, 66 and 51 degrees of the negative real axis: a model that
+            // oscillates as it decays holds it to lower orders, or to small steps.
+            message << "The model oscillates as it decays (a mode " << std::lround(assessment->largestDecayingAngleDegrees) << " degrees from "
+                    << "the negative real axis" << (symbol.empty() ? "" : ", '" + symbol + "' moving fastest") << "): BDF's higher orders are "
+                    << "not stable for such modes, so it will keep to low orders or small steps there. The Rosenbrock solver (Rodas4) is "
+                    << "stable for every mode that decays.";
+            add(result, "numericsBdfOscillatoryModes", "warning", message.str() + judged, "runConfiguration", configurationId, "numerics");
         }
         return;
     }

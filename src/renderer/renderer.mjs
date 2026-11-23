@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { defaultTolerance as defaultIntegrationTolerance, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { bdfSuits, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -6238,31 +6238,33 @@ function renderValidationStatus() {
         button.innerHTML = `<i></i><span><strong>${escapeHtml(item.message)}</strong><small>${escapeHtml(item.location.kind)}${item.location.field ? ` · ${escapeHtml(item.location.field)}` : ''}</small></span>`;
         button.addEventListener('click', () => navigateToValidationIssue(item));
         container.appendChild(withSemiImplicitAction(button, item.code === 'numericsUndampedOscillation' ? Number(item.location.entityId) : null));
-        if (item.code === 'numericsStiffModel' && methodOf(activeRunConfiguration()) !== stiffIntegrationMethod) container.appendChild(useStiffButton());
+        if (item.code === 'numericsStiffModel' && dialogMethodOf(methodOf(activeRunConfiguration())) !== stiffIntegrationMethod) container.appendChild(useStiffButton());
     });
 }
 
 // "Use Stiff", offered where a finding says the model is stiff (docs/proposals/integrators.md, In the app): one click sets the active run
-// configuration's method to Stiff, its tolerances kept, as one undoable step.
+// configuration's method to Stiff, its tolerances kept, as one undoable step. Its solver is BDF only where the model suits it -- many
+// states and few jumps (bdfSuits), and no intervention in the result on screen -- and the Rosenbrock solver otherwise.
 function useStiffButton() {
+    const solver = bdfSuits(serializeProjectDocument()) && !(activeResult?.interventions?.length) ? 'bdf' : stiffIntegrationMethod;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'useStiffMethod';
-    button.textContent = 'Use Stiff';
-    button.title = integrationMethod(stiffIntegrationMethod).description;
-    button.addEventListener('click', () => useStiffMethod());
+    button.textContent = solver === 'bdf' ? 'Use Stiff (BDF)' : 'Use Stiff';
+    button.title = solver === 'bdf' ? stiffSolvers.find((entry) => entry.id === 'bdf').description : integrationMethod(stiffIntegrationMethod).description;
+    button.addEventListener('click', () => useStiffMethod(solver));
     return button;
 }
 
-async function useStiffMethod() {
+async function useStiffMethod(solver = stiffIntegrationMethod) {
     // The model is locked while a result is shown: close it first, as applying a substep fix does.
     if (activeResult) await discardResultPlayback();
     const before = structuredClone(activeRunConfiguration());
-    const after = withIntegrationMethod(before, stiffIntegrationMethod, 1, toleranceOf(before));
+    const after = withIntegrationMethod(before, solver, 1, toleranceOf(before));
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
-    $('#statusText').textContent = 'The model now runs with Stiff (Run settings).';
+    $('#statusText').textContent = solver === 'bdf' ? 'The model now runs with Stiff, its BDF solver (Run settings).' : 'The model now runs with Stiff (Run settings).';
 }
 
 // An undamped oscillation that Explicit Euler grows is fixed by semi-implicit Euler for its node (docs/proposals/integrators.md,
@@ -6728,6 +6730,11 @@ function renderExecutionSummary() {
         methodLines.push(`${plural(integration.jacobians, 'Jacobian')} (${plural(integration.jacobianColours ?? 0, 'colour')}), ${
             plural(integration.factorisations ?? 0, 'factorisation')} of ${plural(integration.linearSystemSize ?? 0, 'equation')}${
             integration.sparse ? ', sparse' : ''}.`);
+    }
+    // BDF: the highest order it reached, and how often its history started again at order 1 (at a jump in the model's inputs).
+    if (integration?.highestOrder !== undefined) {
+        methodLines.push(`Order up to ${integration.highestOrder}; ${integration.newtonIterations?.toLocaleString() ?? 0} Newton iterations; history started again ${
+            integration.restarts === 1 ? 'once' : `${(integration.restarts ?? 0).toLocaleString()} times`}.`);
     }
     const nodeName = (nodeId) => model.nodes.find((node) => node.id === nodeId)?.name ?? `Node ${nodeId}`;
     if (integration?.steppedNodeIds?.length) {
@@ -8685,7 +8692,8 @@ function fillRunConfigurationFields({ continuing }) {
             activeResult.integration?.method ?? 'nodeByNode', activeResult.integration?.stepsPerGlobalStep ?? 1,
             activeResult.integration?.tolerance ?? defaultIntegrationTolerance)
         : saved;
-    $('#runMethod').value = integrationMethod(methodOf(source)) ? methodOf(source) : 'nodeByNode';
+    $('#runMethod').value = integrationMethod(methodOf(source)) ? dialogMethodOf(methodOf(source)) : 'nodeByNode';
+    $('#runStiffSolver').value = stiffSolvers.some((solver) => solver.id === methodOf(source)) ? methodOf(source) : stiffSolvers[0].id;
     $('#runStepsPerGlobalStep').value = stepsPerGlobalStepOf(source);
     $('#runRelativeTolerance').value = toleranceOf(source).relative;
     $('#runAbsoluteTolerance').value = toleranceOf(source).absolute;
@@ -8711,10 +8719,15 @@ function fillRunConfigurationFields({ continuing }) {
 
 // The Run dialog's Method (docs/proposals/integrators.md): its line under the choice, Steps per global step for Runge–Kutta 4,
 // what the global step means for it, and, under a whole-model method, what will be stepped on its own or held, by name.
-for (const method of integrationMethods) $('#runMethod').append(new Option(method.name, method.id));
+for (const method of integrationMethods) if (method.offered !== false) $('#runMethod').append(new Option(method.name, method.id));
 function updateRunMethodFields() {
     const method = integrationMethod($('#runMethod').value) ?? integrationMethods[0];
     $('#runMethodDescription').textContent = method.description;
+    // Under Stiff, its solver: Rosenbrock, or BDF for large models.
+    const stiff = method.id === stiffIntegrationMethod;
+    $('#runStiffSolverField').hidden = !stiff;
+    $('#runStiffSolverDescription').hidden = !stiff;
+    $('#runStiffSolverDescription').textContent = stiffSolvers.find((solver) => solver.id === $('#runStiffSolver').value)?.description ?? '';
     $('#runStepsPerGlobalStepField').hidden = !method.stepsPerGlobalStep;
     $('#runStepsPerGlobalStep').disabled = !method.stepsPerGlobalStep;
     for (const field of ['Relative', 'Absolute']) {
@@ -8747,7 +8760,9 @@ function updateRunMethodFields() {
     $('#runMethodParticipation').replaceChildren(document.createTextNode(lines.join(' ')), ...(links.length ? [document.createElement('br'), ...links] : []));
     $('#runMethodParticipation').hidden = !lines.length;
 }
+for (const solver of stiffSolvers) $('#runStiffSolver').append(new Option(solver.name, solver.id));
 $('#runMethod').addEventListener('change', updateRunMethodFields);
+$('#runStiffSolver').addEventListener('change', updateRunMethodFields);
 $('#runStepsPerGlobalStep').addEventListener('input', updateRunMethodFields);
 
 $('#nodeMethodRunSettings').addEventListener('click', () => openRunDialog());
@@ -8757,7 +8772,7 @@ function readRunConfigurationFields() {
         globalTimeStep: Number($('#runGlobalTimeStep').value),
         outputInterval: Number($('#runOutputInterval').value),
         // Always named here, so a continued run's override says Euler too; saving writes it only when it is not the default.
-        method: $('#runMethod').value,
+        method: $('#runMethod').value === stiffIntegrationMethod ? $('#runStiffSolver').value : $('#runMethod').value,
         stepsPerGlobalStep: Number($('#runStepsPerGlobalStep').value),
         tolerance: { relative: Number($('#runRelativeTolerance').value), absolute: Number($('#runAbsoluteTolerance').value) },
         execution: {

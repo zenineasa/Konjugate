@@ -494,7 +494,72 @@ class Reading(NodeProvider):
     assert.ok(!stiffMethodIssues.some((issue) => issue.code === 'numericsPotentiallyUnstable' || issue.code === 'numericsStiffModel'),
         `Stiff is made for a stiff model: ${JSON.stringify(stiffMethodIssues)}`);
 
-    console.log('✓ whole-model integration: Runge–Kutta 4, Adaptive and Stiff give the same bits on every backend and from a checkpoint, make three nodes the '
+    // --- BDF: the stiff method for large models, its Jacobian and factorisation kept from step to step, its table in checkpoints ---
+    const bdfMethod = { ...timing, method: 'bdf' };
+    const bdfSerial = await run(split, { ...bdfMethod, execution: { backend: 'serial' } });
+    for (const execution of [{ backend: 'threadPool', workerThreads: 2 }, { backend: 'threadPool', workerThreads: 3 },
+        { backend: 'partitioned', partitionCount: 2, workerThreads: 2 }, { backend: 'partitioned', partitionCount: 3, workerThreads: 3 }]) {
+        assert.ok(sameBits(valuesOf(bdfSerial), valuesOf(await run(split, { ...bdfMethod, execution }))),
+            `BDF must give the serial backend's bits on ${execution.backend} with ${execution.workerThreads} workers.`);
+    }
+    const bdfSummary = bdfSerial.integration;
+    assert.equal(bdfSummary.method, 'bdf');
+    assert.deepEqual(bdfSummary.tolerance, { relative: 1e-6, absolute: 1e-9 });
+    assert.ok(bdfSummary.steps >= timing.targetTime / timing.globalTimeStep, 'BDF lands on every global step.');
+    assert.ok(bdfSummary.factorisations < bdfSummary.steps + bdfSummary.rejectedSteps, `BDF keeps its factorisation from step to step: ${JSON.stringify(bdfSummary)}`);
+    assert.equal(bdfSummary.jacobians >= timing.targetTime / timing.globalTimeStep, true, 'BDF works out its Jacobian afresh at every global step.');
+    assert.ok(bdfSummary.highestOrder >= 2 && bdfSummary.highestOrder <= 5, 'BDF raises its order.');
+    assert.equal(bdfSummary.restarts, 0, 'Nothing jumps in the masses on springs: the table never starts again.');
+    const bdfWhole = valuesOf(await run(monolithic, { ...bdfMethod, execution: { backend: 'serial' } }));
+    const bdfLargest = Math.max(...bdfWhole.map(Math.abs));
+    assert.ok(valuesOf(bdfSerial).every((value, index) => Math.abs(value - bdfWhole[index]) <= 1e-5 * bdfLargest), 'Three nodes must agree with the one node within the tolerance under BDF.');
+    const bdfCheckpoint = bdfSerial.checkpoints.find((candidate) => candidate.time === timing.targetTime / 2);
+    assert.equal(bdfCheckpoint.solver.kind, 'bdf');
+    assert.ok(typeof bdfCheckpoint.solver.state === 'string' && bdfCheckpoint.solver.state.length > 0, 'A BDF checkpoint keeps its table.');
+    const bdfResumed = await run(split, { ...bdfMethod, startCheckpoint: bdfCheckpoint });
+    assert.ok(sameBits(bdfResumed.samples.at(-1).states.map((state) => state.value), bdfSerial.samples.at(-1).states.map((state) => state.value)),
+        'A BDF run continued from its checkpoint must end on the uninterrupted run\'s bits.');
+    const bdfAfresh = await run(split, { ...bdfMethod, startCheckpoint: { ...bdfCheckpoint, solver: { kind: 'rodas4', version: 1, state: stiffCheckpoint.solver.state } } });
+    assert.ok(bdfAfresh.samples.at(-1).states.every((state, index) => Math.abs(state.value - bdfSerial.samples.at(-1).states[index].value) <= 1e-4),
+        'Another method\'s memory is not read: BDF starts afresh and still keeps to the tolerance.');
+    // The stiff model, in few steps; the tolerance sets the error; a schedule's jumps are landed on and start the table again.
+    const bdfStiff = await run(stiffModel, { targetTime: 4, globalTimeStep: 1, outputInterval: 1, method: 'bdf', tolerance: { relative: 1e-6, absolute: 1e-9 } });
+    for (const sample of bdfStiff.samples) assert.ok(Math.abs(valueOf(sample, 11) - exactStiff(sample.time)) <= 1e-5, `BDF must follow y' = -1000 (y - cos t) at ${sample.time} s.`);
+    assert.ok(bdfStiff.integration.steps * 5 < stiffResult.integration.steps, `BDF must take far fewer steps than Adaptive on a stiff model: ${bdfStiff.integration.steps}.`);
+    let previousBdf = null;
+    for (const relative of [1e-4, 1e-6, 1e-8]) {
+        const result = await run(decayModel, { targetTime: 8, globalTimeStep: 1, outputInterval: 1, method: 'bdf', tolerance: { relative, absolute: relative * 1e-3 } });
+        const error = Math.max(...result.samples.map((sample) => Math.abs(valueOf(sample, 11) - Math.exp(-sample.time))));
+        assert.ok(error <= 100 * relative, `Under BDF at relative tolerance ${relative} the error must stay near it: ${error}.`);
+        if (previousBdf) assert.ok(error < previousBdf.error && result.integration.steps > previousBdf.steps, 'A tighter tolerance must give a smaller error for more steps.');
+        previousBdf = { error, steps: result.integration.steps };
+    }
+    const bdfScheduled = await run(await modelPath('bdfScheduled', scheduled), { targetTime: 2, globalTimeStep: 0.5, outputInterval: 0.5, method: 'bdf', tolerance: { relative: 1e-9, absolute: 1e-12 } });
+    assert.ok(Math.abs(valueOf(bdfScheduled.samples.at(-1), 11) - exactAtTwo) <= 1e-7, 'Landing on a schedule\'s jumps, BDF keeps the tolerance\'s accuracy.');
+    assert.equal(bdfScheduled.integration.restarts, 2, 'BDF starts its table again after each of the schedule\'s two jumps.');
+    const longBdf = await run(decayModel, { targetTime: 600, globalTimeStep: 0.1, outputInterval: 10, method: 'bdf' });
+    assert.equal(longBdf.samples.at(-1).time, 600, 'BDF must finish a long run with a short global step.');
+    // A held program, as under Stiff.
+    const heldBdf = await run(await modelPath('pythonHeldBdf', decay({ kind: 'python', source: pythonFeed() })), { ...programTiming, method: 'bdf' });
+    assert.deepEqual(heldBdf.integration.heldTerms, [{ sourceId: 31, stateId: 21 }]);
+    // Refused: steps per global step.
+    const { code: bdfStepsCode, diagnostics: bdfStepsDiagnostics } = await attempt(split, { ...bdfMethod, stepsPerGlobalStep: 2 });
+    assert.notEqual(bdfStepsCode, 0);
+    assert.match(bdfStepsDiagnostics, /stepsPerGlobalStep does not apply to the bdf method/);
+    // Validation: a stiff model is no warning, a model that oscillates as it decays is (BDF's higher orders are not stable for it).
+    const bdfValidation = { ...stiffValidation, runConfigurations: [{ id: 900, name: 'Run', globalTimeStep: 1, outputInterval: 1, method: 'bdf' }] };
+    const bdfReportPath = join(directory, 'bdfValidation.report');
+    await execute(['validate', await modelPath('bdfValidation', bdfValidation), '--report', bdfReportPath]);
+    assert.ok(!issues(decodeValidationReport(await readFile(bdfReportPath))).some((issue) => /numerics/.test(issue.code)), 'BDF is made for a stiff model that does not oscillate.');
+    const springs = JSON.parse(await decodeProjectFile(await readFile(split)));
+    springs.runConfigurations = [{ id: 900, name: 'Run', globalTimeStep: 0.0625, outputInterval: 0.125, method: 'bdf' }];
+    springs.activeRunConfigurationId = 900;
+    const springsReportPath = join(directory, 'bdfSprings.report');
+    await execute(['validate', await modelPath('bdfSprings', springs), '--report', springsReportPath]);
+    assert.ok(issues(decodeValidationReport(await readFile(springsReportPath))).some((issue) => issue.code === 'numericsBdfOscillatoryModes'),
+        'Masses on springs oscillate as they decay: BDF\'s higher orders are not stable for them, and validation says so.');
+
+    console.log('✓ whole-model integration (BDF included): Runge–Kutta 4, Adaptive and Stiff give the same bits on every backend and from a checkpoint, make three nodes the '
         + 'one-node model, hold programs through the stages and step a node that is a program of its own; Adaptive and Stiff keep to their tolerance and land '
         + 'on a schedule\'s jumps, Adaptive says when a model is stiff and Stiff takes it in few steps; and what is not known is refused.');
 } finally {

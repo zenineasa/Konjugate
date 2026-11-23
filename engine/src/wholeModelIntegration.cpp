@@ -18,12 +18,19 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     else if (method == "rungeKutta4") settings.method = IntegrationMethod::rungeKutta4;
     else if (method == "dormandPrince54") settings.method = IntegrationMethod::dormandPrince54;
     else if (method == "rodas4") settings.method = IntegrationMethod::rodas4;
+    else if (method == "bdf") settings.method = IntegrationMethod::bdf;
     else {
         throw std::runtime_error("The run's method \"" + method + "\" is not one this version of Konjugate knows (it knows nodeByNode, "
-            "rungeKutta4, dormandPrince54 and rodas4); open the model in the version that wrote it, or choose another method.");
+            "rungeKutta4, dormandPrince54, rodas4 and bdf); open the model in the version that wrote it, or choose another method.");
+    }
+    // BDF always chooses its own steps and orders: a multistep method has no fixed-step form to check here.
+    if (settings.method == IntegrationMethod::bdf && configuration.get_optional<std::string>("stepsPerGlobalStep")) {
+        throw std::runtime_error("stepsPerGlobalStep does not apply to the bdf method, which chooses its own steps.");
     }
     // Dormand–Prince and Rodas4 choose their own steps unless told how many to take.
-    if (settings.method == IntegrationMethod::dormandPrince54 || settings.method == IntegrationMethod::rodas4) settings.stepsPerGlobalStep = 0;
+    if (settings.method == IntegrationMethod::dormandPrince54 || settings.method == IntegrationMethod::rodas4 || settings.method == IntegrationMethod::bdf) {
+        settings.stepsPerGlobalStep = 0;
+    }
     if (const auto steps = configuration.get_optional<std::string>("stepsPerGlobalStep")) {
         char* end = nullptr;
         const auto value = std::strtod(steps->c_str(), &end);
@@ -59,7 +66,7 @@ bool isStiff(const IntegrationSettings& settings) noexcept {
 }
 
 bool hasTolerance(IntegrationMethod method) noexcept {
-    return method == IntegrationMethod::dormandPrince54 || method == IntegrationMethod::rodas4;
+    return method == IntegrationMethod::dormandPrince54 || method == IntegrationMethod::rodas4 || method == IntegrationMethod::bdf;
 }
 
 std::string_view integrationMethodName(IntegrationMethod method) noexcept {
@@ -67,6 +74,7 @@ std::string_view integrationMethodName(IntegrationMethod method) noexcept {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
     case IntegrationMethod::rodas4: return "rodas4";
+    case IntegrationMethod::bdf: return "bdf";
     case IntegrationMethod::nodeByNode: break;
     }
     return "nodeByNode";
@@ -77,6 +85,7 @@ std::string_view solverKindName(IntegrationMethod method) noexcept {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
     case IntegrationMethod::rodas4: return "rodas4";
+    case IntegrationMethod::bdf: return "bdf";
     case IntegrationMethod::nodeByNode: break;
     }
     return "explicitEuler";
@@ -88,6 +97,8 @@ std::size_t integrationMethodStages(IntegrationMethod method) noexcept {
     case IntegrationMethod::dormandPrince54: return 6;
     // Rodas4: six stages, and the Jacobian's evaluations besides (one per colour of the model's structure), not counted here.
     case IntegrationMethod::rodas4: return 6;
+    // BDF: about two Newton iterations a step, its Jacobian kept from step to step.
+    case IntegrationMethod::bdf: return 2;
     case IntegrationMethod::nodeByNode: break;
     }
     return 1;
@@ -249,6 +260,102 @@ bool decodeStiffSolverState(const std::string& record, double& proposedStep, dou
     proposedStep = values[0];
     previousError = values[1];
     previousStep = values[2];
+    return true;
+}
+
+namespace {
+
+void appendBits(std::string& record, std::uint64_t bits, int bytes) {
+    for (int byte = 0; byte < bytes; ++byte) record.push_back(static_cast<char>((bits >> (8 * byte)) & 0xffU));
+}
+
+void appendDouble(std::string& record, double value) {
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof bits);
+    appendBits(record, bits, 8);
+}
+
+std::uint64_t readBits(const std::string& record, std::size_t& offset, int bytes) {
+    std::uint64_t bits = 0;
+    for (int byte = bytes - 1; byte >= 0; --byte) bits = (bits << 8) | static_cast<unsigned char>(record[offset + static_cast<std::size_t>(byte)]);
+    offset += static_cast<std::size_t>(bytes);
+    return bits;
+}
+
+double readDouble(const std::string& record, std::size_t& offset) {
+    const auto bits = readBits(record, offset, 8);
+    double value = 0;
+    std::memcpy(&value, &bits, sizeof value);
+    return value;
+}
+
+}
+
+// BDF's record, little-endian: a version byte (1, or 2 with switching conditions), the order (one byte), the steps taken at it (four
+// bytes), the step (a double), the numbers of integrated states and of states (four bytes each), the table's rows 0 .. order + 2 (each a
+// double per integrated state; the rows above are never read before they are written), and every state as the method left it; then, in
+// version 2, the number of conditions (four bytes), each condition's latch (a double) and each one's armed flag (a byte).
+std::string encodeBdfSolverState(const integrators::BdfHistory& history, const std::vector<double>* latches, const std::vector<unsigned char>* armed) {
+    if (!history.order) return {};
+    const std::size_t integrated = history.differences.empty() ? 0 : history.differences[0].size();
+    const std::size_t rows = std::min(history.order + 3, history.differences.size());
+    std::string record;
+    record.reserve(22 + 8 * (rows * integrated + history.reached.size()));
+    record.push_back(latches && armed ? 2 : 1);
+    appendBits(record, history.order, 1);
+    appendBits(record, history.equalSteps, 4);
+    appendDouble(record, history.step);
+    appendBits(record, integrated, 4);
+    appendBits(record, history.reached.size(), 4);
+    for (std::size_t row = 0; row < rows; ++row) for (const auto value : history.differences[row]) appendDouble(record, value);
+    for (const auto value : history.reached) appendDouble(record, value);
+    if (latches && armed) {
+        appendBits(record, latches->size(), 4);
+        for (const auto value : *latches) appendDouble(record, value);
+        for (const auto flag : *armed) record.push_back(static_cast<char>(flag));
+    }
+    return record;
+}
+
+bool decodeBdfSolverState(const std::string& record, std::size_t integratedCount, std::size_t stateCount, integrators::BdfHistory& history,
+                          std::vector<double>* latches, std::vector<unsigned char>* armed) {
+    constexpr std::size_t maximumOrder = integrators::BdfCoefficients::maximumOrder;
+    if (record.size() < 22 || (record[0] != 1 && record[0] != 2)) return false;
+    const bool withConditions = record[0] == 2;
+    std::size_t offset = 1;
+    const auto order = static_cast<std::size_t>(readBits(record, offset, 1));
+    const auto equalSteps = static_cast<std::size_t>(readBits(record, offset, 4));
+    const double step = readDouble(record, offset);
+    const auto integrated = static_cast<std::size_t>(readBits(record, offset, 4));
+    const auto states = static_cast<std::size_t>(readBits(record, offset, 4));
+    if (!order || order > maximumOrder || !(step > 0) || !std::isfinite(step) || integrated != integratedCount || states != stateCount) return false;
+    const std::size_t rows = order + 3;
+    const std::size_t tableEnd = offset + 8 * (rows * integrated + states);
+    if (withConditions ? record.size() < tableEnd + 4 : record.size() != tableEnd) return false;
+    std::size_t conditions = 0;
+    if (withConditions) {
+        std::size_t at = tableEnd;
+        conditions = static_cast<std::size_t>(readBits(record, at, 4));
+        if (record.size() != tableEnd + 4 + 9 * conditions || (latches && latches->size() != conditions)) return false;
+    }
+    integrators::BdfHistory read;
+    read.order = order;
+    read.equalSteps = equalSteps;
+    read.step = step;
+    read.differences.assign(maximumOrder + 3, std::vector<double>(integrated, 0.0));
+    for (std::size_t row = 0; row < rows; ++row) for (auto& value : read.differences[row]) value = readDouble(record, offset);
+    read.reached.resize(states);
+    for (auto& value : read.reached) value = readDouble(record, offset);
+    if (withConditions && latches && armed) {
+        offset += 4;
+        std::vector<double> readLatches(conditions);
+        for (auto& value : readLatches) value = readDouble(record, offset);
+        std::vector<unsigned char> readArmed(conditions);
+        for (auto& flag : readArmed) flag = static_cast<unsigned char>(record[offset++]);
+        *latches = std::move(readLatches);
+        *armed = std::move(readArmed);
+    }
+    history = std::move(read);
     return true;
 }
 

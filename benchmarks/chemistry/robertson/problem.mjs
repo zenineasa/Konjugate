@@ -15,7 +15,7 @@
 // third reaction's rate reads B and C together. Each species sets its own absolute tolerance (numerics.absoluteTolerance), 1e-12 for A
 // and C and 1e-18 for B, whose concentration falls to 1e-13: one absolute tolerance cannot suit both, as the proposal says.
 //
-// Reported, under Stiff (Rodas4, docs/proposals/integrators.md): the concentrations at Hairer and Wanner's checkpoints 0.4, 4, ..., 4e10 s
+// Reported, under Stiff (Rodas4, docs/proposals/integrators.md) and under BDF beside it: the concentrations at Hairer and Wanner's checkpoints 0.4, 4, ..., 4e10 s
 // and at 1e11 s, each run on its own with the global step its whole length, against the reference, as the largest relative error of each
 // species; the total's largest departure from 1; the most negative concentration reached; the steps and work to 1e11 s; the two-node model
 // against the one-node model; and Adaptive over the first 40 s beside it, the steps each takes.
@@ -85,13 +85,16 @@ export async function evaluate({ engine, config }) {
     const plots = [];
     const notes = [];
     const data = referenceData(directory);
-    const variant = config.variant;
+    // Stiff (Rodas4), and BDF beside it: each check of BDF's is named as Rodas4's with Bdf after it.
+    const variants = [[config.variant, ''], ...(config.bdfVariant ? [[config.bdfVariant, 'Bdf']] : [])];
     const byModel = {};
-    for (const [name, build] of [['oneNode', buildOneNode], ['twoNodes', buildTwoNodes]]) {
+    for (const [variant, suffix] of variants) for (const [name, build] of [['oneNode', buildOneNode], ['twoNodes', buildTwoNodes]]) {
+        const method = suffix ? 'BDF' : 'Stiff';
         const ids = build().ids;
         const values = [];
         let steps = 0;
         let evaluations = 0;
+        let linearAlgebra = '';
         let worst = [0, 0, 0];
         let conservation = 0;
         let lowest = Infinity;
@@ -105,7 +108,11 @@ export async function evaluate({ engine, config }) {
             worst = worst.map((value, species) => Math.max(value, Math.abs(reached[species] - reference[species]) / reference[species]));
             conservation = Math.max(conservation, Math.abs(reached[0] + reached[1] + reached[2] - 1));
             lowest = Math.min(lowest, ...reached);
-            if (time === data.times.at(-1)) { steps = result.work.methodSteps; evaluations = result.work.modelEvaluations; }
+            if (time === data.times.at(-1)) {
+                steps = result.work.methodSteps;
+                evaluations = result.work.modelEvaluations;
+                linearAlgebra = `${result.work.jacobians} Jacobians and ${result.work.factorisations} factorisations`;
+            }
             rows.push(resultRow({ caseName: `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}: t = ${time.toExponential(1)} s`, model: name, variant, run, work: result.work, unit: 'mol/L',
                 errors: { relativeError: Math.max(...reached.map((value, species) => Math.abs(value - reference[species]) / reference[species])) },
                 conservationError: Math.abs(reached[0] + reached[1] + reached[2] - 1),
@@ -118,17 +125,21 @@ export async function evaluate({ engine, config }) {
             conservation = Math.max(conservation, Math.abs(reached[0] + reached[1] + reached[2] - 1));
             lowest = Math.min(lowest, ...reached);
         }
-        byModel[name] = values;
-        const label = name === 'oneNode' ? 'OneNode' : 'TwoNodes';
-        ['A', 'B', 'C'].forEach((species, index) => add(`relativeError${species}${label}`, worst[index], `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, Stiff: largest relative error of ${species} at the checkpoints 0.4 s to 1e11 s`));
-        add(`conservation${label}`, conservation, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, Stiff: largest |A + B + C - 1| at the checkpoints and every 1e9 s to 1e11 s`);
-        add(`lowestConcentration${label}`, lowest, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, Stiff: the lowest concentration reached (negative would be unphysical)`);
-        add(`steps${label}`, steps, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, Stiff: steps taken from 0 to 1e11 s`);
-        notes.push(`${name === 'oneNode' ? 'One node' : 'Two nodes'}: ${steps.toLocaleString()} steps and ${evaluations.toLocaleString()} evaluations of the model (each Jacobian one evaluation per colour, three here) from 0 to 1e11 s at relative tolerance ${variant.tolerance.relative}.`);
+        byModel[`${name}${suffix}`] = values;
+        const label = `${name === 'oneNode' ? 'OneNode' : 'TwoNodes'}${suffix}`;
+        ['A', 'B', 'C'].forEach((species, index) => add(`relativeError${species}${label}`, worst[index], `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: largest relative error of ${species} at the checkpoints 0.4 s to 1e11 s`));
+        add(`conservation${label}`, conservation, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: largest |A + B + C - 1| at the checkpoints and every 1e9 s to 1e11 s`);
+        add(`lowestConcentration${label}`, lowest, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: the lowest concentration reached (negative would be unphysical)`);
+        add(`steps${label}`, steps, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: steps taken from 0 to 1e11 s`);
+        notes.push(`${method}, ${name === 'oneNode' ? 'one node' : 'two nodes'}: ${steps.toLocaleString()} steps, ${evaluations.toLocaleString()} evaluations of the model (each Jacobian one evaluation per colour, three here), ${linearAlgebra}, from 0 to 1e11 s at relative tolerance ${variant.tolerance.relative}.`);
     }
     // The split model against the one node: the same equations under the same tolerances, their error norms summed in different groups.
     const split = Math.max(...byModel.twoNodes.flatMap((reached, index) => reached.map((value, species) => Math.abs(value - byModel.oneNode[index][species]) / data.states[index][species])));
     add('splitDifference', split, 'Robertson, Stiff: the two-node model against the one-node model at every checkpoint, relative to the reference, largest over species');
+    if (byModel.oneNodeBdf) {
+        const bdfSplit = Math.max(...byModel.twoNodesBdf.flatMap((reached, index) => reached.map((value, species) => Math.abs(value - byModel.oneNodeBdf[index][species]) / data.states[index][species])));
+        add('splitDifferenceBdf', bdfSplit, 'Robertson, BDF: the two-node model against the one-node model at every checkpoint, relative to the reference, largest over species');
+    }
 
     // Adaptive over the first 40 s beside Stiff: the steps each takes.
     const comparison = config.explicitComparison;
@@ -152,9 +163,9 @@ export async function evaluate({ engine, config }) {
             series('SciPy Radau, A', 'reference', data.times, data.states.map((value) => value[0])),
             series('SciPy Radau, 1e4 B', 'reference', data.times, data.states.map((value) => 1e4 * value[1])),
             series('SciPy Radau, C', 'reference', data.times, data.states.map((value) => value[2])),
-            series(`Konjugate, ${methodName(variant)}, A`, 'rodas4', data.times, byModel.oneNode.map((value) => value[0])),
-            series(`Konjugate, ${methodName(variant)}, 1e4 B`, 'rodas4', data.times, byModel.oneNode.map((value) => 1e4 * value[1])),
-            series(`Konjugate, ${methodName(variant)}, C`, 'rodas4', data.times, byModel.oneNode.map((value) => value[2]))
+            series(`Konjugate, ${methodName(config.variant)}, A`, 'rodas4', data.times, byModel.oneNode.map((value) => value[0])),
+            series(`Konjugate, ${methodName(config.variant)}, 1e4 B`, 'rodas4', data.times, byModel.oneNode.map((value) => 1e4 * value[1])),
+            series(`Konjugate, ${methodName(config.variant)}, C`, 'rodas4', data.times, byModel.oneNode.map((value) => value[2]))
         ]
     }));
     return { rows, checks, plots, notes };

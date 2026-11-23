@@ -27,6 +27,7 @@
         "rodas4SplitDifference": { "max": 1e-12 },
         "rodas4ErrorOrder": { "min": 3.9, "max": 4.1 },
         "rodas4FinestErrorOrder": { "min": 3.9, "max": 4.1 },
-        "stiffSplitDifference": { "max": 1 }
+        "stiffSplitDifference": { "max": 1 },
+        "bdfSplitDifference": { "max": 5 }
     }
 }

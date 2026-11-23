@@ -154,6 +154,10 @@ struct WholeModelStabilityAssessment {
     std::optional<double> largestStableStep;
     std::optional<std::size_t> requiredStepsPerGlobalStep;
     bool unconditionallyUnstable = false;
+    // The largest angle of a decaying mode from the negative real axis, in degrees (0 for a mode that decays without oscillating, near
+    // 90 for one that oscillates many times while it decays): BDF's higher orders are stable only within an angle of it (decreasing
+    // from 90 degrees at orders 1 and 2 to 51 at order 5).
+    double largestDecayingAngleDegrees = 0;
     // The state the dominant mode is concentrated in, and its node.
     EntityId dominantStateId = 0;
     EntityId dominantNodeId = 0;

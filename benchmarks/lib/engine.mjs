@@ -131,7 +131,9 @@ export function createEngine(executable, workDirectory) {
                     // Rodas4: its Jacobians (each one evaluation per colour of the model's structure) and factorisations.
                     ...(result.integration?.jacobians !== undefined ? {
                         jacobians: result.integration.jacobians, factorisations: result.integration.factorisations
-                    } : {})
+                    } : {}),
+                    // BDF: how often its history started again at order 1.
+                    ...(result.integration?.restarts !== undefined ? { restarts: result.integration.restarts } : {})
                 },
                 timing: measure ? {
                     wallMilliseconds,

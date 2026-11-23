@@ -1764,6 +1764,36 @@ export async function runInteractionTests(driver) {
             document.querySelector('#saveRunConfiguration').click();
         })()`);
         assert.deepEqual(await evaluate(window, activeConfiguration), before);
+        // Stiff has two solvers, chosen under it: Rosenbrock by default, which writes `method: 'rodas4'`, and BDF, the only choice that
+        // writes `method: 'bdf'`; the solver is not offered under any other method.
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffSolverField').hidden`), true, 'Euler offers no stiff solver.');
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'rodas4';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffSolverField').hidden`), false);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runStiffSolver option')].map((option) => option.textContent)`),
+            ['Rosenbrock (best for most models)', 'BDF (for large models, thousands of states)']);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffSolver').value`), 'rodas4');
+        await evaluate(window, `(() => {
+            const solver = document.querySelector('#runStiffSolver');
+            solver.value = 'bdf';
+            solver.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.match(await evaluate(window, `document.querySelector('#runStiffSolverDescription').textContent`), /Keeps the work of solving its equations from step to step/);
+        await evaluate(window, `document.querySelector('#saveRunConfiguration').click()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'bdf' });
+        await openRunDialog(window);
+        assert.deepEqual(await evaluate(window, `[document.querySelector('#runMethod').value, document.querySelector('#runStiffSolver').value]`), ['rodas4', 'bdf']);
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'nodeByNode';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#saveRunConfiguration').click();
+        })()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), before);
         // A run with Runge–Kutta 4: the execution summary names the method.
         await openRunDialog(window);
         await evaluate(window, `(() => {

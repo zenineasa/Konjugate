@@ -11,6 +11,7 @@
 // program can answer yes to (docs/proposals/programSdkV2.md).
 
 #include "executionPlan.hpp"
+#include "konjugate/integrators/bdf.hpp"
 #include <boost/property_tree/ptree.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -20,7 +21,7 @@
 
 namespace konjugate {
 
-enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4 };
+enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4, bdf };
 
 struct IntegrationSettings {
     IntegrationMethod method = IntegrationMethod::nodeByNode;
@@ -41,12 +42,13 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
 bool isAdaptive(const IntegrationSettings& settings) noexcept;
 // Whether the stiff method chooses its own steps (Rodas4 with its error control on).
 bool isStiff(const IntegrationSettings& settings) noexcept;
-// Whether the method has tolerances and a step-size controller (Dormand–Prince 5(4) or Rodas4).
+// Whether the method has tolerances and a step-size controller (Dormand–Prince 5(4), Rodas4 or BDF).
 bool hasTolerance(IntegrationMethod method) noexcept;
 
-// The name a run configuration and a result give the method: nodeByNode, rungeKutta4, dormandPrince54 or rodas4.
+// The name a run configuration and a result give the method: nodeByNode, rungeKutta4, dormandPrince54, rodas4 or bdf.
 std::string_view integrationMethodName(IntegrationMethod method) noexcept;
-// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit nodes included), rungeKutta4, dormandPrince54 or rodas4.
+// The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit and Verlet nodes included), rungeKutta4, dormandPrince54,
+// rodas4 or bdf.
 std::string_view solverKindName(IntegrationMethod method) noexcept;
 // The method's number of new evaluations a step (Dormand–Prince's seventh stage is the next step's first).
 std::size_t integrationMethodStages(IntegrationMethod method) noexcept;
@@ -74,6 +76,16 @@ bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, 
 std::string encodeStiffSolverState(double proposedStep, double previousError, double previousStep);
 // The record read back; false (and nothing changed) when it is empty or not a record this engine wrote.
 bool decodeStiffSolverState(const std::string& record, double& proposedStep, double& previousError, double& previousStep);
+
+// BDF's hidden state in a checkpoint's solver_state: a versioned record of its table of differences (the rows in use), its order, step
+// and steps taken at it, and the states as it left them; with `latches` and `armed` (events located), every switching condition's latch
+// and armed flag after them. Empty before its first step.
+std::string encodeBdfSolverState(const integrators::BdfHistory& history, const std::vector<double>* latches = nullptr,
+                                 const std::vector<unsigned char>* armed = nullptr);
+// The record read back; false (and nothing changed) when it is empty, not a record this engine wrote, or for another number of states or
+// of conditions. `latches` and `armed`, when given, are read from the record (and left as they are when it holds none).
+bool decodeBdfSolverState(const std::string& record, std::size_t integratedCount, std::size_t stateCount, integrators::BdfHistory& history,
+                          std::vector<double>* latches = nullptr, std::vector<unsigned char>* armed = nullptr);
 
 // The project document's `requires`: features a model needs that change its numbers, each named. An engine refuses, by name, any
 // it does not know, rather than running the model as if the feature were not there. Absent from every document that needs none.

@@ -436,7 +436,9 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit,
     IntegrationMethod method) {
     const bool dormandPrince = method == IntegrationMethod::dormandPrince54;
-    const bool rodas = method == IntegrationMethod::rodas4;
+    // BDF is judged as Rodas4 is, stable for every mode that decays, and its higher orders' limit near the imaginary axis by the angle
+    // of the model's modes (largestDecayingAngleDegrees).
+    const bool rodas = method == IntegrationMethod::rodas4 || method == IntegrationMethod::bdf;
     const auto stabilityFunction = rodas ? rodas4StabilityFunction : dormandPrince ? dormandPrince54StabilityFunction : rungeKutta4StabilityFunction;
     const auto largestStableStep = rodas ? rodas4LargestStableStep : dormandPrince ? dormandPrince54LargestStableStep : rungeKutta4LargestStableStep;
     // Adaptive (no steps per global step) is judged at the global step, the largest step it may take.
@@ -536,6 +538,10 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
                 if (!decaying || rate > fastest) fastest = rate;
                 if (!decaying || rate < slowest) slowest = rate;
                 ++decaying;
+            }
+            if (eigenvalue.real() < 0) {
+                assessment.largestDecayingAngleDegrees = std::max(assessment.largestDecayingAngleDegrees,
+                    std::atan2(std::abs(eigenvalue.imag()), -eigenvalue.real()) * 180.0 / 3.14159265358979323846);
             }
             const auto bound = largestStableStep(eigenvalue);
             if (bound == 0) assessment.unconditionallyUnstable = true;

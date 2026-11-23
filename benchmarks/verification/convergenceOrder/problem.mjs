@@ -113,25 +113,26 @@ export async function evaluate({ engine, config }) {
 
         // Stiff: the same tolerances, its error against them and its work (its Jacobians' evaluations included). Its error estimate is
         // of order three, so a slope a little further under 1 than Adaptive's is expected.
-        if (tolerance.stiff) {
+        for (const method of tolerance.stiff ? ['rodas4', ...(tolerance.bdf ? ['bdf'] : [])] : []) {
+            const label = method === 'bdf' ? 'Bdf' : 'Stiff';
             const stiffErrors = [];
             const stiffEvaluations = [];
             for (const relative of tolerance.relativeTolerances) {
-                const variant = { method: 'rodas4', tolerance: { relative, absolute: relative * tolerance.absoluteFraction } };
+                const variant = { method, tolerance: { relative, absolute: relative * tolerance.absoluteFraction } };
                 const result = await engine.run(study.modelPath, variant, adaptiveRun);
                 const metrics = errorMetrics(trajectory(result, stateIds), study.reference(result.times));
                 stiffErrors.push(metrics.relativeError);
                 stiffEvaluations.push(result.work.evaluations);
                 rows.push(resultRow({
                     caseName: `${study.title}: tolerance`, model: study.modelPath.split('/').at(-1).replace('.kjt', ''), variant, run: adaptiveRun, errors: metrics, work: result.work, unit: study.unit,
-                    note: `${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model (${result.work.jacobians} Jacobians); error ${(metrics.relativeError / relative).toFixed(2)} times the tolerance`
+                    note: `${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model (${result.work.jacobians} Jacobians, ${result.work.factorisations} factorisations); error ${(metrics.relativeError / relative).toFixed(2)} times the tolerance`
                 }));
             }
             const stiffProportionality = observedOrder(tolerance.relativeTolerances, stiffErrors);
             rows.at(-1).note += `; error against tolerance: fitted slope ${stiffProportionality.fitted.toFixed(3)}`;
-            add(`${key}StiffToleranceSlope`, stiffProportionality.fitted, `${study.title}, Stiff: slope of log error against log tolerance, least squares over ${tolerance.relativeTolerances.length} tolerances`);
-            add(`${key}StiffToleranceFactor`, Math.max(...stiffErrors.map((error, index) => error / tolerance.relativeTolerances[index])), `${study.title}, Stiff: largest error over its relative tolerance`);
-            workSeries.push(series('Konjugate, Stiff, Rodas4 (tolerances)', 'rodas4', stiffErrors, stiffEvaluations));
+            add(`${key}${label}ToleranceSlope`, stiffProportionality.fitted, `${study.title}, ${method === 'bdf' ? 'BDF' : 'Stiff'}: slope of log error against log tolerance, least squares over ${tolerance.relativeTolerances.length} tolerances`);
+            add(`${key}${label}ToleranceFactor`, Math.max(...stiffErrors.map((error, index) => error / tolerance.relativeTolerances[index])), `${study.title}, ${method === 'bdf' ? 'BDF' : 'Stiff'}: largest error over its relative tolerance`);
+            workSeries.push(series(method === 'bdf' ? 'Konjugate, BDF (tolerances)' : 'Konjugate, Stiff, Rodas4 (tolerances)', method === 'bdf' ? 'extra' : 'rodas4', stiffErrors, stiffEvaluations));
         }
         plots.push(linePlot({
             id: `workPrecision${key[0].toUpperCase()}${key.slice(1)}`, title: `${study.title}: work against precision`,
@@ -143,6 +144,7 @@ export async function evaluate({ engine, config }) {
         'The thermal network is shown for explicit Euler only: every node holds one state, so semi-implicit integration gives the same numbers (checked in thermal/rcNetwork).',
         'Dormand–Prince 5(4) at fixed steps is not judged on the thermal network: its error passes from steps too long to show the order straight to the reference\'s own rounding (about 3e-12 relative), with no halving clean of both between; it is judged there by tolerance only.',
         'Verlet is shown for the oscillator and the pendulum only: in the thermal network and the RLC circuits a state\'s rate reads that state itself (a loss), which Verlet refuses.',
+        'BDF follows its tolerance more loosely than the one-step methods on these problems: a slope of 0.7 to 0.9 and an error 30 to 230 times its relative tolerance, the most on the pendulum and the oscillator, whose oscillation its multistep error accumulates over many periods. It is made for large stiff models (scaling/stiffNetwork); on a smooth, non-stiff or oscillating model the one-step methods are the better choice, and validation says so for an oscillating one (numericsBdfOscillatoryModes).',
         'Rodas4 on the pendulum shows an order between 4.5 and 4.9 over every halving clean of rounding, not 4: its leading fourth-order error term is very small on this problem, so the fifth-order term rules the errors that can be measured. Its band says so rather than hiding it; on the other four problems Rodas4 is held to 3.9 to 4.1.'
     ] };
 }

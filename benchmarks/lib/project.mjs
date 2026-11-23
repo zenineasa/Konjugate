@@ -9,7 +9,9 @@ import { exampleOwnership } from '../../scripts/exampleOwnership.mjs';
 function latexOf(expression) {
     if (typeof expression === 'number') return String(expression);
     if (expression === 't') return 't';
-    if (typeof expression === 'string') return `\\mathrm{${expression}}`;
+    // A one-letter symbol is written as it is: the app reads \mathrm{x} as an upright x, a different symbol from x, and would refuse
+    // the equation when the model is opened.
+    if (typeof expression === 'string') return expression.length === 1 ? expression : `\\mathrm{${expression}}`;
     const [operator, ...operands] = expression;
     const wrapped = (operand) => (Array.isArray(operand) && operand[0] === 'Add' ? `\\left(${latexOf(operand)}\\right)` : latexOf(operand));
     switch (operator) {

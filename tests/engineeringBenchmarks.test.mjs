@@ -22,7 +22,7 @@ test('the model builder writes cases, min, max and the time binding', () => {
     const node = model.node('Node', { states: [['x', 'X', 0, '']] });
     model.sourceTerm(node, 'x', cases(['Less', 't', 'switchAt'], ['Min', ['Max', 'x', 0], 1], 'True', 0), { t: time, switchAt: parameter('Switch time', 2, 's'), x: state(node, 'x') });
     const [term] = model.document({ runConfiguration: { name: 'Test', globalTimeStep: 1, outputInterval: 1 } }).nodes[0].sourceTerms;
-    assert.equal(term.expression, '\\begin{cases} \\min\\left(\\max\\left(\\mathrm{x}, 0\\right), 1\\right) & t < \\mathrm{switchAt} \\\\ 0 & \\text{otherwise} \\end{cases}');
+    assert.equal(term.expression, '\\begin{cases} \\min\\left(\\max\\left(x, 0\\right), 1\\right) & t < \\mathrm{switchAt} \\\\ 0 & \\text{otherwise} \\end{cases}');
     assert.deepEqual(term.expressionModel.bindings.find((binding) => binding.kind === 'time'), { kind: 'time', symbol: 't' });
 });
 

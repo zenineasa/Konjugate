@@ -11,6 +11,7 @@ import test from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { zipSync } from 'fflate';
 import { installFmuArchive } from '../src/fmuPackage.mjs';
 import { describeInstalledFmuPorts, resolveFmiSource, resolveInstalledFmus, FmiResolutionError } from '../src/fmiResolver.mjs';
@@ -62,7 +63,12 @@ test('resolves a valid fmi implementation into a cpp node-provider implementatio
         assert.equal(resolved.outputs.length, 1);
         assert.equal(resolved.outputs[0].key, 'decayLevel');
         assert.equal(resolved.outputs[0].setsValue, true);
-        assert.ok(resolved.source.includes('outputs.addGradient("decayLevel", static_cast<double>(outputValues[0]));'));
+        // The generated source is the FMU's variable table for the shared driver (konjugate/fmiImportedNode.hpp).
+        assert.ok(resolved.source.includes('konjugate::fmi::makeImportedFmu2({'));
+        assert.ok(resolved.source.includes('{"k", "k", 1u, ValueType::float64, Role::input}'));
+        assert.ok(resolved.source.includes('{"decayLevel", "Decay.Level", 0u, ValueType::float64, Role::output}'));
+        // FMI 2.0 gives an FMU its resources directory as a file: URI.
+        assert.ok(resolved.source.includes(`"${pathToFileURL(join(directory, 'fmus', installed.guid, installed.version, 'resources')).href}"`));
     });
 });
 
@@ -191,10 +197,13 @@ test('resolveInstalledFmus walks node implementations and leaves non-fmi kinds u
 test('an installed FMU\'s ports are described under the keys a node\'s implementation uses, for the node editor to wire', async () => {
     await withInstalledFmu(async (directory, installed) => {
         const ports = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
+        const binaryDirectory = process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64';
         assert.deepEqual(ports, {
             name: 'Decay', fmiVersion: '2.0',
-            inputs: [{ key: 'k', name: 'k', causality: 'input' }],
-            outputs: [{ key: 'decayLevel', name: 'Decay.Level' }]
+            inputs: [{ key: 'k', name: 'k', causality: 'input', type: 'Real', variability: 'continuous' }],
+            outputs: [{ key: 'decayLevel', name: 'Decay.Level', type: 'Real' }],
+            notExposed: [],
+            binary: `Runs binaries/${binaryDirectory}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}.`
         });
         await assert.rejects(describeInstalledFmuPorts(directory, installed.guid, '9.9.9'), /is not installed/);
         await assert.rejects(describeInstalledFmuPorts(directory, '../escape', '1.0.0'), /unsafe/);

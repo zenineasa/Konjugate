@@ -8,6 +8,11 @@
 // installed exactly like the Extensions UI would, then imported into a host project and compared
 // against a hand-computed Euler trajectory using the exact same expression order as the fixture's
 // own fmi3DoStep, so the comparison is exact rather than approximate.
+//
+// It then checks the importer against FMUs it did not write: the FMI 3.0 Reference FMUs, every
+// output at every communication point compared bit for bit with FMPy (fixtures/referenceFmuFidelity.mjs),
+// and the errors a person sees when an FMU refuses a value, when a fixed parameter's binding
+// changes during a run, and when an integer input is given a number outside its type.
 
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -17,8 +22,10 @@ import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { installFmuArchive } from '../../src/fmuPackage.mjs';
 import { runWithEngine } from '../../src/engineAdapter.mjs';
-import { platformDirectory, libraryExtension } from '../../src/fmiExport.mjs';
+import { libraryExtension } from '../../src/fmiExport.mjs';
+import { binaryDirectoryCandidates } from '../../src/fmiBinary.mjs';
 import { closeEnough } from './fixtures/fmuFidelityFixture.mjs';
+import { checkReferenceFmus, engineOptionsFor, installReferenceFmu, referenceHostDocument } from './fixtures/referenceFmuFidelity.mjs';
 
 const globalTimeStep = 0.1;
 const targetTime = 1.0;
@@ -29,13 +36,13 @@ const modelIdentifier = 'fmi3DecayFixture';
 const absoluteTolerance = 1e-9;
 const relativeTolerance = 1e-9;
 
-function hostDocument({ fmuId, fmuVersion }) {
+function hostDocument({ fmuId, fmuVersion, k = decayRate }) {
     return {
         format: 'konjugate', version: 1, metadata: { projectName: 'FMI3 import fixture: host' },
         nodes: [{
             id: 1, name: 'Imported',
             states: [
-                { id: 11, name: 'K', symbol: 'k', initialValue: decayRate, unit: '' },
+                { id: 11, name: 'K', symbol: 'k', initialValue: k, unit: '' },
                 { id: 12, name: 'Level', symbol: 'level', initialValue: 0, unit: '' } // deliberately mismatched, see fmiImportFidelity.mjs
             ],
             numerics: { substepsPerGlobalStep: 1 },
@@ -94,7 +101,8 @@ async function main() {
 </fmiModelDescription>`;
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),
-            [`binaries/${platformDirectory()}/${modelIdentifier}${libraryExtension()}`]: new Uint8Array(libraryBytes)
+            // FMI 3.0 names a binary's directory by platform tuple (aarch64-darwin, x86_64-linux, ...).
+            [`binaries/${binaryDirectoryCandidates('3.0')[0]}/${modelIdentifier}${libraryExtension()}`]: new Uint8Array(libraryBytes)
         }, { level: 0 });
 
         const installed = await installFmuArchive(archive, { directory: join(directory, 'packages'), version: '1.0.0' });
@@ -133,9 +141,50 @@ async function main() {
         );
 
         console.log(`✓ FMI3 import fidelity: imported-FMU run matched the hand-computed trajectory across ${compared} samples, including a mismatched-initial-value first step.`);
+
+        const runOptions = { targetTime, globalTimeStep, outputInterval: globalTimeStep, pacing: { mode: 'fastest' } };
+        await assert.rejects(
+            runWithEngine(JSON.stringify(hostDocument({ fmuId: installed.guid, fmuVersion: installed.version, k: -1 })), runOptions,
+                { ...engineOptions, fmuDirectory: join(directory, 'packages'), disabledFmuKeys: [] }),
+            (error) => /A node program failed: The FMU 'Fmi3 Decay Fixture' refused fmi3SetFloat64 \(setting 'k'\) at t = 0: logStatusError: k must not be negative\./.test(error.message)
+                && !error.message.includes('makeImportedFmu3') // the generated source is not part of what the person reads
+        );
+        console.log('✓ FMI3 import: a value the FMU refuses stops the run naming the FMU, the call, the variable, the time and the FMU\'s own reason.');
+
+        const packages = join(directory, 'referencePackages');
+        console.log(`✓ ${await checkReferenceFmus('3.0', packages)}`);
+        await checkImportErrors(packages);
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// A fixed parameter bound to something that changes during the run, and an integer input given a number outside its
+// type: each stops the run saying which FMU, which variable and why.
+async function checkImportErrors(packages) {
+    const run = (document, stopTime, stepSize) => runWithEngine(JSON.stringify(document),
+        { targetTime: stopTime, globalTimeStep: stepSize, outputInterval: stepSize, pacing: { mode: 'fastest' } }, engineOptionsFor(packages));
+
+    // Two Dahlquist nodes: the second's fixed parameter k is bound to the first's x, which decays.
+    const { installed, ports } = await installReferenceFmu('3.0', 'Dahlquist', packages);
+    const first = referenceHostDocument({ guid: installed.guid, version: installed.version, ports, values: { k: 1 }, stepSize: 0.1 });
+    const second = structuredClone(first.nodes[0]);
+    second.id = 2;
+    second.name = 'Dahlquist 2';
+    second.states = second.states.filter((state) => state.id >= 200).map((state) => ({ ...state, id: state.id + 100 }));
+    second.implementation.bindings = [{ key: 'k', kind: 'state', nodeId: 1, stateId: 200 }];
+    second.implementation.outputs = second.implementation.outputs.map((output) => ({ ...output, stateId: output.stateId + 100 }));
+    first.nodes.push(second);
+    await assert.rejects(run(first, 1, 0.1),
+        /The parameter 'k' of the FMU 'Dahlquist' is fixed: it was set to 0 when the run started and cannot change during the run, but what it is bound to is now 0\.9 \(at t = 0\.1\)/);
+    console.log('✓ FMI3 import: a fixed parameter whose binding changes during the run stops it, naming the parameter and both values.');
+
+    const feedthrough = await installReferenceFmu('3.0', 'Feedthrough', packages);
+    await assert.rejects(
+        run(referenceHostDocument({ guid: feedthrough.installed.guid, version: feedthrough.installed.version, ports: feedthrough.ports, values: { Int8_input: 300 }, stepSize: 0.1 }), 0.2, 0.1),
+        /The input 'Int8_input' of the FMU 'Feedthrough' is an Int8, a whole number from -128 to 127, but it was given 300\./
+    );
+    console.log('✓ FMI3 import: an integer input outside its type stops the run, naming the input, its type\'s range and the value.');
 }
 
 main().catch((error) => {

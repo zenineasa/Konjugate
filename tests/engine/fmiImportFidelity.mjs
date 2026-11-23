@@ -13,6 +13,10 @@
 // exported model's (0 instead of 10), specifically to prove the pseudo-derivative feedback binding
 // self-corrects to the FMU's real reported value starting from the very first substep, not just
 // "eventually converges" -- a wrong feedback wiring would show up as a persistent offset instead.
+//
+// It then imports FMUs Konjugate did not write -- the FMI 2.0 Reference FMUs, every output at every
+// communication point compared bit for bit with FMPy (fixtures/referenceFmuFidelity.mjs) -- and
+// runs a C++ node program with two outputs, to show each output reaches its own state.
 
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,6 +26,7 @@ import { generateFmuPackage } from '../../src/fmiExport.mjs';
 import { installFmuArchive } from '../../src/fmuPackage.mjs';
 import { runWithEngine } from '../../src/engineAdapter.mjs';
 import { closeEnough } from './fixtures/fmuFidelityFixture.mjs';
+import { checkReferenceFmus } from './fixtures/referenceFmuFidelity.mjs';
 
 const globalTimeStep = 0.1;
 const targetTime = 1.0;
@@ -131,9 +136,69 @@ async function main() {
         );
 
         console.log(`✓ FMI import fidelity: imported-FMU run matched the reference engine run across ${compared} samples, including a mismatched-initial-value first step.`);
+
+        console.log(`✓ ${await checkReferenceFmus('2.0', join(directory, 'referencePackages'))}`);
+        await checkNodeProgramOutputs(engineOptions);
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// A C++ node program reporting two values each step, 10 + n and 20 + n after n steps: each must reach its own state.
+async function checkNodeProgramOutputs(engineOptions) {
+    const source = `#include <konjugate/relationshipProvider.hpp>
+#include <cstring>
+class TwoOutputs final : public konjugate::sdk::v1::NodeProvider {
+public:
+    konjugate::sdk::v1::NodeProviderDescription describe() const override {
+        return {"twoOutputs", "Two outputs", {{"constant", "constant", ""}}, {{"first", "first", ""}, {"second", "second", ""}}};
+    }
+    void evaluate(const konjugate::sdk::v1::EvaluationContext&, konjugate::sdk::v1::NodeOutputCollector& outputs) override {
+        steps_ += 1;
+        outputs.addGradient("first", 10.0 + steps_);
+        outputs.addGradient("second", 20.0 + steps_);
+    }
+    std::vector<std::byte> checkpoint() const override {
+        std::vector<std::byte> bytes(sizeof steps_);
+        std::memcpy(bytes.data(), &steps_, sizeof steps_);
+        return bytes;
+    }
+    void restore(std::span<const std::byte> payload) override { std::memcpy(&steps_, payload.data(), sizeof steps_); }
+private:
+    double steps_ = 0;
+};
+std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() { return std::make_unique<TwoOutputs>(); }
+`;
+    const document = {
+        format: 'konjugate', version: 1, metadata: { projectName: 'Node program with two outputs' },
+        nodes: [{
+            id: 1, name: 'Two outputs',
+            states: [
+                { id: 11, name: 'Constant', symbol: 'c', initialValue: 5, unit: '' },
+                { id: 12, name: 'First', symbol: 'first', initialValue: 0, unit: '' },
+                { id: 13, name: 'Second', symbol: 'second', initialValue: 0, unit: '' }
+            ],
+            numerics: { substepsPerGlobalStep: 1 },
+            sourceTerms: [],
+            implementation: {
+                kind: 'cpp', providerApiVersion: 1, source,
+                bindings: [{ key: 'constant', kind: 'state', stateId: 11 }],
+                outputs: [{ key: 'first', stateId: 12, setsValue: true }, { key: 'second', stateId: 13, setsValue: true }]
+            }
+        }],
+        edges: [],
+        runConfigurations: [{ id: 900, globalTimeStep: 0.25, outputInterval: 0.25 }],
+        activeRunConfigurationId: 900
+    };
+    const run = await runWithEngine(JSON.stringify(document), { targetTime: 2, globalTimeStep: 0.25, outputInterval: 0.25, pacing: { mode: 'fastest' } }, engineOptions);
+    const samples = run.result.samples;
+    assert.equal(samples.length, 9);
+    for (let index = 1; index < samples.length; index += 1) {
+        const value = (stateId) => samples[index].states.find((state) => state.stateId === stateId).value;
+        assert.equal(value(12), 10 + index, `The node program's first output at sample ${index} is ${value(12)}.`);
+        assert.equal(value(13), 20 + index, `The node program's second output at sample ${index} is ${value(13)}, not 20 + ${index}.`);
+    }
+    console.log('✓ A node program\'s two outputs each reach their own state at every sample.');
 }
 
 main().catch((error) => {

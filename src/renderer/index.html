@@ -960,7 +960,8 @@
                     </div>
                     <div id="nodeProgramFmuFields" hidden>
                         <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
-                        <p class="builderHint">Its inputs and outputs are the FMU's own; wire each below. Every output sets its state to the value the FMU reports.</p>
+                        <p class="builderHint">Its inputs and outputs are the FMU's own; wire each below. Every output sets its state to the value the FMU reports. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
+                        <p id="nodeProgramFmuNotes" class="builderHint" hidden></p>
                     </div>
                     <h3>Inputs <button id="editAddNodeProgramInput" type="button" title="Add an input">＋</button></h3>
                     <div id="nodeProgramInputs"></div>

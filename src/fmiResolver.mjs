@@ -3,9 +3,10 @@
 // Resolves a node's `kind: "fmi"` implementation (see docs/projectSchema.md) into an ordinary
 // `kind: "cpp"` computational-node-provider implementation, exactly like src/pluginResolver.mjs
 // turns `kind: "plugin"` into `kind: "cpp"`/`"python"` before the engine ever sees the document --
-// the engine itself has zero FMI-specific knowledge. The generated C++ source implements
-// konjugate::sdk::v1::NodeProvider by dlopen()ing the installed FMU's own platform binary at
-// runtime and driving it through the real FMI2 C API (konjugate/fmiDynamicLoad.hpp), then runs
+// the engine itself has zero FMI-specific knowledge. The generated C++ source is the FMU's variable
+// table handed to konjugate/fmiImportedNode.hpp's driver, a konjugate::sdk::v1::NodeProvider that
+// dlopen()s the FMU's binary for this machine (src/fmiBinary.mjs chooses it) at runtime and runs
+// it in Co-Simulation through the real FMI 2.0 or 3.0 C API (konjugate/fmiDynamicLoad.hpp), then runs
 // through the exact same in-process computational-node-provider path added for this feature
 // (engine/src/providerInProcessNodeShim.cpp) -- see docs/interactionProviders.md.
 //
@@ -23,10 +24,11 @@
 // -- before being replaced with this one.
 
 import { createHash } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
-import { platformDirectory, libraryExtension } from './fmiExport.mjs';
+import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { packageKey } from './packageArchive.mjs';
 
 export class FmiResolutionError extends Error {
@@ -85,307 +87,67 @@ function cppStringLiteral(text) {
     return JSON.stringify(String(text));
 }
 
-// Shared between generateFmi2Glue/generateFmi3Glue below: the describe()-returned port lists are
-// entirely FMI-version-agnostic (a key, a name, no unit), so this is written once, not duplicated
-// per version.
-function buildPortDeclarations(inputVariables, outputVariables, inputKeys, outputKeys) {
-    const scalarPort = (key) => `        {${cppStringLiteral(key)}, ${cppStringLiteral(key)}, ""}`;
-    const inputPorts = inputVariables.map((variable) => scalarPort(inputKeys.get(variable.name))).join(',\n');
-    const outputPorts = outputVariables.map((variable) => scalarPort(outputKeys.get(variable.name))).join(',\n');
-    return { inputPorts, outputPorts };
+// Each FMI type as the driver's konjugate::fmi::ValueType (engine/include/konjugate/fmiImportedNode.hpp).
+const cppValueTypes = {
+    Real: 'float64', Integer: 'int32', Boolean: 'boolean', Enumeration: 'enumeration',
+    Float64: 'float64', Float32: 'float32', Int8: 'int8', UInt8: 'uint8', Int16: 'int16', UInt16: 'uint16',
+    Int32: 'int32', UInt32: 'uint32', Int64: 'int64', UInt64: 'uint64'
+};
+
+// How the driver treats a variable: an input is set before every step; a fixed parameter only in initialization mode;
+// a tunable one there and whenever its value changes between steps. A parameter that does not say it is tunable is
+// fixed, as the standard has it.
+function variableRole(variable) {
+    if (variable.causality === 'output') return 'output';
+    if (variable.causality === 'input') return 'input';
+    return variable.variability === 'tunable' ? 'tunableParameter' : 'fixedParameter';
 }
 
-function generateFmi2Glue({ description, binaryPath, guid, version, contentHash, inputKeys, outputKeys }) {
+// The FMU's resources directory as its FMI version asks for it at instantiation: FMI 2.0 a file: URI, FMI 3.0 an
+// absolute path ending in a separator (the Reference FMUs refuse one without), or none (null) when the FMU has no
+// resources directory. FMI 2.0's URI is given either way, as FMPy gives it.
+async function resourceLocation(fmuRoot, fmiVersion) {
+    const directory = resolve(fmuRoot, 'resources');
+    if (!fmiVersion.startsWith('3.')) return pathToFileURL(directory).href;
+    const exists = await stat(directory).then((entry) => entry.isDirectory(), () => false);
+    return exists ? `${directory}${sep}` : '';
+}
+
+// The generated source: the FMU's variable table handed to the shared driver, makeImportedFmu2 or makeImportedFmu3
+// (engine/include/konjugate/fmiImportedNode.hpp), which runs it as the FMI standard orders.
+function generateGlue({ description, binaryPath, binaryRelativePath, resources, guid, version, contentHash, inputKeys, outputKeys }) {
     const inputVariables = description.variables.filter((variable) => variable.causality === 'input' || variable.causality === 'parameter');
     const outputVariables = description.variables.filter((variable) => variable.causality === 'output');
-    const { inputPorts, outputPorts } = buildPortDeclarations(inputVariables, outputVariables, inputKeys, outputKeys);
-
-    const inputBlock = inputVariables.length ? `
-        const fmi2ValueReference inputVr[] = {${inputVariables.map((variable) => variable.valueReference).join(', ')}};
-        const fmi2Real inputValues[] = {
-            ${inputVariables.map((variable) => `static_cast<fmi2Real>(context.inputs.at(${cppStringLiteral(inputKeys.get(variable.name))}))`).join(',\n            ')}
-        };
-        if (api_.setReal(component_, inputVr, ${inputVariables.length}, inputValues) != fmi2OK) {
-            throw std::runtime_error("fmi2SetReal failed for the imported FMU.");
-        }
-` : '';
-
-    const outputBlock = outputVariables.length ? `
-        const fmi2ValueReference outputVr[] = {${outputVariables.map((variable) => variable.valueReference).join(', ')}};
-        fmi2Real outputValues[${outputVariables.length}];
-        if (api_.getReal(component_, outputVr, ${outputVariables.length}, outputValues) != fmi2OK) {
-            throw std::runtime_error("fmi2GetReal failed for the imported FMU.");
-        }
-${outputVariables.map((variable, index) =>
-        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, static_cast<double>(outputValues[${index}]));`
-    ).join('\n')}
-` : '';
-
+    const fmi3 = description.fmiVersion.startsWith('3.');
+    const row = (variable, key) => `        {${cppStringLiteral(key)}, ${cppStringLiteral(variable.name)}, ${variable.valueReference}u, ValueType::${cppValueTypes[variable.type] ?? 'float64'}, Role::${variableRole(variable)}}`;
+    const rows = [
+        ...inputVariables.map((variable) => row(variable, inputKeys.get(variable.name))),
+        ...outputVariables.map((variable) => row(variable, outputKeys.get(variable.name)))
+    ];
     return `// Generated by src/fmiResolver.mjs for the imported FMU ${cppStringLiteral(description.modelName)}
-// (guid ${cppStringLiteral(guid)}, version ${cppStringLiteral(version)}, FMI ${description.fmiVersion}).
+// (guid ${cppStringLiteral(guid)}, version ${cppStringLiteral(version)}, FMI ${description.fmiVersion}, Co-Simulation),
+// running ${cppStringLiteral(binaryRelativePath)}.
 // Content hash ${cppStringLiteral(contentHash)} -- embedded only so replacing the installed FMU's
 // binary in place invalidates Konjugate's build cache instead of silently reusing a stale
 // compiled artifact (see buildCppProvider's caching in engine/src/providerRuntime.cpp).
 // Every declared output is marked setsValue in the resolved implementation's outputs[] (see
-// resolveFmiSource below), so addGradient's value here is read by the engine as the state's
+// resolveFmiSource below), so the value the driver reports is read by the engine as the state's
 // algebraic value, not a derivative -- see this file's header comment.
-#include <konjugate/relationshipProvider.hpp>
-#include <konjugate/fmiDynamicLoad.hpp>
-
-#include <memory>
-#include <stdexcept>
-#include <vector>
-
-namespace {
-
-using konjugate::fmi::Fmi2Api;
-using konjugate::fmi::LoadedLibrary;
-
-class ImportedFmu final : public konjugate::sdk::v1::NodeProvider {
-public:
-    ImportedFmu() : library_(${cppStringLiteral(binaryPath)}), api_(library_) {}
-
-    ~ImportedFmu() override { teardown(); }
-
-    konjugate::sdk::v1::NodeProviderDescription describe() const override {
-        return {
-            "fmi.${guid}", ${cppStringLiteral(description.modelName)},
-            {
-${inputPorts}
-            },
-            {
-${outputPorts}
-            }
-        };
-    }
-
-    void initialize(const konjugate::sdk::v1::InitializationContext&) override {
-        component_ = api_.instantiate("konjugateImportedFmu", fmi2CoSimulation, ${cppStringLiteral(guid)}, "", nullptr, fmi2False, fmi2False);
-        if (!component_) throw std::runtime_error("fmi2Instantiate failed for the imported FMU.");
-        if (api_.setupExperiment(component_, fmi2False, 0.0, 0.0, fmi2False, 0.0) != fmi2OK) {
-            throw std::runtime_error("fmi2SetupExperiment failed for the imported FMU.");
-        }
-        if (api_.enterInitializationMode(component_) != fmi2OK) throw std::runtime_error("fmi2EnterInitializationMode failed for the imported FMU.");
-        if (api_.exitInitializationMode(component_) != fmi2OK) throw std::runtime_error("fmi2ExitInitializationMode failed for the imported FMU.");
-        initializedOk_ = true;
-    }
-
-    void evaluate(const konjugate::sdk::v1::EvaluationContext& context, konjugate::sdk::v1::NodeOutputCollector& outputs) override {
-        if (!component_) throw std::runtime_error("The imported FMU was evaluated before initialize().");
-${inputBlock}
-        if (api_.doStep(component_, context.simulationTime, context.stepSize, fmi2False) != fmi2OK) {
-            throw std::runtime_error("fmi2DoStep failed for the imported FMU.");
-        }
-${outputBlock}    }
-
-    std::vector<std::byte> checkpoint() const override {
-        if (!component_) throw std::runtime_error("The imported FMU was checkpointed before initialize().");
-        fmi2FMUstate state = nullptr;
-        if (api_.getFMUstate(component_, &state) != fmi2OK) throw std::runtime_error("This imported FMU does not support checkpointing.");
-        size_t size = 0;
-        if (api_.serializedFMUstateSize(component_, state, &size) != fmi2OK) {
-            api_.freeFMUstate(component_, &state);
-            throw std::runtime_error("fmi2SerializedFMUstateSize failed for the imported FMU.");
-        }
-        std::vector<std::byte> bytes(size);
-        const auto status = api_.serializeFMUstate(component_, state, reinterpret_cast<fmi2Byte*>(bytes.data()), size);
-        api_.freeFMUstate(component_, &state);
-        if (status != fmi2OK) throw std::runtime_error("fmi2SerializeFMUstate failed for the imported FMU.");
-        return bytes;
-    }
-
-    void restore(std::span<const std::byte> payload) override {
-        if (!component_) throw std::runtime_error("The imported FMU was restored before initialize().");
-        fmi2FMUstate state = nullptr;
-        if (api_.deSerializeFMUstate(component_, reinterpret_cast<const fmi2Byte*>(payload.data()), payload.size(), &state) != fmi2OK) {
-            throw std::runtime_error("fmi2DeSerializeFMUstate failed for the imported FMU.");
-        }
-        const auto status = api_.setFMUstate(component_, state);
-        api_.freeFMUstate(component_, &state);
-        if (status != fmi2OK) throw std::runtime_error("fmi2SetFMUstate failed for the imported FMU.");
-    }
-
-    void shutdown() noexcept override { teardown(); }
-
-private:
-    void teardown() noexcept {
-        if (component_) {
-            if (initializedOk_) api_.terminate(component_);
-            api_.freeInstance(component_);
-            component_ = nullptr;
-        }
-    }
-
-    LoadedLibrary library_;
-    Fmi2Api api_;
-    fmi2Component component_ = nullptr;
-    bool initializedOk_ = false;
-};
-
-} // namespace
+#include <konjugate/fmiImportedNode.hpp>
 
 std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
-    return std::make_unique<ImportedFmu>();
+    using konjugate::fmi::Role;
+    using konjugate::fmi::ValueType;
+    return konjugate::fmi::${fmi3 ? 'makeImportedFmu3' : 'makeImportedFmu2'}({
+        ${cppStringLiteral(`fmi.${guid}`)}, ${cppStringLiteral(description.modelName)}, ${cppStringLiteral(guid)},
+        ${cppStringLiteral(binaryPath)},
+        ${cppStringLiteral(resources)},
+        {
+${rows.join(',\n')}
+        }
+    });
 }
 `;
-}
-
-// The FMI 3.0 counterpart to generateFmi2Glue above -- same port-list/setsValue-output shape
-// (see the file header comment), different C API calls: fmi3EnterInitializationMode folds what
-// FMI2 splits into fmi2SetupExperiment+fmi2EnterInitializationMode into one call; fmi3DoStep gains
-// event/terminate/early-return/last-successful-time out-params, which this synchronous,
-// non-early-returning driver always supplies storage for but only acts on when the FMU actually
-// requests termination or an early return it was never granted.
-function generateFmi3Glue({ description, binaryPath, guid, version, contentHash, inputKeys, outputKeys }) {
-    const inputVariables = description.variables.filter((variable) => variable.causality === 'input' || variable.causality === 'parameter');
-    const outputVariables = description.variables.filter((variable) => variable.causality === 'output');
-    const { inputPorts, outputPorts } = buildPortDeclarations(inputVariables, outputVariables, inputKeys, outputKeys);
-
-    const inputBlock = inputVariables.length ? `
-        const fmi3ValueReference inputVr[] = {${inputVariables.map((variable) => variable.valueReference).join(', ')}};
-        const fmi3Float64 inputValues[] = {
-            ${inputVariables.map((variable) => `static_cast<fmi3Float64>(context.inputs.at(${cppStringLiteral(inputKeys.get(variable.name))}))`).join(',\n            ')}
-        };
-        if (api_.setFloat64(instance_, inputVr, ${inputVariables.length}, inputValues, ${inputVariables.length}) != fmi3OK) {
-            throw std::runtime_error("fmi3SetFloat64 failed for the imported FMU.");
-        }
-` : '';
-
-    const outputBlock = outputVariables.length ? `
-        const fmi3ValueReference outputVr[] = {${outputVariables.map((variable) => variable.valueReference).join(', ')}};
-        fmi3Float64 outputValues[${outputVariables.length}];
-        if (api_.getFloat64(instance_, outputVr, ${outputVariables.length}, outputValues, ${outputVariables.length}) != fmi3OK) {
-            throw std::runtime_error("fmi3GetFloat64 failed for the imported FMU.");
-        }
-${outputVariables.map((variable, index) =>
-        `        outputs.addGradient(${cppStringLiteral(outputKeys.get(variable.name))}, static_cast<double>(outputValues[${index}]));`
-    ).join('\n')}
-` : '';
-
-    return `// Generated by src/fmiResolver.mjs for the imported FMU ${cppStringLiteral(description.modelName)}
-// (guid ${cppStringLiteral(guid)}, version ${cppStringLiteral(version)}, FMI ${description.fmiVersion}).
-// Content hash ${cppStringLiteral(contentHash)} -- embedded only so replacing the installed FMU's
-// binary in place invalidates Konjugate's build cache instead of silently reusing a stale
-// compiled artifact (see buildCppProvider's caching in engine/src/providerRuntime.cpp).
-// Every declared output is marked setsValue in the resolved implementation's outputs[] (see
-// resolveFmiSource below), so addGradient's value here is read by the engine as the state's
-// algebraic value, not a derivative -- see this file's header comment.
-#include <konjugate/relationshipProvider.hpp>
-#include <konjugate/fmiDynamicLoad.hpp>
-
-#include <memory>
-#include <stdexcept>
-#include <vector>
-
-namespace {
-
-using konjugate::fmi::Fmi3Api;
-using konjugate::fmi::LoadedLibrary;
-
-class ImportedFmu final : public konjugate::sdk::v1::NodeProvider {
-public:
-    ImportedFmu() : library_(${cppStringLiteral(binaryPath)}), api_(library_) {}
-
-    ~ImportedFmu() override { teardown(); }
-
-    konjugate::sdk::v1::NodeProviderDescription describe() const override {
-        return {
-            "fmi.${guid}", ${cppStringLiteral(description.modelName)},
-            {
-${inputPorts}
-            },
-            {
-${outputPorts}
-            }
-        };
-    }
-
-    void initialize(const konjugate::sdk::v1::InitializationContext&) override {
-        instance_ = api_.instantiateCoSimulation("konjugateImportedFmu", ${cppStringLiteral(guid)}, "",
-            fmi3False, fmi3False, fmi3False, fmi3False, nullptr, 0, nullptr, nullptr, nullptr);
-        if (!instance_) throw std::runtime_error("fmi3InstantiateCoSimulation failed for the imported FMU.");
-        if (api_.enterInitializationMode(instance_, fmi3False, 0.0, 0.0, fmi3False, 0.0) != fmi3OK) {
-            throw std::runtime_error("fmi3EnterInitializationMode failed for the imported FMU.");
-        }
-        if (api_.exitInitializationMode(instance_) != fmi3OK) throw std::runtime_error("fmi3ExitInitializationMode failed for the imported FMU.");
-        initializedOk_ = true;
-    }
-
-    void evaluate(const konjugate::sdk::v1::EvaluationContext& context, konjugate::sdk::v1::NodeOutputCollector& outputs) override {
-        if (!instance_) throw std::runtime_error("The imported FMU was evaluated before initialize().");
-${inputBlock}
-        fmi3Boolean eventEncountered = fmi3False;
-        fmi3Boolean terminateSimulation = fmi3False;
-        fmi3Boolean earlyReturn = fmi3False;
-        fmi3Float64 lastSuccessfulTime = 0.0;
-        // eventEncountered is not itself an error (a real dynamic FMU can legitimately signal a
-        // discrete change) and Konjugate has no event-iteration mechanism to react with, so it is
-        // deliberately not checked here. terminateSimulation and earlyReturn are: this driver
-        // never grants early return (earlyReturnAllowed=false above), so either signals a real
-        // problem worth surfacing rather than silently continuing on stale state.
-        if (api_.doStep(instance_, context.simulationTime, context.stepSize, fmi3False,
-                        &eventEncountered, &terminateSimulation, &earlyReturn, &lastSuccessfulTime) != fmi3OK) {
-            throw std::runtime_error("fmi3DoStep failed for the imported FMU.");
-        }
-        if (terminateSimulation) throw std::runtime_error("The imported FMU requested termination during fmi3DoStep.");
-        if (earlyReturn) throw std::runtime_error("The imported FMU returned early from fmi3DoStep, which this importer does not support.");
-${outputBlock}    }
-
-    std::vector<std::byte> checkpoint() const override {
-        if (!instance_) throw std::runtime_error("The imported FMU was checkpointed before initialize().");
-        fmi3FMUState state = nullptr;
-        if (api_.getFMUState(instance_, &state) != fmi3OK) throw std::runtime_error("This imported FMU does not support checkpointing.");
-        size_t size = 0;
-        if (api_.serializedFMUStateSize(instance_, state, &size) != fmi3OK) {
-            api_.freeFMUState(instance_, &state);
-            throw std::runtime_error("fmi3SerializedFMUStateSize failed for the imported FMU.");
-        }
-        std::vector<std::byte> bytes(size);
-        const auto status = api_.serializeFMUState(instance_, state, reinterpret_cast<fmi3Byte*>(bytes.data()), size);
-        api_.freeFMUState(instance_, &state);
-        if (status != fmi3OK) throw std::runtime_error("fmi3SerializeFMUState failed for the imported FMU.");
-        return bytes;
-    }
-
-    void restore(std::span<const std::byte> payload) override {
-        if (!instance_) throw std::runtime_error("The imported FMU was restored before initialize().");
-        fmi3FMUState state = nullptr;
-        if (api_.deserializeFMUState(instance_, reinterpret_cast<const fmi3Byte*>(payload.data()), payload.size(), &state) != fmi3OK) {
-            throw std::runtime_error("fmi3DeserializeFMUState failed for the imported FMU.");
-        }
-        const auto status = api_.setFMUState(instance_, state);
-        api_.freeFMUState(instance_, &state);
-        if (status != fmi3OK) throw std::runtime_error("fmi3SetFMUState failed for the imported FMU.");
-    }
-
-    void shutdown() noexcept override { teardown(); }
-
-private:
-    void teardown() noexcept {
-        if (instance_) {
-            if (initializedOk_) api_.terminate(instance_);
-            api_.freeInstance(instance_);
-            instance_ = nullptr;
-        }
-    }
-
-    LoadedLibrary library_;
-    Fmi3Api api_;
-    fmi3Instance instance_ = nullptr;
-    bool initializedOk_ = false;
-};
-
-} // namespace
-
-std::unique_ptr<konjugate::sdk::v1::NodeProvider> createNodeProvider() {
-    return std::make_unique<ImportedFmu>();
-}
-`;
-}
-
-async function sha256OfFile(path) {
-    const bytes = await readFile(path);
-    return createHash('sha256').update(bytes).digest('hex');
 }
 
 // implementation is the node's raw `{kind:"fmi", fmuId, fmuVersion, bindings, outputs}` object.
@@ -416,16 +178,15 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
     }
     const description = parseModelDescription(xmlText);
 
-    const platformBinaryPath = resolve(fmuRoot, 'binaries', platformDirectory(), `${description.modelIdentifier}${libraryExtension()}`);
-    let contentHash;
-    try {
-        contentHash = await sha256OfFile(platformBinaryPath);
-    } catch {
+    const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
+    if (chosen.error) {
         throw new FmiResolutionError(
-            `FMU ${guid} has no binary for this platform (${platformDirectory()}). Export or merge a build for this platform before using it here -- see "Merge platform FMUs" in the code export dialog.`,
+            `FMU ${description.modelName} (${guid}) cannot run here: ${chosen.error}. Export or merge a build for this platform before using it here -- see "Merge platform FMUs" in the code export dialog.`,
             'FMU_PLATFORM_MISSING'
         );
     }
+    const platformBinaryPath = resolve(fmuRoot, ...chosen.relativePath.split('/'));
+    const contentHash = createHash('sha256').update(chosen.bytes).digest('hex');
 
     const inputVariables = description.variables.filter((variable) => variable.causality === 'input' || variable.causality === 'parameter');
     const outputVariables = description.variables.filter((variable) => variable.causality === 'output');
@@ -462,8 +223,10 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
         }
     }
 
-    const generateGlue = description.fmiVersion.startsWith('3.') ? generateFmi3Glue : generateFmi2Glue;
-    const source = generateGlue({ description, binaryPath: platformBinaryPath, guid, version, contentHash, inputKeys, outputKeys });
+    const source = generateGlue({
+        description, binaryPath: platformBinaryPath, binaryRelativePath: chosen.relativePath,
+        resources: await resourceLocation(fmuRoot, description.fmiVersion), guid, version, contentHash, inputKeys, outputKeys
+    });
 
     // Every FMU output is algebraic (see the file header comment), so this resolver marks each one
     // setsValue itself rather than requiring the user to author that -- an FMU import couldn't
@@ -482,8 +245,9 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
 
 // An installed FMU's ports as a node's implementation names them: each input or parameter, which the node must bind
 // to a state or a shared parameter, and each output, which sets a state of the node. For the canvas, so a user can wire
-// an FMU into a node without writing the keys by hand. Returns { name, fmiVersion, inputs: [{ key, name, causality }],
-// outputs: [{ key, name }] }.
+// an FMU into a node without writing the keys by hand, and to say how it runs here. Returns { name, fmiVersion,
+// inputs: [{ key, name, causality, type, variability }], outputs: [{ key, name, type }], notExposed: [{ name, causality,
+// type }], binary } -- binary the sentence describeChosenBinary gives (which file runs, or why none can).
 export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
     if (!fmuDirectory) throw new FmiResolutionError('FMI import requires an installed FMU directory.', 'FMU_DIRECTORY_MISSING');
     if (typeof guid !== 'string' || !guid || typeof version !== 'string' || !versionPattern.test(version)) {
@@ -503,10 +267,15 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
     const outputVariables = description.variables.filter((variable) => variable.causality === 'output');
     const inputKeys = keyByVariableName(inputVariables, 'input/parameter');
     const outputKeys = keyByVariableName(outputVariables, 'output');
+    const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
     return {
         name: description.modelName, fmiVersion: description.fmiVersion,
-        inputs: inputVariables.map((variable) => ({ key: inputKeys.get(variable.name), name: variable.name, causality: variable.causality })),
-        outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name }))
+        inputs: inputVariables.map((variable) => ({
+            key: inputKeys.get(variable.name), name: variable.name, causality: variable.causality, type: variable.type, variability: variable.variability
+        })),
+        outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type })),
+        notExposed: description.notExposed,
+        binary: describeChosenBinary(chosen, description.fmiVersion)
     };
 }
 

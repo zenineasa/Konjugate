@@ -58,6 +58,18 @@ public:
         return reinterpret_cast<FunctionPointer>(address);
     }
 
+    // Null when the library does not export symbolName: for the functions an importer needs only for some FMUs (an
+    // integer or Boolean variable's getter, say), so an FMU that never needs one still loads without it.
+    template <typename FunctionPointer>
+    FunctionPointer resolveOptional(const char* symbolName) const noexcept {
+#ifdef _WIN32
+        auto* address = ::GetProcAddress(handle_, symbolName);
+#else
+        auto* address = ::dlsym(handle_, symbolName);
+#endif
+        return reinterpret_cast<FunctionPointer>(address);
+    }
+
 private:
 #ifdef _WIN32
     HMODULE handle_ = nullptr;
@@ -90,6 +102,13 @@ struct Fmi2Api {
     fmi2DeSerializeFMUstateTYPE deSerializeFMUstate;
     fmi2TerminateTYPE terminate;
     fmi2FreeInstanceTYPE freeInstance;
+    // Resolved only if exported (see LoadedLibrary::resolveOptional): FMI import reads and sets Integer, Boolean and
+    // Enumeration variables through these, and asks whether a step the FMU discarded was its request to terminate.
+    fmi2GetIntegerTYPE getInteger;
+    fmi2SetIntegerTYPE setInteger;
+    fmi2GetBooleanTYPE getBoolean;
+    fmi2SetBooleanTYPE setBoolean;
+    fmi2GetBooleanStatusTYPE getBooleanStatus;
 
     explicit Fmi2Api(const LoadedLibrary& library)
         : instantiate(library.resolve<fmi2InstantiateTYPE>("fmi2Instantiate")),
@@ -106,11 +125,16 @@ struct Fmi2Api {
           serializeFMUstate(library.resolve<fmi2SerializeFMUstateTYPE>("fmi2SerializeFMUstate")),
           deSerializeFMUstate(library.resolve<fmi2DeSerializeFMUstateTYPE>("fmi2DeSerializeFMUstate")),
           terminate(library.resolve<fmi2TerminateTYPE>("fmi2Terminate")),
-          freeInstance(library.resolve<fmi2FreeInstanceTYPE>("fmi2FreeInstance")) {}
+          freeInstance(library.resolve<fmi2FreeInstanceTYPE>("fmi2FreeInstance")),
+          getInteger(library.resolveOptional<fmi2GetIntegerTYPE>("fmi2GetInteger")),
+          setInteger(library.resolveOptional<fmi2SetIntegerTYPE>("fmi2SetInteger")),
+          getBoolean(library.resolveOptional<fmi2GetBooleanTYPE>("fmi2GetBoolean")),
+          setBoolean(library.resolveOptional<fmi2SetBooleanTYPE>("fmi2SetBoolean")),
+          getBooleanStatus(library.resolveOptional<fmi2GetBooleanStatusTYPE>("fmi2GetBooleanStatus")) {}
 };
 
 // The FMI 3.0 counterpart to Fmi2Api above -- same scope discipline (Co-Simulation only, Float64
-// scalar get/set only, no clocks/arrays/binary), same eager-resolve-everything-up-front shape.
+// and integer/Boolean scalar get/set only, no clocks/arrays/binary/strings), same eager-resolve-everything-up-front shape.
 // FMI 3.0 combines FMI2's fmi2SetupExperiment+fmi2EnterInitializationMode into one call
 // (enterInitializationMode below), replaces the "GUID" match string with "instantiationToken",
 // and fmi3DoStep gains extra out-params (event/terminate/early-return/last-successful-time) that
@@ -130,6 +154,28 @@ struct Fmi3Api {
     fmi3SerializeFMUStateTYPE serializeFMUState;
     fmi3DeserializeFMUStateTYPE deserializeFMUState;
     fmi3DoStepTYPE doStep;
+    // Resolved only if exported (see LoadedLibrary::resolveOptional): FMI import reads and sets variables of these
+    // types through them.
+    fmi3GetFloat32TYPE getFloat32;
+    fmi3SetFloat32TYPE setFloat32;
+    fmi3GetInt8TYPE getInt8;
+    fmi3SetInt8TYPE setInt8;
+    fmi3GetUInt8TYPE getUInt8;
+    fmi3SetUInt8TYPE setUInt8;
+    fmi3GetInt16TYPE getInt16;
+    fmi3SetInt16TYPE setInt16;
+    fmi3GetUInt16TYPE getUInt16;
+    fmi3SetUInt16TYPE setUInt16;
+    fmi3GetInt32TYPE getInt32;
+    fmi3SetInt32TYPE setInt32;
+    fmi3GetUInt32TYPE getUInt32;
+    fmi3SetUInt32TYPE setUInt32;
+    fmi3GetInt64TYPE getInt64;
+    fmi3SetInt64TYPE setInt64;
+    fmi3GetUInt64TYPE getUInt64;
+    fmi3SetUInt64TYPE setUInt64;
+    fmi3GetBooleanTYPE getBoolean;
+    fmi3SetBooleanTYPE setBoolean;
 
     explicit Fmi3Api(const LoadedLibrary& library)
         : instantiateCoSimulation(library.resolve<fmi3InstantiateCoSimulationTYPE>("fmi3InstantiateCoSimulation")),
@@ -145,7 +191,27 @@ struct Fmi3Api {
           serializedFMUStateSize(library.resolve<fmi3SerializedFMUStateSizeTYPE>("fmi3SerializedFMUStateSize")),
           serializeFMUState(library.resolve<fmi3SerializeFMUStateTYPE>("fmi3SerializeFMUState")),
           deserializeFMUState(library.resolve<fmi3DeserializeFMUStateTYPE>("fmi3DeserializeFMUState")),
-          doStep(library.resolve<fmi3DoStepTYPE>("fmi3DoStep")) {}
+          doStep(library.resolve<fmi3DoStepTYPE>("fmi3DoStep")),
+          getFloat32(library.resolveOptional<fmi3GetFloat32TYPE>("fmi3GetFloat32")),
+          setFloat32(library.resolveOptional<fmi3SetFloat32TYPE>("fmi3SetFloat32")),
+          getInt8(library.resolveOptional<fmi3GetInt8TYPE>("fmi3GetInt8")),
+          setInt8(library.resolveOptional<fmi3SetInt8TYPE>("fmi3SetInt8")),
+          getUInt8(library.resolveOptional<fmi3GetUInt8TYPE>("fmi3GetUInt8")),
+          setUInt8(library.resolveOptional<fmi3SetUInt8TYPE>("fmi3SetUInt8")),
+          getInt16(library.resolveOptional<fmi3GetInt16TYPE>("fmi3GetInt16")),
+          setInt16(library.resolveOptional<fmi3SetInt16TYPE>("fmi3SetInt16")),
+          getUInt16(library.resolveOptional<fmi3GetUInt16TYPE>("fmi3GetUInt16")),
+          setUInt16(library.resolveOptional<fmi3SetUInt16TYPE>("fmi3SetUInt16")),
+          getInt32(library.resolveOptional<fmi3GetInt32TYPE>("fmi3GetInt32")),
+          setInt32(library.resolveOptional<fmi3SetInt32TYPE>("fmi3SetInt32")),
+          getUInt32(library.resolveOptional<fmi3GetUInt32TYPE>("fmi3GetUInt32")),
+          setUInt32(library.resolveOptional<fmi3SetUInt32TYPE>("fmi3SetUInt32")),
+          getInt64(library.resolveOptional<fmi3GetInt64TYPE>("fmi3GetInt64")),
+          setInt64(library.resolveOptional<fmi3SetInt64TYPE>("fmi3SetInt64")),
+          getUInt64(library.resolveOptional<fmi3GetUInt64TYPE>("fmi3GetUInt64")),
+          setUInt64(library.resolveOptional<fmi3SetUInt64TYPE>("fmi3SetUInt64")),
+          getBoolean(library.resolveOptional<fmi3GetBooleanTYPE>("fmi3GetBoolean")),
+          setBoolean(library.resolveOptional<fmi3SetBooleanTYPE>("fmi3SetBoolean")) {}
 };
 
 } // namespace konjugate::fmi

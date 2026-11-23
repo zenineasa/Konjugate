@@ -34,7 +34,7 @@ test('parses a well-formed FMI 2.0 Co-Simulation modelDescription', () => {
     assert.equal(description.modelIdentifier, 'testModel');
     assert.equal(description.canGetAndSetFMUState, true);
     assert.equal(description.variables.length, 3);
-    assert.deepEqual(description.variables[0], { name: 'x', valueReference: 0, causality: 'output', variability: 'continuous', start: 0 });
+    assert.deepEqual(description.variables[0], { name: 'x', valueReference: 0, causality: 'output', type: 'Real', variability: 'continuous', start: 0 });
     assert.equal(description.variables[1].causality, 'input');
     assert.equal(description.variables[2].causality, 'parameter');
     assert.equal(description.variables[2].start, 1.5);
@@ -65,11 +65,25 @@ test('skips variables whose causality is not input/output/parameter, even non-Re
     assert.equal(description.variables[0].name, 'x');
 });
 
-test('rejects a non-Real bindable variable rather than mishandling it', () => {
+test('Integer, Boolean and Enumeration variables are ports with their type; a String is listed as not exposed', () => {
     const xml = fmi2Xml({
-        variables: `<ScalarVariable name="mode" valueReference="0" causality="input"><Integer start="0"/></ScalarVariable>`
+        variables: `
+            <ScalarVariable name="mode" valueReference="0" causality="input"><Integer start="2"/></ScalarVariable>
+            <ScalarVariable name="on" valueReference="1" causality="output" variability="discrete"><Boolean/></ScalarVariable>
+            <ScalarVariable name="option" valueReference="2" causality="parameter" variability="fixed"><Enumeration declaredType="Option" start="1"/></ScalarVariable>
+            <ScalarVariable name="label" valueReference="3" causality="input"><String start="x"/></ScalarVariable>
+        `
     });
-    assert.throws(() => parseModelDescription(xml), /type Integer/);
+    const description = parseModelDescription(xml);
+    assert.deepEqual(description.variables.map(({ name, type, start }) => ({ name, type, start })), [
+        { name: 'mode', type: 'Integer', start: 2 }, { name: 'on', type: 'Boolean', start: undefined }, { name: 'option', type: 'Enumeration', start: 1 }
+    ]);
+    assert.deepEqual(description.notExposed, [{ name: 'label', causality: 'input', type: 'String' }]);
+});
+
+test('an FMU offering only Model Exchange is refused saying so', () => {
+    const xml = fmi2Xml({ coSimulation: false }).replace('<ModelVariables>', '<ModelExchange modelIdentifier="m"/><ModelVariables>');
+    assert.throws(() => parseModelDescription(xml), /offers only Model Exchange\. Konjugate runs FMUs in Co-Simulation/);
 });
 
 test('rejects malformed XML with a clear error, not a garbled parse', () => {
@@ -118,7 +132,7 @@ test('parses a well-formed FMI 3.0 Co-Simulation modelDescription', () => {
     assert.equal(description.modelIdentifier, 'testModel3');
     assert.equal(description.canGetAndSetFMUState, true);
     assert.equal(description.variables.length, 3);
-    assert.deepEqual(description.variables[0], { name: 'x', valueReference: 0, causality: 'output', variability: 'continuous', start: 0 });
+    assert.deepEqual(description.variables[0], { name: 'x', valueReference: 0, causality: 'output', type: 'Float64', variability: 'continuous', start: 0 });
 });
 
 test('a single FMI3 Float64 variable is still returned as an array entry, not collapsed', () => {
@@ -144,14 +158,24 @@ test('FMI3: skips variables whose causality is not input/output/parameter, even 
     assert.equal(description.variables[0].name, 'x');
 });
 
-test('FMI3: rejects a non-Float64 bindable variable rather than mishandling it', () => {
-    const xml = fmi3Xml({ variables: `<Int32 name="mode" valueReference="0" causality="input"/>` });
-    assert.throws(() => parseModelDescription(xml), /type Int32/);
+test('FMI3: integer, Float32 and Boolean variables are ports with their type, discrete unless they say otherwise', () => {
+    const xml = fmi3Xml({ variables: `<Int32 name="mode" valueReference="0" causality="input"/><Float32 name="f" valueReference="1" causality="output"/><Boolean name="b" valueReference="2" causality="output"/>` });
+    assert.deepEqual(parseModelDescription(xml).variables.map(({ name, type, variability }) => ({ name, type, variability })), [
+        { name: 'f', type: 'Float32', variability: 'continuous' }, { name: 'mode', type: 'Int32', variability: 'discrete' }, { name: 'b', type: 'Boolean', variability: 'discrete' }
+    ]);
 });
 
-test('FMI3: rejects an array-shaped bindable variable', () => {
-    const xml = fmi3Xml({ variables: `<Float64 name="vector" valueReference="0" causality="input"><Dimension start="3"/></Float64>` });
-    assert.throws(() => parseModelDescription(xml), /array-shaped/);
+test('FMI3: an array, a String, a Binary or a Clock is not a port, and is listed as not exposed', () => {
+    const xml = fmi3Xml({ variables: `
+        <Float64 name="vector" valueReference="0" causality="input"><Dimension start="3"/></Float64>
+        <String name="label" valueReference="1" causality="input"/>
+        <Binary name="blob" valueReference="2" causality="output"/>
+        <Float64 name="x" valueReference="3" causality="output"/>` });
+    const description = parseModelDescription(xml);
+    assert.deepEqual(description.variables.map((variable) => variable.name), ['x']);
+    assert.deepEqual(description.notExposed, [
+        { name: 'vector', causality: 'input', type: 'Float64 array' }, { name: 'label', causality: 'input', type: 'String' }, { name: 'blob', causality: 'output', type: 'Binary' }
+    ]);
 });
 
 test('FMI3: rejects an FMU missing an instantiationToken', () => {

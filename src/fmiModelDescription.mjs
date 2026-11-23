@@ -44,10 +44,23 @@ function scalarVariableType(rawVariable) {
     return null;
 }
 
+// The variable types general FMI import maps to Konjugate's numbers, by FMI version. Each is read as a number and set
+// from one: an integer or enumeration rounded to the nearest whole number, a Boolean true for anything but 0 and read
+// as 1 or 0 (engine/include/konjugate/fmiImportedNode.hpp). Any other type (String, Binary, Clock) or an array is not a
+// port: the FMU keeps its own start value for it, and notExposed below names it so the person importing it is told.
+const numericFmi2Types = new Set(['Real', 'Integer', 'Boolean', 'Enumeration']);
+const numericFmi3Types = new Set(['Float32', 'Float64', 'Int8', 'UInt8', 'Int16', 'UInt16', 'Int32', 'UInt32', 'Int64', 'UInt64', 'Boolean', 'Enumeration']);
+
+function modelExchangeOnly(root) {
+    return root.ModelExchange !== undefined
+        ? 'This FMU offers only Model Exchange. Konjugate runs FMUs in Co-Simulation, where the FMU integrates its own equations, so it cannot run this one.'
+        : 'This FMU declares no Co-Simulation, which is how Konjugate runs FMUs.';
+}
+
 // document must already be the parsed <fmiModelDescription> root object.
 function parseFmi2(root) {
     if (!root.CoSimulation) {
-        throw new FmiModelDescriptionError('This FMU does not declare Co-Simulation support -- Konjugate import only supports FMI Co-Simulation, not Model Exchange.');
+        throw new FmiModelDescriptionError(modelExchangeOnly(root));
     }
     const guid = root['@_guid'];
     if (!guid) throw new FmiModelDescriptionError('modelDescription.xml has no guid.');
@@ -56,6 +69,7 @@ function parseFmi2(root) {
 
     const rawVariables = root.ModelVariables?.ScalarVariable ?? [];
     const variables = [];
+    const notExposed = [];
     for (const rawVariable of rawVariables) {
         const causality = rawVariable['@_causality'] || 'local';
         if (!bindableCausalities.has(causality)) continue;
@@ -68,14 +82,15 @@ function parseFmi2(root) {
             throw new FmiModelDescriptionError(`Variable '${name}' has an invalid valueReference.`);
         }
         const type = scalarVariableType(rawVariable);
-        if (type !== 'Real') {
-            throw new FmiModelDescriptionError(
-                `Variable '${name}' is of type ${type ?? 'unknown'} -- Konjugate's FMI import only supports Real-valued input/output/parameter variables in this version.`
-            );
+        if (!numericFmi2Types.has(type)) {
+            notExposed.push({ name, causality, type: type ?? 'unknown' });
+            continue;
         }
-        const startText = rawVariable.Real?.['@_start'];
+        // Boolean and Enumeration are also FMI 3.0 element names, which the parser always makes arrays.
+        const typed = Array.isArray(rawVariable[type]) ? rawVariable[type][0] : rawVariable[type];
+        const startText = typed?.['@_start'];
         variables.push({
-            name, valueReference, causality,
+            name, valueReference, causality, type,
             variability: rawVariable['@_variability'] || 'continuous',
             start: startText === undefined ? undefined : Number.parseFloat(startText)
         });
@@ -87,7 +102,9 @@ function parseFmi2(root) {
         modelName: root['@_modelName'] || modelIdentifier,
         modelIdentifier,
         canGetAndSetFMUState: root.CoSimulation['@_canGetAndSetFMUstate'] === 'true',
-        variables
+        modelExchange: root.ModelExchange !== undefined,
+        variables,
+        notExposed
     };
 }
 
@@ -98,7 +115,7 @@ function parseFmi2(root) {
 // canSerializeFMUState, unlike FMI 2.0's canGetAndSetFMUstate/canSerializeFMUstate.
 function parseFmi3(root) {
     if (!root.CoSimulation) {
-        throw new FmiModelDescriptionError('This FMU does not declare Co-Simulation support -- Konjugate import only supports FMI Co-Simulation, not Model Exchange.');
+        throw new FmiModelDescriptionError(modelExchangeOnly(root));
     }
     const instantiationToken = root['@_instantiationToken'];
     if (!instantiationToken) throw new FmiModelDescriptionError('modelDescription.xml has no instantiationToken.');
@@ -107,14 +124,16 @@ function parseFmi3(root) {
 
     const modelVariables = root.ModelVariables ?? {};
     const variables = [];
+    const notExposed = [];
     for (const typeName of fmi3TypeElementNames) {
         for (const rawVariable of modelVariables[typeName] ?? []) {
             const causality = rawVariable['@_causality'] || 'local';
             if (!bindableCausalities.has(causality)) continue;
             const name = rawVariable['@_name'];
             if (!name) throw new FmiModelDescriptionError('A model variable is missing its name.');
-            if (rawVariable.Dimension !== undefined) {
-                throw new FmiModelDescriptionError(`Variable '${name}' is array-shaped -- Konjugate's FMI import only supports scalar variables in this version.`);
+            if (rawVariable.Dimension !== undefined || !numericFmi3Types.has(typeName)) {
+                notExposed.push({ name, causality, type: rawVariable.Dimension !== undefined ? `${typeName} array` : typeName });
+                continue;
             }
             const valueReferenceText = rawVariable['@_valueReference'];
             if (valueReferenceText === undefined) throw new FmiModelDescriptionError(`Variable '${name}' is missing its valueReference.`);
@@ -122,15 +141,10 @@ function parseFmi3(root) {
             if (!Number.isInteger(valueReference) || valueReference < 0) {
                 throw new FmiModelDescriptionError(`Variable '${name}' has an invalid valueReference.`);
             }
-            if (typeName !== 'Float64') {
-                throw new FmiModelDescriptionError(
-                    `Variable '${name}' is of type ${typeName} -- Konjugate's FMI import only supports Float64-valued input/output/parameter variables in this version.`
-                );
-            }
             const startText = rawVariable['@_start'];
             variables.push({
-                name, valueReference, causality,
-                variability: rawVariable['@_variability'] || 'continuous',
+                name, valueReference, causality, type: typeName,
+                variability: rawVariable['@_variability'] || (typeName.startsWith('Float') ? 'continuous' : 'discrete'),
                 start: startText === undefined ? undefined : Number.parseFloat(startText)
             });
         }
@@ -142,15 +156,19 @@ function parseFmi3(root) {
         modelName: root['@_modelName'] || modelIdentifier,
         modelIdentifier,
         canGetAndSetFMUState: root.CoSimulation['@_canGetAndSetFMUState'] === 'true',
-        variables
+        modelExchange: root.ModelExchange !== undefined,
+        variables,
+        notExposed
     };
 }
 
 // Given the raw bytes/text of one FMU's modelDescription.xml, returns
-// { fmiVersion, guid, modelName, modelIdentifier, canGetAndSetFMUState, variables }, where each
-// variable is { name, valueReference, causality, variability, start }. Throws
-// FmiModelDescriptionError on malformed XML, a non-Co-Simulation FMU, or a variable type/shape
-// this version of Konjugate does not support importing.
+// { fmiVersion, guid, modelName, modelIdentifier, canGetAndSetFMUState, modelExchange, variables, notExposed }, where
+// each variable is { name, valueReference, causality, type, variability, start } (type the FMI version's own name:
+// Real, Float64, Int32, Boolean, ...) and each of notExposed is { name, causality, type } for an input, output or
+// parameter that is not a number Konjugate can bind (see numericFmi2Types above). Throws FmiModelDescriptionError on
+// malformed XML or an FMU without Co-Simulation (Konjugate runs FMUs in Co-Simulation only: Model Exchange would need
+// Konjugate to integrate the FMU's equations itself, which it does not).
 export function parseModelDescription(xmlText) {
     const validation = XMLValidator.validate(xmlText);
     if (validation !== true) {

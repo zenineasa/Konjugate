@@ -813,7 +813,7 @@ public:
         if (!instance_) {
             const std::string message = vtable_->lastError(nullptr);
             unloadLibrary();
-            throw std::runtime_error("Failed to construct in-process computational-node provider '" + processKey_ + "': " + message);
+            throw std::runtime_error("A node program could not be loaded: " + message);
         }
     }
 
@@ -833,7 +833,7 @@ public:
             for (const auto& key : keys) keyPointers.push_back(key.c_str());
             if (!vtable_->initializeInstance(instance_, instanceId, keyPointers.data(),
                                              static_cast<std::uint32_t>(keyPointers.size()))) {
-                throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to initialize an instance: " +
+                throw std::runtime_error("A node program could not start: " +
                     std::string(vtable_->lastError(instance_)));
             }
         }
@@ -843,7 +843,7 @@ public:
     std::vector<std::pair<std::uint64_t, double>> evaluateBatch(
         std::uint64_t, double, double,
         const std::vector<std::pair<std::uint64_t, std::span<const double>>>&) override {
-        throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' does not support relationship-shaped batch evaluation.");
+        throw std::runtime_error("A node program cannot be evaluated as a relationship.");
     }
 
     std::vector<std::pair<std::string, double>> evaluateNode(
@@ -854,7 +854,7 @@ public:
         if (!vtable_->evaluateInstance(instance_, instanceId, simulationTime, stepSize,
                                        inputs.data(), static_cast<std::uint32_t>(inputs.size()),
                                        outValues.data(), static_cast<std::uint32_t>(outValues.size()))) {
-            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' evaluation failed: " +
+            throw std::runtime_error("A node program failed: " +
                 std::string(vtable_->lastError(instance_)));
         }
         std::vector<std::pair<std::string, double>> results;
@@ -867,13 +867,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         std::uint32_t size = 0;
         if (!vtable_->requestCheckpoint(instance_, instanceId, nullptr, 0, &size)) {
-            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' declined checkpointing: " +
+            throw std::runtime_error("A node program declined checkpointing: " +
                 std::string(vtable_->lastError(instance_)));
         }
         std::vector<std::uint8_t> buffer(size);
         std::uint32_t written = 0;
         if (!vtable_->requestCheckpoint(instance_, instanceId, buffer.data(), static_cast<std::uint32_t>(buffer.size()), &written)) {
-            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to fill its checkpoint buffer: " +
+            throw std::runtime_error("A node program could not fill its checkpoint: " +
                 std::string(vtable_->lastError(instance_)));
         }
         std::vector<std::byte> result(written);
@@ -886,7 +886,7 @@ public:
         if (!vtable_->requestRestore(instance_, instanceId,
                                      reinterpret_cast<const std::uint8_t*>(payload.data()),
                                      static_cast<std::uint32_t>(payload.size()))) {
-            throw std::runtime_error("In-process computational-node provider '" + processKey_ + "' failed to restore from a checkpoint: " +
+            throw std::runtime_error("A node program could not restore its checkpoint: " +
                 std::string(vtable_->lastError(instance_)));
         }
     }

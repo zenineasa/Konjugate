@@ -6,11 +6,15 @@
 
 /* Standard type definitions for FMI 3.0, per the FMI Standard (fmi-standard.org), reproduced here
    (BSD-2-Clause, matching the standard's own license for its headers) so an imported FMU can be
-   driven without an external FMI SDK dependency. Konjugate's FMI 3.0 import scope is Float64
-   scalar variables only (see docs/projectSchema.md) -- the integer/string/binary typedefs below
-   are declared anyway, matching the standard's own header exactly, even though Konjugate's own
-   glue code never uses most of them; a header that silently omitted them would be a subtly wrong
-   reproduction of the standard, not a smaller one. */
+   driven without an external FMI SDK dependency. Konjugate's FMI 3.0 import drives float, integer
+   and Boolean scalar variables (see docs/codeExport.md) -- the string/binary typedefs below are
+   declared anyway, matching the standard's own header exactly; a header that silently omitted
+   them would be a subtly wrong reproduction of the standard, not a smaller one.
+
+   fmi3ValueReference is 32 bits wide, as the standard has it. An earlier copy declared it 64 bits:
+   every array of value references then reached an FMU as twice as many 32-bit ones, each real
+   reference followed by a 0, so asking a standard FMU for references {1, 3} asked it for {1, 0} --
+   and 0 is its time variable. A one-variable call read only its first, correct, half. */
 
 typedef float    fmi3Float32;
 typedef double   fmi3Float64;
@@ -27,7 +31,7 @@ typedef char     fmi3Char;
 typedef const fmi3Char* fmi3String;
 typedef uint8_t  fmi3Byte;
 typedef const fmi3Byte* fmi3Binary;
-typedef uint64_t fmi3ValueReference;
+typedef uint32_t fmi3ValueReference;
 typedef void*    fmi3Instance;
 typedef void*    fmi3InstanceEnvironment;
 typedef void*    fmi3FMUState;

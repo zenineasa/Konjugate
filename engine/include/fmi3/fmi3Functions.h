@@ -13,7 +13,7 @@
    for the IMPORT side (src/fmiResolver.mjs's generated glue dlopen()s a real vendor FMU and
    resolves these symbols by name) and for engine/tests fixtures standing in for one. Only the
    subset this codebase actually drives is declared -- no Model Exchange, no Scheduled Execution,
-   no clocks, no array/binary/string get-set. */
+   no clocks, no binary/string get-set. */
 
 #if defined(_WIN32)
 #define FMI3_Export __declspec(dllexport)
@@ -42,11 +42,51 @@ FMI3_Export fmi3Status fmi3ExitInitializationMode(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3Terminate(fmi3Instance instance);
 FMI3_Export fmi3Status fmi3Reset(fmi3Instance instance);
 
-/* Getting and setting Float64 variable values (the only variable type Konjugate import drives) */
+/* Getting and setting variable values (the float, integer and Boolean types Konjugate import drives) */
 FMI3_Export fmi3Status fmi3GetFloat64(fmi3Instance instance,
     const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Float64 values[], size_t nValues);
 FMI3_Export fmi3Status fmi3SetFloat64(fmi3Instance instance,
     const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Float64 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetFloat32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Float32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetFloat32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Float32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt8(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Int8 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt8(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Int8 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt8(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3UInt8 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt8(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3UInt8 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt16(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Int16 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt16(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Int16 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt16(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3UInt16 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt16(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3UInt16 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Int32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Int32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3UInt32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt32(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3UInt32 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetInt64(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Int64 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetInt64(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Int64 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetUInt64(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3UInt64 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetUInt64(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3UInt64 values[], size_t nValues);
+FMI3_Export fmi3Status fmi3GetBoolean(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, fmi3Boolean values[], size_t nValues);
+FMI3_Export fmi3Status fmi3SetBoolean(fmi3Instance instance,
+    const fmi3ValueReference valueReferences[], size_t nValueReferences, const fmi3Boolean values[], size_t nValues);
 
 /* Getting and setting the internal FMU state */
 FMI3_Export fmi3Status fmi3GetFMUState(fmi3Instance instance, fmi3FMUState* FMUState);

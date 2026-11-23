@@ -1,0 +1,23 @@
+{
+    "release": "0.0.42",
+    "url": "https://github.com/modelica/Reference-FMUs/releases/download/v0.0.42/Reference-FMUs.zip",
+    "sha256": "b6b4a195b9c0f6bdd3459cd949cbb35fc21ee2049d6dab4cb7a3ba7da63b1e97",
+    "cases": [
+        { "name": "BouncingBall", "stepSize": 0.01, "stopTime": 3, "values": { "g": -9.81, "e": 0.7 } },
+        { "name": "Dahlquist", "stepSize": 0.1, "stopTime": 10, "values": { "k": 1 } },
+        { "name": "VanDerPol", "stepSize": 0.1, "stopTime": 20, "values": { "mu": 1 } },
+        { "name": "Stair", "stepSize": 0.1, "stopTime": 12, "values": {} },
+        { "name": "Resource", "stepSize": 0.1, "stopTime": 1, "values": {} },
+        {
+            "name": "Feedthrough", "stepSize": 0.1, "stopTime": 1,
+            "values": {
+                "Float32_continuous_input": 1.25, "Float32_discrete_input": 2.5,
+                "Float64_fixed_parameter": 3, "Float64_tunable_parameter": 4,
+                "Float64_continuous_input": 5.125, "Float64_discrete_input": 6.5,
+                "Int8_input": -7, "UInt8_input": 200, "Int16_input": -300, "UInt16_input": 60000,
+                "Int32_input": -70000, "UInt32_input": 4000000000, "Int64_input": -5000000000, "UInt64_input": 9000000000,
+                "Boolean_input": 1, "Enumeration_input": 2
+            }
+        }
+    ]
+}

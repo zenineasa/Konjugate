@@ -85,3 +85,33 @@ export function fmiImplementation(guid, version, ports, previous = null) {
         outputs: ports.outputs.map(({ key }) => ({ key, stateId: outputs.get(key)?.stateId ?? null, setsValue: true }))
     };
 }
+
+const floatTypes = new Set(['Real', 'Float64', 'Float32']);
+
+function listOf(names) {
+    return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
+// What the person wiring an FMU should know about how it runs here, as short sentences under the FMU's name: which of
+// its binaries runs, the parameters it fixes when the run starts, the ports that are not real numbers and how they are
+// converted, and what is not wired at all. ports is what describeInstalledFmuPorts returns (src/fmiResolver.mjs).
+export function fmuPortNotes(ports) {
+    const notes = [];
+    if (ports.binary) notes.push(ports.binary);
+    const inputs = ports.inputs ?? [];
+    const outputs = ports.outputs ?? [];
+    const fixed = inputs.filter((port) => port.causality === 'parameter' && port.variability !== 'tunable').map((port) => port.name);
+    if (fixed.length) notes.push(`Set once, when the run starts (fixed): ${listOf(fixed)}.`);
+    const whole = inputs.filter((port) => port.type && !floatTypes.has(port.type) && port.type !== 'Boolean').map((port) => `${port.name} (${port.type})`);
+    if (whole.length) notes.push(`Take the nearest whole number: ${listOf(whole)}.`);
+    const flags = inputs.filter((port) => port.type === 'Boolean').map((port) => port.name);
+    if (flags.length) notes.push(`True for anything other than 0: ${listOf(flags)}.`);
+    const read = outputs.filter((port) => port.type && !floatTypes.has(port.type));
+    if (read.length) {
+        const booleans = read.some((port) => port.type === 'Boolean') ? ', true as 1 and false as 0' : '';
+        notes.push(`Read as numbers${booleans}: ${listOf(read.map((port) => `${port.name} (${port.type})`))}.`);
+    }
+    const notExposed = (ports.notExposed ?? []).map((variable) => `${variable.name} (${variable.type})`);
+    if (notExposed.length) notes.push(`Not wired, so the FMU keeps its own value: ${listOf(notExposed)}.`);
+    return notes;
+}

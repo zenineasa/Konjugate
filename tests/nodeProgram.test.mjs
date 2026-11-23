@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../src/nodeProgram.mjs';
+import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../src/nodeProgram.mjs';
 import { defaultNodeProviderSource } from '../src/providerTemplate.mjs';
 
 const tank = { id: 1, title: 'Tank', states: [{ id: 2, symbol: 'level' }, { id: 3, symbol: 'effort' }] };
@@ -46,6 +46,30 @@ test('an FMU is wired under its own keys, keeping what earlier wiring read and w
     assert.deepEqual(updated.bindings, [{ key: 'u', kind: 'state', nodeId: 4, stateId: 5 }]);
     assert.deepEqual(updated.outputs, [{ key: 'y', stateId: 2, setsValue: true }, { key: 'z', stateId: null, setsValue: true }]);
     assert.equal(freeKey([{ key: 'input' }, { key: 'input2' }], 'input'), 'input3');
+});
+
+test('an FMU says which binary runs, what it fixes, what it converts and what is not wired', () => {
+    assert.deepEqual(fmuPortNotes({
+        binary: 'Runs binaries/aarch64-darwin/Feedthrough.dylib.',
+        inputs: [
+            { name: 'g', causality: 'parameter', variability: 'fixed', type: 'Float64' },
+            { name: 'e', causality: 'parameter', variability: 'tunable', type: 'Float64' },
+            { name: 'n', causality: 'input', variability: 'discrete', type: 'Int8' },
+            { name: 'm', causality: 'input', variability: 'discrete', type: 'Enumeration' },
+            { name: 'on', causality: 'input', variability: 'discrete', type: 'Boolean' }
+        ],
+        outputs: [{ name: 'counter', type: 'Int32' }, { name: 'h', type: 'Real' }],
+        notExposed: [{ name: 'label', causality: 'input', type: 'String' }]
+    }), [
+        'Runs binaries/aarch64-darwin/Feedthrough.dylib.',
+        'Set once, when the run starts (fixed): g.',
+        'Take the nearest whole number: n (Int8) and m (Enumeration).',
+        'True for anything other than 0: on.',
+        'Read as numbers: counter (Int32).',
+        'Not wired, so the FMU keeps its own value: label (String).'
+    ]);
+    assert.deepEqual(fmuPortNotes({ inputs: [{ name: 'k', causality: 'input', type: 'Real' }], outputs: [{ name: 'b', type: 'Boolean' }] }),
+        ['Read as numbers, true as 1 and false as 0: b (Boolean).']);
 });
 
 test('a new program starts from a template naming every input and output', () => {

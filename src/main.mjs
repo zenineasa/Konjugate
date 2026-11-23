@@ -58,6 +58,7 @@ import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
+import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
@@ -1885,10 +1886,12 @@ ipcMain.handle('packageInstall', async (event) => {
     if (lowerPath.endsWith('.fmu')) {
         const archive = await readFile(path);
         const inspected = inspectFmuArchive(archive);
+        const chosen = await chooseFmuBinary(inspected.description, async (name) => inspected.files[name] ?? null);
         const detail = [
-            `${inspected.description.modelName} (FMI ${inspected.description.fmiVersion})`,
+            `${inspected.description.modelName} (FMI ${inspected.description.fmiVersion}, run in Co-Simulation)`,
             `guid: ${inspected.description.guid}`,
-            `Platforms in this file: ${inspected.platforms.join(', ')}`
+            `Platforms in this file: ${inspected.platforms.join(', ')}`,
+            describeChosenBinary(chosen, inspected.description.fmiVersion)
         ].join('\n');
         const confirmation = await dialog.showMessageBox(targetWindow, {
             type: 'question',

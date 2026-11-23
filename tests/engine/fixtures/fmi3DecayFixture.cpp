@@ -7,7 +7,9 @@
 // Co-Simulation C API, exactly like engine/tests/fmiGlueTests.cpp's DecayModel stands in for a
 // generated SimulationModel. Same dynamics as that FMI2 test fixture (x' = -k*x, explicit Euler),
 // so tests/engine/fmi3ImportFidelity.mjs can assert against the identical hand-computed
-// trajectory: value reference 0 is "level" (output, x), value reference 1 is "k" (input).
+// trajectory: value reference 0 is "level" (output, x), value reference 1 is "k" (input). Like a
+// real FMU it refuses a value it cannot take -- a negative k -- and says why through the logger
+// it was instantiated with, so the test can check the importer reports that reason.
 //
 // Compiled directly with a plain compiler invocation by the test script (not through Konjugate's
 // own buildCppProvider/buildSharedLibrary machinery) -- this file plays the role of a vendor's own
@@ -24,6 +26,8 @@ struct DecayInstance {
     double x = 10.0;
     double k = 0.3;
     bool initialized = false;
+    fmi3InstanceEnvironment environment = nullptr;
+    fmi3LogMessageCallback logMessage = nullptr;
 };
 
 } // namespace
@@ -34,9 +38,14 @@ FMI3_Export fmi3Instance fmi3InstantiateCoSimulation(
     fmi3String, fmi3String instantiationToken, fmi3String,
     fmi3Boolean, fmi3Boolean, fmi3Boolean, fmi3Boolean,
     const fmi3ValueReference[], size_t,
-    fmi3InstanceEnvironment, fmi3LogMessageCallback, fmi3IntermediateUpdateCallback) {
+    fmi3InstanceEnvironment environment, fmi3LogMessageCallback logMessage, fmi3IntermediateUpdateCallback) {
     if (!instantiationToken || std::strcmp(instantiationToken, "fmi3-decay-fixture-token") != 0) return nullptr;
-    return new (std::nothrow) DecayInstance();
+    auto* instance = new (std::nothrow) DecayInstance();
+    if (instance) {
+        instance->environment = environment;
+        instance->logMessage = logMessage;
+    }
+    return instance;
 }
 
 FMI3_Export void fmi3FreeInstance(fmi3Instance instance) {
@@ -79,7 +88,10 @@ FMI3_Export fmi3Status fmi3SetFloat64(fmi3Instance instance, const fmi3ValueRefe
     auto* self = static_cast<DecayInstance*>(instance);
     for (size_t index = 0; index < nvr; ++index) {
         if (vr[index] == 0) self->x = values[index];
-        else if (vr[index] == 1) self->k = values[index];
+        else if (vr[index] == 1 && values[index] < 0) {
+            if (self->logMessage) self->logMessage(self->environment, fmi3Error, "logStatusError", "k must not be negative.");
+            return fmi3Error;
+        } else if (vr[index] == 1) self->k = values[index];
         else return fmi3Error;
     }
     return fmi3OK;

@@ -37,7 +37,7 @@ import { recordAsCommands } from '../interventionSchedules.mjs';
 import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
-import { fmiImplementation, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
+import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
 import {
@@ -3351,6 +3351,15 @@ async function renderNodeProgramFmus(node) {
         select.add(new Option(`${implementation.fmuId} ${implementation.fmuVersion} (not installed here)`, current));
     }
     select.value = current;
+    await showFmuNotes(implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null);
+}
+
+// Which of the FMU's binaries runs here, and what about its ports the person wiring it should know (fmuPortNotes).
+async function showFmuNotes(ports) {
+    const notes = $('#nodeProgramFmuNotes');
+    const lines = ports && !ports.error ? fmuPortNotes(ports) : [];
+    notes.textContent = lines.join(' ');
+    notes.hidden = !lines.length;
 }
 
 // Wires an installed FMU into the node, keeping what the earlier wiring read and wrote under the same keys.
@@ -3363,6 +3372,7 @@ async function useFmuForNode(node, guid, version) {
     changeNodeModel(node, (snapshot) => {
         snapshot.implementation = fmiImplementation(guid, version, ports, snapshot.implementation);
     });
+    await showFmuNotes(ports);
 }
 
 // ---- A node's body parts, for result visualizers ------------------------------------------------------------------

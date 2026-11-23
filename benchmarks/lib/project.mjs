@@ -22,6 +22,7 @@ function latexOf(expression) {
         case 'Divide': return `\\frac{${latexOf(operands[0])}}{${latexOf(operands[1])}}`;
         case 'Power': return `{${wrapped(operands[0])}}^{${latexOf(operands[1])}}`;
         case 'Sin': return `\\sin\\left(${latexOf(operands[0])}\\right)`;
+        case 'Cos': return `\\cos\\left(${latexOf(operands[0])}\\right)`;
         default: throw new Error(`No LaTeX form for ${operator}.`);
     }
 }

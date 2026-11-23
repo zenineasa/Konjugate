@@ -1,0 +1,86 @@
+{
+    "title": "Van der Pol oscillator",
+    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4. μ = 1000 (stiff) waits for the stiff method.",
+    "cases": {
+        "mu1": {
+            "run": { "targetTime": 40, "outputInterval": 0.0625 },
+            "cycleRun": { "targetTime": 120, "outputInterval": 0.0625 },
+            "methods": [
+                { "variant": { "integration": "explicit" }, "globalTimeStep": 0.0009765625 },
+                { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.0009765625 },
+                { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.015625 }
+            ],
+            "convergence": {
+                "targetTime": 8,
+                "outputInterval": 0.0625,
+                "methods": [
+                    { "variant": { "integration": "explicit" }, "globalTimeSteps": [0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625] },
+                    { "variant": { "integration": "semiImplicit" }, "globalTimeSteps": [0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625] },
+                    { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.0625, 0.03125, 0.015625, 0.0078125, 0.00390625, 0.001953125] }
+                ]
+            }
+        },
+        "mu10": {
+            "run": { "targetTime": 64, "outputInterval": 0.03125 },
+            "cycleRun": { "targetTime": 200, "outputInterval": 0.03125 },
+            "methods": [
+                { "variant": { "integration": "explicit" }, "globalTimeStep": 0.0009765625 },
+                { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.0009765625 },
+                { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
+            ],
+            "convergence": {
+                "targetTime": 12,
+                "outputInterval": 0.03125,
+                "methods": [
+                    { "variant": { "integration": "explicit" }, "globalTimeSteps": [0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625] },
+                    { "variant": { "integration": "semiImplicit" }, "globalTimeSteps": [0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625] },
+                    { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625] }
+                ]
+            }
+        },
+        "mu1000": {
+            "run": { "targetTime": 3200, "outputInterval": 0.5 },
+            "pending": "Stiff: waits for Konjugate's stiff method (Rodas4, docs/proposals/integrators.md). An explicit method's step is bounded by stability, not accuracy, at about 2/(3μ) ≈ 7e-4 s on the slow flanks of a cycle 1614 s long: about 2.4 million steps a cycle, so it is not benchmarked with Euler or Runge–Kutta 4. The model (mu1000.kjt) and its reference are committed; the stiff method is added here as a method.",
+            "pendingMethod": "Rodas4 (stiff; not yet built)"
+        }
+    },
+    "timing": [
+        { "label": "μ = 10, Runge–Kutta 4, 51,200 steps", "model": "mu10", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 200, "outputInterval": 0.03125 } }
+    ],
+    "thresholds": {
+        "mu1RelativeErrorExplicit": { "max": 0.031 },
+        "mu1PeriodErrorExplicit": { "max": 0.0009 },
+        "mu1AmplitudeErrorExplicit": { "max": 0.0012 },
+        "mu1RelativeErrorSemiImplicit": { "max": 0.023 },
+        "mu1PeriodErrorSemiImplicit": { "max": 0.00069 },
+        "mu1AmplitudeErrorSemiImplicit": { "max": 0.00039 },
+        "mu1RelativeErrorRungeKutta4": { "max": 3.3e-07 },
+        "mu1PeriodErrorRungeKutta4": { "max": 1.6e-08 },
+        "mu1AmplitudeErrorRungeKutta4": { "max": 2.4e-07 },
+        "mu1OrderExplicit": { "min": 0.95, "max": 1.1 },
+        "mu1FinestOrderExplicit": { "min": 0.97, "max": 1.03 },
+        "mu1OrderSemiImplicit": { "min": 0.95, "max": 1.1 },
+        "mu1FinestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
+        "mu1OrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "mu1FinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "mu1ReferenceAgreement": { "max": 1e-10 },
+        "mu1ReferencePeriodAgreement": { "max": 1e-11 },
+        "mu10RelativeErrorExplicit": { "max": 0.87 },
+        "mu10PeriodErrorExplicit": { "max": 0.013 },
+        "mu10AmplitudeErrorExplicit": { "max": 0.0041 },
+        "mu10RelativeErrorSemiImplicit": { "max": 0.85 },
+        "mu10PeriodErrorSemiImplicit": { "max": 0.013 },
+        "mu10AmplitudeErrorSemiImplicit": { "max": 0.0038 },
+        "mu10RelativeErrorRungeKutta4": { "max": 3.2e-05 },
+        "mu10PeriodErrorRungeKutta4": { "max": 1.4e-07 },
+        "mu10AmplitudeErrorRungeKutta4": { "max": 1.5e-06 },
+        "mu10OrderExplicit": { "min": 0.95, "max": 1.1 },
+        "mu10FinestOrderExplicit": { "min": 0.97, "max": 1.03 },
+        "mu10OrderSemiImplicit": { "min": 0.95, "max": 1.1 },
+        "mu10FinestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
+        "mu10OrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "mu10FinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "mu10ReferenceAgreement": { "max": 1e-09 },
+        "mu10ReferencePeriodAgreement": { "max": 1e-11 }
+    }
+}

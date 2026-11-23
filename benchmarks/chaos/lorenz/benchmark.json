@@ -1,0 +1,91 @@
+{
+    "title": "Lorenz system",
+    "summary": "The Lorenz system (σ = 10, ρ = 28, β = 8/3) from (1, 1, 1), as one node and as two: trajectory error against a 70-digit Taylor reference and the predictability horizon of each method and step, then what survives chaos: the attractor's statistics and the largest Lyapunov exponent against a SciPy ensemble, for explicit and semi-implicit Euler and Runge–Kutta 4.",
+    "horizonTolerance": 0.01,
+    "trajectory": {
+        "targetTime": 24,
+        "outputInterval": 0.015625,
+        "shortHorizon": 8,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeStep": 0.000244140625, "identity": true },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.000244140625, "identity": false },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.0078125, "identity": true }
+        ]
+    },
+    "horizonStudy": {
+        "methods": [
+            { "variant": { "integration": "explicit" }, "order": 1, "targetTime": 16, "checkGain": false, "globalTimeSteps": [0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125] },
+            { "variant": { "method": "rungeKutta4" }, "order": 4, "targetTime": 32, "checkGain": true, "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625] }
+        ]
+    },
+    "convergence": {
+        "targetTime": 2,
+        "outputInterval": 0.015625,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeSteps": [0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125] },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeSteps": [0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125] },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125] }
+        ]
+    },
+    "statistics": {
+        "targetTime": 520,
+        "outputInterval": 0.0625,
+        "transient": 20,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeStep": 0.001953125 },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.001953125 },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.0078125, "key": "RungeKutta4Coarse" },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
+        ]
+    },
+    "timing": [
+        { "label": "One node with tangent equations, Runge–Kutta 4, 66,560 steps", "model": "tangent", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.0078125, "targetTime": 520, "outputInterval": 0.0625 } },
+        { "label": "Two nodes, explicit Euler, 98,304 steps", "model": "twoNodes", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.000244140625, "targetTime": 24, "outputInterval": 0.015625 } }
+    ],
+    "thresholds": {
+        "shortRelativeErrorExplicit": { "max": 0.0092 },
+        "horizonExplicit": { "min": 9.7, "max": 12 },
+        "shortRelativeErrorSemiImplicit": { "max": 0.0026 },
+        "horizonSemiImplicit": { "min": 10, "max": 13 },
+        "shortRelativeErrorRungeKutta4": { "max": 8.9e-06 },
+        "horizonRungeKutta4": { "min": 16, "max": 21 },
+        "referenceDop853Horizon": { "min": 30, "max": 38 },
+        "referenceTaylorSelfAgreement": { "max": 1e-20 },
+        "horizonExplicitStep1": { "min": 0.25, "max": 0.31 },
+        "horizonExplicitStep2": { "min": 5.2, "max": 6.4 },
+        "horizonExplicitStep3": { "min": 9.7, "max": 12 },
+        "horizonExplicitStep4": { "min": 10, "max": 13 },
+        "horizonRungeKutta4Step1": { "min": 12, "max": 16 },
+        "horizonRungeKutta4Step2": { "min": 16, "max": 21 },
+        "horizonRungeKutta4Step3": { "min": 19, "max": 24 },
+        "horizonRungeKutta4Step4": { "min": 22, "max": 28 },
+        "horizonRungeKutta4Step5": { "min": 24, "max": 31 },
+        "horizonGainPerHalvingRungeKutta4": { "min": 0.8, "max": 1.3 },
+        "orderExplicit": { "min": 0.95, "max": 1.1 },
+        "finestOrderExplicit": { "min": 0.97, "max": 1.03 },
+        "orderSemiImplicit": { "min": 0.95, "max": 1.1 },
+        "finestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
+        "orderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "finestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "splitDifferenceExplicit": { "max": 1e-12 },
+        "splitDifferenceSemiImplicit": { "min": 0.0035, "max": 0.0056 },
+        "splitDifferenceRungeKutta4": { "max": 1e-12 },
+        "meanZScoreExplicit": { "min": 5.2, "max": 8.2 },
+        "standardDeviationZScoreExplicit": { "min": 1.5, "max": 2.5 },
+        "rmsXScoreExplicit": { "min": 6.3, "max": 10 },
+        "lyapunovExponentScoreExplicit": { "min": 3.1, "max": 4.9 },
+        "meanZScoreSemiImplicit": { "min": 0.88, "max": 1.4 },
+        "standardDeviationZScoreSemiImplicit": { "min": 0.16, "max": 0.26 },
+        "rmsXScoreSemiImplicit": { "min": 2.2, "max": 3.5 },
+        "lyapunovExponentScoreSemiImplicit": { "min": 2, "max": 3.2 },
+        "meanZScoreRungeKutta4Coarse": { "min": 1.6, "max": 2.7 },
+        "standardDeviationZScoreRungeKutta4Coarse": { "min": 1.7, "max": 2.8 },
+        "rmsXScoreRungeKutta4Coarse": { "min": 1.6, "max": 2.6 },
+        "lyapunovExponentScoreRungeKutta4Coarse": { "min": 1.8, "max": 3 },
+        "meanZScoreRungeKutta4": { "max": 3 },
+        "standardDeviationZScoreRungeKutta4": { "max": 3 },
+        "rmsXScoreRungeKutta4": { "max": 3 },
+        "lyapunovExponentScoreRungeKutta4": { "max": 3 },
+        "referenceLyapunovAgainstLiterature": { "max": 3 }
+    }
+}

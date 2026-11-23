@@ -13,6 +13,9 @@ import * as graphSplit from './coupling/graphSplit/problem.mjs';
 import * as convergenceOrder from './verification/convergenceOrder/problem.mjs';
 import * as graphScalability from './scaling/graphScalability/problem.mjs';
 import * as causalReconstruction from './causal/reconstruction/problem.mjs';
+import * as vanDerPol from './oscillators/vanDerPol/problem.mjs';
+import * as lorenz from './chaos/lorenz/problem.mjs';
+import * as doublePendulum from './mechanical/doublePendulum/problem.mjs';
 
 export const problems = [
     { id: 'thermal/rcNetwork', directory: rcNetwork.directory, models: rcNetwork.models, evaluate: rcNetwork.evaluate },
@@ -23,5 +26,8 @@ export const problems = [
     { id: 'verification/convergenceOrder', directory: convergenceOrder.directory, models: {}, evaluate: convergenceOrder.evaluate },
     { id: 'coupling/graphSplit', directory: graphSplit.directory, models: graphSplit.models, evaluate: graphSplit.evaluate },
     { id: 'scaling/graphScalability', directory: graphScalability.directory, models: graphScalability.models, evaluate: graphScalability.evaluate, measure: graphScalability.measure },
-    { id: 'causal/reconstruction', directory: causalReconstruction.directory, models: causalReconstruction.models, evaluate: causalReconstruction.evaluate }
+    { id: 'causal/reconstruction', directory: causalReconstruction.directory, models: causalReconstruction.models, evaluate: causalReconstruction.evaluate },
+    { id: 'oscillators/vanDerPol', directory: vanDerPol.directory, models: vanDerPol.models, evaluate: vanDerPol.evaluate },
+    { id: 'chaos/lorenz', directory: lorenz.directory, models: lorenz.models, evaluate: lorenz.evaluate },
+    { id: 'mechanical/doublePendulum', directory: doublePendulum.directory, models: doublePendulum.models, evaluate: doublePendulum.evaluate }
 ];

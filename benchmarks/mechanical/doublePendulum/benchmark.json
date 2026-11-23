@@ -1,0 +1,59 @@
+{
+    "title": "Double pendulum",
+    "summary": "A double pendulum released from rest with both arms horizontal, one node: trajectory error and predictability horizon against a SciPy DOP853 reference, energy over a long run (explicit and semi-implicit Euler against Runge–Kutta 4), sensitivity to a 1e-9 rad change in the starting angle, and the observed order.",
+    "horizonAngle": 0.1,
+    "trajectory": {
+        "targetTime": 20,
+        "outputInterval": 0.015625,
+        "shortHorizon": 5,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeStep": 0.00048828125 },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.00048828125 },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
+        ]
+    },
+    "energy": {
+        "targetTime": 60,
+        "outputInterval": 0.0625,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeStep": 0.00048828125 },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.00048828125 },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
+        ]
+    },
+    "convergence": {
+        "targetTime": 2,
+        "outputInterval": 0.015625,
+        "methods": [
+            { "variant": { "integration": "explicit" }, "globalTimeSteps": [0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125] },
+            { "variant": { "integration": "semiImplicit" }, "globalTimeSteps": [0.00390625, 0.001953125, 0.0009765625, 0.00048828125, 0.000244140625, 0.0001220703125] },
+            { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.00390625, 0.001953125, 0.0009765625, 0.00048828125] }
+        ]
+    },
+    "timing": [
+        { "label": "Runge–Kutta 4, 15,360 steps", "model": "doublePendulum", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 60, "outputInterval": 0.0625 } }
+    ],
+    "thresholds": {
+        "shortRelativeErrorExplicit": { "max": 0.31 },
+        "horizonExplicit": { "min": 2.9, "max": 3.7 },
+        "sensitivityTimeExplicit": { "max": 0.63 },
+        "shortRelativeErrorSemiImplicit": { "max": 0.023 },
+        "horizonSemiImplicit": { "min": 5.4, "max": 6.8 },
+        "sensitivityTimeSemiImplicit": { "max": 1.8 },
+        "shortRelativeErrorRungeKutta4": { "max": 8.8e-07 },
+        "horizonRungeKutta4": { "min": 11, "max": 14 },
+        "sensitivityTimeRungeKutta4": { "max": 0.36 },
+        "referenceTrustedTime": { "min": 15, "max": 19 },
+        "referenceOwnError": { "max": 1e-09 },
+        "referenceEnergyDrift": { "max": 1e-10 },
+        "energyDriftExplicit": { "min": 0.12, "max": 0.2 },
+        "energyDriftSemiImplicit": { "min": 0.065, "max": 0.11 },
+        "energyDriftRungeKutta4": { "max": 2.6e-06 },
+        "orderExplicit": { "min": 0.95, "max": 1.1 },
+        "finestOrderExplicit": { "min": 0.97, "max": 1.03 },
+        "orderSemiImplicit": { "min": 0.95, "max": 1.1 },
+        "finestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
+        "orderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "finestOrderRungeKutta4": { "min": 3.9, "max": 4.1 }
+    }
+}

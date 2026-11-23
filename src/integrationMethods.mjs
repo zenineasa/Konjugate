@@ -73,21 +73,8 @@ export function dialogMethodOf(method) {
     return stiffSolvers.some((solver) => solver.id === method) ? 'rodas4' : method;
 }
 
-// Whether a stiff model suits BDF better than the Rosenbrock solver (the user's decision, docs/proposals/integrators.md, BDF): many
-// integrated states, and few discontinuities -- no stored schedules, no Updates or values set from other states, no live parameters,
-// and no node that is a program of its own (stepped, and read held, every global step) -- each of which starts BDF's history again.
-export const bdfStateThreshold = 2000;
-export function bdfSuits(document) {
-    const nodes = (document?.nodes ?? []).filter((node) => node.enabled !== false);
-    const states = nodes.reduce((sum, node) => sum + (node.states ?? []).filter((state) => state.kind !== 'update').length, 0);
-    if (states < bdfStateThreshold) return false;
-    if ((document?.sharedParameters ?? []).some((parameter) => parameter.schedule)) return false;
-    const jumps = (parameters) => (parameters ?? []).some((parameter) => parameter.mode === 'live' || parameter.schedule);
-    if (nodes.some((node) => node.implementation || (node.states ?? []).some((state) => state.kind === 'update')
-        || (node.sourceTerms ?? []).some((term) => term.setsValue === true || jumps(term.parameters)))) return false;
-    if ((document?.edges ?? []).some((edge) => edge.enabled !== false && jumps(edge.parameters))) return false;
-    return true;
-}
+// A stiffness finding offers "Use Stiff" with the Rosenbrock solver at every size, never BDF (the user's decision, 23 November 2026,
+// docs/proposals/integrators.md, BDF): BDF is chosen only by hand, under Stiff, and the "?" guide says when to try it.
 
 // Choosing a method: the short guide the Run dialog's "?" opens (beside Method, the Stiff solver and a node's Integration), and the one
 // source of docs/choosingAMethod.md (methodGuideMarkdown; scripts/writeMethodGuide.mjs writes it, and a test checks it is current). Each

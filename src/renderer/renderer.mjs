@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { bdfSuits, benchmarkEvidenceUrl, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodGuide, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { benchmarkEvidenceUrl, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodGuide, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -6244,20 +6244,20 @@ function renderValidationStatus() {
 }
 
 // "Use Stiff", offered where a finding says the model is stiff (docs/proposals/integrators.md, In the app): one click sets the active run
-// configuration's method to Stiff, its tolerances kept, as one undoable step. Its solver is BDF only where the model suits it -- many
-// states and few jumps (bdfSuits), and no intervention in the result on screen -- and the Rosenbrock solver otherwise.
+// configuration's method to Stiff, its tolerances kept, as one undoable step. Its solver is always Rosenbrock, at any size: BDF is chosen
+// only by hand, under Stiff (the user's decision, docs/proposals/integrators.md, BDF).
 function useStiffButton() {
-    const solver = bdfSuits(serializeProjectDocument()) && !(activeResult?.interventions?.length) ? 'bdf' : stiffIntegrationMethod;
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'useStiffMethod';
-    button.textContent = solver === 'bdf' ? 'Use Stiff (BDF)' : 'Use Stiff';
-    button.title = solver === 'bdf' ? stiffSolvers.find((entry) => entry.id === 'bdf').description : integrationMethod(stiffIntegrationMethod).description;
-    button.addEventListener('click', () => useStiffMethod(solver));
+    button.textContent = 'Use Stiff';
+    button.title = integrationMethod(stiffIntegrationMethod).description;
+    button.addEventListener('click', () => useStiffMethod());
     return button;
 }
 
-async function useStiffMethod(solver = stiffIntegrationMethod) {
+async function useStiffMethod() {
+    const solver = stiffIntegrationMethod;
     // The model is locked while a result is shown: close it first, as applying a substep fix does.
     if (activeResult) await discardResultPlayback();
     const before = structuredClone(activeRunConfiguration());
@@ -6265,7 +6265,7 @@ async function useStiffMethod(solver = stiffIntegrationMethod) {
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
-    $('#statusText').textContent = solver === 'bdf' ? 'The model now runs with Stiff, its BDF solver (Run settings).' : 'The model now runs with Stiff (Run settings).';
+    $('#statusText').textContent = 'The model now runs with Stiff (Run settings).';
 }
 
 // An undamped oscillation that Explicit Euler grows is fixed by semi-implicit Euler for its node (docs/proposals/integrators.md,

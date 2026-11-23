@@ -4,7 +4,7 @@
 // --output result.bin` (docs/engineCli.md), then decodes the result with the app's own decoder.
 //
 // A benchmark model is a committed .kjt. A run may apply a variant to it first, and only these, recorded with every result:
-//   integration  every node's numerics.integration ("explicit" or "semiImplicit")
+//   integration  every node's numerics.integration ("explicit", "semiImplicit" or "verlet")
 //   substeps     every node's numerics.substepsPerGlobalStep
 //   method       the run's method ("rungeKutta4" or "dormandPrince54"; docs/proposals/integrators.md), its stepsPerGlobalStep and
 //                Adaptive's tolerance, set on the run configuration the engine is given rather than on the model
@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { decodeResultFile } from '../../src/engineProtocol.mjs';
 import { decodeProjectFile, encodeProjectFile } from '../../src/projectFile.mjs';
+import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 
 export const repositoryRoot = join(import.meta.dirname, '..', '..');
 
@@ -79,6 +80,12 @@ export function createEngine(executable, workDirectory) {
             const reportPath = join(workDirectory, 'validation.bin');
             const { code, diagnostics } = await execute(executable, ['validate', modelPath, '--report', reportPath]);
             if (code !== 0) throw new Error(`${modelPath} did not validate (exit ${code}). ${diagnostics}`);
+        },
+        // The validation issues of a model with a variant applied, as the engine reports them: a model it refuses to run says why here.
+        async issues(modelPath, variant) {
+            const reportPath = join(workDirectory, 'variantValidation.bin');
+            await execute(executable, ['validate', await modelFile(modelPath, variant), '--report', reportPath]);
+            return decodeValidationReport(await readFile(reportPath)).issues ?? [];
         },
         // run: { globalTimeStep, targetTime, outputInterval }. Returns the sampled times, each state's samples by state ID, and the work the
         // engine reports: global steps, node substeps executed and contributions evaluated, summed over nodes. execution: the run

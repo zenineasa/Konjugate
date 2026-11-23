@@ -2,7 +2,8 @@
 
 // Convergence order: the verification argument. For each problem with an exact solution, the error is measured at the same sample
 // times while the global step is halved several times, and the observed order p in error ≈ C hᵖ is reported, from each halving and as
-// the least-squares slope over all of them. Explicit and semi-implicit Euler are first order, so p ≈ 1 is expected of them; Runge–Kutta
+// the least-squares slope over all of them. Explicit and semi-implicit Euler are first order, so p ≈ 1 is expected of them, and Verlet,
+// on the oscillator and the pendulum (whose rates split into positions and speeds, as Verlet needs), second order, p ≈ 2; Runge–Kutta
 // 4, the whole model at once (docs/proposals/integrators.md), is fourth order, judged over halvings of its own (rungeKutta4GlobalSteps)
 // chosen where its error is still well above rounding and its step inside its stability region; Dormand–Prince 5(4) with its error
 // control off (one fixed step a global step) is fifth order, over halvings of its own (dormandPrince54GlobalSteps). A different order
@@ -63,11 +64,12 @@ export async function evaluate({ engine, config }) {
             const order = observedOrder(steps, errors);
             rows.at(-1).observedOrder = order.fitted;
             rows.at(-1).note = `observed order: fitted ${order.fitted.toFixed(3)}; per halving ${order.pairwise.map((value) => value.toFixed(3)).join(', ')}`;
-            const method = { explicit: 'Explicit', semiImplicit: 'SemiImplicit', rungeKutta4: 'RungeKutta4', dormandPrince54: 'DormandPrince54' }[integration];
+            const method = { explicit: 'Explicit', semiImplicit: 'SemiImplicit', verlet: 'Verlet', rungeKutta4: 'RungeKutta4', dormandPrince54: 'DormandPrince54' }[integration];
             add(`${key}Order${method}`, order.fitted, `${study.title}, ${methodName(variant)}: observed order, least-squares over ${steps.length} step sizes`);
             add(`${key}FinestOrder${method}`, order.finest, `${study.title}, ${methodName(variant)}: observed order from the finest halving`);
             plotSeries.push(series(`Konjugate, ${methodName(variant)}`, integration, steps, errors));
             if (rungeKutta4) plotSeries.push(series('Fourth order (slope 4)', 'guide', steps, steps.map((step) => errors[0] * (step / steps[0]) ** 4)));
+            if (integration === 'verlet') plotSeries.push(series('Second order (slope 2)', 'guide', steps, steps.map((step) => errors[0] * (step / steps[0]) ** 2)));
             if (dormandPrince) plotSeries.push(series('Fifth order (slope 5)', 'guide', steps, steps.map((step) => errors[0] * (step / steps[0]) ** 5)));
             workSeries.push(series(`Konjugate, ${methodName(variant)}`, integration, errors, evaluations));
             if (integration === settings.methods[0]) {
@@ -110,6 +112,7 @@ export async function evaluate({ engine, config }) {
     }
     return { rows, checks, plots, notes: [
         'The thermal network is shown for explicit Euler only: every node holds one state, so semi-implicit integration gives the same numbers (checked in thermal/rcNetwork).',
-        'Dormand–Prince 5(4) at fixed steps is not judged on the thermal network: its error passes from steps too long to show the order straight to the reference\'s own rounding (about 3e-12 relative), with no halving clean of both between; it is judged there by tolerance only.'
+        'Dormand–Prince 5(4) at fixed steps is not judged on the thermal network: its error passes from steps too long to show the order straight to the reference\'s own rounding (about 3e-12 relative), with no halving clean of both between; it is judged there by tolerance only.',
+        'Verlet is shown for the oscillator and the pendulum only: in the thermal network and the RLC circuits a state\'s rate reads that state itself (a loss), which Verlet refuses.'
     ] };
 }

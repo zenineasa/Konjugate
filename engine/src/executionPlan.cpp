@@ -1048,6 +1048,59 @@ StateKinds scanStateKinds(const boost::property_tree::ptree& document) {
 
 }
 
+namespace {
+
+// A Verlet node's two parts (NodeExecutionPlan::verlet): the states before the first one whose rate reads a state listed
+// before it, and the rest. Only states with a rate count, and only what equations read: an Update holds its value through
+// the step, and a term written as a program is held through the substep, so neither ties one state to another within it.
+// Each rate may read only states of the other part; the first that does not is refused, in words.
+void assignVerletParts(NodeExecutionPlan& node, const std::unordered_map<EntityId, std::string>& names) {
+    if (node.nodeProvider) throw VerletStructureError(node.nodeId, "A node with a computational-node provider is integrated explicitly.");
+    const auto count = node.stateIds.size();
+    std::unordered_map<EntityId, std::size_t> localIndexes;
+    for (std::size_t index = 0; index < count; ++index) localIndexes[node.stateIds[index]] = index;
+    std::vector<bool> hasRate(count, false);
+    for (const auto& task : node.contributions) hasRate[task.outputStateIndex] = true;
+    // Per state, the states with a rate its equations read, in the order the node lists them.
+    std::vector<std::vector<std::size_t>> reads(count);
+    for (const auto& task : node.contributions) {
+        if (task.implementation != ContributionImplementation::equation) continue;
+        for (const auto stateId : localStatesRead(task)) {
+            const auto found = localIndexes.find(stateId);
+            if (found == localIndexes.end() || !hasRate[found->second]) continue;
+            auto& list = reads[task.outputStateIndex];
+            if (std::find(list.begin(), list.end(), found->second) == list.end()) list.push_back(found->second);
+        }
+    }
+    for (auto& list : reads) std::sort(list.begin(), list.end());
+    std::size_t split = count;
+    for (std::size_t index = 0; index < count && split == count; ++index) {
+        if (!reads[index].empty() && reads[index].front() < index) split = index;
+    }
+    node.verletKicked.assign(count, false);
+    for (std::size_t index = 0; index < split; ++index) node.verletKicked[index] = hasRate[index];
+    const auto name = [&](EntityId id) {
+        const auto found = names.find(id);
+        return found == names.end() || found->second.empty() ? std::to_string(id) : found->second;
+    };
+    for (std::size_t index = 0; index < count; ++index) {
+        for (const auto read : reads[index]) {
+            if (read != index && node.verletKicked[read] != node.verletKicked[index]) continue;
+            const auto splitText = split == count ? std::string("none of its states reads one listed before it, so they are all one part")
+                : "the second part starts at " + name(node.stateIds[split]) + ", the first state whose rate reads one listed before it";
+            const auto problem = read == index ? "the rate of " + name(node.stateIds[index]) + " reads " + name(node.stateIds[index]) + " itself"
+                : "the rate of " + name(node.stateIds[index]) + " reads " + name(node.stateIds[read]) + ", in the same part";
+            throw VerletStructureError(node.nodeId, "Node \"" + name(node.nodeId) + "\" cannot be integrated with Verlet: " + problem +
+                ". Verlet splits a node's states, in their listed order, in two parts and moves each from the other, so a state's "
+                "rate may read only states of the other part, as a position's reads its speed and a speed's reads positions (here " +
+                splitText + "). Reorder the states, or choose semi-implicit Euler for this node, or Runge–Kutta 4 for the whole model "
+                "in the Run settings.");
+        }
+    }
+}
+
+}
+
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     checkRequiredFeatures(document);
     const auto sharedParameters = collectSharedParameters(document);
@@ -1055,6 +1108,8 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
     std::unordered_map<EntityId, std::shared_ptr<const ParameterSchedule>> storedSchedules;
     ExecutionPlan plan;
     std::unordered_map<EntityId, std::size_t> nodeIndexes;
+    // The names of Verlet nodes and their states, for saying in words why one cannot be integrated so.
+    std::unordered_map<EntityId, std::string> verletNames;
     // A disabled node contributes no state and no contribution tasks -- exactly as if it, and
     // every edge touching it, had been deleted from the model. Tracked so the edge loop below
     // can skip edges into a disabled node too, since their endpoint's state was never allocated.
@@ -1069,8 +1124,15 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
         compiledNode.nodeId = idValue(node, "id");
         compiledNode.substeps = node.get<std::size_t>("numerics.substepsPerGlobalStep", 1);
         const auto integration = node.get<std::string>("numerics.integration", "explicit");
-        if (integration != "explicit" && integration != "semiImplicit") throw std::runtime_error("A node's numerics.integration must be explicit or semiImplicit.");
+        if (integration != "explicit" && integration != "semiImplicit" && integration != "verlet") {
+            throw std::runtime_error("A node's numerics.integration must be explicit, semiImplicit or verlet.");
+        }
         compiledNode.semiImplicit = integration == "semiImplicit";
+        compiledNode.verlet = integration == "verlet";
+        if (compiledNode.verlet) {
+            verletNames[compiledNode.nodeId] = value(node, "name");
+            for (const auto& stateItem : node.get_child("states")) verletNames[idValue(stateItem.second, "id")] = value(stateItem.second, "name");
+        }
         // How its Updates are worked out: settled within the step, or once per step; a legacy document settles them all.
         const auto updates = value(node, "updates");
         if (!updates.empty() && updates != "oncePerStep" && updates != "settle") throw std::runtime_error("A node's updates must be oncePerStep or settle.");
@@ -1333,6 +1395,7 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             buildContribution(otherNodeId, otherStateId, true);
         }
     }
+    for (auto& node : plan.nodes) if (node.verlet) assignVerletParts(node, verletNames);
     orderAlgebraicOutputs(plan);
     buildUpdatePhase(plan);
     std::sort(plan.stateIds.begin(), plan.stateIds.end());
@@ -1718,6 +1781,65 @@ void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const
     }
 }
 
+namespace {
+
+// Störmer–Verlet over one global step's substeps (NodeExecutionPlan::verlet). Each substep of size h from t: the first part
+// moves by h/2 with its rates read at t, the second by h with its rates read at t + h/2 from the first part's new values,
+// and the first by h/2 again with its rates read at t + h from the second part's new values. Within the global step
+// nothing a rate reads changes between one substep's end and the next one's start, so the rates read at a substep's end
+// are the next substep's rates at its start, evaluated once. Other nodes are read from the snapshot throughout, as under
+// Euler: across nodes the step stays first order. A term written as a program is held: evaluated once at the substep's
+// start, with the states then, and added to its state's rate through the substep.
+StateValues integrateVerletNode(const NodeExecutionPlan& node, StateValues localStates, const StateValues& synchronizationSnapshot,
+                                const EntityValues& liveParameterValues, double simulationTime, double nodeTimeStep,
+                                ProviderEvaluator* providerEvaluator, const std::vector<ParameterSchedule>& activeSchedules,
+                                bool hasSchedules) {
+    NodeExecutionPlan kickTasks;
+    NodeExecutionPlan driftTasks;
+    NodeExecutionPlan heldTasks;
+    std::vector<std::size_t> kicked;
+    std::vector<std::size_t> drifted;
+    for (const auto& task : node.contributions) {
+        const bool first = node.verletKicked.at(task.outputStateIndex);
+        auto& indexes = first ? kicked : drifted;
+        if (std::find(indexes.begin(), indexes.end(), task.outputStateIndex) == indexes.end()) indexes.push_back(task.outputStateIndex);
+        (task.implementation != ContributionImplementation::equation ? heldTasks : first ? kickTasks : driftTasks).contributions.push_back(task);
+    }
+    const auto resolve = [&](const NodeExecutionPlan& group, double time) {
+        return resolveParameterValues(group.contributions, liveParameterValues, activeSchedules, time);
+    };
+    const auto rates = [&](const NodeExecutionPlan& group, const NodeParameterValues& parameters, double time) {
+        std::vector<double> result(localStates.size(), 0.0);
+        if (group.contributions.empty()) return result;
+        const auto evaluated = evaluateContributionTasks(group, localStates, synchronizationSnapshot, parameters, time, nodeTimeStep, providerEvaluator);
+        for (const auto& [index, rate] : reduceContributions(evaluated)) result.at(index) = rate;
+        return result;
+    };
+    auto kickParameters = resolve(kickTasks, simulationTime);
+    auto driftParameters = resolve(driftTasks, simulationTime + 0.5 * nodeTimeStep);
+    auto heldParameters = resolve(heldTasks, simulationTime);
+    const auto half = 0.5 * nodeTimeStep;
+    std::vector<double> kick;
+    for (std::size_t substep = 0; substep < node.substeps; ++substep) {
+        const double start = simulationTime + static_cast<double>(substep) * nodeTimeStep;
+        const double middle = start + half;
+        const double end = simulationTime + static_cast<double>(substep + 1) * nodeTimeStep;
+        if (hasSchedules && substep > 0) heldParameters = resolve(heldTasks, start);
+        const auto held = rates(heldTasks, heldParameters, start);
+        if (substep == 0) kick = rates(kickTasks, kickParameters, start);
+        for (const auto index : kicked) localStates[index] += half * (kick[index] + held[index]);
+        if (hasSchedules && substep > 0) driftParameters = resolve(driftTasks, middle);
+        const auto drift = rates(driftTasks, driftParameters, middle);
+        for (const auto index : drifted) localStates[index] += nodeTimeStep * (drift[index] + held[index]);
+        if (hasSchedules) kickParameters = resolve(kickTasks, end);
+        kick = rates(kickTasks, kickParameters, end);
+        for (const auto index : kicked) localStates[index] += half * (kick[index] + held[index]);
+    }
+    return localStates;
+}
+
+}
+
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const StateValues& synchronizationSnapshot,
                                     const EntityValues& liveParameterValues,
@@ -1741,6 +1863,12 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     // intervention pays zero extra allocation cost even at node.substeps in the hundreds/thousands
     // (multi-rate models like HFT order routing per docs/proposals/fintechToolbox.md).
     const auto hasSchedules = !activeSchedules.empty() || node.hasParameterSchedules;
+    if (node.verlet) {
+        auto result = integrateVerletNode(node, std::move(localStates), synchronizationSnapshot, liveParameterValues, simulationTime,
+            nodeTimeStep, providerEvaluator, activeSchedules, hasSchedules);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
+        return {std::move(result), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+    }
     auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
     // Semi-implicit: the node's contributions, one group per state it updates, in the node's order.
     std::vector<NodeExecutionPlan> semiImplicitTasks;

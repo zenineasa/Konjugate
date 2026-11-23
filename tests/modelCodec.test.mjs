@@ -56,6 +56,15 @@ test('a node with only the required fields comes back with nothing invented', ()
     assert.deepEqual(nodeToDocument(nodeFromDocument(plain, context), context), plain);
 });
 
+test('a Verlet node keeps its integration, which is written only when chosen', () => {
+    const plain = { id: 1, name: 'Plain', type: 'Custom node', enabled: true, numerics: { substepsPerGlobalStep: 1 }, position: [0, 0, 0], states: [], sourceTerms: [], appearance: { type: 'primitive', shape: 'box', color: '#34727a' } };
+    const verlet = { ...plain, numerics: { substepsPerGlobalStep: 2, integration: 'verlet' } };
+    assert.equal(nodeFromDocument(verlet, context).integration, 'verlet');
+    assert.deepEqual(nodeToDocument(nodeFromDocument(verlet, context), context), verlet);
+    const explicit = nodeToDocument({ ...nodeFromDocument(verlet, context), integration: 'explicit' }, context);
+    assert.deepEqual(explicit.numerics, { substepsPerGlobalStep: 2 });
+});
+
 test('a node dropped somewhere else takes the place it is given and keeps its description', () => {
     const definition = nodeFromDocument(node, context, { subsystemId: null });
     assert.equal(definition.subsystemId, null);

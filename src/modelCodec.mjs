@@ -60,7 +60,7 @@ export function nodeFromDocument(node, context, { subsystemId } = {}) {
         deleted: false,
         enabled: node.enabled !== false,
         substepsPerGlobalStep: Math.max(1, Math.min(10000, Number(node.numerics?.substepsPerGlobalStep) || 1)),
-        integration: node.numerics?.integration === 'semiImplicit' ? 'semiImplicit' : 'explicit',
+        integration: ['semiImplicit', 'verlet'].includes(node.numerics?.integration) ? node.numerics.integration : 'explicit',
         // How its Updates are worked out (docs/proposals/ratesAndUpdates.md), as the file says it: absent means once per step
         // in a file that says its states' kinds, and settling in one that does not.
         ...(node.updates !== undefined ? { updates: node.updates } : {}),
@@ -105,7 +105,7 @@ export function nodeToDocument(definition, context) {
         ...(definition.subsystemId === null ? {} : { subsystemId: definition.subsystemId }),
         enabled: definition.enabled !== false,
         // integration is written only when it is not the default, so other models save exactly as before.
-        numerics: { substepsPerGlobalStep: definition.substepsPerGlobalStep, ...(definition.integration === 'semiImplicit' ? { integration: 'semiImplicit' } : {}) },
+        numerics: { substepsPerGlobalStep: definition.substepsPerGlobalStep, ...(['semiImplicit', 'verlet'].includes(definition.integration) ? { integration: definition.integration } : {}) },
         position,
         // Omitted when at the identity value, like subsystemId above -- keeps a node that was never rotated or scaled
         // serializing exactly as it did before these fields existed, rather than growing every node's JSON with inert

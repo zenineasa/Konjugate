@@ -1008,8 +1008,10 @@
                     <label class="editorField"><span>Integration</span><select id="editNodeIntegration">
                         <option value="explicit">Explicit Euler</option>
                         <option value="semiImplicit">Semi-implicit Euler (states in order)</option>
+                        <option value="verlet">Verlet, second order (states in two parts)</option>
                     </select></label>
-                    <p class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy. Reorder the states on the Equations tab with their ↑ and ↓ buttons, or Alt (⌥ on a Mac) with the arrow keys.</p>
+                    <p id="nodeVerletHint" class="builderHint" hidden>Verlet moves the node's states in two parts, split at the first state whose rate reads one listed above it: the first part half a step, the second a whole step, then the first the other half. It is second order, and an oscillation keeps its energy. Each state's rate may read only the other part, as a position reads its speed and a speed reads positions, so a damped speed is refused, with the reason. Other nodes are read as they were at the start of the global step, so between nodes it is still first order.</p>
+                    <p id="nodeSemiImplicitHint" class="builderHint">Semi-implicit updates the node's states one after another in their listed order, each from the states updated before it: list a speed before the position it moves, and an oscillation keeps its energy. Reorder the states on the Equations tab with their ↑ and ↓ buttons, or Alt (⌥ on a Mac) with the arrow keys.</p>
                     <p class="builderHint">The node timestep is the global timestep divided by this integer. Cross-node values remain fixed until the next global synchronization.</p>
                     <div class="derivedTimeStep">Effective timestep <strong id="nodeEffectiveTimeStep">—</strong></div>
                 </section>

@@ -177,6 +177,59 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
         }
     }
 
+    // A Verlet node (NodeExecutionPlan::verlet): one substep of the linearized node y' = J y is K D K, K moving the first
+    // part's states by half a step (I + h/2 J on their rows) and D the second's by a whole one (I + h J on theirs), so its
+    // amplification is the spectral radius of K D K, not Euler's |1 + h λ|. Each part's rates read only the other's, so J's
+    // eigenvalues come in pairs ±μ: an oscillation (μ imaginary) is stable up to a step (h |μ| ≤ 2 for one), and any other
+    // pair has a growing mode that no substep count stabilizes.
+    if (node.verlet) {
+        const auto size = static_cast<Eigen::Index>(stateCount);
+        const auto amplificationAt = [&](double stepSize) {
+            Eigen::MatrixXd kick = Eigen::MatrixXd::Identity(size, size);
+            Eigen::MatrixXd drift = Eigen::MatrixXd::Identity(size, size);
+            for (Eigen::Index row = 0; row < size; ++row) {
+                if (node.verletKicked.at(differentialLocalIndices[static_cast<std::size_t>(row)])) kick.row(row) += 0.5 * stepSize * jacobian.row(row);
+                else drift.row(row) += stepSize * jacobian.row(row);
+            }
+            const Eigen::MatrixXd step = kick * drift * kick;
+            return step.eigenvalues().cwiseAbs().maxCoeff();
+        };
+        const auto stableAt = [&](std::size_t substeps) { return amplificationAt(globalTimeStep / static_cast<double>(substeps)) <= 1.0 + 1e-6; };
+        assessment.maxAmplificationFactor = std::max(idleStateCount ? 1.0 : 0.0, amplificationAt(nodeStepSize));
+        assessment.stable = assessment.maxAmplificationFactor <= 1.0 + 1e-6;
+        assessment.unconditionallyUnstable = false;
+        assessment.requiredSubsteps.reset();
+        const auto& eigenvalues = solver.eigenvalues();
+        bool growing = false;
+        for (Eigen::Index index = 0; index < eigenvalues.size(); ++index) growing = growing || eigenvalues(index).real() > neutralRate;
+        // The mode the finding names: the fastest growing one if there is one, else the fastest oscillation, which limits the step.
+        dominantIndex = 0;
+        for (Eigen::Index index = 1; index < eigenvalues.size(); ++index) {
+            const auto eigenvalue = eigenvalues(index);
+            const auto dominant = eigenvalues(dominantIndex);
+            if (growing ? eigenvalue.real() > dominant.real() : std::abs(eigenvalue) > std::abs(dominant)) dominantIndex = index;
+        }
+        if (!assessment.stable) {
+            constexpr std::size_t mostSubsteps = 10000;
+            std::size_t low = node.substeps;
+            std::size_t high = node.substeps;
+            while (!growing && high < mostSubsteps && !stableAt(high)) {
+                low = high;
+                high = std::min(mostSubsteps, high * 2);
+            }
+            if (growing || !stableAt(high)) {
+                assessment.unconditionallyUnstable = true;
+            } else {
+                // The fewest substeps from low (unstable) to high (stable) that are stable.
+                while (high - low > 1) {
+                    const auto middle = low + (high - low) / 2;
+                    (stableAt(middle) ? high : low) = middle;
+                }
+                assessment.requiredSubsteps = high;
+            }
+        }
+    }
+
     // Attribution, not just detection (see this function's own doc comment): only worth the extra
     // evaluations once a node is actually flagged. The dominant eigenvalue's eigenvector says which
     // single state the unstable mode is concentrated in; every task feeding that state's own

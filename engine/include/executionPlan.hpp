@@ -290,6 +290,13 @@ public:
     }
 };
 
+// A node whose integration is "verlet" but whose rates do not split into two parts, each read only by the other: what is
+// wrong, in words, and the node it is on (the validator files it against the node's Numerics tab).
+struct VerletStructureError : std::runtime_error {
+    VerletStructureError(EntityId node, const std::string& message) : std::runtime_error(message), nodeId(node) {}
+    EntityId nodeId;
+};
+
 struct NodeExecutionPlan {
     EntityId nodeId = 0;
     std::size_t substeps = 1;
@@ -299,6 +306,18 @@ struct NodeExecutionPlan {
     // speed: semi-implicit, or symplectic, Euler). Otherwise every state is updated together from
     // the substep's starting values (explicit Euler).
     bool semiImplicit = false;
+    // numerics.integration "verlet": Störmer–Verlet, second order and symplectic (docs/proposals/integrators.md, Verlet,
+    // node by node). The node's states, in the order it lists them, fall in two parts: those before the first state whose
+    // rate reads a state listed before it, and the rest. Each substep moves the first part by half a step, the second by a
+    // whole step from the first's new values, and the first by the other half from the second's new values: a speed
+    // listed before the position it moves gives velocity Verlet, a position listed before its speed position Verlet. A
+    // state's rate may read only states of the other part (compileExecutionPlan refuses a node whose rates do not, naming
+    // the states). A term written as a program is held: evaluated once at the substep's start, as under Euler, and added
+    // through the substep.
+    bool verlet = false;
+    // Per state, in the node's order (verlet only): true for the first part (two half steps a substep, its rates read at
+    // the substep's start and end), false for the second part or a state with no rate (one whole step, read at the middle).
+    std::vector<bool> verletKicked;
     std::vector<EntityId> stateIds;
     std::vector<std::size_t> stateIndexes;
     std::vector<ContributionTask> contributions;

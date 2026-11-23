@@ -1721,6 +1721,9 @@ void Simulation::integrateStep(std::size_t step, double synchronizationStep, dou
         ++metrics.invocations;
         metrics.executedSubsteps += node.substeps;
         metrics.evaluatedContributions += node.substeps * (node.contributions.size() + node.algebraicTasks.size());
+        // A Verlet node reads its first part's equations once more a global step: at the start of its first substep.
+        if (node.verlet) metrics.evaluatedContributions += static_cast<std::uint64_t>(std::count_if(node.contributions.begin(), node.contributions.end(),
+            [&](const auto& task) { return task.implementation == ContributionImplementation::equation && node.verletKicked[task.outputStateIndex]; }));
         metrics.computeNanoseconds += result.computeNanoseconds;
     }
     const auto synchronizationElapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(

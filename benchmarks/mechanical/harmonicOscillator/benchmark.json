@@ -1,16 +1,19 @@
 {
     "title": "Harmonic oscillator",
-    "summary": "An undamped mass on a spring, one node: trajectory error against the exact solution and energy over a long run, explicit against semi-implicit Euler.",
+    "summary": "An undamped mass on a spring, one node: trajectory error against the exact solution and energy over a long run, explicit against semi-implicit Euler and Verlet.",
     "accuracy": { "globalTimeStep": 0.015625, "targetTime": 64, "outputInterval": 0.25 },
     "longRun": { "globalTimeStep": 0.015625, "targetTime": 1024, "outputInterval": 1 },
     "timing": [
         { "label": "262,144 steps, explicit", "model": "harmonicOscillator", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 1024, "outputInterval": 1 } },
-        { "label": "262,144 steps, semi-implicit", "model": "harmonicOscillator", "variant": { "integration": "semiImplicit" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 1024, "outputInterval": 1 } }
+        { "label": "262,144 steps, semi-implicit", "model": "harmonicOscillator", "variant": { "integration": "semiImplicit" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 1024, "outputInterval": 1 } },
+        { "label": "262,144 steps, Verlet", "model": "harmonicOscillator", "variant": { "integration": "verlet" }, "run": { "globalTimeStep": 0.00390625, "targetTime": 1024, "outputInterval": 1 } }
     ],
     "thresholds": {
         "relativeErrorExplicit": { "max": 0.39 },
         "energyDriftExplicit": { "min": 7100000, "max": 11000000 },
         "relativeErrorSemiImplicit": { "max": 0.0049 },
+        "relativeErrorVerlet": { "max": 0.0004 },
+        "energyDriftVerlet": { "max": 0.000077 },
         "energyDriftSemiImplicit": { "max": 0.0098 }
     }
 }

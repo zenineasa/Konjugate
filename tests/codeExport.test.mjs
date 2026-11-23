@@ -593,3 +593,27 @@ test('the C++ export pastes the engine\'s own Dormand–Prince 5(4) header, byte
     assert.match(generateStandaloneProgram(document, 'cpp'), /constexpr std::size_t fixedSteps = 4;/);
     assert.match(generateStandaloneProgram(document, 'python'), /fixed_steps = 4/);
 });
+
+test('a Verlet node is written as the engine steps it: the first part in half steps around a whole step of the second', async () => {
+    const { verletDocument } = await import('./engine/fixtures/verletFixture.mjs');
+    const document = { ...verletDocument(), runConfigurations: [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1 }], activeRunConfigurationId: 900 };
+    const cpp = generateStandaloneProgram(document, 'cpp');
+    assert.match(cpp, /const double halfStep = 0\.5 \* nodeTimeStep;/);
+    // Mass lists its speed first (velocity Verlet), Pendulum its angle (position Verlet): state 0 is kicked in both.
+    assert.equal(cpp.match(/state\[0\] \+= halfStep \* \(kick\[0\] \+ held\[0\]\);/g).length, 4);
+    assert.equal(cpp.match(/state\[1\] \+= nodeTimeStep \* \(derivative\[1\] \+ held\[1\]\);/g).length, 2);
+    assert.match(cpp, /const double stepTime = startTime \+ halfStep;/);
+    assert.match(cpp, /const double stepTime = currentTime \+ \(substep \+ 1\) \* nodeTimeStep;/);
+    // Drive, explicit, keeps Euler's loop.
+    assert.match(cpp, /state\[index\] \+= nodeTimeStep \* derivative\[index\];/);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /state\[0\] \+= half_step \* \(kick\[0\] \+ held\[0\]\)/);
+    assert.match(python, /step_time = start_time \+ half_step/);
+    // Under a whole-model method a node's integration does not apply.
+    assert.doesNotMatch(generateStandaloneProgram({ ...document, runConfigurations: [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1, method: 'rungeKutta4' }] }, 'cpp'), /halfStep/);
+    // A node whose rates do not split is refused in the engine's words.
+    const damped = structuredClone(document);
+    damped.nodes[1].sourceTerms[0].expressionModel.bindings.push({ kind: 'state', nodeId: 2, stateId: 21, symbol: 'v' });
+    damped.nodes[1].sourceTerms[0].expressionModel.mathJson = ['Add', ['Multiply', '-1', 'k', 'x'], ['Negate', 'v']];
+    assert.throws(() => generateStandaloneProgram(damped, 'python'), /Node "Mass" cannot be integrated with Verlet: the rate of V reads V itself\. Verlet splits/);
+});

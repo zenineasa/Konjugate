@@ -2,8 +2,8 @@
 
 // The evaluation shared by the conservative mechanical problems (a one-node system of a position and a velocity with an exact solution
 // and an energy that should stay constant): the trajectory error over a short run, and the energy over a long one, for explicit Euler
-// and for semi-implicit (symplectic) Euler. Explicit Euler lets an undamped oscillation's energy grow every step; symplectic Euler keeps
-// it within a band of width O(h) for as long as the run lasts.
+// for semi-implicit (symplectic) Euler and for Verlet. Explicit Euler lets an undamped oscillation's energy grow every step; symplectic
+// Euler keeps it within a band of width O(h) for as long as the run lasts, and Verlet, symplectic and second order, within one of O(h²).
 
 import { trajectory } from './engine.mjs';
 import { conservationDrift } from './metrics.mjs';
@@ -14,8 +14,8 @@ export async function evaluateConservative({ engine, config, add, modelPath, mod
     const plots = [];
     const short = {};
     const long = {};
-    for (const variant of [{ integration: 'explicit' }, { integration: 'semiImplicit' }]) {
-        const method = variant.integration === 'explicit' ? 'Explicit' : 'SemiImplicit';
+    for (const variant of [{ integration: 'explicit' }, { integration: 'semiImplicit' }, { integration: 'verlet' }]) {
+        const method = { explicit: 'Explicit', semiImplicit: 'SemiImplicit', verlet: 'Verlet' }[variant.integration];
         const run = engineRun(config.accuracy);
         const comparison = await runAndCompare(engine, modelPath, variant, run, stateIds, reference);
         const shortEnergy = conservationDrift(comparison.numeric.map(energy), energyScale);
@@ -42,14 +42,15 @@ export async function evaluateConservative({ engine, config, add, modelPath, mod
         series: [
             series('Exact', 'reference', times, short.explicit.exact.map((sample) => sample[0])),
             series('Konjugate, explicit Euler', 'explicit', times, short.explicit.numeric.map((sample) => sample[0])),
-            series('Konjugate, semi-implicit Euler', 'semiImplicit', times, short.semiImplicit.numeric.map((sample) => sample[0]))
+            series('Konjugate, semi-implicit Euler', 'semiImplicit', times, short.semiImplicit.numeric.map((sample) => sample[0])),
+            series('Konjugate, Verlet', 'verlet', times, short.verlet.numeric.map((sample) => sample[0]))
         ]
     }));
     // Log scale: the first sample's drift is exactly zero, so the plot starts from the second.
     plots.push(linePlot({
         id: `${plotPrefix}Energy`, title: `${title}: energy drift over a long run`, subtitle: `Largest |E - E(0)| / ${plotUnits.energyScaleName} up to each time, h = 2^${Math.log2(config.longRun.globalTimeStep)} s`,
         xLabel: 'Time (s)', yLabel: 'Largest relative energy drift so far', logY: true,
-        series: ['explicit', 'semiImplicit'].map((integration) => series(`Konjugate, ${methodName({ integration })}`, integration, long[integration].times.slice(1), long[integration].drift.slice(1)))
+        series: ['explicit', 'semiImplicit', 'verlet'].map((integration) => series(`Konjugate, ${methodName({ integration })}`, integration, long[integration].times.slice(1), long[integration].drift.slice(1)))
     }));
     return { rows, plots };
 }

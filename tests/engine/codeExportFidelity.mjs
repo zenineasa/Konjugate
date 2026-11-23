@@ -20,6 +20,7 @@ import { decodeResultFile } from '../../src/engineProtocol.mjs';
 import { generateStandaloneProgram } from '../../src/codeExport.mjs';
 import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 import { addScheduledNode } from './fixtures/scheduledNodeFixture.mjs';
+import { verletDocument } from './fixtures/verletFixture.mjs';
 
 function execute(executable, args, options = {}) {
     return new Promise((resolve, reject) => {
@@ -654,6 +655,40 @@ class Feed(RelationshipProvider):
     nodeProgram.runConfigurations = [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }];
     nodeProgram.activeRunConfigurationId = 900;
     assert.throws(() => generateStandaloneProgram(nodeProgram, 'python'), /Node "Node provider" is a program of its own, which code export cannot write under Runge–Kutta 4 yet/);
+
+    // --- 5. Verlet, node by node (docs/proposals/integrators.md): velocity- and position-first nodes with substeps, a time-dependent
+    // force, a scheduled parameter and a relationship from an explicit node, in every C++ mode and in Python ---
+    const verlet = verletDocument();
+    const verletReference = await runEngine(verlet, 'verlet');
+    verlet.exportDefaultTargetTime = targetTime;
+    verlet.runConfigurations = [{ id: 900, globalTimeStep, outputInterval }];
+    verlet.activeRunConfigurationId = 900;
+    const verletStates = verlet.nodes.flatMap((node) => node.states.map((state) => state.id));
+    const verletSerial = variantIndex;
+    await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, serial)', 'cpp');
+    await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, openmp)', 'cpp', 'openmp', { compilerArgs: openmpCompilerArgs });
+    await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, stdThread)', 'cpp', 'stdThread', { compilerArgs: process.platform === 'win32' ? [] : ['-pthread'] });
+    if (mpiAvailable) await exportAndCompare(verlet, verletReference, verletStates, 'C++ (Verlet, mpi)', 'cpp', 'mpi', { runViaMpi: 5 });
+    await exportAndCompare(verlet, verletReference, verletStates, 'Python (Verlet)', 'python');
+    // Not just close: the export takes the engine's steps, so its numbers are the engine's but for the 15 digits C++ prints.
+    const verletCsv = parseCsv(await readFile(join(directory, `rk4${verletSerial}.csv`), 'utf8'));
+    let largestVerletDifference = 0;
+    for (const sample of verletReference.samples) {
+        const row = verletCsv.find((candidate) => Math.abs(candidate[0] - sample.time) < 1e-6);
+        if (!row) continue;
+        for (const { stateId, value } of sample.states) {
+            largestVerletDifference = Math.max(largestVerletDifference, Math.abs(row[verletStates.indexOf(stateId) + 1] - value) / Math.max(1, Math.abs(value)));
+        }
+    }
+    assert.ok(largestVerletDifference < 1e-12, `The Verlet export should give the engine's numbers, differed by ${largestVerletDifference}.`);
+    console.log(`  Verlet: largest relative difference from the engine ${largestVerletDifference.toExponential(2)}`);
+    // A node whose rates do not split is refused in the engine's words.
+    const damped = verletDocument();
+    damped.nodes[1].sourceTerms[0].expressionModel.bindings = [...verletDocument().nodes[1].sourceTerms[0].expressionModel.bindings, { kind: 'state', nodeId: 2, stateId: 21, symbol: 'v' }];
+    damped.nodes[1].sourceTerms[0].expressionModel.mathJson = ['Add', ['Multiply', '-1', 'k', 'x'], ['Negate', 'v']];
+    damped.runConfigurations = verlet.runConfigurations;
+    damped.activeRunConfigurationId = 900;
+    assert.throws(() => generateStandaloneProgram(damped, 'cpp'), /Node "Mass" cannot be integrated with Verlet: the rate of V reads V itself/);
 
     assert.ok(comparisons >= 5 * expectedTimes.length * 3, 'Expected at least 5 states compared at every sampled time across several variants.');
     console.log(`✓ code export fidelity: every generated variant matched the real engine across ${comparisons} state/time comparisons.`);

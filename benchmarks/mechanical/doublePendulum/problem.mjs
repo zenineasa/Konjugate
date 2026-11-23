@@ -17,7 +17,8 @@
 // Semi-implicit Euler updates the angles, then the angular velocities from the new angles, in the order the node lists its states. For a
 // single pendulum that is the symplectic Euler method, whose energy stays bounded. Here it is not: the kinetic energy depends on the
 // angles (through cos d), so the Hamiltonian is not separable and an update in angles and angular velocities, rather than angles and
-// canonical momenta, is not symplectic. Its energy is measured, not promised.
+// canonical momenta, is not symplectic. Its energy is measured, not promised. Verlet does not apply for the same reason, each angular
+// velocity's rate reading itself, and is refused in words (checked).
 //
 // Reference (reference.json, generateReference.py): SciPy solve_ivp, DOP853 at rtol = atol = 1e-13, with its own error estimated at every
 // sample against 1e-12. Every comparison stops where that estimate reaches 1 % of the angle the horizons are judged at: beyond it the
@@ -150,6 +151,12 @@ export async function evaluate({ engine, config }) {
         series: sensitivitySeries
     }));
     const ownError = Math.max(...exact.ownError.slice(0, shortCount));
+    // Verlet does not apply: the kinetic energy depends on the angles (through cos d), so each angular velocity's rate reads that angular
+    // velocity itself, and Verlet moves a node's states in two parts each read only by the other (docs/proposals/integrators.md, Verlet,
+    // node by node). The engine refuses it, in words.
+    const verletRefused = (await engine.issues(paths.doublePendulum, { integration: 'verlet' }))
+        .some((issue) => issue.code === 'nodeIntegrationInvalid' && /cannot be integrated with Verlet: the rate of (.+) reads \1 itself/.test(issue.message));
+    add('verletRefusedInWords', verletRefused ? 1 : 0, 'Verlet refused, saying which rate reads its own state (1 if so): each angular velocity\'s rate reads itself, the kinetic energy depending on the angles');
     add('referenceTrustedTime', trustedTime, `How long the reference is trusted (s): until its own error, DOP853 at 1e-13 against 1e-12, first exceeds ${limit / 100} (1 % of the horizon angle)`);
     add('referenceOwnError', ownError, `The reference's own error over the first ${config.trajectory.shortHorizon} s: DOP853 at 1e-13 against 1e-12, largest difference (rad, rad/s)`);
     add('referenceEnergyDrift', data.provenance.energyDrift, 'The reference\'s own energy drift over 20 s, relative to the energy above the bottom');

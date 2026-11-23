@@ -115,6 +115,13 @@ export async function evaluate({ engine, config }) {
     const splitSemi = trajectory(await engine.run(twoNodesPath, { integration: 'semiImplicit' }, run), twoNodesIds);
     add('splitSemiImplicitMatchesExplicit', largestOf(splitSemi, splitNumeric), 'Two-node semi-implicit against two-node explicit: identical, since each node holds one state');
 
+    // Verlet does not apply: each population's rate reads that population itself, and Verlet moves a node's states in two parts each
+    // read only by the other (docs/proposals/integrators.md, Verlet, node by node). The engine refuses it, in words, as one node and as two.
+    const refusal = async (path) => (await engine.issues(path, { integration: 'verlet' }))
+        .some((issue) => issue.code === 'nodeIntegrationInvalid' && /cannot be integrated with Verlet: the rate of (.+) reads \1 itself/.test(issue.message));
+    add('verletRefusedInWords', (await refusal(oneNodePath)) && (await refusal(twoNodesPath)) ? 1 : 0,
+        'Verlet refused, saying which rate reads its own state, as one node and as two (1 if so): each population\'s rate reads itself');
+
     if (exact) {
         add('referenceInvariantDrift', conservationDrift(exact.states.map(invariant), scale).maxRelativeDrift, 'The SciPy reference\'s own drift of V, relative to V(0) - V*: how far the numerical reference itself is from exact');
     } else {

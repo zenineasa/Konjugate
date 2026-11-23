@@ -30,6 +30,7 @@ import {
     absoluteTolerance, closeEnough, communicationStepSize, document, execute,
     globalTimeStep, orderedStateNames, relativeTolerance, runRealEngine, stateIds, stateNameByStateId, targetTime
 } from './fixtures/fmuFidelityFixture.mjs';
+import { verletDocument } from './fixtures/verletFixture.mjs';
 
 const executable = process.argv[2] ?? join(import.meta.dirname, '..', '..', 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
 const python = process.env.PYTHON || 'python3';
@@ -163,6 +164,38 @@ print(float(result[-1]['Coupled.Value']))
         assert.ok(closeEnough(tunedFmuFinal, tunedFinal, absoluteTolerance, relativeTolerance),
             `Setting the "coupling" parameter via fmi2SetReal should reproduce the real engine's run with that same value: engine=${tunedFinal}, fmu=${tunedFmuFinal}.`);
         console.log('✓ FMU tunable parameter: setting "coupling" via fmi2SetReal matched a real engine run using that same value, not the value baked in at export time.');
+
+        // --- 7. Verlet, node by node (docs/proposals/integrators.md): an FMU of nodes integrated with Verlet steps as the engine does ---
+        const verlet = { ...verletDocument(), runConfigurations: [{ id: 900, globalTimeStep, outputInterval: communicationStepSize }], activeRunConfigurationId: 900 };
+        const verletEngine = await runRealEngine(executable, directory, verlet, 'verlet');
+        const verletFmuPath = join(directory, 'verlet.fmu');
+        await writeFile(verletFmuPath, await generateFmuPackage(verlet, {
+            modelName: 'verletFidelityFixture',
+            engineOptions: { applicationPath: join(import.meta.dirname, '..', '..'), resourcesPath: '', packaged: false }
+        }));
+        const verletDriverPath = join(directory, 'driveVerlet.py');
+        await writeFile(verletDriverPath, `
+import json
+from fmpy import simulate_fmu
+names = ['Drive.D', 'Mass.V', 'Mass.X', 'Pendulum.Angle', 'Pendulum.Rate']
+result = simulate_fmu(${JSON.stringify(verletFmuPath)}, start_time=0.0, stop_time=${targetTime}, output_interval=${communicationStepSize}, output=names)
+print(json.dumps([dict(zip(result.dtype.names, [float(v) for v in row])) for row in result]))
+`, 'utf8');
+        const verletSimulation = await execute(python, [verletDriverPath]);
+        assert.equal(verletSimulation.code, 0, 'FMPy must simulate the Verlet FMU successfully.');
+        const verletRows = JSON.parse(verletSimulation.stdout.trim().split('\n').at(-1));
+        const verletNames = { 11: 'Drive.D', 21: 'Mass.V', 22: 'Mass.X', 31: 'Pendulum.Angle', 32: 'Pendulum.Rate' };
+        let largestVerletDifference = 0;
+        for (const sample of verletEngine.samples) {
+            const row = verletRows.find((candidate) => Math.abs(candidate.time - sample.time) < 1e-6);
+            assert.ok(row, `FMPy did not report a Verlet row at t=${sample.time}.`);
+            for (const { stateId, value } of sample.states) {
+                largestVerletDifference = Math.max(largestVerletDifference, Math.abs(row[verletNames[stateId]] - value) / Math.max(1, Math.abs(value)));
+                comparisons += 1;
+            }
+        }
+        assert.ok(largestVerletDifference < 1e-12, `The Verlet FMU should give the engine's numbers, differed by ${largestVerletDifference}.`);
+        console.log(`✓ FMU Verlet: FMPy's simulation matched the real engine, largest relative difference ${largestVerletDifference.toExponential(2)}.`);
 
         console.log(`✓ FMU export fidelity: FMPy's simulation of the real .fmu matched the real engine across ${comparisons} state/time comparisons.`);
     }

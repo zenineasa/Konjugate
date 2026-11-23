@@ -17,7 +17,7 @@
 import { integrationMethod, methodOf } from './integrationMethods.mjs';
 import {
     buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, doubleLiteral,
-    cppAlgebraicLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
+    cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
 } from './codeExport.mjs';
 
 // Assigns a stable FMI valueReference to every state (as an "output") and every parameter --
@@ -86,11 +86,9 @@ function cppNodeStepBlocks(model, providerInfo) {
     return model.nodePlans.map((plan) => {
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
-        const contributionLines = plan.contributions.map((contribution) => (
-            contribution.implementation
-                ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
-                : emitCppRegularContribution(contribution)
-        )).join('\n');
+        const emitContribution = (contribution) => (contribution.implementation
+            ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
+            : emitCppRegularContribution(contribution));
         const commitLines = plan.node.states.map((state, index) => (
             `        state_[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`
         )).join('\n');
@@ -98,13 +96,8 @@ function cppNodeStepBlocks(model, providerInfo) {
             `    // Node: ${plan.node.name}`,
             '    {',
             `        double state[${stateCount}] = { ${seed} };`,
-            `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
-            `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
-            '            const double stepTime = currentTime + substep * nodeTimeStep;',
-            `            double derivative[${stateCount}] = {};`,
-            contributionLines,
-            `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
-            '        }',
+            // Euler or Verlet, as codeExport.mjs writes a node's substeps.
+            cppNodeSubstepLines(plan, emitContribution),
             cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    }'

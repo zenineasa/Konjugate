@@ -141,7 +141,7 @@ for (const figure of document.querySelectorAll('figure.chart')) {
     cross.setAttribute('stroke', 'var(--axis)'); cross.setAttribute('stroke-width', '1'); cross.style.display = 'none';
     svg.appendChild(cross);
     const dots = data.series.map(() => { const dot = document.createElementNS(NS, 'circle'); dot.setAttribute('r', '4'); dot.setAttribute('stroke', 'var(--surface-1)'); dot.setAttribute('stroke-width', '2'); dot.style.display = 'none'; svg.appendChild(dot); return dot; });
-    const colours = { reference: 'var(--series-1)', explicit: 'var(--series-2)', semiImplicit: 'var(--series-3)', extra: 'var(--series-4)', rungeKutta4: 'var(--series-4)', slot1: 'var(--series-1)', slot2: 'var(--series-2)', slot3: 'var(--series-3)', slot4: 'var(--series-4)', guide: 'var(--text-muted)' };
+    const colours = { reference: 'var(--series-1)', explicit: 'var(--series-2)', semiImplicit: 'var(--series-3)', verlet: 'var(--series-3)', extra: 'var(--series-4)', rungeKutta4: 'var(--series-4)', slot1: 'var(--series-1)', slot2: 'var(--series-2)', slot3: 'var(--series-3)', slot4: 'var(--series-4)', guide: 'var(--text-muted)' };
     const format = (value) => { if (!isFinite(value)) return String(value); const a = Math.abs(value); return a !== 0 && (a >= 1e5 || a < 1e-3) ? value.toExponential(3) : String(Number(value.toPrecision(5))); };
     function hide() { cross.style.display = 'none'; dots.forEach((dot) => { dot.style.display = 'none'; }); tip.hidden = true; }
     function show(event) {

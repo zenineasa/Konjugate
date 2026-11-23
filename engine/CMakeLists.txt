@@ -313,6 +313,17 @@ if(BUILD_TESTING)
     target_link_libraries(algebraicRelationshipTests PRIVATE Eigen3::Eigen Threads::Threads)
     add_test(NAME algebraicRelationshipTests COMMAND algebraicRelationshipTests)
 
+    add_executable(verletIntegrationTests
+        tests/verletIntegrationTests.cpp
+        src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
+        src/modelValidator.cpp
+        src/stabilityAnalysis.cpp
+    )
+    target_include_directories(verletIntegrationTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(verletIntegrationTests PRIVATE Eigen3::Eigen Threads::Threads)
+    add_test(NAME verletIntegrationTests COMMAND verletIntegrationTests)
+
     add_executable(nodeProviderRuntimeTests
         tests/nodeProviderRuntimeTests.cpp
         ${PROVIDER_PROTOCOL_SOURCES}

@@ -656,9 +656,9 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 }
             }
             const auto integration = value(node, "numerics.integration");
-            if (!integration.empty() && integration != "explicit" && integration != "semiImplicit") {
-                add(result, "nodeIntegrationInvalid", "error", "A node's integration must be explicit or semiImplicit.", "node", id, "numerics");
-            } else if (integration == "semiImplicit" && node.get_child_optional("implementation")) {
+            if (!integration.empty() && integration != "explicit" && integration != "semiImplicit" && integration != "verlet") {
+                add(result, "nodeIntegrationInvalid", "error", "A node's integration must be explicit, semiImplicit or verlet.", "node", id, "numerics");
+            } else if ((integration == "semiImplicit" || integration == "verlet") && node.get_child_optional("implementation")) {
                 add(result, "nodeIntegrationInvalid", "error", "A node with a computational-node provider is integrated explicitly.", "node", id, "numerics");
             }
             // How its Updates are worked out: once per step, or settled within the step, up to a number of sweeps.
@@ -1233,9 +1233,16 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     }
     // The plan compiled here, if any, serves the stability pass below too: compiling a large model takes seconds.
     std::shared_ptr<const ExecutionPlan> compiledPlan;
-    if (!relationshipStateIds.empty() && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
+    // Whether a Verlet node's rates split into its two parts is known once its terms and relationships are compiled.
+    bool hasVerletNode = false;
+    if (const auto nodes = document.get_child_optional("nodes")) for (const auto& nodeItem : *nodes) {
+        if (value(nodeItem.second, "enabled") != "false" && value(nodeItem.second, "numerics.integration") == "verlet") hasVerletNode = true;
+    }
+    if ((!relationshipStateIds.empty() || hasVerletNode) && std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; })) {
         try {
             compiledPlan = std::make_shared<const ExecutionPlan>(compileExecutionPlan(document));
+        } catch (const VerletStructureError& error) {
+            add(result, "nodeIntegrationInvalid", "error", error.what(), "node", std::to_string(error.nodeId), "numerics");
         } catch (const std::exception& error) {
             add(result, "modelCompileFailed", "error", error.what(), "model", "");
         }
@@ -1277,7 +1284,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                     if (resolved) message << " -- driven mainly by " << resolved->phrase;
                     const auto symbol = stateSymbol(document, assessment->dominantStateId);
                     if (assessment->unconditionallyUnstable) {
-                        message << " -- no substep count can stabilize this with Explicit Euler ("
+                        message << " -- no substep count can stabilize this with " << (node.verlet ? "Verlet" : "Explicit Euler") << " ("
                                 << (symbol.empty() ? "its dominant state" : "'" + symbol + "'") << " has a genuinely growing mode) "
                                 << "-- this looks like a modeling or gain-tuning issue rather than a numerics one; check whether "
                                 << "this dynamics is intentionally unstable before adjusting numerics.";

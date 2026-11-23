@@ -235,3 +235,11 @@ test('FMU export refuses a whole-model method by name, for now', () => {
     };
     assert.throws(() => generateFmiModel(document), /method is Runge–Kutta 4, which FMU export cannot write yet/);
 });
+
+test('FMU export writes a Verlet node as code export does', async () => {
+    const { verletDocument } = await import('./engine/fixtures/verletFixture.mjs');
+    const document = { ...verletDocument(), runConfigurations: [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1 }], activeRunConfigurationId: 900 };
+    const { source } = generateFmiModel(document);
+    assert.match(source, /const double halfStep = 0\.5 \* nodeTimeStep;/);
+    assert.match(source, /const double stepTime = startTime \+ halfStep;/);
+});

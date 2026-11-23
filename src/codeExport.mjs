@@ -298,7 +298,148 @@ export function buildModel(sourceDocument, options = {}) {
         }
     }
 
+    // Verlet's two parts, once every relationship's contribution is in (under a whole-model method a node's integration does not apply).
+    if (!options.wholeModel) {
+        for (const plan of nodePlans) if (plan.node.numerics?.integration === 'verlet') plan.verletKicked = verletParts(plan);
+    }
     return { nodePlans, globalStateCount: globalIndex, stateRecord, schedules: schedules.list };
+}
+
+// A Verlet node's two parts, as engine/src/executionPlan.cpp's assignVerletParts finds them: the states before the first one whose
+// rate reads a state listed before it, and the rest, counting only states with a rate and only what equations read (a program term
+// is held through the substep). Per state, true for the first part. A rate reading its own part is refused in the engine's words.
+function verletParts(plan) {
+    if (plan.nodeProvider) throw new Error('A node with a computational-node provider is integrated explicitly.');
+    const states = plan.node.states;
+    const count = states.length;
+    const hasRate = new Array(count).fill(false);
+    for (const contribution of plan.contributions) hasRate[contribution.outputLocalIndex] = true;
+    const reads = Array.from({ length: count }, () => new Set());
+    for (const contribution of plan.contributions) {
+        if (contribution.implementation) continue;
+        for (const symbol of mathJsonSymbols(contribution.mathJson)) {
+            const local = /^state\[(\d+)\]$/.exec(contribution.symbols.get(symbol)?.text ?? '');
+            if (local && hasRate[Number(local[1])]) reads[contribution.outputLocalIndex].add(Number(local[1]));
+        }
+    }
+    const sorted = reads.map((set) => [...set].sort((left, right) => left - right));
+    let split = sorted.findIndex((list, index) => list.length && list[0] < index);
+    if (split < 0) split = count;
+    const kicked = states.map((state, index) => index < split && hasRate[index]);
+    const name = (entity) => entity.name || String(entity.id);
+    sorted.forEach((list, index) => {
+        for (const read of list) {
+            if (read !== index && kicked[read] !== kicked[index]) continue;
+            const splitText = split === count ? 'none of its states reads one listed before it, so they are all one part'
+                : `the second part starts at ${name(states[split])}, the first state whose rate reads one listed before it`;
+            const problem = read === index ? `the rate of ${name(states[index])} reads ${name(states[index])} itself`
+                : `the rate of ${name(states[index])} reads ${name(states[read])}, in the same part`;
+            throw new Error(`Node "${name(plan.node)}" cannot be integrated with Verlet: ${problem}. Verlet splits a node's states, in their listed order, `
+                + 'in two parts and moves each from the other, so a state\'s rate may read only states of the other part, as a position\'s reads its speed '
+                + `and a speed's reads positions (here ${splitText}). Reorder the states, or choose semi-implicit Euler for this node, or Runge–Kutta 4 `
+                + 'for the whole model in the Run settings.');
+        }
+    });
+    return kicked;
+}
+
+// The indexes of a Verlet node's states with a rate, in its first part (kicked) or its second (drifted), and its contributions split
+// as the engine splits them: program terms held, equations into the first part, equations into the second.
+function verletGroups(plan) {
+    const indexes = { kicked: [], drifted: [] };
+    const groups = { held: [], kick: [], drift: [] };
+    for (const contribution of plan.contributions) {
+        const first = plan.verletKicked[contribution.outputLocalIndex];
+        const list = indexes[first ? 'kicked' : 'drifted'];
+        if (!list.includes(contribution.outputLocalIndex)) list.push(contribution.outputLocalIndex);
+        groups[contribution.implementation ? 'held' : first ? 'kick' : 'drift'].push(contribution);
+    }
+    return { ...indexes, ...groups };
+}
+
+// A node's substeps in C++, from `const double nodeTimeStep` on, with its states in `state` (shared with fmiCodeGen.mjs). Euler: every
+// contribution at the substep's start, then every state moves. Verlet (engine/src/executionPlan.cpp, integrateVerletNode): program
+// terms held from the substep's start; the first part half a step with its rates at the start, the second a whole step with its rates
+// at the middle, the first the other half with its rates at the end, which are the next substep's at its start. Each block sets its
+// own stepTime, the instant a time binding or a schedule reads.
+export function cppNodeSubstepLines(plan, emitContribution) {
+    const stateCount = plan.node.states.length;
+    const lines = (contributions) => contributions.map(emitContribution).join('\n');
+    if (!plan.verletKicked) {
+        return [
+            `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
+            `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
+            '            const double stepTime = currentTime + substep * nodeTimeStep;',
+            `            double derivative[${stateCount}] = {};`,
+            lines(plan.contributions),
+            `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
+            '        }'
+        ].join('\n');
+    }
+    const groups = verletGroups(plan);
+    const block = (time, contributions, after) => [
+        '            {',
+        `            const double stepTime = ${time};`,
+        `            double derivative[${stateCount}] = {};`,
+        lines(contributions),
+        ...after,
+        '            }'
+    ].filter(Boolean).join('\n');
+    const copy = (target) => `            for (int index = 0; index < ${stateCount}; ++index) ${target}[index] = derivative[index];`;
+    const kick = groups.kicked.map((index) => `            state[${index}] += halfStep * (kick[${index}] + held[${index}]);`);
+    return [
+        `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
+        '        const double halfStep = 0.5 * nodeTimeStep;',
+        '        // Verlet: the first part in two half steps around a whole step of the second.',
+        `        double kick[${stateCount}] = {};`,
+        `        double held[${stateCount}] = {};`,
+        '        {',
+        '        const double stepTime = currentTime;',
+        `        double derivative[${stateCount}] = {};`,
+        lines(groups.kick),
+        copy('kick').replace(/^    /, ''),
+        '        }',
+        `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
+        '            const double startTime = currentTime + substep * nodeTimeStep;',
+        groups.held.length ? block('startTime', groups.held, [copy('held')]) : '',
+        ...kick,
+        block('startTime + halfStep', groups.drift, groups.drifted.map((index) => `            state[${index}] += nodeTimeStep * (derivative[${index}] + held[${index}]);`)),
+        block('currentTime + (substep + 1) * nodeTimeStep', groups.kick, [copy('kick')]),
+        ...kick,
+        '        }'
+    ].filter(Boolean).join('\n');
+}
+
+// The same in Python, from `node_time_step` on, indented for a node's block.
+function pythonNodeSubstepLines(plan, emitContribution) {
+    const stateCount = plan.node.states.length;
+    const lines = (contributions) => contributions.map(emitContribution).join('\n');
+    const groups = verletGroups(plan);
+    const kick = groups.kicked.map((index) => `        state[${index}] += half_step * (kick[${index}] + held[${index}])`);
+    const outdent = (text) => text.split('\n').map((line) => line.replace(/^    /, '')).join('\n');
+    return [
+        `    node_time_step = global_time_step / ${plan.substeps}`,
+        '    half_step = 0.5 * node_time_step',
+        '    # Verlet: the first part in two half steps around a whole step of the second.',
+        '    step_time = current_time',
+        `    derivative = [0.0] * ${stateCount}`,
+        groups.kick.length ? outdent(lines(groups.kick)) : '',
+        '    kick = derivative',
+        `    held = [0.0] * ${stateCount}`,
+        `    for substep in range(${plan.substeps}):`,
+        '        start_time = current_time + substep * node_time_step',
+        ...(groups.held.length ? ['        step_time = start_time', `        derivative = [0.0] * ${stateCount}`, lines(groups.held), '        held = derivative'] : []),
+        ...kick,
+        '        step_time = start_time + half_step',
+        `        derivative = [0.0] * ${stateCount}`,
+        lines(groups.drift),
+        ...groups.drifted.map((index) => `        state[${index}] += node_time_step * (derivative[${index}] + held[${index}])`),
+        '        step_time = current_time + (substep + 1) * node_time_step',
+        `        derivative = [0.0] * ${stateCount}`,
+        lines(groups.kick),
+        '        kick = derivative',
+        ...kick
+    ].filter(Boolean).join('\n');
 }
 
 // Same order as the engine: an algebraic state bound by another algebraic term is computed first.
@@ -795,11 +936,9 @@ function cppNodeIntegratorLambdas(model, providerInfo) {
     return model.nodePlans.map((plan, nodeIndex) => {
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
-        const contributionLines = plan.contributions.map((contribution) => (
-            contribution.implementation
-                ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
-                : emitCppRegularContribution(contribution)
-        )).join('\n');
+        const emitContribution = (contribution) => (contribution.implementation
+            ? emitCppProviderContribution(contribution, providerInfo.get(contribution))
+            : emitCppRegularContribution(contribution));
         const commitLines = plan.node.states.map((state, index) => (
             `        globalState[${model.stateRecord.get(state.id).globalIndex}] = state[${index}];`
         )).join('\n');
@@ -807,13 +946,7 @@ function cppNodeIntegratorLambdas(model, providerInfo) {
             `    // Node: ${plan.node.name}`,
             `    const auto integrateNode${nodeIndex} = [&]() {`,
             `        double state[${stateCount}] = { ${seed} };`,
-            `        const double nodeTimeStep = globalTimeStep / ${plan.substeps}.0;`,
-            `        for (int substep = 0; substep < ${plan.substeps}; ++substep) {`,
-            '            const double stepTime = currentTime + substep * nodeTimeStep;',
-            `            double derivative[${stateCount}] = {};`,
-            contributionLines,
-            `            for (int index = 0; index < ${stateCount}; ++index) state[index] += nodeTimeStep * derivative[index];`,
-            '        }',
+            cppNodeSubstepLines(plan, emitContribution),
             cppAlgebraicLines(plan, providerInfo),
             commitLines,
             '    };'
@@ -1316,11 +1449,10 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
     return model.nodePlans.map((plan, nodeIndex) => {
         const stateCount = plan.node.states.length;
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
-        const contributionLines = plan.contributions.map((contribution) => (
-            contribution.implementation
-                ? emitPythonProviderContribution(contribution, providerInfo.get(contribution))
-                : emitPythonRegularContribution(contribution)
-        )).join('\n');
+        const emitContribution = (contribution) => (contribution.implementation
+            ? emitPythonProviderContribution(contribution, providerInfo.get(contribution))
+            : emitPythonRegularContribution(contribution));
+        const contributionLines = plan.contributions.map(emitContribution).join('\n');
         const nodeProviderLines = plan.nodeProvider ? emitPythonNodeProvider(plan.nodeProvider, providerInfo.get(plan.nodeProvider)) : '';
         // Once, after the last update, as the engine does (see cppAlgebraicLines).
         const algebraicLines = plan.algebraic.map((task) => emitPythonAlgebraicTask(task, providerInfo.get(task))).join('\n');
@@ -1329,7 +1461,13 @@ function pythonNodeBlockLines(model, providerInfo, isMpi) {
         const commitLines = plan.node.states.map((state, index) => (
             `    global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`
         )).join('\n');
-        const body = [
+        const body = plan.verletKicked ? [
+            `    # Node: ${plan.node.name}`,
+            `    state = [${seed}]`,
+            pythonNodeSubstepLines(plan, emitContribution),
+            algebraicAtEnd,
+            commitLines
+        ].filter(Boolean).join('\n') : [
             `    # Node: ${plan.node.name}`,
             `    state = [${seed}]`,
             `    node_time_step = global_time_step / ${plan.substeps}`,

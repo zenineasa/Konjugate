@@ -3164,6 +3164,8 @@ function renderNodeEditorModel(node) {
     $('#editNodeDescription').value = definition.description ?? '';
     $('#editNodeSubsteps').value = definition.substepsPerGlobalStep;
     $('#editNodeIntegration').value = definition.integration ?? 'explicit';
+    $('#nodeVerletHint').hidden = definition.integration !== 'verlet';
+    $('#nodeSemiImplicitHint').hidden = definition.integration === 'verlet';
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
     $('#nodeEffectiveTimeStep').textContent = `${(configuration.globalTimeStep / definition.substepsPerGlobalStep).toPrecision(6)} s`;
     const wholeModelMethod = methodOf(configuration) !== 'nodeByNode' ? integrationMethod(methodOf(configuration)) : null;
@@ -3338,7 +3340,7 @@ function renderNodeProgram(node) {
         outputs.appendChild(row);
     });
     // The engine integrates a node with a program explicitly (nodeIntegrationInvalid).
-    if (definition.integration === 'semiImplicit') errors.errors.push('A node with a program is integrated explicitly: set Integration to Explicit Euler on the Numerics tab.');
+    if (definition.integration === 'semiImplicit' || definition.integration === 'verlet') errors.errors.push('A node with a program is integrated explicitly: set Integration to Explicit Euler on the Numerics tab.');
     $('#nodeProgramError').textContent = errors.errors.join(' ');
 }
 
@@ -6037,7 +6039,9 @@ function navigateToValidationIssue(item) {
             renderNodeEditorModel(node);
             applyInspectorReadOnly();
         }
-        const field = { name: '#editNodeName', numerics: '#editNodeUpdates', states: '#nodeEditorStates .editorStateRow input', sourceTerms: '#nodeEditorStates .ownPart' }[item.location.field];
+        // A node's integration refused (Verlet on rates that do not split, say) focuses the Integration choice, not Updates.
+        const field = item.code === 'nodeIntegrationInvalid' ? '#editNodeIntegration'
+            : { name: '#editNodeName', numerics: '#editNodeUpdates', states: '#nodeEditorStates .editorStateRow input', sourceTerms: '#nodeEditorStates .ownPart' }[item.location.field];
         if (field) requestAnimationFrame(() => $(field)?.focus());
     } else if (item.location.kind === 'edge') {
         const relationship = model.relationships.find((candidate) => candidate.id === Number(item.location.entityId));
@@ -13722,7 +13726,7 @@ $('#editAddNodeProgramOutput').addEventListener('click', () => {
 });
 $('#editNodeIntegration').addEventListener('change', (event) => {
     if (!selectedNode) return;
-    const integration = event.target.value === 'semiImplicit' ? 'semiImplicit' : 'explicit';
+    const integration = ['semiImplicit', 'verlet'].includes(event.target.value) ? event.target.value : 'explicit';
     changeNodeModel(selectedNode, (snapshot) => { snapshot.integration = integration; });
 });
 $('#editAddState').addEventListener('click', () => {

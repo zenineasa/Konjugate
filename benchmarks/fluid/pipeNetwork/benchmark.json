@@ -4,7 +4,7 @@
     "run": { "globalTimeStep": 0.0625, "targetTime": 600, "outputInterval": 2 },
     "globalTimeSteps": { "explicit": [0.25, 0.125, 0.0625, 0.03125, 0.015625], "rungeKutta4": [0.125, 0.0625, 0.03125, 0.015625] },
     "timing": [
-        { "label": "Fluid network, 2^16 steps, explicit", "model": "pipeNetwork", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0091552734375, "targetTime": 600, "outputInterval": 2 } },
+        { "label": "Fluid network, 2^16 steps, explicit", "model": "pipeNetwork", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.0091552734375, "targetTime": 600, "outputInterval": 2.34375 } },
         { "label": "Fluid network, 9,600 steps, Runge–Kutta 4", "model": "pipeNetwork", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.0625, "targetTime": 600, "outputInterval": 2 } }
     ],
     "thresholds": {

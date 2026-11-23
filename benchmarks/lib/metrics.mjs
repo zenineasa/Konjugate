@@ -82,3 +82,20 @@ export function spread(values) {
         count: values.length
     };
 }
+
+// A timing's statistics: spread() with the quartiles, the interquartile range, the minimum over the median and the runs themselves. The
+// headline of every timing is its minimum (benchmarks/README.md, Timing): noise on a computer only ever adds time.
+export function timingStatistics(values) {
+    const sorted = values.slice().sort((a, b) => a - b);
+    // Quartiles by linear interpolation between order statistics (the R-7 rule, NumPy's default).
+    const quantile = (q) => {
+        const position = (sorted.length - 1) * q;
+        const below = Math.floor(position);
+        return sorted[below] + (sorted[Math.min(below + 1, sorted.length - 1)] - sorted[below]) * (position - below);
+    };
+    const basic = spread(values);
+    return {
+        ...basic, lowerQuartile: quantile(0.25), upperQuartile: quantile(0.75), interquartileRange: quantile(0.75) - quantile(0.25),
+        minimumOverMedian: basic.median > 0 ? basic.minimum / basic.median : null, values: values.slice()
+    };
+}

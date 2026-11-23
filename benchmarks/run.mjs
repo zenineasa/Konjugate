@@ -13,6 +13,9 @@
 //   --repeats <n>        timed runs per timing case in --full (default 7)
 //   --warmup <n>         untimed runs before them (default 1)
 //   --no-caffeinate      do not run --full under caffeinate on macOS
+//   --no-scaling         under --full, time every problem's own timing cases but not graph scalability's (npm run benchmark:performance's parts)
+//   --scaling-up-to <n>  under --full, time the generated graphs up to n nodes only (a quick check of the harness, not for publishing)
+//   --wait-for-quiet     before timing, wait for a quiet computer, and check again before every timed run (lib/quiet.mjs)
 
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -21,8 +24,9 @@ import { tmpdir } from 'node:os';
 import { basename, join, relative } from 'node:path';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createEngine, loadModel, repositoryRoot, resolveEngineExecutable } from './lib/engine.mjs';
-import { busyProcesses, machineDetails, machineSlug } from './lib/machine.mjs';
-import { spread } from './lib/metrics.mjs';
+import { busyProcesses, conditions, engineBuild, machineDetails, machineSlug } from './lib/machine.mjs';
+import { createQuietGate } from './lib/quiet.mjs';
+import { timingStatistics } from './lib/metrics.mjs';
 import { formatNumber, plotCsv, renderSvg } from './lib/plots.mjs';
 import { renderReport } from './lib/report.mjs';
 import { referenceData } from './lib/study.mjs';
@@ -38,7 +42,10 @@ const { values: options } = parseArgs({
         only: { type: 'string' },
         repeats: { type: 'string', default: '7' },
         warmup: { type: 'string', default: '1' },
-        'no-caffeinate': { type: 'boolean', default: false }
+        'no-caffeinate': { type: 'boolean', default: false },
+        'wait-for-quiet': { type: 'boolean', default: false },
+        'scaling-up-to': { type: 'string' },
+        'no-scaling': { type: 'boolean', default: false }
     }
 });
 if (options.accuracy && options.full) throw new Error('Choose --accuracy or --full, not both.');
@@ -77,7 +84,8 @@ async function main() {
     const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
     const executable = resolveEngineExecutable(options.engine);
     const workDirectory = await mkdtemp(join(tmpdir(), 'konjugateBenchmarks-'));
-    const baseEngine = createEngine(executable, workDirectory);
+    const quiet = options['wait-for-quiet'] ? createQuietGate() : null;
+    const baseEngine = createEngine(executable, workDirectory, { beforeTimedRun: quiet?.beforeTimedRun ?? null });
     const totals = { engineRuns: 0, substeps: 0, evaluations: 0 };
     let engineVersion = '';
     const engine = {
@@ -126,7 +134,10 @@ async function main() {
         let machine = null;
         let timingSummary = null;
         if (mode === 'full') {
-            machine = machineDetails();
+            if (quiet) await quiet.full('timing');
+            machine = { ...machineDetails(), engineBuild: engineBuild(executable) };
+            const startConditions = conditions();
+            console.log(`Timing starts: load ${startConditions.loadAverage.join(' ')}; ${startConditions.power}; ${startConditions.thermal}`);
             const busy = busyProcesses();
             if (busy.length) {
                 console.warn('\n⚠ Other heavy processes are running; timings may be disturbed. Stop them and run again for numbers worth recording:');
@@ -142,19 +153,22 @@ async function main() {
                     for (let index = 0; index < warmupRuns; ++index) await baseEngine.run(modelPath, timing.variant, timing.run);
                     const measured = [];
                     for (let index = 0; index < repeats; ++index) measured.push(await baseEngine.run(modelPath, timing.variant, timing.run, { measure: true }));
-                    const engineCompute = spread(measured.map((run) => run.timing.engineComputeMilliseconds));
+                    const engineCompute = timingStatistics(measured.map((run) => run.timing.engineComputeMilliseconds));
                     const memory = measured.map((run) => run.timing.peakResidentBytes).filter((value) => value !== null);
                     timings.push({
                         problem: id, label: timing.label, model: `${timing.model}.kjt`, variant: timing.variant ?? {}, run: timing.run, work: measured[0].work,
-                        wall: spread(measured.map((run) => run.timing.wallMilliseconds)), engineCompute,
-                        substepsPerSecond: measured[0].work.substeps / (engineCompute.median / 1000),
+                        wall: timingStatistics(measured.map((run) => run.timing.wallMilliseconds)), engineCompute,
+                        substepsPerSecond: measured[0].work.substeps / (engineCompute.minimum / 1000),
                         peakResidentBytes: memory.length ? Math.max(...memory) : null
                     });
-                    console.log(`  timed ${id}: ${timing.label}: median ${timings.at(-1).wall.median.toFixed(1)} ms over ${repeats} runs`);
+                    console.log(`  timed ${id}: ${timing.label}: minimum ${timings.at(-1).wall.minimum.toFixed(1)} ms, median ${timings.at(-1).wall.median.toFixed(1)} ms over ${repeats} runs`);
                 }
                 // A problem that times its own cases (generated models, several backends) exports measure(); its rows, plots and notes join
                 // its own section of the report.
-                if (measure) {
+                if (measure && !options['no-scaling']) {
+                    if (options['scaling-up-to'] && config.full?.sizes) {
+                        for (const family of Object.keys(config.full.sizes)) config.full.sizes[family] = config.full.sizes[family].filter((size) => size <= Number(options['scaling-up-to']));
+                    }
                     const measured = await measure({ engine: baseEngine, config, repeats, warmupRuns });
                     timings.push(...measured.timings);
                     const entry = results.find((candidate) => candidate.id === id);
@@ -163,7 +177,9 @@ async function main() {
                     entry.notes.push(...measured.notes);
                 }
             }
-            timingSummary = { repeats, warmupRuns, caffeinated: Boolean(process.env.KONJUGATE_BENCHMARK_CAFFEINATED), busyProcesses: [...new Set(busy.map((entry) => entry.kind))] };
+            const endConditions = conditions();
+            console.log(`Timing ends: load ${endConditions.loadAverage.join(' ')}; ${endConditions.power}; ${endConditions.thermal}`);
+            timingSummary = { conditions: { start: startConditions, end: endConditions }, repeats, warmupRuns, caffeinated: Boolean(process.env.KONJUGATE_BENCHMARK_CAFFEINATED), busyProcesses: [...new Set(busy.map((entry) => entry.kind))], ...(quiet ? { quietGate: quiet.summary() } : {}) };
         }
 
         const outputDirectory = options.output
@@ -186,10 +202,13 @@ async function main() {
         if (timings) {
             await writeFile(join(outputDirectory, 'timing.csv'), csv(timings.map((timing) => ({
                 problem: timing.problem, label: timing.label, model: timing.model, globalSteps: timing.work.globalSteps, substeps: timing.work.substeps, runs: timing.wall.count,
-                wallMedianMs: timing.wall.median, wallMinMs: timing.wall.minimum, wallMaxMs: timing.wall.maximum, wallMadMs: timing.wall.medianAbsoluteDeviation,
-                engineComputeMedianMs: timing.engineCompute.median, substepsPerSecond: timing.substepsPerSecond, peakResidentBytes: timing.peakResidentBytes
-            })), ['problem', 'label', 'model', 'globalSteps', 'substeps', 'runs', 'wallMedianMs', 'wallMinMs', 'wallMaxMs', 'wallMadMs', 'engineComputeMedianMs', 'substepsPerSecond', 'peakResidentBytes']));
+                wallMinMs: timing.wall.minimum, wallMedianMs: timing.wall.median, wallMaxMs: timing.wall.maximum, wallMadMs: timing.wall.medianAbsoluteDeviation,
+                wallIqrMs: timing.wall.interquartileRange ?? null, wallMinOverMedian: timing.wall.minimumOverMedian ?? null,
+                engineComputeMinMs: timing.engineCompute.minimum, engineComputeMedianMs: timing.engineCompute.median, engineComputeIqrMs: timing.engineCompute.interquartileRange ?? null,
+                substepsPerSecond: timing.substepsPerSecond, peakResidentBytes: timing.peakResidentBytes
+            })), ['problem', 'label', 'model', 'globalSteps', 'substeps', 'runs', 'wallMinMs', 'wallMedianMs', 'wallMaxMs', 'wallMadMs', 'wallIqrMs', 'wallMinOverMedian', 'engineComputeMinMs', 'engineComputeMedianMs', 'engineComputeIqrMs', 'substepsPerSecond', 'peakResidentBytes']));
         }
+        if (quiet && mode === 'full') await writeFile(join(outputDirectory, 'timing-conditions.csv'), quiet.csv());
         await writeFile(join(outputDirectory, 'summary.json'), `${JSON.stringify(summary, (_key, value) => (typeof value === 'number' && !Number.isFinite(value) ? String(value) : value), 2)}\n`);
         for (const plot of results.flatMap((entry) => entry.plots)) {
             await writeFile(join(outputDirectory, 'plots', `${plot.id}.svg`), renderSvg(plot, { standalone: true }));

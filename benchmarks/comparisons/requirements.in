@@ -1,0 +1,4 @@
+# The comparisons' Python packages, pinned. requirements.lock is compiled from this file, with every wheel's hash:
+#   uv pip compile benchmarks/comparisons/requirements.in --universal --generate-hashes --python-version 3.12 -o benchmarks/comparisons/requirements.lock
+numpy==2.5.5
+scipy==1.18.1

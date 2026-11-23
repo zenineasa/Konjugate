@@ -7,7 +7,7 @@
         "rungeKutta4": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625]
     },
     "timing": [
-        { "label": "DC motor, 2^17 steps, explicit", "model": "dcMotor", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.000091552734375, "targetTime": 12, "outputInterval": 0.015625 } },
+        { "label": "DC motor, 2^17 steps, explicit", "model": "dcMotor", "variant": { "integration": "explicit" }, "run": { "globalTimeStep": 0.000091552734375, "targetTime": 12, "outputInterval": 0.01171875 } },
         { "label": "DC motor, 49,152 steps, Runge–Kutta 4", "model": "dcMotor", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.000244140625, "targetTime": 12, "outputInterval": 0.015625 } }
     ],
     "thresholds": {

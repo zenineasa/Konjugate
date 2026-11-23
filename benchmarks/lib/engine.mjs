@@ -61,7 +61,8 @@ function memoryWrapper() {
     return null;
 }
 
-export function createEngine(executable, workDirectory) {
+// beforeTimedRun: awaited before every measured run, outside its timing (lib/quiet.mjs waits there for a quiet computer).
+export function createEngine(executable, workDirectory, { beforeTimedRun = null } = {}) {
     const modelFiles = new Map();
     let runIndex = 0;
 
@@ -103,6 +104,7 @@ export function createEngine(executable, workDirectory) {
             } : {};
             await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial', ...(execution ?? {}) } }));
             const engineArgs = ['run', modelAsIs ? modelPath : await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];
+            if (measure && beforeTimedRun) await beforeTimedRun(`${modelPath.split('/').at(-1)} ${variant?.method ?? variant?.integration ?? 'explicit'} ${execution?.backend ?? 'serial'}${execution?.workerThreads ? ` ${execution.workerThreads}` : ''}`);
             const wrapper = measure ? memoryWrapper() : null;
             const startedAt = performance.now();
             const { code, diagnostics } = wrapper ? await execute(wrapper.command, [...wrapper.args, executable, ...engineArgs]) : await execute(executable, engineArgs);

@@ -7,6 +7,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
+import { dirname, join } from 'node:path';
 
 function command(file, args) {
     try {
@@ -96,4 +97,30 @@ export function busyProcesses() {
         if (kind) found.push({ pid: Number(match[1]), kind: kind.name, command: match[2].slice(0, 160) });
     }
     return found;
+}
+
+// How the engine being timed was built, from the CMake cache beside it: its build type, compiler and that compiler's version, and the
+// flags of its build type. Null when the executable was not built by CMake in its own directory.
+export function engineBuild(executable) {
+    const cachePath = join(dirname(executable), 'CMakeCache.txt');
+    if (!existsSync(cachePath)) return null;
+    const cache = readFileSync(cachePath, 'utf8');
+    const entry = (name) => new RegExp(`^${name}:[A-Z]+=(.*)$`, 'm').exec(cache)?.[1] ?? null;
+    const buildType = entry('CMAKE_BUILD_TYPE');
+    const compiler = entry('CMAKE_CXX_COMPILER');
+    return {
+        buildType, compiler,
+        compilerVersion: compiler ? command(compiler, ['--version']).split('\n')[0] || null : null,
+        flags: [entry('CMAKE_CXX_FLAGS'), buildType ? entry(`CMAKE_CXX_FLAGS_${buildType.toUpperCase()}`) : null].filter(Boolean).join(' ').trim() || null
+    };
+}
+
+// The computer's state at an instant, recorded at the start and end of a timing session: the load average, the power source and, on
+// macOS, the thermal and performance warnings and processor speed limit that pmset reports.
+export function conditions() {
+    return {
+        at: new Date().toISOString(), loadAverage: os.loadavg().map((value) => Number(value.toFixed(2))),
+        power: process.platform === 'darwin' ? command('pmset', ['-g', 'batt']).split('\n')[0] || null : null,
+        thermal: process.platform === 'darwin' ? command('pmset', ['-g', 'therm']).split('\n').map((line) => line.trim()).filter(Boolean).join('; ') || null : null
+    };
 }

@@ -27,7 +27,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { affineSolution } from '../../lib/linearAlgebra.mjs';
-import { errorMetrics, spread } from '../../lib/metrics.mjs';
+import { errorMetrics, timingStatistics } from '../../lib/metrics.mjs';
 import { trajectory } from '../../lib/engine.mjs';
 import { createChecks, engineRun, linePlot, methodName, resultRow, series } from '../../lib/study.mjs';
 import { contributionCount, denseMatrix, generateGraph, stepIndependently, writeGraphModel } from './graphs.mjs';
@@ -197,14 +197,14 @@ export async function measure({ engine, config, repeats: maximumRepeats, warmupR
                 for (const method of config.methods) {
                     const study = await studyGraph({ engine, graph, path, stateIds, method, backends: config.backends, run, matrixExponentialMaxNodes: config.matrixExponentialMaxNodes, measure: true, repeats, warmup });
                     rows.push(resultRow({ caseName: `${familyNames[family]}, ${graph.nodeCount} nodes`, model: family, variant: method.variant, run, errors: study.errors ?? {}, conservationError: study.conservation, work: study.work, unit: 'K', note: graphNote(graph, study) }));
-                    const serialSolve = spread(study.runs[0].measured.map((entry) => entry.timing.engineComputeMilliseconds)).median;
+                    const serialSolve = timingStatistics(study.runs[0].measured.map((entry) => entry.timing.engineComputeMilliseconds)).minimum;
                     for (const { backend, measured } of study.runs) {
                         const entry = timingEntry({ family, graph, method, backend, measured, run, generationMilliseconds });
-                        entry.speedUp = serialSolve / entry.solve.median;
+                        entry.speedUp = serialSolve / entry.solve.minimum;
                         entry.efficiency = entry.speedUp / measured[0].execution.workerThreads;
                         timings.push(entry);
                         cases.push(entry);
-                        log(`  timed graphScalability: ${entry.label}: median wall ${entry.wall.median.toFixed(0)} ms, solve ${entry.solve.median.toFixed(0)} ms over ${measured.length} runs`);
+                        log(`  timed graphScalability: ${entry.label}: minimum wall ${entry.wall.minimum.toFixed(0)} ms, solve ${entry.solve.minimum.toFixed(0)} ms (medians ${entry.wall.median.toFixed(0)}, ${entry.solve.median.toFixed(0)}) over ${measured.length} runs`);
                     }
                     if (sweepHere && method.key === full.workerSweep.method) {
                         for (const workers of full.workerSweep.workers) {
@@ -213,7 +213,7 @@ export async function measure({ engine, config, repeats: maximumRepeats, warmupR
                                 for (let index = 0; index < warmup; ++index) await engine.run(path, method.variant, run, { execution, modelAsIs: true });
                                 const measured = [];
                                 for (let index = 0; index < repeats; ++index) measured.push(await engine.run(path, method.variant, run, { execution, modelAsIs: true, measure: true }));
-                                const solve = spread(measured.map((entry) => entry.timing.engineComputeMilliseconds)).median;
+                                const solve = timingStatistics(measured.map((entry) => entry.timing.engineComputeMilliseconds)).minimum;
                                 sweep.push({ backend, workers, effectiveWorkers: measured[0].execution.workerThreads, solve, speedUp: serialSolve / solve });
                             }
                         }
@@ -228,17 +228,17 @@ export async function measure({ engine, config, repeats: maximumRepeats, warmupR
 }
 
 function timingEntry({ family, graph, method, backend, measured, run, generationMilliseconds }) {
-    const wall = spread(measured.map((entry) => entry.timing.wallMilliseconds));
-    const solve = spread(measured.map((entry) => entry.timing.engineComputeMilliseconds));
-    const compile = spread(measured.map((entry) => entry.timing.planningMilliseconds));
+    const wall = timingStatistics(measured.map((entry) => entry.timing.wallMilliseconds));
+    const solve = timingStatistics(measured.map((entry) => entry.timing.engineComputeMilliseconds));
+    const compile = timingStatistics(measured.map((entry) => entry.timing.planningMilliseconds));
     const memory = measured.map((entry) => entry.timing.peakResidentBytes).filter((value) => value !== null);
     const nodeSteps = graph.nodeCount * measured[0].work.globalSteps;
     return {
         problem: 'scaling/graphScalability', label: `${familyNames[family]}, ${graph.nodeCount} nodes, ${methodName(method.variant)}, ${backend.label}`, model: `generated ${family}`,
         family, nodes: graph.nodeCount, method: method.key, backend: backend.execution.backend, workers: measured[0].execution.workerThreads,
         variant: method.variant, run, work: measured[0].work, wall, engineCompute: solve, solve, compile,
-        otherMilliseconds: wall.median - solve.median - compile.median, generationMilliseconds,
-        substepsPerSecond: measured[0].work.substeps / (solve.median / 1000), nodeStepsPerSecond: nodeSteps / (solve.median / 1000),
+        otherMilliseconds: wall.minimum - solve.minimum - compile.minimum, generationMilliseconds,
+        substepsPerSecond: measured[0].work.substeps / (solve.minimum / 1000), nodeStepsPerSecond: nodeSteps / (solve.minimum / 1000),
         peakResidentBytes: memory.length ? Math.max(...memory) : null
     };
 }
@@ -256,7 +256,7 @@ function timingPlots(cases, sweep, config) {
         });
         for (const family of Object.keys(config.full.sizes)) {
             plots.push(linePlot({
-                id: `scalingThroughput-${family}-${method.key}`, title: `Throughput, ${familyNames[family]}, ${name}`, subtitle: 'Node steps per second of solving (median), on this machine',
+                id: `scalingThroughput-${family}-${method.key}`, title: `Throughput, ${familyNames[family]}, ${name}`, subtitle: 'Node steps per second of solving (minimum), on this machine',
                 xLabel: 'Nodes', yLabel: 'Node steps per second', logX: true, logY: true, series: byBackend(family, (entry) => entry.nodeStepsPerSecond)
             }));
         }
@@ -265,9 +265,9 @@ function timingPlots(cases, sweep, config) {
             id: `scalingTimeSplit-${method.key}`, title: `Where the time goes, grid, ${name}, serial`, subtitle: 'Median wall time of the engine process, split into its parts',
             xLabel: 'Nodes', yLabel: 'Milliseconds', logX: true, logY: true,
             series: [
-                series('wall time', 'reference', serial.map((entry) => entry.nodes), serial.map((entry) => entry.wall.median)),
-                series('solving', 'slot2', serial.map((entry) => entry.nodes), serial.map((entry) => entry.solve.median)),
-                series('compiling and planning', 'slot3', serial.map((entry) => entry.nodes), serial.map((entry) => entry.compile.median)),
+                series('wall time', 'reference', serial.map((entry) => entry.nodes), serial.map((entry) => entry.wall.minimum)),
+                series('solving', 'slot2', serial.map((entry) => entry.nodes), serial.map((entry) => entry.solve.minimum)),
+                series('compiling and planning', 'slot3', serial.map((entry) => entry.nodes), serial.map((entry) => entry.compile.minimum)),
                 series('starting, reading, validating, writing', 'slot4', serial.map((entry) => entry.nodes), serial.map((entry) => entry.otherMilliseconds))
             ]
         }));
@@ -302,8 +302,8 @@ function timingNotes(cases, sweep, config) {
     const format = (value) => (value >= 1e6 ? `${(value / 1e6).toFixed(2)} M` : value >= 1e3 ? `${(value / 1e3).toFixed(1)} k` : value.toFixed(value < 10 ? 1 : 0));
     const notes = [];
     for (const entry of cases.filter((candidate) => candidate.backend === 'serial')) {
-        const best = cases.filter((candidate) => candidate.family === entry.family && candidate.nodes === entry.nodes && candidate.method === entry.method).toSorted((a, b) => a.solve.median - b.solve.median)[0];
-        notes.push(`${entry.label.replace(', serial', '')}: wall ${format(entry.wall.median)} ms (compiling ${format(entry.compile.median)} ms, solving ${format(entry.solve.median)} ms, the rest ${format(entry.otherMilliseconds)} ms), ${format(entry.nodeStepsPerSecond)} node steps/s serial, peak memory ${entry.peakResidentBytes === null ? 'not measured' : `${(entry.peakResidentBytes / 2 ** 20).toFixed(0)} MiB`}; fastest solve ${backendNames[best.backend]} (speed-up ${best.speedUp.toFixed(2)}, efficiency ${best.efficiency.toFixed(2)}).`);
+        const best = cases.filter((candidate) => candidate.family === entry.family && candidate.nodes === entry.nodes && candidate.method === entry.method).toSorted((a, b) => a.solve.minimum - b.solve.minimum)[0];
+        notes.push(`${entry.label.replace(', serial', '')}: wall ${format(entry.wall.minimum)} ms (compiling ${format(entry.compile.minimum)} ms, solving ${format(entry.solve.minimum)} ms, the rest ${format(entry.otherMilliseconds)} ms), ${format(entry.nodeStepsPerSecond)} node steps/s serial, peak memory ${entry.peakResidentBytes === null ? 'not measured' : `${(entry.peakResidentBytes / 2 ** 20).toFixed(0)} MiB`}; fastest solve ${backendNames[best.backend]} (speed-up ${best.speedUp.toFixed(2)}, efficiency ${best.efficiency.toFixed(2)}).`);
     }
     for (const entry of sweep) notes.push(`Worker sweep: ${backendNames[entry.backend]}, ${entry.workers} workers requested (${entry.effectiveWorkers} used): speed-up ${entry.speedUp.toFixed(2)}, efficiency ${(entry.speedUp / entry.effectiveWorkers).toFixed(2)}.`);
     return notes;

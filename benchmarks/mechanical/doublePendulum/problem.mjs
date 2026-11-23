@@ -10,7 +10,9 @@
 //
 // The motion is chaotic. Reported, for each method in benchmark.json: the trajectory's error over the first seconds and its predictability
 // horizon; energy over a long run; the sensitivity to initial conditions, from perturbed.kjt (θ1 larger by 1e-9 rad), against the
-// reference's own; and the observed order.
+// reference's own; and the observed order. Adaptive (Dormand–Prince 5(4) with its error control) is run over relative tolerances from
+// 1e-4 to 1e-10 instead of steps: its predictability horizon and its energy drift over the long run against the tolerance, with the steps
+// and evaluations each took.
 //
 // Semi-implicit Euler updates the angles, then the angular velocities from the new angles, in the order the node lists its states. For a
 // single pendulum that is the symplectic Euler method, whose energy stays bounded. Here it is not: the kinetic energy depends on the
@@ -172,6 +174,51 @@ export async function evaluate({ engine, config }) {
         id: 'doublePendulumEnergy', title: 'Double pendulum: energy drift over a long run', subtitle: `Largest |E - E(0)| / (E(0) + 3 g L) up to each time, over ${energyRun.targetTime} s`, xLabel: 'Time (s)', yLabel: 'Largest relative energy drift so far', logY: true,
         series: energySeries
     }));
+
+    // Adaptive: the horizon and the energy drift against the tolerance, with the work each took. Its global step, the largest step it
+    // may take, is set long enough not to bind, with the samples on it.
+    {
+        const adaptive = config.adaptive;
+        const stride = Math.round(adaptive.globalTimeStep / config.trajectory.outputInterval);
+        const adaptiveRun = { ...run, globalTimeStep: adaptive.globalTimeStep, outputInterval: adaptive.globalTimeStep };
+        const sampled = (values) => values.filter((_value, k) => k % stride === 0);
+        const adaptiveExact = sampled(trusted(exact.states));
+        const horizons = [];
+        const drifts = [];
+        const work = [];
+        for (const relative of adaptive.relativeTolerances) {
+            const variant = { method: 'dormandPrince54', tolerance: { relative, absolute: relative * adaptive.absoluteFraction } };
+            const result = await engine.run(paths.doublePendulum, variant, adaptiveRun);
+            const numeric = trajectory(result, ids).slice(0, adaptiveExact.length);
+            const horizon = firstAbove(result.times.slice(0, adaptiveExact.length), angleSeparation(numeric, adaptiveExact), limit);
+            const energyResult = await engine.run(paths.doublePendulum, variant, { ...energyRun, globalTimeStep: config.energy.outputInterval });
+            const drift = conservationDrift(trajectory(energyResult, ids).map(energy), scale);
+            horizons.push(horizon);
+            drifts.push(drift.maxRelativeDrift);
+            work.push(energyResult.work.modelEvaluations);
+            rows.push(resultRow({ caseName: 'Double pendulum: against tolerance', model: 'doublePendulum', variant, run: energyRun, conservationError: drift.maxRelativeDrift, work: energyResult.work, unit,
+                note: `angle error first above ${limit} rad at ${horizon >= trustedTime ? `${trustedTime.toFixed(2)} s or later (the reference is trusted to ${trustedTime.toFixed(2)} s)` : `${horizon.toFixed(2)} s`}; energy drift over ${energyRun.targetTime} s ${drift.maxRelativeDrift.toExponential(2)}; ${energyResult.work.methodSteps} steps, ${energyResult.work.rejectedSteps} rejected, ${energyResult.work.modelEvaluations} evaluations of the model` }));
+        }
+        const proportionality = observedOrder(adaptive.relativeTolerances, drifts);
+        rows.at(-1).note += `; energy drift against tolerance: fitted slope ${proportionality.fitted.toFixed(3)}`;
+        add('energyDriftToleranceSlopeAdaptive', proportionality.fitted, `Adaptive: slope of log energy drift over ${energyRun.targetTime} s against log tolerance, ${adaptive.relativeTolerances.length} tolerances from ${adaptive.relativeTolerances[0]} to ${adaptive.relativeTolerances.at(-1)}`);
+        // A chaotic run's energy drift grows faster than the tolerance as it loosens (slope above 1), so it is judged by its slope and at
+        // the tightest tolerance rather than as a multiple of the tolerance.
+        add('energyDriftTightestAdaptive', drifts.at(-1), `Adaptive: largest relative energy drift over ${energyRun.targetTime} s at relative tolerance ${adaptive.relativeTolerances.at(-1)}`);
+        add('horizonLoosestAdaptive', horizons[0], `Predictability horizon (s) at relative tolerance ${adaptive.relativeTolerances[0]}, Adaptive`);
+        add('horizonTightestAdaptive', horizons.at(-1), `Predictability horizon (s) at relative tolerance ${adaptive.relativeTolerances.at(-1)}, Adaptive, up to the ${trustedTime.toFixed(2)} s the reference is trusted for`);
+        plots.push(linePlot({
+            id: 'doublePendulumTolerance', title: 'Double pendulum: Adaptive\'s energy drift against its tolerance', subtitle: `Largest relative energy drift over ${energyRun.targetTime} s`,
+            xLabel: 'Relative tolerance', yLabel: 'Largest relative energy drift', logX: true, logY: true, xTicks: adaptive.relativeTolerances,
+            series: [series('Konjugate, Adaptive, Dormand–Prince 5(4)', 'dormandPrince54', adaptive.relativeTolerances, drifts),
+                series('Proportional (slope 1)', 'guide', adaptive.relativeTolerances, adaptive.relativeTolerances.map((relative) => drifts[0] * relative / adaptive.relativeTolerances[0]))]
+        }));
+        plots.push(linePlot({
+            id: 'doublePendulumHorizonTolerance', title: 'Double pendulum: Adaptive\'s horizon against its tolerance', subtitle: `The first time either angle's error exceeds ${limit} rad, up to the ${trustedTime.toFixed(2)} s the reference is trusted for`,
+            xLabel: 'Relative tolerance', yLabel: 'Predictability horizon (s)', logX: true, xTicks: adaptive.relativeTolerances,
+            series: [series('Konjugate, Adaptive, Dormand–Prince 5(4)', 'dormandPrince54', adaptive.relativeTolerances, horizons)]
+        }));
+    }
 
     // Observed order over a short run.
     const convergence = config.convergence;

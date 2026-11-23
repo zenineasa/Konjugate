@@ -1,6 +1,6 @@
 {
     "title": "Double pendulum",
-    "summary": "A double pendulum released from rest with both arms horizontal, one node: trajectory error and predictability horizon against a SciPy DOP853 reference, energy over a long run (explicit and semi-implicit Euler against Runge–Kutta 4), sensitivity to a 1e-9 rad change in the starting angle, and the observed order.",
+    "summary": "A double pendulum released from rest with both arms horizontal, one node: trajectory error and predictability horizon against a SciPy DOP853 reference, energy over a long run (explicit and semi-implicit Euler against Runge–Kutta 4), sensitivity to a 1e-9 rad change in the starting angle, and the observed order; and Adaptive's horizon and energy drift against its tolerance, with the work it took.",
     "horizonAngle": 0.1,
     "trajectory": {
         "targetTime": 20,
@@ -21,6 +21,7 @@
             { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
         ]
     },
+    "adaptive": { "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "globalTimeStep": 0.125 },
     "convergence": {
         "targetTime": 2,
         "outputInterval": 0.015625,
@@ -54,6 +55,10 @@
         "orderSemiImplicit": { "min": 0.95, "max": 1.1 },
         "finestOrderSemiImplicit": { "min": 0.97, "max": 1.03 },
         "orderRungeKutta4": { "min": 3.9, "max": 4.1 },
-        "finestOrderRungeKutta4": { "min": 3.9, "max": 4.1 }
+        "finestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
+        "energyDriftToleranceSlopeAdaptive": { "min": 1.1, "max": 1.5 },
+        "energyDriftTightestAdaptive": { "max": 1e-9 },
+        "horizonLoosestAdaptive": { "min": 5.7, "max": 7.3 },
+        "horizonTightestAdaptive": { "min": 15, "max": 19 }
     }
 }

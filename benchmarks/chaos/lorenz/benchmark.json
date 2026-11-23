@@ -1,6 +1,6 @@
 {
     "title": "Lorenz system",
-    "summary": "The Lorenz system (σ = 10, ρ = 28, β = 8/3) from (1, 1, 1), as one node and as two: trajectory error against a 70-digit Taylor reference and the predictability horizon of each method and step, then what survives chaos: the attractor's statistics and the largest Lyapunov exponent against a SciPy ensemble, for explicit and semi-implicit Euler and Runge–Kutta 4.",
+    "summary": "The Lorenz system (σ = 10, ρ = 28, β = 8/3) from (1, 1, 1), as one node and as two: trajectory error against a 70-digit Taylor reference and the predictability horizon of each method and step, and of Adaptive against its tolerance with the work it took, then what survives chaos: the attractor's statistics and the largest Lyapunov exponent against a SciPy ensemble, for explicit and semi-implicit Euler, Runge–Kutta 4 and Adaptive.",
     "horizonTolerance": 0.01,
     "trajectory": {
         "targetTime": 24,
@@ -27,6 +27,7 @@
             { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.015625, 0.0078125, 0.00390625, 0.001953125, 0.0009765625, 0.00048828125] }
         ]
     },
+    "adaptive": { "globalTimeStep": 0.125, "targetTime": 40, "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10, 1e-11], "absoluteFraction": 1e-3, "statisticsTolerance": 1e-8 },
     "statistics": {
         "targetTime": 520,
         "outputInterval": 0.0625,
@@ -86,6 +87,20 @@
         "standardDeviationZScoreRungeKutta4": { "max": 3 },
         "rmsXScoreRungeKutta4": { "max": 3 },
         "lyapunovExponentScoreRungeKutta4": { "max": 3 },
-        "referenceLyapunovAgainstLiterature": { "max": 3 }
+        "referenceLyapunovAgainstLiterature": { "max": 3 },
+        "horizonAdaptiveTolerance1": { "min": 10.9, "max": 13.9 },
+        "horizonAdaptiveTolerance2": { "min": 12.3, "max": 15.7 },
+        "horizonAdaptiveTolerance3": { "min": 15, "max": 19 },
+        "horizonAdaptiveTolerance4": { "min": 16.3, "max": 20.7 },
+        "horizonAdaptiveTolerance5": { "min": 18.9, "max": 24.1 },
+        "horizonAdaptiveTolerance6": { "min": 21.4, "max": 27.3 },
+        "horizonAdaptiveTolerance7": { "min": 24.1, "max": 30.7 },
+        "horizonAdaptiveTolerance8": { "min": 25.5, "max": 32.5 },
+        "horizonGainPerDecadeAdaptive": { "min": 0.75, "max": 1.2 },
+        "splitDifferenceAdaptive": { "max": 1e-12 },
+        "meanZScoreAdaptive": { "max": 3 },
+        "standardDeviationZScoreAdaptive": { "max": 3 },
+        "rmsXScoreAdaptive": { "max": 3 },
+        "lyapunovExponentScoreAdaptive": { "max": 3 }
     }
 }

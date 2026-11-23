@@ -12,6 +12,10 @@
 //   Statistics. Over 500 s after a 20 s transient: the mean and standard deviation of z and the root mean square of x, against an ensemble
 //   of 200 reference runs of the same length; each is judged in units of the ensemble's scatter, which is how far one run of that length
 //   should land from the attractor's true value.
+//   Adaptive. Dormand–Prince 5(4) with its error control (docs/proposals/integrators.md) over relative tolerances from 1e-4 to 1e-11:
+//   the predictability horizon against the tolerance, which a decade of tolerance lengthens by about ln 10 / λ = 2.5 s times the slope of
+//   its error against its tolerance (a little under 1), with the steps and evaluations each took; two nodes against one under it; and
+//   the attractor's statistics and Lyapunov exponent at one tolerance.
 //   Lyapunov exponent. tangent.kjt carries the tangent equations beside the state, du/dt = J(x, y, z) u from u = (1, 0, 0); the largest
 //   exponent is the growth rate of ln |u| over the same window, against the reference ensemble and Viswanath's 0.9056.
 //
@@ -269,6 +273,71 @@ export async function evaluate({ engine, config }) {
         rows.push(resultRow({ caseName: `Lorenz, one node: attractor statistics over ${run.targetTime - transient} s`, model: 'oneNode', variant, run, work: result.work,
             note: Object.entries(measured).map(([name, value]) => `${statisticNames[name]} ${value.toFixed(4)} (reference ${reference[name].mean.toFixed(4)} ± ${reference[name].windowStandardDeviation.toFixed(4)}, ${scores[name] >= 0 ? '+' : ''}${scores[name].toFixed(2)} σ)`).join('; ') }));
     }
+    // Adaptive: the horizon against the tolerance, with the work it took; two nodes against one; the statistics at one tolerance.
+    const adaptive = config.adaptive;
+    // The global step is Adaptive's largest step: long enough not to bind at the loosest tolerance, and the samples at it, so the
+    // reference is read at every one of its samples that falls on one.
+    const adaptiveRun = { ...trajectoryRun, globalTimeStep: adaptive.globalTimeStep, outputInterval: adaptive.globalTimeStep, targetTime: adaptive.targetTime };
+    const stride = Math.round(adaptive.globalTimeStep / config.trajectory.outputInterval);
+    const adaptiveReference = exact.states.filter((_sample, k) => k % stride === 0);
+    const adaptiveHorizons = [];
+    const adaptiveWork = [];
+    for (const [index, relative] of adaptive.relativeTolerances.entries()) {
+        const variant = { method: 'dormandPrince54', tolerance: { relative, absolute: relative * adaptive.absoluteFraction } };
+        const result = await engine.run(paths.oneNode, variant, adaptiveRun);
+        const horizon = horizonOf(result.times, errorHistory(trajectory(result, oneNodeIds), adaptiveReference, ranges), tolerance);
+        adaptiveHorizons.push(horizon);
+        adaptiveWork.push(result.work.modelEvaluations);
+        rows.push(resultRow({ caseName: 'Lorenz, one node: predictability horizon against tolerance', model: 'oneNode', variant, run: adaptiveRun, work: result.work,
+            note: `horizon ${horizon.toFixed(2)} s; ${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model` }));
+        add(`horizonAdaptiveTolerance${index + 1}`, horizon, `Predictability horizon (s) at relative tolerance ${relative}, run to ${adaptive.targetTime} s, ${methodName(variant)}`);
+    }
+    {
+        const x = adaptive.relativeTolerances.map((relative) => -Math.log10(relative));
+        const meanX = x.reduce((sum, value) => sum + value, 0) / x.length;
+        const meanY = adaptiveHorizons.reduce((sum, value) => sum + value, 0) / adaptiveHorizons.length;
+        const gain = x.reduce((sum, value, k) => sum + (value - meanX) * (adaptiveHorizons[k] - meanY), 0) / x.reduce((sum, value) => sum + (value - meanX) ** 2, 0);
+        const expected = Math.LN10 / lambda;
+        rows.push(resultRow({ caseName: 'Lorenz, one node: horizon gained per decade of tolerance', model: 'oneNode', variant: { method: 'dormandPrince54' },
+            note: `least-squares gain ${gain.toFixed(2)} s per decade (ln 10 / λ = ${expected.toFixed(2)} s)` }));
+        add('horizonGainPerDecadeAdaptive', gain / expected, `Horizon gained per decade of tolerance, least-squares, as a fraction of ln 10 / λ (${expected.toFixed(2)} s), Adaptive`);
+        plots.push(linePlot({
+            id: 'lorenzHorizonTolerance', title: 'Lorenz: Adaptive\'s predictability horizon against its tolerance', subtitle: `The first time the error exceeds ${tolerance * 100} % of a state's range; each point's model evaluations in the results table`,
+            xLabel: 'Relative tolerance', yLabel: 'Predictability horizon (s)', logX: true, xTicks: adaptive.relativeTolerances,
+            series: [series('Konjugate, Adaptive, Dormand–Prince 5(4)', 'dormandPrince54', adaptive.relativeTolerances, adaptiveHorizons)]
+        }));
+        plots.push(linePlot({
+            id: 'lorenzWorkHorizon', title: 'Lorenz: Adaptive\'s work against its horizon', subtitle: 'Evaluations of the whole model against the predictability horizon reached', xLabel: 'Predictability horizon (s)', yLabel: 'Evaluations of the model', logY: true,
+            series: [series('Konjugate, Adaptive, Dormand–Prince 5(4)', 'dormandPrince54', adaptiveHorizons, adaptiveWork)]
+        }));
+    }
+    {
+        const variant = { method: 'dormandPrince54', tolerance: { relative: adaptive.statisticsTolerance, absolute: adaptive.statisticsTolerance * adaptive.absoluteFraction } };
+        const shortRun = { ...trajectoryRun, globalTimeStep: config.trajectory.outputInterval };
+        const one = trajectory(await engine.run(paths.oneNode, variant, shortRun), oneNodeIds);
+        const twoResult = await engine.run(paths.twoNodes, variant, shortRun);
+        const difference = largestRelative(trajectory(twoResult, twoNodesIds).slice(0, shortCount), one.slice(0, shortCount));
+        rows.push(resultRow({ caseName: `Lorenz, two nodes: first ${config.trajectory.shortHorizon} s`, model: 'twoNodes', variant, run: { ...shortRun, targetTime: config.trajectory.shortHorizon }, work: twoResult.work,
+            note: `difference from the one-node model over the first ${config.trajectory.shortHorizon} s, relative to range: ${difference.toExponential(2)}` }));
+        add('splitDifferenceAdaptive', difference, `Two nodes against one under Adaptive at relative tolerance ${adaptive.statisticsTolerance}: the same steps (the error summed node by node), largest difference relative to range over the first ${config.trajectory.shortHorizon} s`);
+        const run = { ...statisticsRun, globalTimeStep: config.statistics.outputInterval };
+        const tangentResult = await engine.run(paths.tangent, variant, run);
+        const allIds = buildOneNode({ tangent: true }).ids;
+        const measured = statisticsOf(tangentResult.times, trajectory(tangentResult, allIds.slice(0, 3)), transient);
+        const tangentIds = allIds.slice(3);
+        const logNorm = (k) => Math.log(Math.hypot(...tangentIds.map((id) => tangentResult.values.get(id)[k])));
+        const start = tangentResult.times.findIndex((time) => time >= transient - 1e-9);
+        const end = tangentResult.times.length - 1;
+        measured.lyapunovExponent = (logNorm(end) - logNorm(start)) / (tangentResult.times[end] - tangentResult.times[start]);
+        const scores = {};
+        for (const [name, value] of Object.entries(measured)) {
+            scores[name] = (value - reference[name].mean) / reference[name].windowStandardDeviation;
+            add(`${name}ScoreAdaptive`, Math.abs(scores[name]), `${capitalised(statisticNames[name])} over ${run.targetTime - transient} s after ${transient} s: |Konjugate - reference| in units of the scatter of one run that long, ${methodName(variant)}`);
+        }
+        rows.push(resultRow({ caseName: `Lorenz, one node: attractor statistics over ${run.targetTime - transient} s`, model: 'oneNode', variant, run, work: tangentResult.work,
+            note: `${Object.entries(measured).map(([name, value]) => `${statisticNames[name]} ${value.toFixed(4)} (${scores[name] >= 0 ? '+' : ''}${scores[name].toFixed(2)} σ)`).join('; ')}; ${tangentResult.work.methodSteps} steps, ${tangentResult.work.rejectedSteps} rejected` }));
+    }
+
     const literature = data.provenance.literatureLyapunovExponent;
     add('referenceLyapunovAgainstLiterature', Math.abs(reference.lyapunovExponent.mean - literature) / reference.lyapunovExponent.standardErrorOfMean,
         `The reference ensemble's mean Lyapunov exponent against Viswanath's ${literature}, in units of the ensemble mean's standard error`);

@@ -1,6 +1,6 @@
 {
     "title": "Van der Pol oscillator",
-    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4. μ = 1000 (stiff) waits for the stiff method.",
+    "summary": "The Van der Pol oscillator from x = 2, y = 0, one node, at μ = 1 (smooth) and μ = 10 (relaxation): trajectory error against a SciPy Radau reference, the limit cycle's period and amplitude, the phase portrait and the observed order, for explicit and semi-implicit Euler and Runge–Kutta 4, and Adaptive's error, period and amplitude against its tolerance with the work it took. μ = 1000 (stiff) waits for the stiff method.",
     "cases": {
         "mu1": {
             "run": { "targetTime": 40, "outputInterval": 0.0625 },
@@ -10,6 +10,7 @@
                 { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.0009765625 },
                 { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.015625 }
             ],
+            "adaptive": { "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "globalTimeStep": 0.5, "cycleTolerance": 1e-8 },
             "convergence": {
                 "targetTime": 8,
                 "outputInterval": 0.0625,
@@ -28,6 +29,7 @@
                 { "variant": { "integration": "semiImplicit" }, "globalTimeStep": 0.0009765625 },
                 { "variant": { "method": "rungeKutta4" }, "globalTimeStep": 0.00390625 }
             ],
+            "adaptive": { "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "globalTimeStep": 0.5, "cycleTolerance": 1e-8 },
             "convergence": {
                 "targetTime": 12,
                 "outputInterval": 0.03125,
@@ -81,6 +83,14 @@
         "mu10OrderRungeKutta4": { "min": 3.9, "max": 4.1 },
         "mu10FinestOrderRungeKutta4": { "min": 3.9, "max": 4.1 },
         "mu10ReferenceAgreement": { "max": 1e-09 },
-        "mu10ReferencePeriodAgreement": { "max": 1e-11 }
+        "mu10ReferencePeriodAgreement": { "max": 1e-11 },
+        "mu1ToleranceSlopeAdaptive": { "min": 0.85, "max": 1.2 },
+        "mu1ToleranceFactorAdaptive": { "max": 25 },
+        "mu1PeriodErrorAdaptive": { "max": 1e-8 },
+        "mu1AmplitudeErrorAdaptive": { "max": 2.4e-7 },
+        "mu10ToleranceSlopeAdaptive": { "min": 0.85, "max": 1.2 },
+        "mu10ToleranceFactorAdaptive": { "max": 25 },
+        "mu10PeriodErrorAdaptive": { "max": 2e-8 },
+        "mu10AmplitudeErrorAdaptive": { "max": 1.5e-6 }
     }
 }

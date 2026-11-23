@@ -12,7 +12,11 @@
 //
 // Reported, for each method in a case's methods (a variant and its global step): the trajectory's error against the reference over a few
 // cycles; the limit cycle's period and amplitude, measured after a long transient from Konjugate's own samples, against the reference's;
-// the phase portrait; and the observed order over halvings of the step.
+// the phase portrait; and the observed order over halvings of the step. Adaptive (Dormand–Prince 5(4) with its error control) is judged
+// against its tolerance instead: the trajectory's error over relative tolerances from 1e-4 to 1e-10, with a global step long enough not
+// to bind and samples on it, and the limit cycle's period and amplitude at each, with the steps and evaluations each took. The period and
+// amplitude are measured from samples a sixteenth or thirty-second of a second apart, which sets a floor (about 2e-7 and 1e-6 in
+// amplitude) that a tighter tolerance does not lower; they are checked at one tolerance.
 //
 // Reference (reference.json): SciPy solve_ivp, Radau with the exact Jacobian at rtol = atol = 1e-12, checked against DOP853 at the same
 // tolerances for μ = 1 and 10; the period and amplitude by event location on the same solutions.
@@ -167,6 +171,46 @@ export async function evaluate({ engine, config }) {
             id: `vanDerPol${key.slice(2)}Convergence`, title: `${title}: error against step size`, subtitle: `Largest error relative to range over ${convergence.targetTime} s`,
             xLabel: 'Global step h (s)', yLabel: 'Relative error', logX: true, logY: true, xTicks: steps, series: orderSeries
         }));
+
+        // Adaptive: the error against the tolerance, the limit cycle at each, and the work.
+        if (settings.adaptive) {
+            const adaptive = settings.adaptive;
+            const stride = Math.round(adaptive.globalTimeStep / run.outputInterval);
+            const adaptiveRun = { ...run, globalTimeStep: adaptive.globalTimeStep, outputInterval: adaptive.globalTimeStep };
+            const adaptiveReference = exact.states.filter((_sample, k) => k % stride === 0);
+            const errors = [];
+            for (const relative of adaptive.relativeTolerances) {
+                const variant = { method: 'dormandPrince54', tolerance: { relative, absolute: relative * adaptive.absoluteFraction } };
+                const result = await engine.run(modelPath(key), variant, adaptiveRun);
+                const metrics = errorMetrics(trajectory(result, ids), adaptiveReference);
+                errors.push(metrics.relativeError);
+                const cycleResult = await engine.run(modelPath(key), variant, { ...cycleRun, globalTimeStep: cycleRun.outputInterval });
+                const cycle = limitCycle(cycleResult.times, trajectory(cycleResult, ids), mu);
+                const periodError = Math.abs(cycle.period - exact.limitCycle.period) / exact.limitCycle.period;
+                const amplitudeError = Math.abs(cycle.amplitude - exact.limitCycle.amplitude) / exact.limitCycle.amplitude;
+                rows.push(resultRow({ caseName: `${title}: trajectory against tolerance`, model: key, variant, run: adaptiveRun, errors: metrics, work: result.work, unit: 'x, y = dx/dt',
+                    note: `error ${(metrics.relativeError / relative).toFixed(1)} times the tolerance; ${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model` }));
+                rows.push(resultRow({ caseName: `${title}: limit cycle against tolerance`, model: key, variant, run: { ...cycleRun, globalTimeStep: cycleRun.outputInterval }, work: cycleResult.work, unit: 'relative',
+                    errors: { relativeError: Math.max(periodError, amplitudeError) },
+                    note: `period error ${periodError.toExponential(2)}, amplitude error ${amplitudeError.toExponential(2)}; ${cycleResult.work.methodSteps} steps, ${cycleResult.work.rejectedSteps} rejected, ${cycleResult.work.modelEvaluations} evaluations of the model` }));
+                if (relative === adaptive.cycleTolerance) {
+                    add(`${key}PeriodErrorAdaptive`, periodError, `${title}: limit-cycle period, relative error, Adaptive at relative tolerance ${relative}`);
+                    add(`${key}AmplitudeErrorAdaptive`, amplitudeError, `${title}: limit-cycle amplitude, relative error, Adaptive at relative tolerance ${relative} (the sampling's floor)`);
+                }
+            }
+            const proportionality = observedOrder(adaptive.relativeTolerances, errors);
+            rows.at(-2).note += `; error against tolerance: fitted slope ${proportionality.fitted.toFixed(3)}`;
+            add(`${key}ToleranceSlopeAdaptive`, proportionality.fitted, `${title}, Adaptive: slope of log error against log tolerance over ${adaptive.relativeTolerances.length} tolerances from ${adaptive.relativeTolerances[0]} to ${adaptive.relativeTolerances.at(-1)}`);
+            add(`${key}ToleranceFactorAdaptive`, Math.max(...errors.map((error, index) => error / adaptive.relativeTolerances[index])), `${title}, Adaptive: largest trajectory error over its relative tolerance`);
+            plots.push(linePlot({
+                id: `vanDerPol${key.slice(2)}Tolerance`, title: `${title}: Adaptive's error against its tolerance`, subtitle: `Largest error relative to range over ${run.targetTime} s, sampled every ${adaptive.globalTimeStep} s`,
+                xLabel: 'Relative tolerance', yLabel: 'Relative error', logX: true, logY: true, xTicks: adaptive.relativeTolerances,
+                series: [
+                    series('Konjugate, Adaptive, Dormand–Prince 5(4)', 'dormandPrince54', adaptive.relativeTolerances, errors),
+                    series('Proportional (slope 1)', 'guide', adaptive.relativeTolerances, adaptive.relativeTolerances.map((relative) => errors[0] * relative / adaptive.relativeTolerances[0]))
+                ]
+            }));
+        }
 
         if (exact.dop853States) {
             add(`${key}ReferenceAgreement`, referenceAgreement(exact.states, exact.dop853States), `${title}: the Radau reference against DOP853 at the same tolerances, relative to each column's magnitude`);

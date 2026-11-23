@@ -143,6 +143,9 @@ export function generateFmiModel(document) {
     }
     const model = buildModel(document);
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
+    // A program in the current format keeps its memory with the engine, which an FMU would save in its FMU state: not written yet.
+    const currentFormat = providers.find((provider) => provider.program);
+    if (currentFormat) throw new Error(`The program of the ${currentFormat.entityLabel} is in the current program format, which FMU export cannot write yet -- export blocked.`);
     const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model);
     rewriteParameterSymbols(model, parameterValueReferences);
     // A model with any embedded C++ provider can carry arbitrary internal state across evaluate()

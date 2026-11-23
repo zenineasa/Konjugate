@@ -29,6 +29,8 @@ import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from '
 import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
     rungeKutta4Python, stiffSystemCpp, stiffSystemPython } from './integratorSources.mjs';
 import { programSourceVersion } from './providerTemplate.mjs';
+import { programSdkCpp, programSdkPython } from './programSdkSources.mjs';
+import { parseUnit } from './units.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -623,20 +625,20 @@ function buildContribution(spec, stateRecord, schedules) {
         if (binding.kind === 'time') {
             // Language-specific, resolved by symbolTexts(): substep start for a derivative, end
             // for an algebraic term -- the same instants the engine uses.
-            symbols.set(key, { time: algebraic ? 'algebraic' : 'start', comment: 'simulation time' });
+            symbols.set(key, { time: algebraic ? 'algebraic' : 'start', comment: 'simulation time', unit: 's' });
             continue;
         }
         if (binding.kind === 'parameter') {
             const parameter = (parameters ?? []).find((item) => item.id === binding.parameterId);
             if (!parameter) throw new Error(`The ${entityLabel} has an unresolved parameter binding.`);
-            symbols.set(key, parameterSymbol(parameter, algebraic ? 'algebraic' : 'start', schedules));
+            symbols.set(key, { ...parameterSymbol(parameter, algebraic ? 'algebraic' : 'start', schedules), unit: parameter.unit ?? '' });
         } else {
             const record = stateRecord.get(binding.stateId);
             if (!record) throw new Error(`The ${entityLabel} references a disabled or missing state.`);
             const isLocal = alwaysLocal || binding.nodeId === ownerPlan.node.id;
             symbols.set(key, isLocal
-                ? { text: `state[${ownerPlan.localIndexByStateId.get(binding.stateId)}]`, comment: `${ownerPlan.node.name}.${record.state.name}` }
-                : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}` });
+                ? { text: `state[${ownerPlan.localIndexByStateId.get(binding.stateId)}]`, comment: `${ownerPlan.node.name}.${record.state.name}`, unit: record.state.unit ?? '' }
+                : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}`, unit: record.state.unit ?? '' });
         }
     }
     // A provider may read any state it binds; an equation only the ones it uses (the node editor
@@ -645,7 +647,8 @@ function buildContribution(spec, stateRecord, schedules) {
     const boundStateIds = (bindings ?? [])
         .filter((binding) => (binding.kind === 'state' || binding.kind === undefined) && (!used || used.has(binding[identifierField])))
         .map((binding) => binding.stateId);
-    return { entityLabel, outputStateId, outputLocalIndex, negate, symbols, mathJson, implementation, boundStateIds };
+    return { entityLabel, outputStateId, outputLocalIndex, negate, symbols, mathJson, implementation, boundStateIds, algebraic,
+        outputUnit: stateRecord.get(outputStateId)?.state.unit ?? '' };
 }
 
 function buildNodeProvider(plan, stateRecord, schedules) {
@@ -691,7 +694,14 @@ export function collectProviders(model, kind) {
         // A program in the current program format (version 2) keeps its memory with the engine and is converted at its ports; code
         // export does not write that yet, so it refuses rather than write a program that would run differently.
         if (programSourceVersion(providerKind, owner.implementation.source) === 2) {
-            throw new Error(`The ${owner.entityLabel} is written in the current program format, which code export cannot write yet -- export blocked.`);
+            const declared = programDeclarations(providerKind, owner.implementation.source);
+            if (declared.keepsMemory) {
+                throw new Error(`The program of the ${owner.entityLabel} remembers something between steps, or has a clock, which code export cannot write yet -- export blocked.`);
+            }
+            if (declared.ownInitialize || declared.node || declared.outputs.length !== 1) {
+                throw new Error(`The program of the ${owner.entityLabel} has an initialize() of its own or several outputs, which code export cannot write yet -- export blocked.`);
+            }
+            owner.program = declared;
         }
         if (providerKind !== kind) {
             throw new Error(`The ${owner.entityLabel} is implemented in ${providerKind === 'cpp' ? 'C++' : 'Python'}, but export to ${kind === 'cpp' ? 'C++' : 'Python'} was requested -- export blocked. Provider source is never auto-translated between languages.`);
@@ -736,6 +746,11 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     const wholeModel = method !== 'nodeByNode';
     const model = buildModel(document, { wholeModel });
     const providers = collectProviders(model, kind);
+    // A program in the current format takes every stage of a whole-model method, which code export does not write yet.
+    const currentFormat = providers.find((provider) => provider.program);
+    if (wholeModel && currentFormat) {
+        throw new Error(`The program of the ${currentFormat.entityLabel} is in the current program format, which code export cannot write under ${integrationMethod(method).name} yet -- export blocked.`);
+    }
     if (wholeModel) {
         const nodeProvider = model.nodePlans.find((plan) => plan.nodeProvider);
         if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which code export cannot write under ${integrationMethod(method).name} yet.`);
@@ -919,7 +934,9 @@ export function emitCppRegularContribution(contribution) {
 // An algebraic state is a plain replacement: g(x, t) from the node's states at one instant.
 export function emitCppAlgebraicTask(task, info) {
     const lines = ['        {', ...commentLines(task.symbols, '            ', '//')];
-    if (task.implementation) {
+    if (task.program) {
+        lines.push(...cppProgramCall(task, info, 'algebraicTime', 'algebraicValue', false));
+    } else if (task.implementation) {
         const keys = Array.from(task.symbols.keys());
         const values = keys.map((key) => task.symbols.get(key).text).join(', ') || '0.0';
         const keyLiterals = keys.map((key) => `std::string_view("${key}")`).join(', ') || 'std::string_view("")';
@@ -975,7 +992,29 @@ function cppSettleLines(model, providerInfo) {
     return blocks.length ? blocks.join('\n') : null;
 }
 
+// A version 2 program's call (docs/proposals/programSdkV2.md): its inputs in its declaration order, converted at the port, its evaluate()
+// given the time and nothing else, its output converted into the state's unit.
+function cppProgramCall(task, info, timeName, valueName, rate) {
+    const { values, output } = programCall(task, task.program, 'cpp', task.outputUnit, rate);
+    return [
+        values.length ? `            const double programInputs[] = { ${values.join(', ')} };` : '            const double* programInputs = nullptr;',
+        `            double ${valueName} = static_cast<const konjugate::sdk::v2::Relationship&>(*${info.instanceVariable}).evaluate(${timeName}, konjugate::sdk::v2::Inputs(programInputs, nullptr, nullptr));`,
+        output ? `            ${valueName} = ${valueName} * ${output.scale} + ${output.offset};` : ''
+    ].filter(Boolean);
+}
+
 export function emitCppProviderContribution(contribution, info) {
+    if (contribution.program) {
+        return [
+            '        {',
+            ...commentLines(contribution.symbols, '            ', '//'),
+            ...cppProgramCall(contribution, info, 'stepTime', 'contributionValue', true),
+            contribution.negate ? '            contributionValue = -contributionValue;' : '',
+            '            if (!std::isfinite(contributionValue)) throw std::runtime_error("A contribution produced a non-finite derivative.");',
+            `            derivative[${contribution.outputLocalIndex}] += contributionValue;`,
+            '        }'
+        ].filter(Boolean).join('\n');
+    }
     const keys = Array.from(contribution.symbols.keys());
     const values = keys.map((key) => contribution.symbols.get(key).text).join(', ') || '0.0';
     const keyLiterals = keys.map((key) => `std::string_view("${key}")`).join(', ') || 'std::string_view("")';
@@ -1364,7 +1403,9 @@ function generateCpp(model, providers, meta, document) {
         const namespaceName = `provider${providerIndex}`;
         providerIndex += 1;
         providerInfo.set(provider, { namespaceName, instanceVariable: `${namespaceName}Instance`, index: providerIndex - 1 });
-        return `namespace ${namespaceName} {\n${stripLeadingCppInclude(provider.implementation.source)}\n}\n`;
+        const source = provider.program
+            ? provider.implementation.source.replace(/^#include\s*<konjugate\/sdk\/v2\/program\.hpp>\s*\n/m, '') : stripLeadingCppInclude(provider.implementation.source);
+        return `namespace ${namespaceName} {\n${source}\n}\n`;
     });
 
     const isMpi = meta.parallelism === 'mpi';
@@ -1375,6 +1416,7 @@ function generateCpp(model, providers, meta, document) {
 
     const providerDeclarations = providers.map((provider) => {
         const info = providerInfo.get(provider);
+        if (provider.program) return `    auto ${info.instanceVariable} = ${info.namespaceName}::createProgram();`;
         return `    auto ${info.instanceVariable} = ${info.namespaceName}::createRelationshipProvider();\n    ${info.instanceVariable}->initialize({});`;
     }).join('\n');
 
@@ -1432,7 +1474,9 @@ function generateCpp(model, providers, meta, document) {
         header,
         includes,
         '',
-        providers.length ? `${cppSdkNamespace}\n` : '',
+        providers.some((provider) => !provider.program) ? `${cppSdkNamespace}\n` : '',
+        // The program SDK (version 2) as it is, for the programs in the current format.
+        providers.some((provider) => provider.program) ? `${programSdkCpp.replace(/^#pragma once\n/m, '')}\n` : '',
         providerBlocks.join('\n'),
         cppScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
@@ -1546,7 +1590,25 @@ function emitPythonRegularContribution(contribution) {
     ].filter(Boolean).join('\n');
 }
 
+// A version 2 program's call in Python, as cppProgramCall's.
+function pythonProgramCall(task, info, timeName, valueName, rate) {
+    const { values, output } = programCall(task, task.program, 'python', task.outputUnit, rate);
+    return [
+        `        ${valueName} = float(${info.instanceVariable}.evaluate(${timeName}, describe(type(${info.instanceVariable})).view([${values.join(', ')}], {})))`,
+        output ? `        ${valueName} = ${valueName} * ${output.scale} + ${output.offset}` : ''
+    ].filter(Boolean);
+}
+
 function emitPythonProviderContribution(contribution, info) {
+    if (contribution.program) {
+        return [
+            ...commentLines(contribution.symbols, '        ', '#'),
+            ...pythonProgramCall(contribution, info, 'step_time', 'contribution_value', true),
+            contribution.negate ? '        contribution_value = -contribution_value' : '',
+            '        if not math.isfinite(contribution_value): raise RuntimeError("A contribution produced a non-finite derivative.")',
+            `        derivative[${contribution.outputLocalIndex}] += contribution_value`
+        ].filter(Boolean).join('\n');
+    }
     return [
         ...commentLines(contribution.symbols, '        ', '#'),
         '        outputs = OutputCollector()',
@@ -1560,7 +1622,9 @@ function emitPythonProviderContribution(contribution, info) {
 
 function emitPythonAlgebraicTask(task, info) {
     const lines = [...commentLines(task.symbols, '        ', '#')];
-    if (task.implementation) {
+    if (task.program) {
+        lines.push(...pythonProgramCall(task, info, 'algebraic_time', 'algebraic_value', false));
+    } else if (task.implementation) {
         lines.push(
             '        outputs = OutputCollector()',
             `        ${info.instanceVariable}.evaluate(EvaluationContext(algebraic_time, node_time_step), InputView(${pythonSymbolsDict(task.symbols)}), outputs)`,
@@ -1834,6 +1898,17 @@ function generatePython(model, providers, meta, document) {
     let providerIndex = 0;
     const providerInfo = new Map();
     const providerBlocks = providers.map((provider) => {
+        if (provider.program) {
+            // A program in the current format: its class renamed as the older ones are, its import from konjugate.v2 left out (the SDK is
+            // pasted in once).
+            const match = provider.implementation.source.match(/^class\s+(\w+)\s*\(\s*(?:Relationship|Node)\s*\)\s*:/m);
+            if (!match) throw new Error(`Could not find the program's class in the source for the ${provider.entityLabel}.`);
+            const uniqueName = `${match[1]}Program${providerIndex}`;
+            providerIndex += 1;
+            providerInfo.set(provider, { className: uniqueName, instanceVariable: `${uniqueName.charAt(0).toLowerCase()}${uniqueName.slice(1)}`, index: providerIndex - 1 });
+            return provider.implementation.source.replace(/^from konjugate\.v2 import\s*(\([^)]*\)|[^\n]*)\n?/m, '')
+                .replace(new RegExp(`\\bclass\\s+${match[1]}\\s*\\(`), `class ${uniqueName}(`);
+        }
         const { className, pattern } = pythonProviderClassName(provider.implementation.source, provider.entityLabel);
         const uniqueName = `${className}Provider${providerIndex}`;
         providerIndex += 1;
@@ -1848,6 +1923,7 @@ function generatePython(model, providers, meta, document) {
 
     const providerInstances = providers.map((provider) => {
         const info = providerInfo.get(provider);
+        if (provider.program) return `    ${info.instanceVariable} = ${info.className}()`;
         return [
             `    ${info.instanceVariable} = ${info.className}()`,
             `    ${info.instanceVariable}.initialize(InitializationContext(0))`
@@ -1889,7 +1965,9 @@ function generatePython(model, providers, meta, document) {
         'import math',
         isMpi ? 'from mpi4py import MPI' : '',
         '',
-        providers.length ? `${pythonSdkModule}\n` : '',
+        providers.some((provider) => !provider.program) ? `${pythonSdkModule}\n` : '',
+        // The program SDK (version 2) as it is, for the programs in the current format.
+        providers.some((provider) => provider.program) ? `# --- vendored from engine/sdk/python/konjugate/v2 (the program SDK) ---\n${programSdkPython}\n# --- end of the program SDK ---\n` : '',
         providerBlocks.join('\n\n\n'),
         '',
         pythonScheduleLines(model),
@@ -2042,3 +2120,77 @@ class NodeProvider(ABC):
     def shutdown(self) -> None:
         pass
 # --- end vendored SDK types ---`;
+
+// ---- Programs in the current format (version 2 of the program SDK; docs/proposals/programSdkV2.md, Export parity) ----------------
+// What a program declares, read from its source as the SDK's declarations are written: its inputs in declaration order (each key, unit
+// and default), its outputs, and whether it keeps memory, has a clock or an initialize() of its own, which code export does not write yet.
+const programKey = (attribute) => attribute.replace(/_([a-z0-9])/g, (_match, letter) => letter.toUpperCase());
+
+export function programDeclarations(kind, source) {
+    const text = String(source ?? '');
+    const declared = { inputs: [], outputs: [], node: false, keepsMemory: false, ownInitialize: false };
+    if (kind === 'cpp') {
+        declared.node = /:\s*public\s+(?:k|konjugate::sdk::v2)::Node\b/.test(text);
+        const ns = '(?:k|konjugate::sdk::v2)::';
+        for (const match of text.matchAll(new RegExp(`${ns}(Input|Parameter|Constant|Output)\\s+\\w+\\s*\\{\\s*this\\s*,\\s*"([^"]+)"(?:\\s*,\\s*"([^"]*)")?(?:\\s*,\\s*${ns}optional\\(\\s*([^)]+?)\\s*\\))?`, 'g'))) {
+            const port = { key: match[2], unit: match[3] ?? '', ...(match[4] !== undefined ? { default: Number(match[4]) } : {}) };
+            (match[1] === 'Output' ? declared.outputs : declared.inputs).push(port);
+        }
+        declared.keepsMemory = new RegExp(`${ns}(Memory|Clock)\\b`).test(text);
+        declared.ownInitialize = /\bvoid\s+initialize\s*\(/.test(text);
+    } else {
+        declared.node = /^class\s+\w+\s*\(\s*(?:\w+\.)?Node\s*\)/m.test(text);
+        for (const match of text.matchAll(/^[ \t]+(\w+)\s*=\s*(Input|Parameter|Constant|Output)\(([^)]*)\)/gm)) {
+            const argumentsText = match[3];
+            const unit = /^\s*(["'])(.*?)\1/.exec(argumentsText)?.[2] ?? /\bunit\s*=\s*(["'])(.*?)\1/.exec(argumentsText)?.[2] ?? '';
+            const name = /\bname\s*=\s*(["'])(.*?)\1/.exec(argumentsText)?.[2];
+            const fallback = /\bdefault\s*=\s*([-+0-9.eE]+)/.exec(argumentsText)?.[1];
+            const port = { key: name ?? programKey(match[1]), unit, ...(fallback !== undefined ? { default: Number(fallback) } : {}) };
+            (match[2] === 'Output' ? declared.outputs : declared.inputs).push(port);
+        }
+        declared.keepsMemory = /=\s*(Memory|Random|Clock)\(/.test(text);
+        declared.ownInitialize = /^\s+def\s+initialize\s*\(/m.test(text);
+    }
+    return declared;
+}
+
+// The conversion at a port, exactly as the engine works it out (engine/src/programUnits.cpp): value in `to` = value in `from` x scale +
+// offset; a rate never takes an offset. Null when either side has no unit (not checked) or it is the identity; an error when the two are
+// different kinds of quantity.
+function portConversion(from, to, rate, what) {
+    if (!from || !to) return null;
+    const source = parseUnit(from);
+    const target = parseUnit(to);
+    if (!source || !target) throw new Error(`${what}: "${!source ? from : to}" is not a unit Konjugate knows.`);
+    const angle = 7;
+    const time = 2;
+    const onlyAngle = Math.abs(Math.abs(source.dimensions[angle] - target.dimensions[angle]) - 1) < 1e-12
+        && source.dimensions.every((value, index) => index === angle || value === target.dimensions[index]);
+    const same = source.dimensions.every((value, index) => value === target.dimensions[index]);
+    if (!same && !onlyAngle) throw new Error(`${what}: ${from} and ${to} measure different kinds of quantity -- export blocked.`);
+    const cycle = onlyAngle && source.dimensions[time] < 0 ? (source.dimensions[angle] > target.dimensions[angle] ? 1 / (2 * Math.PI) : 2 * Math.PI) : 1;
+    const tidy = (value) => (Math.abs(value - Math.round(value)) < 1e-12 * Math.max(1, Math.abs(value)) ? Math.round(value) : value);
+    const scale = tidy(source.scale * cycle / target.scale);
+    const offset = rate ? 0 : tidy((source.offset - target.offset) / target.scale);
+    return scale === 1 && offset === 0 ? null : { scale, offset };
+}
+
+const perSecondUnit = (unit) => (!unit ? 'Hz' : /[/*· ]/.test(unit) ? `(${unit})/s` : `${unit}/s`);
+
+// A version 2 program's inputs, in its declaration order, as expressions of the language: each bound one's value converted at the port,
+// an unbound one its default; and its output's conversion into the state's unit.
+function programCall(task, declared, language, stateUnit, rate) {
+    const texts = symbolTexts(task.symbols, language);
+    const literal = (value) => doubleLiteral(value);
+    const values = declared.inputs.map((port) => {
+        if (!task.symbols.has(port.key)) {
+            if (port.default === undefined) throw new Error(`Input ‘${port.key}’ of the program of the ${task.entityLabel} is not bound to anything and has no default -- export blocked.`);
+            return literal(port.default);
+        }
+        const conversion = portConversion(task.symbols.get(port.key).unit, port.unit, false, `Input ‘${port.key}’ of the program of the ${task.entityLabel}`);
+        const text = texts.get(port.key);
+        return conversion ? `(${text}) * ${literal(conversion.scale)} + ${literal(conversion.offset)}` : text;
+    });
+    const output = portConversion(declared.outputs[0]?.unit, rate ? perSecondUnit(stateUnit) : stateUnit, rate, `The output of the program of the ${task.entityLabel}`);
+    return { values, output: output ? { scale: literal(output.scale), offset: literal(output.offset) } : null };
+}

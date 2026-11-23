@@ -422,6 +422,54 @@ class Conduction(RelationshipProvider):
     const lateRk = stateValues(latchRk, 11).slice(400);
     assert.ok(Math.max(...lateRk) > 20.4 && Math.min(...lateRk) < 19.6, 'The latch must switch under Runge–Kutta 4.');
 
+    // Under Adaptive and Stiff, memory advances after every step they accept (never a rejected one, or one taken again to land on an event),
+    // and a run continued from its checkpoint, which keeps the controller and the memory, gives the bits of the whole run.
+    for (const method of ['dormandPrince54', 'rodas4']) {
+        const adaptiveTiming = { ...latchTiming, method, tolerance: { relative: 1e-6, absolute: 1e-9 } };
+        const whole = await run(latched, adaptiveTiming);
+        const lateAdaptive = stateValues(whole, 11).slice(400);
+        assert.ok(Math.max(...lateAdaptive) > 20.4 && Math.min(...lateAdaptive) < 19.6, `The latch must switch under ${method}.`);
+        const firstHalf = await run(latched, { ...adaptiveTiming, targetTime: 200 });
+        const rest = await run(latched, { ...adaptiveTiming, startCheckpoint: firstHalf.checkpoints.at(-1) });
+        assert.ok(sameBits(whole.samples.filter((sample) => sample.time > 200).flatMap((sample) => sample.states.map((state) => state.value)),
+            rest.samples.filter((sample) => sample.time > 200).flatMap((sample) => sample.states.map((state) => state.value))),
+        `A latch under ${method} continued from its checkpoint must give the bits of the whole run.`);
+    }
+
+    // OutOfDomain: a fast decay whose program refuses a negative amount. Adaptive and Stiff reject the steps a stage refuses and finish;
+    // Runge–Kutta 4 at a step that overshoots stops, naming the program, the time, the stage and the inputs.
+    const refusing = `from konjugate.v2 import Input, OutOfDomain, Output, Relationship
+
+
+class Decay(Relationship):
+    amount = Input()
+    rate = Output()
+
+    def evaluate(self, t, x):
+        if x.amount < 0:
+            raise OutOfDomain(f"an amount of {x.amount:.3g} cannot decay")
+        return -50.0 * x.amount
+`;
+    const decaying = {
+        format: 'konjugate', version: 1, copyright: 'Copyright © 2026 Zenin Easa Panthakkalakath',
+        nodes: [{
+            id: 1, name: 'Store', states: [{ id: 11, name: 'Amount', symbol: 'amount', initialValue: 1, unit: '' }],
+            sourceTerms: [{ id: 101, state: 'amount', expression: '', implementation: {
+                kind: 'python', providerApiVersion: 2, source: refusing, bindings: [{ key: 'amount', kind: 'state', nodeId: 1, stateId: 11 }], output: { key: 'rate', stateId: 11 }
+            } }]
+        }],
+        edges: []
+    };
+    const decayTiming = { targetTime: 0.5, globalTimeStep: 0.1, outputInterval: 0.1 };
+    for (const method of ['dormandPrince54', 'rodas4']) {
+        const decayed = await run(decaying, { ...decayTiming, method, tolerance: { relative: 1e-8, absolute: 1e-12 } });
+        assert.ok(Math.abs(stateValues(decayed, 11).at(-1) - Math.exp(-25)) < 1e-9, `Under ${method} the refused steps are retried smaller and the decay finishes.`);
+        // Adaptive overshoots below zero at a large stage and is refused; Stiff, L-stable, does not overshoot here.
+        if (method === 'dormandPrince54') assert.ok(decayed.integration.rejectedSteps > 0, 'Under Adaptive the refusals count as rejected steps.');
+    }
+    await refused(decaying, { ...decayTiming, method: 'rungeKutta4' },
+        /Decay on node Store's own part refused its inputs at t = 0\.05 s \(stage 2 of 4, Runge–Kutta 4\): an amount of -1\.5 cannot decay/, 'A refusal under Runge–Kutta 4');
+
     // A clock whose period is not a whole number of steps is refused, with the periods that would do.
     await refused(heatedRoom('python', await example('pidController.py')), { ...pidTiming, globalTimeStep: 0.004, outputInterval: 0.004 },
         /The clock of PidController on node Heater ticks every 0\.01 s, which is not a whole number of the run's time steps \(0\.004 s\)\. Use a period of 0\.008 s or 0\.012 s/,

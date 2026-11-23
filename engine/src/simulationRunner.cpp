@@ -66,6 +66,22 @@ struct Sample { double time; Values states; Values parts; };
 // Each entry pairs a computational-node-provider-owning node's id with that provider instance's
 // opaque checkpoint() payload. Empty for a plan with no computational-node providers.
 using ProviderCheckpointStates = std::vector<std::pair<EntityId, std::vector<std::byte>>>;
+// The events an adaptive or stiff step is given when version 2 programs remember something from step to step: the switching conditions'
+// (or none), and after each step the method accepts, the programs advanced (docs/proposals/programSdkV2.md, How the engine calls a
+// program): whether their memory changed, so the next step's first stage is evaluated again rather than reused. A step rejected, or
+// taken again to land on an event, never reaches accepted().
+template <typename Inner, typename Accepted>
+struct ProgramStepEvents {
+    Inner& inner;
+    Accepted onAccepted;
+    bool active() const { return inner.active(); }
+    void beginStep(double time, const std::vector<double>& states) { inner.beginStep(time, states); }
+    template <typename At>
+    bool locate(double from, double to, At&& at, double& when) { return inner.locate(from, to, std::forward<At>(at), when); }
+    void fire(double time) { inner.fire(time); }
+    bool accepted(double time, double step, const std::vector<double>& states) { return onAccepted(time, step, states); }
+};
+
 // A version 2 program's memory in a result's checkpoint (protocol ProgramMemory), and back: reals as doubles, integers and flags as
 // integers, a random stream's seed and counter as words.
 void encodeProgramMemory(const ProgramMemoryState& memory, protocol::ProgramMemory& encoded) {
@@ -1018,6 +1034,20 @@ private:
     // and which nodes take part (the others are stepped on their own, and advance their programs in their substeps).
     bool programsAdvanceAtSteps = false;
     std::vector<unsigned char> stageNodeMask;
+    // advance() for the programs of the nodes taking part in the stages, after a step an adaptive or stiff method accepted, at `time`
+    // with its size, reading the states it reached; whether any program's memory changed.
+    bool advanceProgramsAfter(double time, double step, const Values& accepted) {
+        const auto before = providerRuntime->programMemory();
+        advancePlanPrograms(executionPlan, accepted, runControl.parameterValues, runControl.activeSchedules, time, step, false,
+            providerRuntime.get(), stageNodeMask);
+        const auto after = providerRuntime->programMemory();
+        for (std::size_t index = 0; index < before.size() && index < after.size(); ++index) {
+            for (std::size_t field = 0; field < before[index].fields.size(); ++field) {
+                if (before[index].fields[field].words != after[index].fields[field].words) return true;
+            }
+        }
+        return false;
+    }
     // What was said while restoring programs' memory from a checkpoint (a field added or dropped since), told once on standard error.
     std::vector<std::string> programMemoryNotes;
     void restoreStartCheckpoint(const boost::property_tree::ptree& checkpoint);
@@ -1982,9 +2012,9 @@ void Simulation::checkProgramClocks() {
             }
             if (node.nodeProvider && node.nodeProvider->programVersion == 2 && providerRuntime->programAdvancesEachStep(node.nodeId)) programsAdvanceAtSteps = true;
         }
-        // Adaptive and Stiff choose their own steps inside the global step; a program that remembers something from step to step is
-        // advanced after each accepted one, which these methods do not do yet. Refused by name rather than never advanced.
-        if (programsAdvanceAtSteps && integration.method != IntegrationMethod::rungeKutta4) {
+        // BDF chooses its own steps and orders inside the global step; a program that remembers something from step to step is advanced
+        // after each accepted one, which BDF does not do yet (Adaptive and Rodas4 do). Refused by name rather than never advanced.
+        if (programsAdvanceAtSteps && integration.method == IntegrationMethod::bdf) {
             std::string names;
             for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
                 if (!stageNodeMask[index]) continue;
@@ -1997,10 +2027,9 @@ void Simulation::checkProgramClocks() {
                 }
                 if (node.nodeProvider && node.nodeProvider->programVersion == 2) add(node.nodeId);
             }
-            throw std::runtime_error("Under " + std::string(integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf ? "Stiff" : "Adaptive")
-                + ", a program that "
-                "remembers something from step to step is not advanced yet: " + names + ". Run with Runge–Kutta 4 or Euler, or give the "
-                "program a clock, which ticks at global steps under every method.");
+            throw std::runtime_error("Under Stiff with BDF, a program that remembers something from step to step is not advanced yet: " + names +
+                ". Choose Rodas4 for Stiff, or Adaptive, Runge–Kutta 4 or Euler, or give the program a clock, which ticks at global steps under every "
+                "method.");
         }
     }
     for (const auto& [owner, period] : providerRuntime->programClocks()) {
@@ -2143,7 +2172,21 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         const auto evaluateDormandPrince = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
             evaluateAt(evaluation == 0, time, stageStates, derivatives);
         };
-        if (switching) {
+        if (programsAdvanceAtSteps) {
+            integrators::DormandPrince54NoEvents none;
+            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
+            if (switching) {
+                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
+                integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+                    breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, events,
+                    evaluateDormandPrince, [](double, const Values&) {});
+            } else {
+                ProgramStepEvents<integrators::DormandPrince54NoEvents, decltype(advance)> events{none, advance};
+                integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+                    breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, events,
+                    evaluateDormandPrince, [](double, const Values&) {});
+            }
+        } else if (switching) {
             integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
                 breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, *switching,
                 evaluateDormandPrince, [](double, const Values&) {});
@@ -2175,7 +2218,19 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
             evaluateAt(evaluation == 0, time, stageStates, derivatives);
         };
         const bool readsTime = stagesReadTimeAlways || !runControl.activeSchedules.empty();
-        if (switching) {
+        if (programsAdvanceAtSteps) {
+            integrators::Rodas4NoEvents none;
+            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
+            if (switching) {
+                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
+                integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
+                    integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, events, evaluateRodas, [](double, const Values&) {});
+            } else {
+                ProgramStepEvents<integrators::Rodas4NoEvents, decltype(advance)> events{none, advance};
+                integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
+                    integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, events, evaluateRodas, [](double, const Values&) {});
+            }
+        } else if (switching) {
             integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
                 integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, *switching, evaluateRodas, [](double, const Values&) {});
         } else {

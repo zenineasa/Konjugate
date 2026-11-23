@@ -10,11 +10,37 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
+
+#ifndef KONJUGATE_INTEGRATORS_STAGE_REJECTED
+#define KONJUGATE_INTEGRATORS_STAGE_REJECTED
+namespace konjugate::integrators {
+
+// Thrown by an evaluation at a stage to say its states are outside what it can compute (a program's OutOfDomain, or a value that is not a
+// finite number): an adaptive or stiff method rejects the step and tries a smaller one, as it does for too large an error
+// (docs/proposals/programSdkV2.md, Exceptions and non-finite values). At the step's start, or with the error control off, it stops the run.
+struct StageRejected : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// After each step the method accepts, `events.accepted(time, step, states)` when the events object has one (the engine's: programs'
+// memory advanced, docs/proposals/programSdkV2.md); whether the derivative at the step's end must be worked out again because what it
+// reads changed. Never called for a step rejected or taken again to land on an event.
+template <typename Events>
+bool acceptedStep(Events& events, double time, double step, const std::vector<double>& states) {
+    if constexpr (requires { { events.accepted(time, step, states) } -> std::convertible_to<bool>; }) return events.accepted(time, step, states);
+    else return false;
+}
+
+}
+#endif
+
 
 namespace konjugate::integrators {
 
@@ -145,6 +171,8 @@ void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::
     };
     double time = startTime;
     call(time, states, k1);
+    // Why the last step was refused at a stage, said if the step then becomes too small to take.
+    std::string refused;
 
     // Hairer's initial step: from the size of y and f, then one more evaluation to estimate the second derivative. Used only when
     // the controller has proposed nothing yet: the run's first step, or a run started from states the controller did not reach.
@@ -203,6 +231,7 @@ void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::
             message.precision(17);
             message << "The adaptive method's step became too small to take at " << time << " s: the model may change too fast there "
                     << "for its tolerance, or be stiff or singular.";
+            if (!refused.empty()) message << " The last step was refused: " << refused;
             throw std::runtime_error(message.str());
         }
         const bool landsOnEvent = lands && towardEvent;
@@ -210,6 +239,7 @@ void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::
         const double end = !lands ? (fixedSteps ? startTime + static_cast<double>(fixedStep + 1) * step : time + step) : (landsOnEnd ? endTime : target);
         // A stage at the step's end is read just before it when the step lands, so a jump at `target` is not seen inside the step.
         const double endStage = lands ? std::nextafter(end, startTime) : end;
+        try {
         for (std::size_t index = 0; index < count; ++index) {
             if (integrated[index]) stage[index] = states[index] + step * (T::a[1][0] * k1[index]);
         }
@@ -242,6 +272,15 @@ void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::
             }
         }
         call(endStage, next, k7);
+        } catch (const StageRejected& refusal) {
+            // A stage refused its states: a smaller step from the same start, as for too large an error.
+            if (fixedSteps) throw;
+            refused = refusal.what();
+            controller.proposedStep = step / shrinkLimit;
+            rejectedLast = true;
+            ++statistics.rejectedSteps;
+            continue;
+        }
 
         double error = 0.0;
         if (!fixedSteps) {
@@ -338,14 +377,17 @@ void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::
             controller.previousError = std::max(error, 1.0e-4);
         }
         rejectedLast = false;
+        refused.clear();
         ++fixedStep;
         if (landsOnEvent) {
             events.fire(time);
             eventTarget = std::numeric_limits<double>::quiet_NaN();
         }
+        // What the next step reads may have changed with the step accepted (programs' memory): then its first stage is not the last.
+        const bool changed = acceptedStep(events, time, step, states);
         while (breakpoint < breakpoints.size() && breakpoints[breakpoint] <= time) ++breakpoint;
         if (landsOnEnd || (landsOnEvent && !(time < endTime))) break;
-        if (lands) {
+        if (lands || changed) {
             // Across a jump, or a condition's change, the last stage's derivative is not the next step's first: it is evaluated again.
             call(time, states, k1);
         } else {

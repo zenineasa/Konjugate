@@ -14,11 +14,37 @@
 
 #include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <vector>
+
+#ifndef KONJUGATE_INTEGRATORS_STAGE_REJECTED
+#define KONJUGATE_INTEGRATORS_STAGE_REJECTED
+namespace konjugate::integrators {
+
+// Thrown by an evaluation at a stage to say its states are outside what it can compute (a program's OutOfDomain, or a value that is not a
+// finite number): an adaptive or stiff method rejects the step and tries a smaller one, as it does for too large an error
+// (docs/proposals/programSdkV2.md, Exceptions and non-finite values). At the step's start, or with the error control off, it stops the run.
+struct StageRejected : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// After each step the method accepts, `events.accepted(time, step, states)` when the events object has one (the engine's: programs'
+// memory advanced, docs/proposals/programSdkV2.md); whether the derivative at the step's end must be worked out again because what it
+// reads changed. Never called for a step rejected or taken again to land on an event.
+template <typename Events>
+bool acceptedStep(Events& events, double time, double step, const std::vector<double>& states) {
+    if constexpr (requires { { events.accepted(time, step, states) } -> std::convertible_to<bool>; }) return events.accepted(time, step, states);
+    else return false;
+}
+
+}
+#endif
+
 
 namespace konjugate::integrators {
 
@@ -178,6 +204,8 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
     std::size_t nextSample = 0;
     std::size_t fixedStep = 0;
     bool rejectedLast = false;
+    // Why the last step was refused at a stage, said if the step then becomes too small to take.
+    std::string refused;
     bool haveJacobian = false;
     // A located event the step is to land on; NaN for none.
     double eventTarget = std::numeric_limits<double>::quiet_NaN();
@@ -211,6 +239,7 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
         if (!(step > std::numeric_limits<double>::min()) || !std::isfinite(step) || 0.1 * step <= std::abs(time) * std::numeric_limits<double>::epsilon()) {
             std::ostringstream message;
             message.precision(17);
+            if (!refused.empty()) message << "The last step was refused: " << refused << " ";
             message << "The stiff method's step became too small to take at " << time << " s: the model may change too fast there for its "
                     << "tolerance, or be singular.";
             throw std::runtime_error(message.str());
@@ -242,6 +271,7 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
                      c65 = T::C[5][4] * inverse;
         const double d1 = step * T::d[0], d2 = step * T::d[1], d3 = step * T::d[2], d4 = step * T::d[3];
 
+        try {
         for (std::size_t row = 0; row < n; ++row) rhs[row] = f0[integratedStates[row]] + d1 * dT[row];
         solve(rhs);
         k1 = rhs;
@@ -286,6 +316,16 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
         solve(rhs);
         k6 = rhs;
         for (std::size_t row = 0; row < n; ++row) next[integratedStates[row]] = stage[integratedStates[row]] + k6[row];
+        } catch (const StageRejected& refusal) {
+            // A stage refused its states: a smaller step from the same start, with the same Jacobian, as for too large an error.
+            if (fixedSteps) throw;
+            refused = refusal.what();
+            controller.proposedStep = step / shrinkLimit;
+            rejectedLast = true;
+            ++statistics.rejectedSteps;
+            for (const auto index : integratedStates) stage[index] = states[index];
+            continue;
+        }
 
         double error = 0.0;
         if (!fixedSteps) {
@@ -380,6 +420,9 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
             events.fire(time);
             eventTarget = std::numeric_limits<double>::quiet_NaN();
         }
+        // The programs' memory advanced with the step accepted, before the derivative where it ended is worked out.
+        acceptedStep(events, time, step, states);
+        refused.clear();
         while (breakpoint < breakpoints.size() && breakpoints[breakpoint] <= time) ++breakpoint;
         if (landsOnEnd || (landsOnEvent && !(time < endTime))) break;
         // The next step starts from the derivative and Jacobian where this one ended.

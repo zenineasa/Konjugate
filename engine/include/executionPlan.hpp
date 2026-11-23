@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "konjugate/integrators/dormandPrince54.hpp"
 #include <boost/property_tree/ptree.hpp>
 #include <cstddef>
 #include <cstdint>
@@ -284,8 +285,8 @@ struct NodeProviderTask {
 // Version 2 programs (docs/proposals/programSdkV2.md). A program refusing its inputs (OutOfDomain) or giving a value that is not a
 // finite number: an adaptive or stiff method rejects the step and tries a smaller one; every other method stops the run with the
 // message, which names the program, what it belongs to, the port, the time and the stage.
-struct ProgramOutOfDomain : std::runtime_error {
-    using std::runtime_error::runtime_error;
+struct ProgramOutOfDomain : integrators::StageRejected {
+    using integrators::StageRejected::StageRejected;
 };
 
 // Where a program is being called from, for its messages: the method and the stage, set by the whole-model integration before each stage

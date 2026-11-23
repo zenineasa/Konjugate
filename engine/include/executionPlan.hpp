@@ -197,6 +197,10 @@ struct ContributionTask {
     // own right once nothing else dominates (e.g. the in-process transport). Empty for
     // equation tasks, which never call providerProcessKey().
     std::string providerProcessKeyCache;
+    // Under event location (docs/proposals/integrators.md, Event location): the latch each comparison of a condition reads instead of
+    // comparing, as extra symbols after the bindings (symbol bindings.size() + k reads latch latchSlots[k]). Empty for every task that
+    // is not a whole-model stage's copy of a term with switching conditions.
+    std::vector<std::size_t> latchSlots;
     // True for the complementary contribution a bidirectional edge applies to its other
     // endpoint: the same computed value, sign-flipped, since what leaves one node enters the
     // other. False for every other contribution (source terms, directed edges, and a
@@ -473,7 +477,11 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     double stepSize = 0,
     ProviderEvaluator* providerEvaluator = nullptr,
     std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr,
-    const std::vector<double>* nodeProviderParameterValues = nullptr);
+    const std::vector<double>* nodeProviderParameterValues = nullptr,
+    const std::vector<double>* latches = nullptr);
+
+// An expression as a program (ExpressionProgram), its symbols already bound: as the plan compiles every equation's.
+ExpressionProgram compileExpressionProgram(const CompiledExpression& expression);
 
 // The values of a computational-node provider's parameters (NodeProviderTask::parameters) at
 // simulationTime, resolved as every other parameter is: live overrides, recorded interventions and

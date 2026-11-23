@@ -383,7 +383,8 @@ bool stagesReadTime(const ExecutionPlan& plan, const WholeModelPlan& whole) {
 NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeModelNode& stageNode, const StateValues& stageStates,
                                   const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules,
                                   double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
-                                  std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator) {
+                                  std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
+                                  const std::vector<double>* latches) {
     const auto startedAt = std::chrono::steady_clock::now();
     NodeStageResult result;
     StateValues localStates(node.stateIndexes.size());
@@ -400,7 +401,7 @@ NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeMode
     const auto providerParameters = stage.nodeProvider && !stage.nodeProvider->parameters.empty()
         ? resolveNodeProviderParameterValues(*stage.nodeProvider, liveParameterValues, activeSchedules, stageTime) : std::vector<double>{};
     auto evaluated = evaluateContributionTasks(stage, localStates, stageStates, parameters, stageTime, stepSize, providerEvaluator, nullptr,
-        &providerParameters);
+        &providerParameters, latches);
     // A provider's outputs come after every contribution of the node, as node by node orders them, held contributions included.
     const auto shift = node.contributions.size() - stage.contributions.size();
     for (auto& contribution : evaluated) if (contribution.sequence >= stage.contributions.size()) contribution.sequence += shift;

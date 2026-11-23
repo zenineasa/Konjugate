@@ -26,7 +26,8 @@ import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
-import { dormandPrince54Cpp, dormandPrince54Python, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp, rungeKutta4Python } from './integratorSources.mjs';
+import { dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
+    rungeKutta4Python } from './integratorSources.mjs';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -190,6 +191,55 @@ export function emitExpression(node, symbols, operators) {
     const minimum = minimumArgumentCounts[node.op] ?? 0;
     if (node.args.length < minimum) throw new Error(`An expression is missing an argument for ${node.op}.`);
     return emitter(node.args.map((argument) => emitExpression(argument, symbols, operators)), node.args);
+}
+
+// ---- event location (docs/proposals/integrators.md, Event location): as engine/src/eventLocation.cpp, every comparison by order in a
+// Which condition of a Rate term written as an equation becomes a switching function, g = left - right, and the term reads the condition's
+// latch instead of comparing, so the exported program locates the same events. ----
+
+const orderings = { Less: 0, LessEqual: 1, Greater: 2, GreaterEqual: 3 };
+
+// Rewrites each Rate equation's mathJson in the whole-model nodes, adding a latch symbol for each comparison of a condition; returns the
+// switching functions, each with its node's plan, the comparison's two sides and the term's symbols.
+function latchConditions(model) {
+    const functions = [];
+    model.nodePlans.forEach((plan, nodeIndex) => {
+        for (const contribution of plan.contributions) {
+            if (contribution.implementation) continue;
+            const latch = (comparison, left, right) => {
+                const key = `__latch${functions.length}`;
+                functions.push({ nodeIndex, plan, comparison, left, right, symbols: contribution.symbols });
+                return key;
+            };
+            const condition = (expression) => {
+                if (Array.isArray(expression) && expression[0] in orderings && expression.length >= 3) {
+                    const comparison = orderings[expression[0]];
+                    const reads = [];
+                    for (let pair = 1; pair + 1 < expression.length; ++pair) reads.push(latch(comparison, expression[pair], expression[pair + 1]));
+                    return reads.length === 1 ? reads[0] : ['And', ...reads];
+                }
+                if (Array.isArray(expression) && ['And', 'Or', 'Not'].includes(expression[0])) return [expression[0], ...expression.slice(1).map(condition)];
+                return walk(expression);
+            };
+            const walk = (expression) => {
+                if (!Array.isArray(expression)) return expression;
+                if (expression[0] === 'Which') {
+                    const args = expression.slice(1);
+                    return ['Which', ...args.map((argument, index) => (index % 2 === 0 && index + 1 < args.length ? condition(argument) : walk(argument)))];
+                }
+                return [expression[0], ...expression.slice(1).map(walk)];
+            };
+            const before = functions.length;
+            const rewritten = walk(contribution.mathJson);
+            if (functions.length === before) continue;
+            contribution.mathJson = rewritten;
+            contribution.symbols = new Map(contribution.symbols);
+            for (let index = before; index < functions.length; ++index) {
+                contribution.symbols.set(`__latch${index}`, { text: `switching.latches[${index}]`, comment: 'the condition, latched through the step' });
+            }
+        }
+    });
+    return functions;
 }
 
 // ---- graph build: mirrors engine/src/executionPlan.cpp's compileExecutionPlan exactly enough to
@@ -683,7 +733,11 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     }
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const outputInterval = runConfiguration?.outputInterval ?? globalTimeStep;
+    // Event location, as the engine: under Runge–Kutta 4, Adaptive and Stiff (not Dormand–Prince or Rodas4 with the error control off).
+    const locating = method === 'rungeKutta4' || ((method === 'dormandPrince54' || method === 'rodas4') && !runConfiguration?.stepsPerGlobalStep);
+    const switching = locating ? latchConditions(model) : [];
     const meta = {
+        switching,
         globalTimeStep, outputInterval, defaultTargetTime: document.exportDefaultTargetTime ?? 1, parallelism, method, stepsPerGlobalStep: stepsPerGlobalStepOf(runConfiguration),
         // Adaptive (Dormand–Prince 5(4)): its tolerances, every state's absolute one (its own where it sets one), and its fixed steps,
         // when a run configuration turns its error control off with steps per global step (0: the error control chooses).
@@ -1143,7 +1197,41 @@ function cppStageDispatchLines(parallelism) {
     return cppDispatchLines(parallelism);
 }
 
+// The switching functions, node by node, each g = left - right from its term's symbols at (time, states), and the conditions' latches
+// with the events located (events.hpp's Switching), for the stage terms to read.
+function cppSwitchingLines(model, functions) {
+    if (!functions.length) return [];
+    const byNode = new Map();
+    functions.forEach((fn, index) => {
+        if (!byNode.has(fn.nodeIndex)) byNode.set(fn.nodeIndex, []);
+        byNode.get(fn.nodeIndex).push([fn, index]);
+    });
+    const blocks = [...byNode].map(([nodeIndex, entries]) => {
+        const plan = model.nodePlans[nodeIndex];
+        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
+        return [
+            `        {   // Node: ${plan.node.name}`,
+            `            [[maybe_unused]] double state[${plan.node.states.length}] = { ${seed} };`,
+            ...entries.map(([fn, index]) => {
+                const texts = symbolTexts(fn.symbols, 'cpp');
+                return `            values[${index}] = ${emitExpression(compileExpressionNode(fn.left), texts, cppOperators)} - ${emitExpression(compileExpressionNode(fn.right), texts, cppOperators)};`;
+            }),
+            '        }'
+        ].join('\n');
+    });
+    return [
+        '    // Event location (docs/proposals/integrators.md): each comparison of a condition in a Rate equation, g = a - b, watched; the',
+        '    // terms read the condition latched through each step, and a step that crosses a switch is retaken to end on it.',
+        '    const auto evaluateSwitching = [&](double time, const std::vector<double>& snapshot, std::vector<double>& values) {',
+        '        [[maybe_unused]] const double stepTime = time;',
+        ...blocks,
+        '    };',
+        `    konjugate::integrators::Switching<std::function<void(double, const std::vector<double>&, std::vector<double>&)>> switching(evaluateSwitching, { ${functions.map((fn) => fn.comparison).join(', ')} });`
+    ];
+}
+
 function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
+    const located = meta.switching?.length > 0;
     const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
     const adaptive = meta.method === 'dormandPrince54';
     const stiff = meta.method === 'rodas4';
@@ -1159,6 +1247,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         '    [[maybe_unused]] std::size_t stageStep = 0;',
         '    [[maybe_unused]] std::size_t stageIndex = 0;',
         '    double stepTime = 0;',
+        ...cppSwitchingLines(model, meta.switching ?? []),
         cppStageLambdas(model, providerInfo),
         `    std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
         '    const auto evaluateStage = [&](std::size_t internalStep, std::size_t stage, double time, const std::vector<double>& states, std::vector<double>& rates) {',
@@ -1216,17 +1305,20 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         '    const auto steps = static_cast<std::size_t>(std::ceil(targetTime / globalTimeStep - 1e-9));',
         '    for (std::size_t step = 0; step < steps; ++step) {',
         '        const double currentTime = step * globalTimeStep;',
+        located ? '        switching.beginGlobalStep(currentTime, globalState);' : null,
         adaptive
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                '        konjugate::integrators::dormandPrince54GlobalStep(currentTime, endTime, globalState, integrated, errorGroups, tolerance,',
-                '            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,',
+                `        konjugate::integrators::dormandPrince54GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
+                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,${located ? ' switching,' : ''}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
             : stiff
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                '        konjugate::integrators::rodas4GlobalStep(currentTime, endTime, globalState, system, tolerance,',
-                '            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,',
+                `        konjugate::integrators::rodas4GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
+                `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,${located ? ' switching,' : ''}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
-            : '        konjugate::integrators::rungeKutta4GlobalStep(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage);',
+            : located
+                ? '        konjugate::integrators::rungeKutta4GlobalStepWithEvents(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, switching, evaluateStage);'
+                : '        konjugate::integrators::rungeKutta4GlobalStep(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, evaluateStage);',
         ...cppWholeModelUpdateLines(model, providerInfo),
         '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
         '    }'
@@ -1319,6 +1411,7 @@ function generateCpp(model, providers, meta, document) {
         // Stiff: Konjugate's own linear algebra, then the method, which includes it.
         meta.method === 'rodas4' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
         meta.method === 'rodas4' ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
+        meta.switching?.length ? `${eventsCpp.replace(/^#pragma once\n/m, '')}\n` : null,
         'int main(int argc, char** argv) {',
         isMpi ? '    MPI_Init(&argc, &argv);' : null,
         `    double targetTime = ${doubleLiteral(meta.defaultTargetTime)};`,
@@ -1567,7 +1660,33 @@ function emitPythonStageProviderContribution(contribution, info) {
     ].filter(Boolean).join('\n');
 }
 
+// As cppSwitchingLines, in Python.
+function pythonSwitchingLines(model, functions) {
+    if (!functions.length) return [];
+    const lines = [
+        '    # Event location (docs/proposals/integrators.md): each comparison of a condition in a Rate equation, g = a - b, watched; the',
+        '    # terms read the condition latched through each step, and a step that crosses a switch is retaken to end on it.',
+        '    def evaluate_switching(time, snapshot, values):',
+        '        step_time = time'
+    ];
+    let node = -1;
+    functions.forEach((fn, index) => {
+        if (fn.nodeIndex !== node) {
+            node = fn.nodeIndex;
+            const plan = model.nodePlans[node];
+            lines.push(`        # Node: ${plan.node.name}`);
+            lines.push(`        state = [${plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')}]`);
+        }
+        const texts = symbolTexts(fn.symbols, 'python');
+        lines.push(`        values[${index}] = ${emitExpression(compileExpressionNode(fn.left), texts, pythonOperators)} - ${emitExpression(compileExpressionNode(fn.right), texts, pythonOperators)}`);
+    });
+    lines.push('');
+    lines.push(`    switching = Switching(evaluate_switching, [${functions.map((fn) => fn.comparison).join(', ')}])`);
+    return lines;
+}
+
 function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) {
+    const located = meta.switching?.length > 0;
     const stageBlocks = model.nodePlans.map((plan, nodeIndex) => {
         const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
         const body = [
@@ -1601,6 +1720,7 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         `    steps_per_global_step = ${adaptive || stiff ? 1 : meta.stepsPerGlobalStep}`,
         `    integrated = [${integratedFlags(model).map((flag) => (flag ? 'True' : 'False')).join(', ')}]`,
         providers.length ? `    held_value = [0.0] * ${providers.length}` : '',
+        ...pythonSwitchingLines(model, meta.switching ?? []),
         '',
         '    def evaluate_stage(internal_step, stage, step_time, snapshot, rates):',
         '        node_time_step = global_time_step / steps_per_global_step',
@@ -1645,17 +1765,20 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         '    steps = math.ceil(target_time / global_time_step - 1e-9)',
         '    for step in range(steps):',
         '        current_time = step * global_time_step',
+        located ? '        switching.begin_global_step(current_time, global_state)' : '',
         adaptive
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        dormand_prince_54_global_step(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,',
                 '                                      [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,',
-                '                                      lambda _time, _values: None)'].join('\n')
+                `                                      lambda _time, _values: None${located ? ', switching' : ''})`].join('\n')
             : stiff
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        rodas_4_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,',
                 '                            [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, reads_time, controller, evaluate_adaptive,',
-                '                            lambda _time, _values: None)'].join('\n')
-            : '        runge_kutta_4_global_step(current_time, global_time_step, steps_per_global_step, global_state, integrated, evaluate_stage)',
+                `                            lambda _time, _values: None${located ? ', switching' : ''})`].join('\n')
+            : located
+                ? '        runge_kutta_4_global_step_with_events(current_time, global_time_step, steps_per_global_step, global_state, integrated, switching, evaluate_stage)'
+                : '        runge_kutta_4_global_step(current_time, global_time_step, steps_per_global_step, global_state, integrated, evaluate_stage)',
         ...updateBlocks
     ];
 }
@@ -1726,6 +1849,7 @@ function generatePython(model, providers, meta, document) {
         meta.method === 'rungeKutta4' ? `${rungeKutta4Python}\n` : '',
         meta.method === 'dormandPrince54' ? `${dormandPrince54Python}\n` : '',
         meta.method === 'rodas4' ? `${rodas4Python}\n` : '',
+        meta.switching?.length ? `${eventsPython}\n` : '',
         'def run(target_time, output_path):',
         `    global_time_step = ${doubleLiteral(meta.globalTimeStep)}`,
         `    output_interval = ${doubleLiteral(meta.outputInterval)}`,

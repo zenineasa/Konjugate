@@ -13,9 +13,10 @@
 // the energy lost in its winding and the switches, (r_w + r_s) i²; the capacitor the energy delivered to the load, v²/R. The energy balance
 // E_in = ½ L i² + ½ C v² + E_loss + E_load is checked from Konjugate's own states.
 //
-// Konjugate has no event location: a switching instant takes effect at the first step (or Runge–Kutta stage) that starts after it. That is
-// an error of up to one step per switching edge, so the switched model converges at first order whatever the method; the averaged model,
-// which is smooth, shows each method's own order.
+// Runge–Kutta 4, Adaptive and Stiff (Rodas4) locate the switches (docs/proposals/integrators.md, Event location): each switching condition in an equation is
+// watched, and a step that crosses one is retaken to end on it, so the switched model converges at the method's own order, as the averaged
+// model, which is smooth, does. Explicit Euler does not locate: a switching instant takes effect at the first step that starts after it, an
+// error of up to one step per edge, so it converges at first order. Adaptive and Stiff are judged against their tolerance.
 //
 // Half-wave rectifier (rectifier.kjt): a 10 V, 50 Hz source charges a 470 µF capacitor through a diode, into a 100 Ω load. The diode is
 // the relationship from the source to the capacitor, piecewise linear: 1 Ω while the voltage across it is positive, 1 MΩ otherwise.
@@ -263,6 +264,32 @@ export async function evaluate({ engine, config }) {
         add(`rectifier${method === 'explicit' ? 'Explicit' : 'RungeKutta4'}Order`, order.fitted, `Rectifier: observed order of the error in h, ${methodName(variantOf(method))} (fitted over every h)`);
         sweeps[`rectifier:${method}`] = { steps, errors, order };
     }
+    // Adaptive and Stiff: each circuit's error against the tolerance, every switch located, with the work it took.
+    for (const [methodLabel, method, suffix] of [['Adaptive', 'dormandPrince54', 'Adaptive'], ['Stiff', 'rodas4', 'Rodas4']]) for (const [key, caseRun, measure] of [
+        ['buck', config.buck.run, async (result) => {
+            const exact = buckSwitchedReference(result.times);
+            return errorMetrics(trajectory(result, buildBuck(true).ids.compared), exact.map((sample) => sample.slice(0, 2)));
+        }],
+        ['rectifier', config.rectifier.run, async (result) => errorMetrics(trajectory(result, [rectifier.ids.voltage]), data.rectifier.states.map((sample) => [sample[0]]))]
+    ]) {
+        const run = engineRun(caseRun, { globalTimeStep: caseRun.outputInterval });
+        const errors = [];
+        for (const relative of config.adaptive.relativeTolerances) {
+            const variant = { method, tolerance: { relative, absolute: relative * config.adaptive.absoluteFraction } };
+            const result = await engine.run(key === 'buck' ? buckSwitchedPath : rectifierPath, variant, run);
+            const metrics = await measure(result);
+            errors.push(metrics.relativeError);
+            rows.push(resultRow({ caseName: key === 'buck' ? 'Buck, switched: against tolerance' : 'Rectifier: against tolerance', model: key === 'buck' ? 'buckSwitched' : 'rectifier', variant, run, errors: metrics, work: result.work,
+                unit: key === 'buck' ? 'A, V' : 'V', note: `${result.integration.events} switches located; ${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model` }));
+        }
+        const proportionality = observedOrder(config.adaptive.relativeTolerances, errors);
+        rows.at(-1).note += `; error against tolerance: fitted slope ${proportionality.fitted.toFixed(3)}`;
+        // Between its switches the buck is linear and the method far more accurate than asked, its steps held by the global step its
+        // samples need: its error is checked against its tolerance, not for a slope. The rectifier's follows its tolerance.
+        if (key === 'rectifier') add(`${key}ToleranceSlope${suffix}`, proportionality.fitted, `Rectifier: ${methodLabel}'s slope of log error against log tolerance, every switch located`);
+        add(`${key}ToleranceFactor${suffix}`, Math.max(...errors.map((error, index) => error / config.adaptive.relativeTolerances[index])), `${key === 'buck' ? 'Buck, switched' : 'Rectifier'}: ${methodLabel}'s largest error over its relative tolerance`);
+    }
+
     add('rectifierNgspiceAgreement', data ? referenceAgreement(data.rectifier.ngspice.map((value) => [value]), data.rectifier.states.map((sample) => [sample[0]])) : NaN, 'Rectifier: ngspice (a switch controlled by its own voltage) against the SciPy reference, largest difference relative to the voltage\'s magnitude');
 
     // Plots: the switched buck's first millisecond, the energy, the rectifier, and the convergence of every case.
@@ -288,7 +315,7 @@ export async function evaluate({ engine, config }) {
         ]
     }));
     plots.push(linePlot({
-        id: 'buckConvergence', title: 'Buck converter: error against the step', subtitle: 'Largest error relative to range. Without event location a switching edge costs up to a step, so the switched converter converges at first order under either method; the averaged one, smooth, at each method\'s own order', xLabel: 'Step h (s)', yLabel: 'Relative error', logX: true, logY: true,
+        id: 'buckConvergence', title: 'Buck converter: error against the step', subtitle: 'Largest error relative to range. Runge–Kutta 4 locates each switching edge and converges at fourth order switched or averaged; explicit Euler, which does not, at first', xLabel: 'Step h (s)', yLabel: 'Relative error', logX: true, logY: true,
         series: [
             series('Switched, explicit Euler', 'explicit', sweeps.switched.explicit.steps, sweeps.switched.explicit.errors),
             series('Switched, Runge–Kutta 4', 'rungeKutta4', sweeps.switched.rungeKutta4.steps, sweeps.switched.rungeKutta4.errors),
@@ -297,7 +324,7 @@ export async function evaluate({ engine, config }) {
         ]
     }));
     plots.push(linePlot({
-        id: 'rectifierConvergence', title: 'Half-wave rectifier: error against the step', subtitle: 'Largest capacitor-voltage error relative to range; the diode switches inside steps, which caps Runge–Kutta 4 near second order', xLabel: 'Step h (s)', yLabel: 'Relative error', logX: true, logY: true,
+        id: 'rectifierConvergence', title: 'Half-wave rectifier: error against the step', subtitle: 'Largest capacitor-voltage error relative to range; Runge–Kutta 4 locates where the diode switches and keeps its fourth order', xLabel: 'Step h (s)', yLabel: 'Relative error', logX: true, logY: true,
         series: [
             series('Explicit Euler', 'explicit', sweeps['rectifier:explicit'].steps, sweeps['rectifier:explicit'].errors),
             series('Runge–Kutta 4', 'rungeKutta4', sweeps['rectifier:rungeKutta4'].steps, sweeps['rectifier:rungeKutta4'].errors)

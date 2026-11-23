@@ -645,3 +645,49 @@ test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers,
     assert.match(python, /stage_reads = \[\[0\]\]/);
     assert.match(python, /rodas_4_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,/);
 });
+
+// Event location (docs/proposals/integrators.md): under Runge–Kutta 4, Adaptive and Stiff each comparison of a Which condition in a Rate equation
+// becomes a switching function, the term reads its latch, and the program locates the switch with the engine's own events header.
+test('under Runge–Kutta 4, Adaptive and Stiff a switching condition is latched and located with the engine\'s events header, byte for byte', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { eventsCpp } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/events.hpp', import.meta.url), 'utf8');
+    assert.equal(eventsCpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/events.hpp has it.');
+    const switched = () => {
+        const document = singleNodeSourceTermModel();
+        const term = document.nodes[0].sourceTerms[0];
+        term.expressionModel.mathJson = ['Which', ['Less', '0', 'p', '200'], ['Multiply', '-0.1', 'p'], 'True', '0'];
+        return document;
+    };
+    const rungeKutta4 = switched();
+    rungeKutta4.runConfigurations[0].method = 'rungeKutta4';
+    const source = generateStandaloneProgram(rungeKutta4, 'cpp');
+    assert.ok(source.includes(header.replace(/^#pragma once\n/m, '')), 'The events header must be pasted in, less its #pragma once.');
+    // A chain is a switching function per pair, read as both latches.
+    assert.match(source, /\(\(switching\.latches\[0\] && switching\.latches\[1\]\) \? \(-0\.1 \* state\[0\]\) : 0\.0\)/);
+    assert.match(source, /values\[0\] = 0\.0 - state\[0\];/);
+    assert.match(source, /switching\(evaluateSwitching, \{ 0, 0 \}\)/);
+    assert.match(source, /switching\.beginGlobalStep\(currentTime, globalState\);/);
+    assert.match(source, /rungeKutta4GlobalStepWithEvents\(currentTime, globalTimeStep, stepsPerGlobalStep, globalState, integrated, switching, evaluateStage\)/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(rungeKutta4, 'python');
+    assert.match(python, /def runge_kutta_4_global_step_with_events\(/);
+    assert.match(python, /switching = Switching\(evaluate_switching, \[0, 0\]\)/);
+    const adaptive = switched();
+    adaptive.runConfigurations[0].method = 'dormandPrince54';
+    assert.match(generateStandaloneProgram(adaptive, 'cpp'), /dormandPrince54GlobalStepWithEvents\(currentTime, endTime,/);
+    assert.match(generateStandaloneProgram(adaptive, 'python'), /lambda _time, _values: None, switching\)/);
+    const stiff = switched();
+    stiff.runConfigurations[0].method = 'rodas4';
+    assert.match(generateStandaloneProgram(stiff, 'cpp'), /rodas4GlobalStepWithEvents\(currentTime, endTime, globalState, system, tolerance,[^;]*readsTime, controller, statistics, switching,/);
+    assert.match(generateStandaloneProgram(stiff, 'python'), /reads_time, controller, evaluate_adaptive,\n {28}lambda _time, _values: None, switching\)/);
+    // With the error control off (for measuring order) neither locates.
+    adaptive.runConfigurations[0].stepsPerGlobalStep = 4;
+    assert.doesNotMatch(generateStandaloneProgram(adaptive, 'cpp'), /WithEvents\(currentTime|switching\.beginGlobalStep/);
+    // Euler, node by node, and a model with no condition, are written as before: nothing latched, no events header.
+    const euler = generateStandaloneProgram(switched(), 'cpp');
+    assert.doesNotMatch(euler, /switching|Switching/);
+    const plain = singleNodeSourceTermModel();
+    plain.runConfigurations[0].method = 'rungeKutta4';
+    assert.doesNotMatch(generateStandaloneProgram(plain, 'cpp'), /Switching|WithEvents/);
+});

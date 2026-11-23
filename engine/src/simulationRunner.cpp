@@ -11,7 +11,9 @@
 #include "providerRuntime.hpp"
 #include "taskExecutor.hpp"
 #include "wholeModelIntegration.hpp"
+#include "eventLocation.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/events.hpp"
 #include "konjugate/integrators/rodas4.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
@@ -28,6 +30,8 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <functional>
+#include <limits>
 #include <optional>
 #include <openssl/evp.h>
 #include <random>
@@ -668,7 +672,7 @@ public:
             const auto& wholeNode = request.wholeModel->nodes[index];
             if (wholeNode.stepped) continue;
             results[index] = evaluateNodeStage(plan_.nodes[index], wholeNode, stageStates, control.parameterValues, control.activeSchedules,
-                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(index), providers);
+                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(index), providers, request.latches);
         }
         return results;
     }
@@ -707,7 +711,7 @@ public:
             auto* held = &request.held->at(index);
             futures[index] = taskExecutor_.submit([nodePlan, wholeNode, held, &stageStates, &control, &request, providers] {
                 return evaluateNodeStage(*nodePlan, *wholeNode, stageStates, control.parameterValues, control.activeSchedules,
-                    request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, *held, providers);
+                    request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, *held, providers, request.latches);
             });
         }
         for (std::size_t index = 0; index < futures.size(); ++index) if (futures[index].valid()) results[index] = futures[index].get();
@@ -959,16 +963,52 @@ private:
     integrators::Rodas4Controller stiffController;
     integrators::Rodas4Statistics stiffStatistics;
     bool stagesReadTimeAlways = false;
-    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive and Stiff, nothing under every other method.
+    // Event location (docs/proposals/integrators.md, Event location), under every whole-model method for a model with switching
+    // conditions: the conditions, their latches, the events located (how many instants, and the first thousand, each with its
+    // condition), and whether a global step has had to stop locating (chattering). Under Euler, node by node, the conditions it does not
+    // locate, for the run's summary.
+    using SwitchingEvaluate = std::function<void(double, const Values&, std::vector<double>&)>;
+    EventPlan eventPlan;
+    std::optional<integrators::Switching<SwitchingEvaluate>> switching;
+    std::size_t eventInstants = 0;
+    std::vector<std::pair<double, std::size_t>> eventList;
+    bool chatteringReported = false;
+    std::vector<std::pair<EntityId, EntityId>> unlocated;
+    // The hidden state a checkpoint taken now keeps: the controller's memory under Adaptive and Stiff, and the conditions' latches when
+    // events are located; nothing under every other method.
     std::string solverState() const {
+        if (switching) {
+            const bool stiff = isStiff(integration);
+            return encodeEventSolverState(stiff ? stiffController.proposedStep : isAdaptive(integration) ? adaptiveController.proposedStep : 0.0,
+                stiff ? stiffController.previousError : adaptiveController.previousError, stiff ? stiffController.previousStep : 0.0,
+                switching->latches, switching->armed);
+        }
         if (isStiff(integration)) return encodeStiffSolverState(stiffController.proposedStep, stiffController.previousError, stiffController.previousStep);
         return isAdaptive(integration) ? encodeAdaptiveSolverState(adaptiveController.proposedStep, adaptiveController.previousError) : std::string();
     }
-    // The controller started afresh: its first step chosen again by the initial step algorithm.
+    // The controller started afresh: its first step chosen again by the initial step algorithm; every condition read afresh.
     void resetSolverState(const std::string& record = {}) {
         adaptiveController = {};
-        if (isAdaptive(integration)) decodeAdaptiveSolverState(record, adaptiveController.proposedStep, adaptiveController.previousError);
         stiffController = {};
+        if (switching) {
+            switching->reset();
+            double proposed = 0;
+            double previousError = 0;
+            double previousStep = 0;
+            if (decodeEventSolverState(record, proposed, previousError, previousStep, switching->latches, switching->armed)) {
+                switching->established = true;
+                if (proposed > 0 && isStiff(integration)) {
+                    stiffController.proposedStep = proposed;
+                    stiffController.previousError = previousError;
+                    stiffController.previousStep = previousStep;
+                } else if (proposed > 0 && isAdaptive(integration)) {
+                    adaptiveController.proposedStep = proposed;
+                    adaptiveController.previousError = previousError;
+                }
+            }
+            return;
+        }
+        if (isAdaptive(integration)) decodeAdaptiveSolverState(record, adaptiveController.proposedStep, adaptiveController.previousError);
         if (isStiff(integration)) decodeStiffSolverState(record, stiffController.proposedStep, stiffController.previousError, stiffController.previousStep);
     }
     std::chrono::steady_clock::time_point planningStartedAt;
@@ -1101,6 +1141,20 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         if (hasTolerance(integration.method)) {
             absoluteToleranceByState = absoluteTolerances(document, executionPlan, integration.absoluteTolerance);
         }
+        // Switching conditions are located under Runge–Kutta 4, Adaptive and Stiff (not Dormand–Prince or Rodas4 with the error control
+        // off, which is for measuring the method's order): their stage terms then read them latched.
+        if (integration.method == IntegrationMethod::rungeKutta4 || isAdaptive(integration) || isStiff(integration)) {
+            eventPlan = compileEventPlan(executionPlan, wholeModel);
+            if (!eventPlan.functions.empty()) {
+                std::vector<unsigned char> comparisons;
+                for (const auto& function : eventPlan.functions) comparisons.push_back(function.comparison);
+                switching.emplace([this](double time, const Values& values, std::vector<double>& out) {
+                    evaluateSwitchingFunctions(executionPlan, eventPlan, values, runControl.parameterValues, runControl.activeSchedules, time, out);
+                }, std::move(comparisons));
+            }
+        }
+    } else {
+        unlocated = unlocatedConditions(executionPlan);
     }
     const auto requestedPartitions = configuration.get<std::size_t>("execution.partitionCount", executionSettings.workerThreads);
     if (!requestedPartitions || requestedPartitions > 256) {
@@ -1492,7 +1546,26 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             json << (index ? "," : "") << "{\"sourceId\":" << wholeModel.heldTerms[index].sourceId << ",\"stateId\":"
                  << wholeModel.heldTerms[index].stateId << '}';
         }
-        json << "]}";
+        json << ']';
+        // Event location: how many switching conditions were watched, how many instants located, and the first thousand events, each
+        // the term whose condition changed and whether the condition holds after it. Only for a model with switching conditions.
+        if (switching) {
+            json << ",\"switchingConditions\":" << eventPlan.functions.size() << ",\"events\":" << eventInstants << ",\"eventList\":[";
+            for (std::size_t index = 0; index < eventList.size(); ++index) {
+                const auto& [time, condition] = eventList[index];
+                const auto& function = eventPlan.functions[condition];
+                json << (index ? "," : "") << "{\"time\":" << time << ",\"sourceId\":" << function.sourceId << ",\"stateId\":" << function.stateId << '}';
+            }
+            json << ']';
+        }
+        json << '}';
+    } else if (!unlocated.empty()) {
+        // Euler, node by node, does not locate switching conditions: the terms whose conditions it read at each substep instead.
+        json << ",\"unlocatedConditions\":[";
+        for (std::size_t index = 0; index < unlocated.size(); ++index) {
+            json << (index ? "," : "") << "{\"sourceId\":" << unlocated[index].first << ",\"stateId\":" << unlocated[index].second << '}';
+        }
+        json << ']';
     }
     json
          << ",\"execution\":{\"planVersion\":1,\"requestedBackend\":\"" << executionBackendName(executionSettings.requestedBackend)
@@ -1811,6 +1884,11 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     };
     // The steps taken inside this global step, for each node's substep count.
     std::size_t takenSteps = steps;
+    // Switching conditions latched as they hold at the global step's start (Updates, controls and schedules may have moved them since).
+    if (switching) {
+        request.latches = &switching->latches;
+        switching->beginGlobalStep(currentTime, reached);
+    }
     if (integration.method == IntegrationMethod::dormandPrince54) {
         // Every step lands on the global step's end and on every corner of a schedule within it; the controller's memory carries
         // from one global step to the next (and into checkpoints). The held programs are evaluated at the first evaluation, the
@@ -1821,12 +1899,18 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         integrators::DormandPrince54Tolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
         // Samples stay on global steps, where Updates are set too: the dense output is not used for them (it is kept for event
         // location), so no sample shows a Rate state between global steps beside an Update still at its value from the step's start.
-        integrators::dormandPrince54GlobalStep(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
-            breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics,
-            [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
-                evaluateAt(evaluation == 0, time, stageStates, derivatives);
-            },
-            [](double, const Values&) {});
+        const auto evaluateDormandPrince = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
+            evaluateAt(evaluation == 0, time, stageStates, derivatives);
+        };
+        if (switching) {
+            integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+                breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, *switching,
+                evaluateDormandPrince, [](double, const Values&) {});
+        } else {
+            integrators::dormandPrince54GlobalStep(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+                breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics,
+                evaluateDormandPrince, [](double, const Values&) {});
+        }
         takenSteps = adaptiveStatistics.acceptedSteps - acceptedBefore;
         // Hairer's stiffness test said so: once a run, as a finding about the whole model, with what to do about it.
         if (!adaptiveStiffnessReported && !std::isnan(adaptiveStiffness.detectedAt)) {
@@ -1846,18 +1930,52 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
             ? scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime, elapsed) : std::vector<double>{};
         const auto acceptedBefore = stiffStatistics.acceptedSteps;
         integrators::Rodas4Tolerance tolerance{integration.relativeTolerance, absoluteToleranceByState};
-        integrators::rodas4GlobalStep(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, integration.stepsPerGlobalStep,
-            stagesReadTimeAlways || !runControl.activeSchedules.empty(), stiffController, stiffStatistics,
-            [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
-                evaluateAt(evaluation == 0, time, stageStates, derivatives);
-            },
-            [](double, const Values&) {});
+        const auto evaluateRodas = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
+            evaluateAt(evaluation == 0, time, stageStates, derivatives);
+        };
+        const bool readsTime = stagesReadTimeAlways || !runControl.activeSchedules.empty();
+        if (switching) {
+            integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
+                integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, *switching, evaluateRodas, [](double, const Values&) {});
+        } else {
+            integrators::rodas4GlobalStep(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, integration.stepsPerGlobalStep,
+                readsTime, stiffController, stiffStatistics, evaluateRodas, [](double, const Values&) {});
+        }
         takenSteps = stiffStatistics.acceptedSteps - acceptedBefore;
     } else {
-        integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated,
-            [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
-                evaluateAt(step == 0 && stage == 0, time, stageStates, derivatives);
-            });
+        const auto evaluateRungeKutta = [&](std::size_t step, std::size_t stage, double time, const Values& stageStates, Values& derivatives) {
+            evaluateAt(step == 0 && stage == 0, time, stageStates, derivatives);
+        };
+        if (switching) {
+            integrators::rungeKutta4GlobalStepWithEvents(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, *switching,
+                evaluateRungeKutta);
+        } else {
+            integrators::rungeKutta4GlobalStep(currentTime, synchronizationStep, steps, reached, wholeModel.integrated, evaluateRungeKutta);
+        }
+    }
+    // The events located this global step: each instant counted once, however many conditions changed at it; the first thousand kept
+    // for the result, each with its condition. A global step that reached the limit is said once, as a finding.
+    if (switching) {
+        double last = std::numeric_limits<double>::quiet_NaN();
+        for (const auto& [time, condition] : switching->fired) {
+            if (!(time == last)) ++eventInstants;
+            last = time;
+            if (eventList.size() < 1000) eventList.emplace_back(time, condition);
+        }
+        switching->fired.clear();
+        if (switching->chattering && !chatteringReported) {
+            chatteringReported = true;
+            DuringRunStabilityFinding finding;
+            finding.code = "eventsChattering";
+            finding.globalTime = currentTime;
+            std::ostringstream message;
+            message << "Switching conditions changed " << switching->limit << " times within one step starting at " << currentTime
+                    << " s, so the rest of that step read them as they stood at each internal step's start instead of locating each change. "
+                    << "A condition that switches back and forth this fast (a diode or friction at zero, a threshold without hysteresis) "
+                    << "makes the result depend on the step; a band between switching on and off, or a smooth transition, avoids it.";
+            finding.message = message.str();
+            stabilityFindings.push_back(std::move(finding));
+        }
     }
     for (std::size_t position = 0; position < wholeModel.steppedNodes.size(); ++position) {
         const auto index = wholeModel.steppedNodes[position];

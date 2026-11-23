@@ -137,6 +137,7 @@ struct NodeStageResult {
 NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeModelNode& stageNode, const StateValues& stageStates,
                                   const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules,
                                   double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
-                                  std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator);
+                                  std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
+                                  const std::vector<double>* latches = nullptr);
 
 }

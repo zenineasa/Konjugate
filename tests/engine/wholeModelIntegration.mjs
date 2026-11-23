@@ -312,6 +312,14 @@ class Reading(NodeProvider):
     // Euler and Runge–Kutta 4 checkpoints keep no hidden state.
     assert.equal(serial.checkpoints.at(-1).solver.state, undefined);
 
+    // A long run lands on every global step: late in it (t / H past about 450) rounding could leave a step a few ulps short of the global
+    // step, and the sliver left after it was refused as too small a step, failing the run (the bundled thermal-management example at
+    // H = 0.1 s failed at 512.5 s). Such a step now lands; a run that succeeded before takes the same steps.
+    const thermalExample = join(root, 'examples', 'thermalManagement.kjt');
+    const longRun = await run(thermalExample, { targetTime: 600, globalTimeStep: 0.1, outputInterval: 0.1, method: 'dormandPrince54' });
+    assert.ok(Math.abs(longRun.samples.at(-1).time - 600) <= 1e-9, 'The run reaches its end.');
+    assert.ok(longRun.integration.smallestStep > 1e-9, `No sliver step is taken: ${longRun.integration.smallestStep}.`);
+
     // The tolerance sets the error: y' = -y over 8 s against e^-t, each tighter tolerance closer, with more steps.
     const decayDocument = decay(null);
     const decayModel = await modelPath('adaptiveDecay', decayDocument);

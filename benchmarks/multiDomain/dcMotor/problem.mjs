@@ -237,7 +237,7 @@ export async function evaluate({ engine, config }) {
     return {
         rows, checks, plots, notes: [
             'The thermal balance is linear in the states and is kept to rounding by either method; the electromechanical one holds only as well as the integration, since ½ L i² and ½ J ω² are quadratic.',
-            'A weakness this problem exposes: Runge–Kutta 4 is first order here, and its largest error (in the armature current, at 4 s) is larger than explicit Euler\'s. The setpoint step falls on a step boundary, but the last stage of the step that ends at 4 s is evaluated at t = 4 s and already sees the new setpoint, so the jump in di/dt enters that step with weight h/6: an error of order h, once. Explicit Euler never evaluates at the end of a step and does not suffer it. The other states carry the same first-order error from the step: under Runge–Kutta 4 the speeds and the controller are only a little closer to the reference than under Euler, the temperatures about ten times closer. A step input needs its left limit at the end of a step, or event handling, before a higher-order method can keep its order through it.'
+            'The setpoint and load steps are conditions on time in the equations, so Runge–Kutta 4 locates each and steps to it (docs/proposals/integrators.md, Event location): the step that ends at a step input is taken entirely before it, and Runge–Kutta 4 keeps its fourth order through the steps, with its largest error, in the armature current at 4 s, far below explicit Euler\'s, which does not locate them.'
         ]
     };
 }

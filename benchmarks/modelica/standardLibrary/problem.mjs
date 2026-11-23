@@ -256,7 +256,7 @@ export async function evaluate({ engine, config }) {
         rows, checks, plots,
         notes: [
             'The published results are accurate to between 1e-5 and 5e-4 of each signal\'s range (DASSL at a tolerance of 1e-6); Runge–Kutta 4 agrees with the exact solutions far more closely than that, so its agreement with the published results is the published results\' own error.',
-            'The Cauer filter is driven by a step at 1 s. It falls on a step boundary, but Runge–Kutta 4\'s last stage of the step ending there is evaluated at 1 s and sees the step already, an error of order h: Runge–Kutta 4 is first order on this example, and no better than explicit Euler at the same cost.',
+            'The Cauer filter is driven by a step at 1 s, a condition on time in its equation, which Runge–Kutta 4 locates and steps to (docs/proposals/integrators.md, Event location): it keeps its fourth order on this example, as on the other three.',
             'Two modelling differences: Konjugate has no acausal network solver or index reduction, so the Cauer filter\'s capacitance matrix is inverted by hand, and the drive train\'s rigid ideal gear is removed by hand by reflecting the motor\'s inertia through it. Both give the same equations the Modelica tool derives; neither is automatic in Konjugate.'
         ]
     };

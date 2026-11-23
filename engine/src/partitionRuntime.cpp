@@ -154,7 +154,8 @@ std::future<PartitionStageMessage> PartitionRuntime::submitStage(PartitionTransp
             const auto& node = executionPlan_.nodes[nodeIndex];
             fillNodeSnapshot(executionPlan_, node, boundary, stageStates);
             result.nodes.emplace_back(nodeIndex, evaluateNodeStage(node, wholeNode, stageStates, parameterValues, activeSchedules,
-                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(nodeIndex), providerEvaluator));
+                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(nodeIndex), providerEvaluator,
+                request.latches));
         }
         return result;
     });

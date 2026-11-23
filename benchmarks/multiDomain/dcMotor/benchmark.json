@@ -18,13 +18,13 @@
         "riseTimeErrorExplicit": { "max": 0.0029 },
         "loadDipErrorExplicit": { "max": 0.0029 },
         "orderExplicit": { "min": 0.95, "max": 1.1 },
-        "relativeErrorRungeKutta4": { "max": 0.038 },
-        "electromechanicalBalanceRungeKutta4": { "max": 2.7e-7 },
+        "relativeErrorRungeKutta4": { "max": 7.2e-08 },
+        "electromechanicalBalanceRungeKutta4": { "max": 6.3e-09 },
         "thermalBalanceRungeKutta4": { "max": 1e-10 },
-        "supplyEnergyErrorRungeKutta4": { "max": 0.000033 },
-        "riseTimeErrorRungeKutta4": { "max": 0.00034 },
-        "loadDipErrorRungeKutta4": { "max": 0.000095 },
-        "orderRungeKutta4": { "min": 0.95, "max": 1.1 },
+        "supplyEnergyErrorRungeKutta4": { "max": 3.5e-10 },
+        "riseTimeErrorRungeKutta4": { "max": 9.7e-11 },
+        "loadDipErrorRungeKutta4": { "max": 2.8e-10 },
+        "orderRungeKutta4": { "min": 4, "max": 4.5 },
         "referenceSelfAgreement": { "max": 3e-9 }
     }
 }

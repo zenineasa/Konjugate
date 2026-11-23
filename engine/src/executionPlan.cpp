@@ -1458,7 +1458,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     double stepSize,
     ProviderEvaluator* providerEvaluator,
     std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites,
-    const std::vector<double>* nodeProviderParameterValues) {
+    const std::vector<double>* nodeProviderParameterValues,
+    const std::vector<double>* latches) {
     std::vector<EvaluatedContribution> evaluated;
     evaluated.reserve(node.contributions.size());
 
@@ -1483,6 +1484,11 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             } else if (binding.source == BindingSource::localState) symbols[index] = localStates.at(binding.valueIndex);
             else if (binding.source == BindingSource::simulationTime) symbols[index] = simulationTime;
             else symbols[index] = synchronizationSnapshot.at(binding.valueIndex);
+        }
+        // A latched condition's comparisons read their latches (event location), after the bindings.
+        if (!task.latchSlots.empty()) {
+            if (!latches) throw std::runtime_error("A latched condition was evaluated without its latches.");
+            for (const auto slot : task.latchSlots) symbols.push_back(latches->at(slot));
         }
 
         if (task.implementation == ContributionImplementation::equation) {
@@ -2172,6 +2178,11 @@ std::vector<double> evaluateRecordedParts(const ExecutionPlan& plan, const State
         }
     });
     return values;
+}
+
+
+ExpressionProgram compileExpressionProgram(const CompiledExpression& expression) {
+    return expressionProgram(expression);
 }
 
 }

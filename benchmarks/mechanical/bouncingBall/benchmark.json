@@ -1,0 +1,27 @@
+{
+    "title": "Bouncing ball on a stiff floor",
+    "summary": "A ball dropped onto a floor that is a stiff spring and damper while the ball is below it, one node: the switch is a condition on the height, located and stepped to by Runge–Kutta 4, Adaptive and Stiff; trajectory error and observed order against the exact piecewise solution, each contact's start and end against the exact instants, Adaptive's and Stiff's error against their tolerance with the work they took, and explicit Euler, which does not locate.",
+    "run": { "targetTime": 2, "outputInterval": 0.015625 },
+    "methods": [
+        { "variant": { "integration": "explicit" }, "globalTimeSteps": [0.000244140625, 0.0001220703125, 0.00006103515625, 0.000030517578125] },
+        { "variant": { "method": "rungeKutta4" }, "globalTimeSteps": [0.001953125, 0.0009765625, 0.00048828125, 0.000244140625] }
+    ],
+    "adaptive": { "relativeTolerances": [1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10], "absoluteFraction": 1e-3, "switchTolerance": 1e-8 },
+    "timing": [
+        { "label": "Runge–Kutta 4 with its contacts located, 4,096 steps", "model": "bouncingBall", "variant": { "method": "rungeKutta4" }, "run": { "globalTimeStep": 0.00048828125, "targetTime": 2, "outputInterval": 0.015625 } }
+    ],
+    "thresholds": {
+        "orderExplicit": { "min": 0.4, "max": 0.7 },
+        "relativeErrorExplicit": { "max": 0.26 },
+        "orderRungeKutta4": { "min": 3.6, "max": 4.0 },
+        "relativeErrorRungeKutta4": { "max": 1.5e-7 },
+        "switchTimeErrorRungeKutta4": { "max": 7.7e-9 },
+        "switchTimeErrorAdaptive": { "max": 6.1e-9 },
+        "toleranceSlopeAdaptive": { "min": 0.9, "max": 1.15 },
+        "toleranceFactorAdaptive": { "max": 20 },
+        "exactRestitution": { "min": 0.715, "max": 0.73 },
+        "switchTimeErrorRodas4": { "max": 2.3e-9 },
+        "toleranceSlopeRodas4": { "min": 0.9, "max": 1.1 },
+        "toleranceFactorRodas4": { "max": 4.5 }
+    }
+}

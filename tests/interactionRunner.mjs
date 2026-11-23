@@ -1725,7 +1725,7 @@ export async function runInteractionTests(driver) {
         // Euler, node by node, by default: no steps per global step, and the line under the choice says what it is.
         await openRunDialog(window);
         assert.equal(await evaluate(window, `document.querySelector('#runMethod').value`), 'nodeByNode');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runMethod option')].map((option) => option.textContent)`), ['Euler, node by node', 'Runge–Kutta 4', 'Adaptive']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runMethod option')].map((option) => option.textContent)`), ['Euler, node by node', 'Runge–Kutta 4', 'Adaptive', 'Stiff']);
         assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /Each node steps on its own/);
         assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), true);
         // Runge–Kutta 4 with two steps per global step, saved with the model.

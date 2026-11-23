@@ -18,6 +18,7 @@ import * as vanDerPol from './oscillators/vanDerPol/problem.mjs';
 import * as robertson from './chemistry/robertson/problem.mjs';
 import * as lorenz from './chaos/lorenz/problem.mjs';
 import * as doublePendulum from './mechanical/doublePendulum/problem.mjs';
+import * as bouncingBall from './mechanical/bouncingBall/problem.mjs';
 import * as switchedCircuits from './electrical/switchedCircuits/problem.mjs';
 import * as heatExchanger from './thermal/heatExchanger/problem.mjs';
 import * as pipeNetwork from './fluid/pipeNetwork/problem.mjs';
@@ -41,6 +42,7 @@ export const problems = [
     { id: 'chemistry/robertson', directory: robertson.directory, models: robertson.models, evaluate: robertson.evaluate },
     { id: 'chaos/lorenz', directory: lorenz.directory, models: lorenz.models, evaluate: lorenz.evaluate },
     { id: 'mechanical/doublePendulum', directory: doublePendulum.directory, models: doublePendulum.models, evaluate: doublePendulum.evaluate },
+    { id: 'mechanical/bouncingBall', directory: bouncingBall.directory, models: bouncingBall.models, evaluate: bouncingBall.evaluate },
     { id: 'electrical/switchedCircuits', directory: switchedCircuits.directory, models: switchedCircuits.models, evaluate: switchedCircuits.evaluate },
     { id: 'thermal/heatExchanger', directory: heatExchanger.directory, models: heatExchanger.models, evaluate: heatExchanger.evaluate },
     { id: 'fluid/pipeNetwork', directory: pipeNetwork.directory, models: pipeNetwork.models, evaluate: pipeNetwork.evaluate },

@@ -180,10 +180,15 @@ double groupedSumOfSquares(const std::vector<std::vector<std::size_t>>& groups, 
 // is evaluated at the time just before it, so a schedule that jumps there is read as it was during the step.
 //
 // `sampleTimes` and `sample(time, values)` as Dormand–Prince's, from Rodas4's third-order dense output.
-template <typename Evaluate, typename Sample>
-void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& states, Rodas4System& system, const Rodas4Tolerance& tolerance,
-                      const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps, bool readsTime,
-                      Rodas4Controller& controller, Rodas4Statistics& statistics, Evaluate&& evaluate, Sample&& sample) {
+//
+// `events` (rodas4GlobalStepWithEvents; events.hpp's Switching) as Dormand–Prince's: after each step the error control accepts, a
+// switching condition that changed within it is located on the step's dense output, and the step is taken again, with the same Jacobian,
+// to land on that instant, where the condition flips and the derivative and Jacobian are worked out again. Not with the error control
+// off.
+template <typename Events, typename Evaluate, typename Sample>
+void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<double>& states, Rodas4System& system, const Rodas4Tolerance& tolerance,
+                                const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps, bool readsTime,
+                                Rodas4Controller& controller, Rodas4Statistics& statistics, Events& events, Evaluate&& evaluate, Sample&& sample) {
     using T = Rodas4Tableau;
     const std::size_t count = states.size();
     const std::size_t n = system.integratedStates.size();
@@ -239,8 +244,14 @@ void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& sta
     std::size_t fixedStep = 0;
     bool rejectedLast = false;
     bool haveJacobian = false;
+    // A located event the step is to land on; NaN for none.
+    double eventTarget = std::numeric_limits<double>::quiet_NaN();
+    const bool locating = !fixedSteps && events.active();
     while (true) {
-        const double target = breakpoint < breakpoints.size() ? breakpoints[breakpoint] : endTime;
+        if (locating) events.beginStep(time, states);
+        const double scheduled = breakpoint < breakpoints.size() ? breakpoints[breakpoint] : endTime;
+        const bool towardEvent = eventTarget <= scheduled;
+        const double target = towardEvent ? eventTarget : scheduled;
         if (!haveJacobian) {
             // The Jacobian at the step's start, column group by column group: every column of a colour perturbed at once, each by
             // sqrt(eps) max(|y_j|, absolute_j / relative), the perturbation taken as the difference the rounding actually made.
@@ -296,7 +307,8 @@ void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& sta
                     << "tolerance, or be singular.";
             throw std::runtime_error(message.str());
         }
-        const bool landsOnEnd = lands && (fixedSteps || breakpoint == breakpoints.size());
+        const bool landsOnEvent = lands && towardEvent;
+        const bool landsOnEnd = lands && !landsOnEvent && (fixedSteps || breakpoint == breakpoints.size());
         const double end = !lands ? (fixedSteps ? startTime + static_cast<double>(fixedStep + 1) * step : time + step) : (landsOnEnd ? endTime : target);
         const double endStage = lands ? std::nextafter(end, startTime) : end;
 
@@ -404,6 +416,37 @@ void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& sta
             continue;
         }
 
+        // A switching condition that changed within the step: the step is taken again to land on the instant it changed.
+        if (locating && !landsOnEvent) {
+            const auto at = [&](double when, std::vector<double>& out) {
+                out.resize(count);
+                if (when == end) { for (std::size_t index = 0; index < count; ++index) out[index] = next[index]; return; }
+                const double theta = (when - time) / step;
+                const double theta1 = 1.0 - theta;
+                for (std::size_t index = 0; index < count; ++index) out[index] = states[index];
+                for (std::size_t row = 0; row < n; ++row) {
+                    const auto index = integratedStates[row];
+                    const double w1 = T::hd[0][0] * k1[row] + T::hd[0][1] * k2[row] + T::hd[0][2] * k3[row] + T::hd[0][3] * k4[row] + T::hd[0][4] * k5[row];
+                    const double w2 = T::hd[1][0] * k1[row] + T::hd[1][1] * k2[row] + T::hd[1][2] * k3[row] + T::hd[1][3] * k4[row] + T::hd[1][4] * k5[row];
+                    out[index] = states[index] * theta1 + theta * (next[index] + theta1 * (w1 + theta * w2));
+                }
+            };
+            double eventTime = 0.0;
+            if (events.locate(time, end, at, eventTime)) {
+                for (const auto index : integratedStates) stage[index] = states[index];
+                if (!(eventTime > time)) {
+                    // At the step's very start: the condition flips there, and the derivative and Jacobian are worked out again in the
+                    // new mode.
+                    events.fire(time);
+                    call(time, states, f0);
+                    haveJacobian = false;
+                } else {
+                    eventTarget = eventTime;
+                }
+                continue;
+            }
+        }
+
         // Accepted.
         ++statistics.acceptedSteps;
         statistics.smallestStep = std::min(statistics.smallestStep, step);
@@ -444,12 +487,35 @@ void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& sta
         }
         rejectedLast = false;
         ++fixedStep;
-        if (landsOnEnd) break;
-        if (lands) ++breakpoint;
+        if (landsOnEvent) {
+            events.fire(time);
+            eventTarget = std::numeric_limits<double>::quiet_NaN();
+        }
+        while (breakpoint < breakpoints.size() && breakpoints[breakpoint] <= time) ++breakpoint;
+        if (landsOnEnd || (landsOnEvent && !(time < endTime))) break;
         // The next step starts from the derivative and Jacobian where this one ended.
         call(time, states, f0);
         haveJacobian = false;
     }
+}
+
+// No switching conditions located.
+struct Rodas4NoEvents {
+    bool active() const { return false; }
+    void beginStep(double, const std::vector<double>&) {}
+    template <typename At>
+    bool locate(double, double, At&&, double&) { return false; }
+    void fire(double) {}
+};
+
+// rodas4GlobalStepWithEvents with no switching conditions located.
+template <typename Evaluate, typename Sample>
+void rodas4GlobalStep(double startTime, double endTime, std::vector<double>& states, Rodas4System& system, const Rodas4Tolerance& tolerance,
+                      const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps, bool readsTime,
+                      Rodas4Controller& controller, Rodas4Statistics& statistics, Evaluate&& evaluate, Sample&& sample) {
+    Rodas4NoEvents none;
+    rodas4GlobalStepWithEvents(startTime, endTime, states, system, tolerance, breakpoints, sampleTimes, fixedSteps, readsTime, controller,
+        statistics, none, evaluate, sample);
 }
 
 }

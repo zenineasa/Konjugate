@@ -143,7 +143,9 @@ export function createEngine(executable, workDirectory) {
                     backend: result.execution.backend, workerThreads: result.execution.workerThreads, selectionReason: result.execution.selectionReason,
                     communicationCutFraction: result.execution.communicationCutFraction, estimatedOperationsPerSynchronization: Number(result.execution.estimatedOperationsPerSynchronization)
                 },
-                engineVersion: result.engineVersion
+                engineVersion: result.engineVersion,
+                // The method's own account, when it is a whole-model one: its settings, work and the switches it located.
+                integration: result.integration ?? null
             };
         }
     };

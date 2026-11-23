@@ -670,6 +670,30 @@ class Feed(RelationshipProvider):
         assert.equal(reference.integration.heldTerms.length, 1);
     }
 
+    // --- 7. Event location (docs/proposals/integrators.md): a diode-like term whose condition reads a state, and a switch on time alone,
+    // under Runge–Kutta 4, Adaptive and Stiff, each switch located and stepped to in the engine and in every exported program ---
+    const state = (nodeId, stateId, symbol) => ({ kind: 'state', nodeId, stateId, symbol });
+    const switchedDocument = {
+        format: 'konjugate', version: 1, metadata: { projectName: 'Switched' },
+        nodes: [
+            { id: 1, name: 'Diode', states: [{ id: 11, name: 'Y', symbol: 'y', initialValue: 0, unit: '' }], sourceTerms: [{
+                id: 101, state: 'y', expression: 'cases', expressionModel: { latex: '', bindings: [state(1, 11, 'y'), { kind: 'time', symbol: 't' }], output: { stateId: 11 },
+                    mathJson: ['Which', ['Greater', ['Add', ['Sin', ['Multiply', '6.283185307179586', 't']], ['Negate', 'y']], '0'],
+                        ['Multiply', '5', ['Add', ['Sin', ['Multiply', '6.283185307179586', 't']], ['Negate', 'y']]], 'True', ['Multiply', '-0.5', 'y']] }
+            }] },
+            { id: 2, name: 'Switch', states: [{ id: 21, name: 'Z', symbol: 'z', initialValue: 0, unit: '' }], sourceTerms: [{
+                id: 201, state: 'z', expression: 'cases', expressionModel: { latex: '', bindings: [state(2, 21, 'z'), { kind: 'time', symbol: 't' }], output: { stateId: 21 },
+                    mathJson: ['Which', ['Less', ['Sin', ['Multiply', '7', 't']], '0.3'], ['Add', '1', ['Multiply', '-0.2', 'z']], 'True', '-2'] }
+            }] }
+        ],
+        edges: []
+    };
+    for (const [label, configuration] of [['Runge–Kutta 4, events', { method: 'rungeKutta4', stepsPerGlobalStep: 2 }], ['Adaptive, events', { method: 'dormandPrince54', tolerance: { relative: 1e-9 } }],
+        ['Stiff, events', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }]]) {
+        const reference = await runAndCompareAll(structuredClone(switchedDocument), configuration, label, [11, 21]);
+        assert.ok(reference.integration.events >= 4, `The switches must be located: ${JSON.stringify(reference.integration.events)}.`);
+    }
+
     // A node that is a program of its own is refused by name under a whole-model method, for now.
     const nodeProgram = providerAlgebraicDocument('python');
     nodeProgram.runConfigurations = [{ id: 900, globalTimeStep, outputInterval, ...rungeKutta4 }];

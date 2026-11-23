@@ -6650,6 +6650,16 @@ function renderExecutionSummary() {
             ?? model.nodes.find((node) => node.sourceTerms?.some((term) => term.id === sourceId))?.name ?? `Term ${sourceId}`;
         methodLines.push(`${integration.heldTerms.length === 1 ? '1 program' : `${integration.heldTerms.length} programs`} evaluated once a step and held, coupled at first order: ${nameList(integration.heldTerms.map(termName))}.`);
     }
+    // Event location (docs/proposals/integrators.md): the switches located and stepped to, or, under Euler, the conditions it did not locate.
+    const conditionName = ({ sourceId }) => model.relationships.find((edge) => edge.id === sourceId)?.name
+        ?? model.nodes.find((node) => node.sourceTerms?.some((term) => term.id === sourceId))?.name ?? `Term ${sourceId}`;
+    if (integration?.switchingConditions) {
+        methodLines.push(`${integration.events === 1 ? '1 switch' : `${(integration.events ?? 0).toLocaleString()} switches`} located and stepped to exactly, from ${integration.switchingConditions === 1 ? '1 condition' : `${integration.switchingConditions} conditions`} in the equations.`);
+    }
+    const unlocated = activeResult.unlocatedConditions ?? [];
+    if (unlocated.length) {
+        methodLines.push(`Euler, node by node, does not locate switches: ${nameList([...new Set(unlocated.map(conditionName))])} ${unlocated.length === 1 ? 'switches' : 'switch'} at the first substep after the instant. Runge–Kutta 4, Adaptive and Stiff step to each switch exactly.`);
+    }
     $('#executionSummaryMethod').textContent = methodLines.join(' ');
     const communication = execution.partitionCommunication ?? {};
     const selected = partitionPlan.selected ?? partitionPlan.greedy ?? {};

@@ -120,12 +120,17 @@ inline std::size_t groupedCount(const std::vector<std::vector<std::size_t>>& gro
 // `sampleTimes` (sorted, strictly between `startTime` and `endTime`) are times at which `sample(time, values)` is called with the
 // states there, from the dense output of the step that covers the time: values for every state (an integrated state interpolated,
 // every other state held).
-template <typename Evaluate, typename Sample>
-void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<double>& states, const std::vector<unsigned char>& integrated,
-                               const std::vector<std::vector<std::size_t>>& errorGroups, const DormandPrince54Tolerance& tolerance,
-                               const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps,
-                               DormandPrince54Controller& controller, DormandPrince54Stiffness& stiffness,
-                               DormandPrince54Statistics& statistics, Evaluate&& evaluate, Sample&& sample) {
+//
+// `events` (dormandPrince54GlobalStepWithEvents; events.hpp's Switching) locates the model's switching conditions: after each accepted
+// step it is asked, on the step's dense output, whether a condition changed within it, and if so the step is retaken to land on that
+// instant, as on a breakpoint, and the condition flips there (docs/proposals/integrators.md, Event location). Not with the error control
+// off.
+template <typename Events, typename Evaluate, typename Sample>
+void dormandPrince54GlobalStepWithEvents(double startTime, double endTime, std::vector<double>& states, const std::vector<unsigned char>& integrated,
+                                         const std::vector<std::vector<std::size_t>>& errorGroups, const DormandPrince54Tolerance& tolerance,
+                                         const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps,
+                                         DormandPrince54Controller& controller, DormandPrince54Stiffness& stiffness,
+                                         DormandPrince54Statistics& statistics, Events& events, Evaluate&& evaluate, Sample&& sample) {
     using T = DormandPrince54Tableau;
     const std::size_t count = states.size();
     const double globalStep = endTime - startTime;
@@ -170,8 +175,14 @@ void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<dou
     std::size_t nextSample = 0;
     std::size_t fixedStep = 0;
     bool rejectedLast = false;
+    // A located event the step is to land on; NaN for none.
+    double eventTarget = std::numeric_limits<double>::quiet_NaN();
+    const bool locating = !fixedSteps && events.active();
     while (true) {
-        const double target = breakpoint < breakpoints.size() ? breakpoints[breakpoint] : endTime;
+        if (locating) events.beginStep(time, states);
+        const double scheduled = breakpoint < breakpoints.size() ? breakpoints[breakpoint] : endTime;
+        const bool towardEvent = eventTarget <= scheduled;
+        const double target = towardEvent ? eventTarget : scheduled;
         const double wanted = fixedSteps ? globalStep / static_cast<double>(fixedSteps) : std::min(controller.proposedStep, globalStep);
         double step = wanted;
         bool lands = false;
@@ -179,18 +190,23 @@ void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<dou
             // Error control off: equal steps, the last ending exactly on endTime; breakpoints are not landed on.
             lands = fixedStep + 1 == fixedSteps;
             if (lands) step = endTime - time;
-        } else if (step >= (target - time) * (1.0 - 1.0e-12)) {
+        } else if (step >= (target - time) * (1.0 - 1.0e-12) || target - time - step <= 100.0 * std::abs(target) * std::numeric_limits<double>::epsilon()) {
+            // Landing: the step reaches the target, or would end so close short of it that the time could not resolve what is left.
+            // Late in a long run (t / H past about 450) rounding can leave a step a few ulps short of a global step, which the first
+            // test, relative to the distance left, misses; the sliver left was then refused as too small a step. As Rodas4 lands.
             step = target - time;
             lands = true;
         }
-        if (!(step > 0.0) || !std::isfinite(step) || 0.1 * step <= std::max(std::abs(time), globalStep) * std::numeric_limits<double>::epsilon()) {
+        // Too small to take: Hairer's test, a step the time cannot resolve (a legitimately tiny first step at t = 0 is allowed).
+        if (!(step > std::numeric_limits<double>::min()) || !std::isfinite(step) || 0.1 * step <= std::abs(time) * std::numeric_limits<double>::epsilon()) {
             std::ostringstream message;
             message.precision(17);
             message << "The adaptive method's step became too small to take at " << time << " s: the model may change too fast there "
                     << "for its tolerance, or be stiff or singular.";
             throw std::runtime_error(message.str());
         }
-        const bool landsOnEnd = lands && (fixedSteps || breakpoint == breakpoints.size());
+        const bool landsOnEvent = lands && towardEvent;
+        const bool landsOnEnd = lands && !landsOnEvent && (fixedSteps || breakpoint == breakpoints.size());
         const double end = !lands ? (fixedSteps ? startTime + static_cast<double>(fixedStep + 1) * step : time + step) : (landsOnEnd ? endTime : target);
         // A stage at the step's end is read just before it when the step lands, so a jump at `target` is not seen inside the step.
         const double endStage = lands ? std::nextafter(end, startTime) : end;
@@ -244,6 +260,41 @@ void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<dou
             continue;
         }
 
+        // A switching condition that changed within the step: the step is taken again to land on the instant it changed.
+        if (locating && !landsOnEvent) {
+            const auto at = [&](double when, std::vector<double>& out) {
+                out.resize(count);
+                if (when == end) { for (std::size_t index = 0; index < count; ++index) out[index] = next[index]; return; }
+                const double theta = (when - time) / step;
+                const double theta1 = 1.0 - theta;
+                for (std::size_t index = 0; index < count; ++index) {
+                    if (!integrated[index]) { out[index] = states[index]; continue; }
+                    const double difference = next[index] - states[index];
+                    const double spline = step * k1[index] - difference;
+                    const double fourth = difference - step * k7[index] - spline;
+                    const double fifth = step * (T::d[0] * k1[index] + T::d[2] * k3[index] + T::d[3] * k4[index] + T::d[4] * k5[index] +
+                        T::d[5] * k6[index] + T::d[6] * k7[index]);
+                    out[index] = states[index] + theta * (difference + theta1 * (spline + theta * (fourth + theta1 * fifth)));
+                }
+            };
+            double eventTime = 0.0;
+            if (events.locate(time, end, at, eventTime)) {
+                for (std::size_t index = 0; index < count; ++index) {
+                    stage[index] = states[index];
+                    next[index] = states[index];
+                    sixth[index] = states[index];
+                }
+                if (!(eventTime > time)) {
+                    // At the step's very start: the condition flips there, and the derivative is evaluated again in the new mode.
+                    events.fire(time);
+                    call(time, states, k1);
+                } else {
+                    eventTarget = eventTime;
+                }
+                continue;
+            }
+        }
+
         // Accepted.
         ++statistics.acceptedSteps;
         statistics.smallestStep = std::min(statistics.smallestStep, step);
@@ -288,10 +339,14 @@ void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<dou
         }
         rejectedLast = false;
         ++fixedStep;
-        if (landsOnEnd) break;
+        if (landsOnEvent) {
+            events.fire(time);
+            eventTarget = std::numeric_limits<double>::quiet_NaN();
+        }
+        while (breakpoint < breakpoints.size() && breakpoints[breakpoint] <= time) ++breakpoint;
+        if (landsOnEnd || (landsOnEvent && !(time < endTime))) break;
         if (lands) {
-            ++breakpoint;
-            // Across a jump the last stage's derivative is not the next step's first: it is evaluated again.
+            // Across a jump, or a condition's change, the last stage's derivative is not the next step's first: it is evaluated again.
             call(time, states, k1);
         } else {
             for (std::size_t index = 0; index < count; ++index) if (integrated[index]) k1[index] = k7[index];
@@ -302,6 +357,28 @@ void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<dou
             sixth[index] = states[index];
         }
     }
+}
+
+
+// No switching conditions located.
+struct DormandPrince54NoEvents {
+    bool active() const { return false; }
+    void beginStep(double, const std::vector<double>&) {}
+    template <typename At>
+    bool locate(double, double, At&&, double&) { return false; }
+    void fire(double) {}
+};
+
+// dormandPrince54GlobalStepWithEvents with no switching conditions located.
+template <typename Evaluate, typename Sample>
+void dormandPrince54GlobalStep(double startTime, double endTime, std::vector<double>& states, const std::vector<unsigned char>& integrated,
+                               const std::vector<std::vector<std::size_t>>& errorGroups, const DormandPrince54Tolerance& tolerance,
+                               const std::vector<double>& breakpoints, const std::vector<double>& sampleTimes, std::size_t fixedSteps,
+                               DormandPrince54Controller& controller, DormandPrince54Stiffness& stiffness,
+                               DormandPrince54Statistics& statistics, Evaluate&& evaluate, Sample&& sample) {
+    DormandPrince54NoEvents none;
+    dormandPrince54GlobalStepWithEvents(startTime, endTime, states, integrated, errorGroups, tolerance, breakpoints, sampleTimes, fixedSteps,
+        controller, stiffness, statistics, none, evaluate, sample);
 }
 
 }

@@ -58,6 +58,8 @@ struct StageRequest {
     double stepSize = 0;
     bool evaluateHeld = false;
     double heldStepSize = 0;
+    // The switching conditions' latches the stage terms read (event location); null when the model has none.
+    const std::vector<double>* latches = nullptr;
 };
 
 class PartitionTransport {

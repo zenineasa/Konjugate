@@ -14,12 +14,12 @@
         "heatRemovedErrorExplicit": { "max": 0.0000077 },
         "energyBalanceExplicit": { "max": 1e-10 },
         "orderExplicit": { "min": 0.95, "max": 1.1 },
-        "relativeErrorRungeKutta4": { "max": 0.0048 },
-        "inletErrorRungeKutta4": { "max": 0.0073 },
-        "crossingTimeErrorRungeKutta4": { "max": 0.05 },
-        "heatRemovedErrorRungeKutta4": { "max": 0.000024 },
+        "relativeErrorRungeKutta4": { "max": 2.3e-07 },
+        "inletErrorRungeKutta4": { "max": 6.1e-08 },
+        "crossingTimeErrorRungeKutta4": { "max": 4.2e-06 },
+        "heatRemovedErrorRungeKutta4": { "max": 1.2e-10 },
         "energyBalanceRungeKutta4": { "max": 1e-10 },
-        "orderRungeKutta4": { "min": 0.95, "max": 1.1 },
+        "orderRungeKutta4": { "min": 3, "max": 3.9 },
         "referenceSelfAgreement": { "max": 3e-8 },
         "graphSize": { "min": 26, "max": 26 }
     }

@@ -163,7 +163,8 @@ export async function ensureBaseline(workspace, runTime, notify, run) {
         name: 'Baseline', targetTime: runTime, globalTimeStep: configuration.globalTimeStep, outputInterval: configuration.outputInterval,
         ...(configuration.method !== undefined ? { method: configuration.method } : {}),
         ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {}),
-        ...(configuration.tolerance !== undefined ? { tolerance: configuration.tolerance } : {})
+        ...(configuration.tolerance !== undefined ? { tolerance: configuration.tolerance } : {}),
+        ...(configuration.jacobian !== undefined ? { jacobian: configuration.jacobian } : {})
     };
     notify({ stage: 'baseline', message: 'Running the baseline…' });
     const entry = { runTime, promise: null };

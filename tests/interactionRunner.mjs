@@ -1794,6 +1794,36 @@ export async function runInteractionTests(driver) {
             document.querySelector('#saveRunConfiguration').click();
         })()`);
         assert.deepEqual(await evaluate(window, activeConfiguration), before);
+        // Stiff's Jacobian, chosen under it: exact from the equations by default, which writes nothing; finite differences, written by
+        // name; dropped again when the method is not Stiff.
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffJacobianField').hidden`), true, 'Euler offers no Jacobian.');
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'rodas4';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffJacobianField').hidden`), false);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runStiffJacobian option')].map((option) => option.textContent)`),
+            ['Exact (from the equations)', 'By small changes (finite differences)', 'Exact, checked by small changes']);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffJacobian').value`), 'analytic');
+        await evaluate(window, `(() => {
+            const jacobian = document.querySelector('#runStiffJacobian');
+            jacobian.value = 'finiteDifference';
+            jacobian.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.match(await evaluate(window, `document.querySelector('#runStiffJacobianDescription').textContent`), /Each state changed a little/);
+        await evaluate(window, `document.querySelector('#saveRunConfiguration').click()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'rodas4', jacobian: 'finiteDifference' });
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runStiffJacobian').value`), 'finiteDifference');
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'nodeByNode';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#saveRunConfiguration').click();
+        })()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), before);
         // A run with Runge–Kutta 4: the execution summary names the method.
         await openRunDialog(window);
         await evaluate(window, `(() => {

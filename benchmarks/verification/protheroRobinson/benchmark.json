@@ -24,6 +24,8 @@
         "errorControl": { "max": 3e-05 },
         "stiffnessScaling": { "max": 0.1 },
         "stiffToleranceError": { "max": 1e-06 },
-        "explicitStepRatio": { "min": 10000 }
+        "explicitStepRatio": { "min": 10000 },
+        "finestOrderControl": { "min": 3.9, "max": 4.1 },
+        "finestOrderControlFiniteDifference": { "min": 4.3, "max": 5.2 }
     }
 }

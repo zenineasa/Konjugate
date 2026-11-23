@@ -405,7 +405,7 @@ class Reading(NodeProvider):
     assert.ok(stiffIssues.some((issue) => issue.code === 'numericsStiffModel' && /Adaptive stays stable only with steps of at most about/.test(issue.message)),
         `A stiff model must be named under Adaptive: ${JSON.stringify(stiffIssues)}`);
 
-    // --- Stiff: Rodas4, with its Jacobian's structure from the graph, coloured finite differences and Konjugate's own LU ---
+    // --- Stiff: Rodas4, with its Jacobian's structure from the graph, exact from the equations (or coloured finite differences) and Konjugate's own LU ---
     const stiffMethod = { ...timing, method: 'rodas4' };
     const stiffSerial = await run(split, { ...stiffMethod, execution: { backend: 'serial' } });
     for (const execution of [{ backend: 'threadPool', workerThreads: 2 }, { backend: 'threadPool', workerThreads: 3 },
@@ -422,8 +422,13 @@ class Reading(NodeProvider):
     assert.equal(stiffSummary.factorisations, stiffSummary.steps + stiffSummary.rejectedSteps, 'One factorisation a step tried.');
     assert.equal(stiffSummary.linearSystemSize, 6, 'Three masses: six integrated states.');
     assert.equal(stiffSummary.sparse, false, 'Six states are solved by the dense LU.');
-    // The masses on springs: each mass reads its own position and velocity and its neighbours' positions, so a few colours cover them.
-    assert.ok(stiffSummary.jacobianColours >= 2 && stiffSummary.jacobianColours < 6, `The Jacobian's colours come from the graph's structure: ${JSON.stringify(stiffSummary)}`);
+    // Every term an equation: the Jacobian exact in every column, no evaluation on finite differences (tests/engine/exactJacobian.mjs).
+    assert.equal(stiffSummary.exactColumns, 6);
+    assert.equal(stiffSummary.jacobianColours, 0);
+    // By finite differences: the masses on springs, each reading its own position and velocity and its neighbours' positions, so a few
+    // colours cover them.
+    const differencedSummary = (await run(split, { ...stiffMethod, jacobian: 'finiteDifference', execution: { backend: 'serial' } })).integration;
+    assert.ok(differencedSummary.jacobianColours >= 2 && differencedSummary.jacobianColours < 6, `The Jacobian's colours come from the graph's structure: ${JSON.stringify(differencedSummary)}`);
     assert.ok(stiffSummary.largestStep <= timing.globalTimeStep * (1 + 1e-12), 'The global step is the largest step Stiff takes.');
     // The split model is the one-node model: to the bit at fixed steps (the same equations, the same Jacobian whatever its colouring, the
     // same solves); under error control the error norm is summed node by node, so in the one-node model in one group, and a rounding

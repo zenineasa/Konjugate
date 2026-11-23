@@ -4,7 +4,8 @@
 
 // What the stiff methods share (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): the model's structure worked out once --
 // the integrated states, the Jacobian's pattern from the model's graph, its columns' colours and the sparse LU's ordering -- the
-// Jacobian by coloured finite differences, and the factorisation of shift I - J with Konjugate's own LU, dense or sparse. Rodas4 works out
+// Jacobian, its exact columns from the model's own derivatives and the rest by coloured finite differences, and the factorisation of
+// shift I - J with Konjugate's own LU, dense or sparse. Rodas4 works out
 // a Jacobian and a factorisation every step; BDF keeps both across steps for as long as its Newton iteration converges with them. Plain
 // C++ with no dependency beyond the standard library and linearSolve.hpp: the engine includes it, and C++ code export pastes it in.
 
@@ -13,6 +14,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <limits>
 #include <vector>
 
@@ -42,6 +44,18 @@ struct StiffSystem {
     SparseLu sparseLu;
     // The integrated states node by node in node order, each node's in its order: the order the error norm is summed in.
     std::vector<std::vector<std::size_t>> errorGroups;
+    // Exact columns (useExactColumns): the columns `exact` works out from the model's own derivatives, every entry of each; the colours
+    // above then cover only the other columns, worked out by finite differences. `exact(time, states, jacobian, dT)` writes every entry
+    // of every exact column, and with `dT` not null, df/dt at every position (only when `exactTime`: the model's dependence on time is
+    // known exactly too). Empty `exact`: every column by finite differences.
+    std::vector<unsigned char> exactColumn;
+    std::size_t exactColumns = 0;
+    std::function<void(double, const std::vector<double>&, std::vector<double>&, std::vector<double>*)> exact;
+    bool exactTime = false;
+    // The colours of every column, for `check`: when set, each Jacobian is also worked out wholly by finite differences and both are
+    // handed to check(time, states, exact, differences), which changes neither.
+    std::vector<std::vector<std::size_t>> allColourColumns;
+    std::function<void(double, const std::vector<double>&, const std::vector<double>&, const std::vector<double>&)> check;
 };
 
 // `integrated` marks the states the method integrates; `reads[i]`, for each integrated state i (the plan's index), lists the states
@@ -88,25 +102,46 @@ inline StiffSystem makeStiffSystem(const std::vector<unsigned char>& integrated,
     return system;
 }
 
-// The Jacobian at (time, states), whose derivative there is f0, column group by column group: every column of a colour perturbed at
-// once, each by sqrt(eps) max(|y_j|, absolute_j / relative), the perturbation taken as the difference the rounding actually made. `stage`
-// holds `states` on entry and on return; `derivative` is scratch. With `readsTime`, df/dt too, by a forward difference over
-// min(sqrt(eps) max(|time|, timeScale), timeLimit), into `dT` (one value per position). `call(time, values, derivatives)` evaluates.
+// The columns `exactColumn` marks are worked out exactly from now on, and only the others by finite differences: they are coloured
+// again among themselves (a colour left with no column dropped), so fewer evaluations work out a Jacobian. The first colouring is kept
+// for `check`.
+inline void useExactColumns(StiffSystem& system, const std::vector<unsigned char>& exactColumn) {
+    const std::size_t count = system.integratedStates.size();
+    system.allColourColumns = system.colourColumns;
+    system.exactColumn = exactColumn;
+    system.exactColumns = 0;
+    for (std::size_t column = 0; column < count; ++column) if (exactColumn[column]) ++system.exactColumns;
+    SparsityRows differenced(count);
+    for (std::size_t row = 0; row < count; ++row) {
+        for (const auto column : system.rows[row]) if (!exactColumn[column]) differenced[row].push_back(column);
+    }
+    std::size_t colours = 0;
+    const auto colour = colourColumns(differenced, colours);
+    std::vector<std::vector<std::size_t>> byColour(colours);
+    for (std::size_t column = 0; column < count; ++column) if (!exactColumn[column]) byColour[colour[column]].push_back(column);
+    system.colourColumns.clear();
+    for (auto& columns : byColour) if (!columns.empty()) system.colourColumns.push_back(std::move(columns));
+    system.colours = system.colourColumns.size();
+    system.colour.assign(count, 0);
+    for (std::size_t index = 0; index < system.colours; ++index) for (const auto column : system.colourColumns[index]) system.colour[column] = index;
+}
+
+// The finite differences of differenceJacobian (below), over the given colours of columns.
 template <typename Call>
-void differenceJacobian(const StiffSystem& system, double time, const std::vector<double>& states, const std::vector<double>& f0,
-                        const std::vector<double>& absolute, double relative, bool readsTime, double timeScale, double timeLimit,
-                        std::vector<double>& stage, std::vector<double>& derivative, std::vector<double>& jacobian, std::vector<double>& dT,
-                        Call&& call) {
+void differenceColumns(const StiffSystem& system, const std::vector<std::vector<std::size_t>>& colourColumns, double time,
+                       const std::vector<double>& states, const std::vector<double>& f0, const std::vector<double>& absolute, double relative,
+                       bool readsTime, double timeScale, double timeLimit, std::vector<double>& stage, std::vector<double>& derivative,
+                       std::vector<double>& jacobian, std::vector<double>& dT, Call&& call) {
     const auto& integratedStates = system.integratedStates;
     const double root = std::sqrt(std::numeric_limits<double>::epsilon());
-    for (std::size_t colour = 0; colour < system.colours; ++colour) {
-        for (const auto column : system.colourColumns[colour]) {
+    for (const auto& columns : colourColumns) {
+        for (const auto column : columns) {
             const auto index = integratedStates[column];
             const double size = root * std::max(std::abs(states[index]), absolute[index] / relative);
             stage[index] = states[index] + size;
         }
         call(time, stage, derivative);
-        for (const auto column : system.colourColumns[colour]) {
+        for (const auto column : columns) {
             const auto index = integratedStates[column];
             const double perturbation = stage[index] - states[index];
             for (const auto& [row, entry] : system.columnEntries[column]) {
@@ -125,6 +160,38 @@ void differenceJacobian(const StiffSystem& system, double time, const std::vecto
             const auto index = integratedStates[row];
             dT[row] = (derivative[index] - f0[index]) / perturbation;
         }
+    }
+}
+
+// The Jacobian at (time, states), whose derivative there is f0, column group by column group: every column of a colour perturbed at
+// once, each by sqrt(eps) max(|y_j|, absolute_j / relative), the perturbation taken as the difference the rounding actually made. `stage`
+// holds `states` on entry and on return; `derivative` is scratch. With `readsTime`, df/dt too, by a forward difference over
+// min(sqrt(eps) max(|time|, timeScale), timeLimit), into `dT` (one value per position). `call(time, values, derivatives)` evaluates.
+template <typename Call>
+void differenceJacobian(const StiffSystem& system, double time, const std::vector<double>& states, const std::vector<double>& f0,
+                        const std::vector<double>& absolute, double relative, bool readsTime, double timeScale, double timeLimit,
+                        std::vector<double>& stage, std::vector<double>& derivative, std::vector<double>& jacobian, std::vector<double>& dT,
+                        Call&& call) {
+    differenceColumns(system, system.colourColumns, time, states, f0, absolute, relative, readsTime, timeScale, timeLimit, stage, derivative,
+        jacobian, dT, call);
+}
+
+// The Jacobian (and, with `readsTime`, df/dt) as the stiff methods take it: its exact columns from `system.exact` and the rest by
+// coloured finite differences (differenceJacobian), and checked against finite differences throughout when `system.check` is set.
+template <typename Call>
+void assembleJacobian(const StiffSystem& system, double time, const std::vector<double>& states, const std::vector<double>& f0,
+                      const std::vector<double>& absolute, double relative, bool readsTime, double timeScale, double timeLimit,
+                      std::vector<double>& stage, std::vector<double>& derivative, std::vector<double>& jacobian, std::vector<double>& dT,
+                      Call&& call) {
+    const bool exactTime = system.exact && system.exactTime;
+    differenceJacobian(system, time, states, f0, absolute, relative, readsTime && !exactTime, timeScale, timeLimit, stage, derivative, jacobian,
+        dT, call);
+    if (system.exact) system.exact(time, states, jacobian, readsTime && exactTime ? &dT : nullptr);
+    if (system.check) {
+        std::vector<double> differences(jacobian.size(), 0.0), differencedTime(dT.size(), 0.0);
+        differenceColumns(system, system.allColourColumns.empty() ? system.colourColumns : system.allColourColumns, time, states, f0, absolute,
+            relative, false, timeScale, timeLimit, stage, derivative, differences, differencedTime, call);
+        system.check(time, states, jacobian, differences);
     }
 }
 

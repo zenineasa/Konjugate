@@ -16,7 +16,7 @@
 
 import { integrationMethod, methodOf } from './integrationMethods.mjs';
 import {
-    buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, doubleLiteral,
+    buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, cppStiffFmuPieces, doubleLiteral,
     cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude
 } from './codeExport.mjs';
 
@@ -135,13 +135,19 @@ function cppSettleBlocks(model, providerInfo) {
 export function generateFmiModel(document) {
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
-    // An FMU steps with Euler node by node; a whole-model method inside fmi2DoStep comes in a later stage
-    // (docs/proposals/integrators.md, Order of work), so an FMU is never made with numbers other than the run's.
+    // An FMU steps with Euler node by node, or under Stiff with Rodas4 or BDF inside fmi2DoStep, each global step as the engine takes
+    // it (docs/proposals/integrators.md, Code export); Runge–Kutta 4 and Adaptive inside fmi2DoStep come later, so an FMU is never made
+    // with numbers other than the run's.
     const method = methodOf(runConfiguration);
-    if (method !== 'nodeByNode') {
-        throw new Error(`The run configuration's method is ${integrationMethod(method)?.name ?? `“${method}”`}, which FMU export cannot write yet; choose Euler, node by node in the Run settings to export an FMU.`);
+    const stiff = method === 'rodas4' || method === 'bdf';
+    if (method !== 'nodeByNode' && !stiff) {
+        throw new Error(`The run configuration's method is ${integrationMethod(method)?.name ?? `“${method}”`}, which FMU export cannot write yet; choose Euler, node by node or Stiff in the Run settings to export an FMU.`);
     }
-    const model = buildModel(document);
+    const model = buildModel(document, { wholeModel: stiff });
+    if (stiff) {
+        const nodeProvider = model.nodePlans.find((plan) => plan.nodeProvider);
+        if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which FMU export cannot write under ${integrationMethod(method).name} yet.`);
+    }
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
     // A program in the current format keeps its memory with the engine, which an FMU would save in its FMU state: not written yet.
     const currentFormat = providers.find((provider) => provider.program);
@@ -150,8 +156,9 @@ export function generateFmiModel(document) {
     rewriteParameterSymbols(model, parameterValueReferences);
     // A model with any embedded C++ provider can carry arbitrary internal state across evaluate()
     // calls with no generic way to serialize it -- only a provider-free model supports rollback
-    // (fmi2Get/SetFMUstate). See konjugate/simulationModel.hpp's supportsStateCapture().
-    const supportsStateCapture = providers.length === 0;
+    // (fmi2Get/SetFMUstate). See konjugate/simulationModel.hpp's supportsStateCapture(). Under Stiff the solver's memory (Rodas4's
+    // controller, BDF's table) is not in the captured state either, so rollback is not offered.
+    const supportsStateCapture = providers.length === 0 && !stiff;
 
     let providerIndex = 0;
     const providerInfo = new Map();
@@ -162,7 +169,8 @@ export function generateFmiModel(document) {
         return `namespace ${namespaceName} {\n${stripLeadingCppInclude(provider.implementation.source)}\n}\n`;
     });
 
-    const stepBlocks = cppNodeStepBlocks(model, providerInfo);
+    const stiffPieces = stiff ? cppStiffFmuPieces(model, providers, providerInfo, runConfiguration) : null;
+    const stepBlocks = stiff ? stiffPieces.body.join('\n') : cppNodeStepBlocks(model, providerInfo);
     const settleBlocks = cppSettleBlocks(model, providerInfo);
 
     const providerMembers = providers.map((provider) => {
@@ -207,6 +215,8 @@ export function generateFmiModel(document) {
         '#include <algorithm>',
         '#include <cmath>',
         '#include <cstddef>',
+        stiff ? '#include <functional>' : '',
+        stiff ? '#include <limits>' : '',
         '#include <memory>',
         '#include <stdexcept>',
         providers.length ? '#include <span>' : '',
@@ -222,6 +232,7 @@ export function generateFmiModel(document) {
         '',
         providers.length ? `${cppSdkNamespace}\n` : '',
         providerBlocks.join('\n'),
+        stiff ? stiffPieces.headers : '',
         'namespace {',
         '',
         cppScheduleLines(model),
@@ -249,7 +260,7 @@ export function generateFmiModel(document) {
         '',
         '    void doStep(double currentTime, double globalTimeStep) override {',
         '        started_ = true;',
-        '        const std::vector<double> snapshot = state_;',
+        stiff ? '' : '        const std::vector<double> snapshot = state_;',
         stepBlocks,
         '    }',
         '',
@@ -264,6 +275,11 @@ export function generateFmiModel(document) {
         settleBlocks,
         '    }',
         '',
+        ...(stiff ? [
+            ...stiffPieces.members,
+            '    // Every input a host may set, for BDF to tell whether one changed between steps.',
+            `    std::vector<double> currentInputs() const { return { ${parameterVariables.map((variable) => `parameterValue_${variable.valueReference}`).join(', ')} }; }`
+        ] : []),
         '    bool started_ = false;',
         `    std::vector<double> state_ = { ${stateVariables.map((variable) => doubleLiteral(variable.start)).join(', ')} };`,
         parameterMembers,

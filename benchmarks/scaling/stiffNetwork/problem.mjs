@@ -82,6 +82,20 @@ export async function evaluate({ engine, config }) {
                             result.work.restarts !== undefined ? `, history started again ${result.work.restarts} times` : ''}; ${(milliseconds / 1000).toFixed(2)} s of engine compute on this machine (not checked)` }));
                     add(`${family.key}${size}Error${variant.method === 'bdf' ? 'Bdf' : 'Rodas4'}`, errors.relativeError, `Thermal grid${heated ? ` ${heated}` : ''} of ${graph.nodeCount} nodes, ${methodName(variant)}: largest error relative to range, against ${family.jumps ? 'Rodas4 at a tight tolerance' : 'the exact solution'}`);
                 }
+                // The exact Jacobian against finite differences (docs/proposals/integrators.md, Jacobians for Rodas4), on the case named.
+                if (config.jacobianComparison?.family === family.key && config.jacobianComparison.size === size) {
+                    for (const variant of config.methods) {
+                        const differenced = { ...variant, jacobian: 'finiteDifference' };
+                        const result = await engine.run(path, differenced, engineRun(run), { modelAsIs: true, measure: true });
+                        const errors = errorMetrics(trajectory(result, stateIds), reference ?? result.times.map((time) => Array.from(graph.exact(time))));
+                        const exact = byMethod[variant.method];
+                        const label = variant.method === 'bdf' ? 'Bdf' : 'Rodas4';
+                        rows.push(resultRow({ caseName: `Thermal grid${heated ? `, ${heated}` : ''}, ${graph.nodeCount} nodes: the exact Jacobian against finite differences`, model: `${family.key}${graph.nodeCount}`, variant: differenced, run: engineRun(run), errors, work: result.work, unit: 'K',
+                            note: `${result.work.methodSteps} steps, ${result.work.jacobians} Jacobians, ${result.work.modelEvaluations} evaluations, ${(result.timing.engineComputeMilliseconds / 1000).toFixed(2)} s, against ${exact.work.methodSteps}, ${exact.work.jacobians}, ${exact.work.modelEvaluations} and ${(exact.milliseconds / 1000).toFixed(2)} s with the exact Jacobian, whose error is ${exact.errors.relativeError.toExponential(2)} (engine times on this machine, not checked)` }));
+                        add(`${family.key}${size}EvaluationRatio${label}`, exact.work.modelEvaluations / result.work.modelEvaluations, `Thermal grid of ${graph.nodeCount} nodes, ${methodName(variant)}: evaluations with the exact Jacobian over those with finite differences`);
+                        add(`${family.key}${size}ErrorRatio${label}`, exact.errors.relativeError / errors.relativeError, `Thermal grid of ${graph.nodeCount} nodes, ${methodName(variant)}: error with the exact Jacobian over that with finite differences`);
+                    }
+                }
                 const rodas = byMethod.rodas4;
                 const bdf = byMethod.bdf;
                 add(`${family.key}${size}FactorisationRatio`, ratio(rodas.work.factorisations, bdf.work.factorisations), `Thermal grid${heated ? ` ${heated}` : ''} of ${graph.nodeCount} nodes: Rodas4's factorisations for each of BDF's`);

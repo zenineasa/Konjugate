@@ -40,6 +40,10 @@
         "conservationTwoNodesBdf": { "max": 1e-13 },
         "lowestConcentrationTwoNodesBdf": { "min": -1e-18 },
         "stepsTwoNodesBdf": { "max": 2500 },
-        "splitDifferenceBdf": { "max": 1e-06 }
+        "splitDifferenceBdf": { "max": 1e-06 },
+        "evaluationRatioRodas4": { "max": 0.75 },
+        "errorRatioRodas4": { "max": 1.2 },
+        "evaluationRatioBdf": { "max": 1 },
+        "errorRatioBdf": { "max": 1.2 }
     }
 }

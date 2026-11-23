@@ -195,7 +195,7 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
     double time = startTime;
     call(time, states, f0);
     // The Jacobian afresh at every global step's start.
-    differenceJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, stage, derivative, jacobian, dT, call);
+    assembleJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, stage, derivative, jacobian, dT, call);
     ++statistics.jacobians;
 
     // Whether the table still describes where the run is: the integrated states where it left them, every other state unchanged.
@@ -242,10 +242,13 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
     double eventTarget = std::numeric_limits<double>::quiet_NaN();
     const bool locating = events.active();
     std::vector<double> updated(BdfCoefficients::maximumOrder + 3);
-    // The Jacobian afresh where the run is, and the table started again at order 1: after the right-hand side jumps.
+    // The Jacobian afresh where the run is, and the table started again at order 1: after the right-hand side jumps. The differences'
+    // scratch holds the states it starts from (after an accepted step it still held the step's start, so the columns were perturbed
+    // about a point the others were not at).
     const auto startAgain = [&](double step) {
         call(time, states, f0);
-        differenceJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, stage, derivative, jacobian, dT, call);
+        for (std::size_t index = 0; index < count; ++index) stage[index] = states[index];
+        assembleJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, stage, derivative, jacobian, dT, call);
         ++statistics.jacobians;
         ++statistics.restarts;
         startTable(step);
@@ -374,7 +377,7 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
             for (std::size_t row = 0; row < n; ++row) stage[integratedStates[row]] = predicted[row];
             call(endEvaluation, stage, f0);
             for (std::size_t index = 0; index < count; ++index) point[index] = stage[index];
-            differenceJacobian(system, endEvaluation, stage, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, point, derivative,
+            assembleJacobian(system, endEvaluation, stage, f0, tolerance.absolute, tolerance.relative, false, globalStep, 0.0, point, derivative,
                 jacobian, dT, call);
             for (std::size_t index = 0; index < count; ++index) point[index] = states[index];
             ++statistics.jacobians;

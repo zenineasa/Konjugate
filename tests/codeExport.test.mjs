@@ -715,3 +715,23 @@ test('under Runge–Kutta 4, Adaptive and Stiff a switching condition is latched
     plain.runConfigurations[0].method = 'rungeKutta4';
     assert.doesNotMatch(generateStandaloneProgram(plain, 'cpp'), /Switching|WithEvents/);
 });
+
+// The stiff methods' exact Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): each equation's derivatives written as
+// the engine differentiates it, the system told to take every column from them, unless the run asks for finite differences.
+test('under Stiff code export writes the Jacobian exactly, from the equations\' derivatives, unless the run asks for finite differences', () => {
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'rodas4';
+    const cpp = generateStandaloneProgram(document, 'cpp');
+    assert.match(cpp, /konjugate::integrators::useExactColumns\(system, std::vector<unsigned char>\(system\.integratedStates\.size\(\), 1\)\);/);
+    assert.match(cpp, /system\.exact = \[&\]\(double time, const std::vector<double>& states, std::vector<double>& jacobian, std::vector<double>\* dT\) \{/);
+    assert.match(cpp, /\(\*jacobianEntries\)\[0\] \+= value;/);
+    balanced(cpp, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.match(python, /def exact_jacobian\(step_time, snapshot, jacobian, d_t\):/);
+    assert.match(python, /system\.exact = exact_jacobian/);
+    document.runConfigurations[0].method = 'bdf';
+    assert.match(generateStandaloneProgram(document, 'cpp'), /system\.exact = /);
+    document.runConfigurations[0].jacobian = 'finiteDifference';
+    assert.doesNotMatch(generateStandaloneProgram(document, 'cpp'), /system\.exact = /);
+    assert.doesNotMatch(generateStandaloneProgram(document, 'python'), /exact_jacobian/);
+});

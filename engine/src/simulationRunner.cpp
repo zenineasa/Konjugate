@@ -12,6 +12,7 @@
 #include "taskExecutor.hpp"
 #include "wholeModelIntegration.hpp"
 #include "eventLocation.hpp"
+#include "jacobianAssembly.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
 #include "konjugate/integrators/events.hpp"
 #include "konjugate/integrators/rodas4.hpp"
@@ -1082,6 +1083,29 @@ private:
     integrators::Rodas4Controller stiffController;
     integrators::Rodas4Statistics stiffStatistics;
     bool stagesReadTimeAlways = false;
+    // The stiff methods' exact Jacobian columns (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): the equations'
+    // derivatives, compiled once; and under jacobian "check", the largest difference from finite differences seen, each entry scaled
+    // as the error control sees the states and relative to the largest so scaled, where and when, over how many Jacobians.
+    JacobianPlan jacobianPlan;
+    double jacobianCheckLargest = 0;
+    double jacobianCheckTime = 0;
+    std::size_t jacobianCheckRow = 0;
+    std::size_t jacobianCheckColumn = 0;
+    std::size_t jacobianChecks = 0;
+    // The Jacobian in the run's summary: how it was worked out, how many of its columns exactly, and the check's finding.
+    void writeJacobianSummary(std::ostream& json) const {
+        json << ",\"jacobian\":\"" << (integration.jacobian == JacobianMethod::finiteDifference ? "finiteDifference"
+            : integration.jacobian == JacobianMethod::check ? "check" : "analytic") << '"'
+             << ",\"exactColumns\":" << (stiffSystem ? stiffSystem->exactColumns : 0);
+        if (integration.jacobian == JacobianMethod::check) {
+            json << ",\"jacobianCheck\":{\"checks\":" << jacobianChecks << ",\"largestDifference\":" << jacobianCheckLargest;
+            if (jacobianCheckLargest > 0) {
+                json << ",\"time\":" << jacobianCheckTime << ",\"rowStateId\":" << executionPlan.stateIds.at(jacobianCheckRow)
+                     << ",\"columnStateId\":" << executionPlan.stateIds.at(jacobianCheckColumn);
+            }
+            json << '}';
+        }
+    }
     // Event location (docs/proposals/integrators.md, Event location), under every whole-model method for a model with switching
     // conditions: the conditions, their latches, the events located (how many instants, and the first thousand, each with its
     // condition), and whether a global step has had to stop locating (chattering). Under Euler, node by node, the conditions it does not
@@ -1296,6 +1320,56 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
                 switching.emplace([this](double time, const Values& values, std::vector<double>& out) {
                     evaluateSwitchingFunctions(executionPlan, eventPlan, values, runControl.parameterValues, runControl.activeSchedules, time, out);
                 }, std::move(comparisons));
+            }
+        }
+        // The stiff methods' Jacobian: each column whose every term is an equation (or a program supplying its derivatives) from the
+        // equations' derivatives, compiled here once the stage terms read their conditions latched; the rest by finite differences.
+        if (stiffSystem && integration.jacobian != JacobianMethod::finiteDifference) {
+            jacobianPlan = compileJacobianPlan(executionPlan, wholeModel, *stiffSystem, providerRuntime.get());
+            if (std::any_of(jacobianPlan.exactColumn.begin(), jacobianPlan.exactColumn.end(), [](unsigned char exact) { return exact != 0; })) {
+                integrators::useExactColumns(*stiffSystem, jacobianPlan.exactColumn);
+                stiffSystem->exact = [this](double time, const Values& states, std::vector<double>& jacobian, std::vector<double>* dT) {
+                    evaluateExactJacobian(executionPlan, wholeModel, jacobianPlan, time, states, runControl.parameterValues,
+                        runControl.activeSchedules, switching ? &switching->latches : nullptr, jacobian, dT);
+                };
+            }
+            if (integration.jacobian == JacobianMethod::check) {
+                stiffSystem->check = [this](double time, const std::vector<double>& states, const std::vector<double>& exact,
+                                            const std::vector<double>& differences) {
+                    // Each entry as the error control sees it, J_ij s_j / s_i with s = absolute + relative |y|, and the largest difference
+                    // relative to the largest such entry: a check of the step's linear algebra, not of entries too small to matter.
+                    ++jacobianChecks;
+                    const auto& system = *stiffSystem;
+                    const auto scaleOf = [&](std::size_t position) {
+                        const auto index = system.integratedStates[position];
+                        return absoluteToleranceByState[index] + integration.relativeTolerance * std::abs(states[index]);
+                    };
+                    double largestEntry = 0;
+                    double largestDifference = 0;
+                    std::size_t row = 0, column = 0;
+                    for (std::size_t position = 0; position < system.integratedStates.size(); ++position) {
+                        const double rowScale = scaleOf(position);
+                        for (std::size_t entry = system.rowStart[position]; entry < system.rowStart[position + 1]; ++entry) {
+                            const auto other = system.rows[position][entry - system.rowStart[position]];
+                            const double weight = scaleOf(other) / rowScale;
+                            largestEntry = std::max(largestEntry, std::abs(exact[entry]) * weight);
+                            const double difference = std::abs(exact[entry] - differences[entry]) * weight;
+                            if (difference > largestDifference) {
+                                largestDifference = difference;
+                                row = position;
+                                column = other;
+                            }
+                        }
+                    }
+                    if (!(largestEntry > 0)) return;
+                    const double relative = largestDifference / largestEntry;
+                    if (relative > jacobianCheckLargest) {
+                        jacobianCheckLargest = relative;
+                        jacobianCheckTime = time;
+                        jacobianCheckRow = system.integratedStates[row];
+                        jacobianCheckColumn = system.integratedStates[column];
+                    }
+                };
             }
         }
     } else {
@@ -1689,6 +1763,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             if (stiffStatistics.acceptedSteps) {
                 json << ",\"smallestStep\":" << stiffStatistics.smallestStep << ",\"largestStep\":" << stiffStatistics.largestStep;
             }
+            writeJacobianSummary(json);
             json << ",\"jacobians\":" << stiffStatistics.jacobians << ",\"jacobianColours\":" << (stiffSystem ? stiffSystem->colours : 0)
                  << ",\"factorisations\":" << stiffStatistics.factorisations << ",\"linearSystemSize\":"
                  << (stiffSystem ? stiffSystem->integratedStates.size() : 0) << ",\"sparse\":" << (stiffSystem && stiffSystem->sparse ? "true" : "false");
@@ -1702,6 +1777,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             if (bdfStatistics.acceptedSteps) {
                 json << ",\"smallestStep\":" << bdfStatistics.smallestStep << ",\"largestStep\":" << bdfStatistics.largestStep;
             }
+            writeJacobianSummary(json);
             json << ",\"jacobians\":" << bdfStatistics.jacobians << ",\"jacobianColours\":" << (stiffSystem ? stiffSystem->colours : 0)
                  << ",\"factorisations\":" << bdfStatistics.factorisations << ",\"newtonIterations\":" << bdfStatistics.newtonIterations
                  << ",\"highestOrder\":" << bdfStatistics.highestOrder << ",\"restarts\":" << bdfStatistics.restarts
@@ -2218,6 +2294,8 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
             evaluateAt(evaluation == 0, time, stageStates, derivatives);
         };
         const bool readsTime = stagesReadTimeAlways || !runControl.activeSchedules.empty();
+        // df/dt from the equations' derivatives, unless a recorded intervention or a program makes the time matter otherwise.
+        stiffSystem->exactTime = jacobianPlan.exactTime && runControl.activeSchedules.empty();
         if (programsAdvanceAtSteps) {
             integrators::Rodas4NoEvents none;
             const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };

@@ -131,6 +131,7 @@ add_executable(konjugateEngine
     src/executionPlan.cpp
     src/wholeModelIntegration.cpp
     src/eventLocation.cpp
+    src/jacobianAssembly.cpp
     src/causalInference.cpp
     src/causalInferenceReport.cpp
     src/finiteDifferenceGradient.cpp
@@ -256,6 +257,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/partitionPlan.cpp
         src/partitionRuntime.cpp
         src/taskExecutor.cpp
@@ -282,6 +284,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
@@ -332,6 +335,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
     )
@@ -345,6 +349,7 @@ if(BUILD_TESTING)
         src/wholeModelIntegration.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
+        src/jacobianAssembly.cpp
     )
     target_include_directories(verletIntegrationTests PRIVATE include ${BOOST_INCLUDE_DIR})
     target_link_libraries(verletIntegrationTests PRIVATE Eigen3::Eigen Threads::Threads)
@@ -357,6 +362,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/modelValidator.cpp
         src/stabilityAnalysis.cpp
         src/cppToolchain.cpp
@@ -383,6 +389,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/stabilityAnalysis.cpp
     )
     set_target_properties(stabilityAnalysisTests PROPERTIES
@@ -403,6 +410,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/stabilityAnalysis.cpp
         src/duringRunStabilityMonitor.cpp
     )
@@ -476,6 +484,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/finiteDifferenceGradient.cpp
         src/fittingObjective.cpp
         src/runMeasure.cpp
@@ -522,6 +531,7 @@ if(BUILD_TESTING)
         src/executionPlan.cpp
         src/wholeModelIntegration.cpp
         src/eventLocation.cpp
+        src/jacobianAssembly.cpp
         src/cppToolchain.cpp
         src/programUnits.cpp
         src/providerRuntime.cpp

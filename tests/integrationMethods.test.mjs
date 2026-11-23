@@ -112,3 +112,13 @@ test('Stiff\'s solvers: Rosenbrock by default and BDF for large models, BDF show
     assert.equal(bdfSuits({ nodes: [{ ...large.nodes[0], states: [...states(bdfStateThreshold), { id: 9999, symbol: 'u', kind: 'update' }] }], edges: [] }), false, 'An Update is a jump at every global step.');
     assert.equal(bdfSuits({ ...large, edges: [{ id: 5, parameters: [{ id: 6, mode: 'live' }] }] }), false, 'A live parameter may be set at any global step.');
 });
+
+test('Stiff\'s Jacobian is written only when it is not the default, and only for Stiff', () => {
+    const configuration = { id: 1, name: 'Run', globalTimeStep: 0.1, outputInterval: 0.1 };
+    assert.deepEqual(withIntegrationMethod(configuration, 'rodas4', 1, defaultTolerance, 'analytic'), { ...configuration, method: 'rodas4' });
+    assert.deepEqual(withIntegrationMethod(configuration, 'bdf', 1, defaultTolerance, 'finiteDifference'), { ...configuration, method: 'bdf', jacobian: 'finiteDifference' });
+    assert.deepEqual(withIntegrationMethod(configuration, 'rodas4', 1, defaultTolerance, 'check'), { ...configuration, method: 'rodas4', jacobian: 'check' });
+    // Leaving Stiff drops it; the configuration's own is kept when none is given.
+    assert.deepEqual(withIntegrationMethod({ ...configuration, method: 'rodas4', jacobian: 'finiteDifference' }, 'rungeKutta4', 1), { ...configuration, method: 'rungeKutta4' });
+    assert.deepEqual(withIntegrationMethod({ ...configuration, jacobian: 'finiteDifference' }, 'rodas4', 1), { ...configuration, method: 'rodas4', jacobian: 'finiteDifference' });
+});

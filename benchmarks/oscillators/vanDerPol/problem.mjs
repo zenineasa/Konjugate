@@ -132,6 +132,16 @@ export async function evaluate({ engine, config }) {
                 rows.push(resultRow({ caseName: `${title}: tolerance`, model: key, variant, run: studyRun, errors: metrics, work: result.work, unit: 'x, y = dx/dt',
                     note: `${result.work.methodSteps} steps, ${result.work.rejectedSteps} rejected, ${result.work.modelEvaluations} evaluations of the model, ${result.work.jacobians} Jacobians` }));
                 if (relative === study.judgedTolerance) add(`${key}Steps${methodKey(study.variant)}`, result.work.methodSteps, `${title}: steps taken over ${study.run.targetTime} s at relative tolerance ${relative}, ${methodName(study.variant)}`);
+                if (relative === study.judgedTolerance && (variant.method === 'rodas4' || variant.method === 'bdf')) {
+                    // The exact Jacobian against finite differences (docs/proposals/integrators.md, Jacobians for Rodas4), at the same tolerance.
+                    const differenced = { ...variant, jacobian: 'finiteDifference' };
+                    const other = await engine.run(modelPath(key), differenced, studyRun);
+                    const otherMetrics = errorMetrics(trajectory(other, ids), studyReference);
+                    rows.push(resultRow({ caseName: `${title}: the exact Jacobian against finite differences`, model: key, variant: differenced, run: studyRun, errors: otherMetrics, work: other.work, unit: 'x, y = dx/dt',
+                        note: `${other.work.methodSteps} steps and ${other.work.modelEvaluations} evaluations, against ${result.work.methodSteps} and ${result.work.modelEvaluations} with the exact Jacobian, whose error is ${metrics.relativeError.toExponential(2)}` }));
+                    add(`${key}EvaluationRatio${methodKey(study.variant)}`, result.work.modelEvaluations / other.work.modelEvaluations, `${title}, ${methodName(study.variant)}: evaluations with the exact Jacobian over those with finite differences, at relative tolerance ${relative}`);
+                    add(`${key}ErrorRatio${methodKey(study.variant)}`, metrics.relativeError / otherMetrics.relativeError, `${title}, ${methodName(study.variant)}: error with the exact Jacobian over that with finite differences, at relative tolerance ${relative}`);
+                }
             }
             const proportionality = observedOrder(study.relativeTolerances, errors);
             add(`${key}ToleranceSlope${methodKey(study.variant)}`, proportionality.fitted, `${title}: slope of log error against log tolerance, ${methodName(study.variant)}, over ${study.relativeTolerances.length} tolerances`);

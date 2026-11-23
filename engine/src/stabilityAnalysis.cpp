@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 #include "stabilityAnalysis.hpp"
+#include "jacobianAssembly.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
 #include "konjugate/integrators/rodas4.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
@@ -10,6 +11,7 @@
 #include <complex>
 #include <limits>
 #include <set>
+#include <unordered_map>
 
 namespace konjugate {
 namespace {
@@ -82,12 +84,30 @@ std::optional<NodeStabilityAssessment> assessNodeStability(
     const auto algebraicParameterValues = resolveParameterValues(node.algebraicTasks, {});
     const auto nodeStepSize = globalTimeStep / static_cast<double>(node.substeps);
 
-    // Central-difference Jacobian, restricted to the node's own differential states (both rows and
-    // columns): perturbing state j by ±epsilon and re-running the exact substep derivative
-    // computation gives column j directly, with no baseline (unperturbed) evaluation needed.
+    // The Jacobian, restricted to the node's own differential states (both rows and columns): exactly, from its equations'
+    // derivatives (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF), unless the node sets values from its states first
+    // (its Updates), which its rates then read; then by central differences, perturbing state j by ±epsilon and re-running the exact
+    // substep derivative computation, which gives column j directly, with no baseline (unperturbed) evaluation needed.
     const auto stateCount = differentialLocalIndices.size();
-    Eigen::MatrixXd jacobian(static_cast<Eigen::Index>(stateCount), static_cast<Eigen::Index>(stateCount));
-    for (std::size_t column = 0; column < stateCount; ++column) {
+    Eigen::MatrixXd jacobian = Eigen::MatrixXd::Zero(static_cast<Eigen::Index>(stateCount), static_cast<Eigen::Index>(stateCount));
+    constexpr auto none = std::numeric_limits<std::size_t>::max();
+    std::vector<std::size_t> positionOf(node.stateIndexes.size(), none);
+    for (std::size_t position = 0; position < stateCount; ++position) positionOf[differentialLocalIndices[position]] = position;
+    const bool exact = node.algebraicTasks.empty();
+    if (exact) {
+        addExactDerivatives(node.contributions, parameterValues, 0.0,
+            [&](const CompiledBinding& binding) {
+                return binding.source == BindingSource::localState ? localStates.at(binding.valueIndex) : synchronizationSnapshot.at(binding.valueIndex);
+            },
+            [&](const CompiledBinding& binding) {
+                return binding.source == BindingSource::localState && positionOf.at(binding.valueIndex) != none ? positionOf[binding.valueIndex] : none;
+            },
+            [&](std::size_t output, std::size_t column, double value) {
+                if (positionOf.at(output) == none) return;
+                jacobian(static_cast<Eigen::Index>(positionOf[output]), static_cast<Eigen::Index>(column)) += value;
+            });
+    }
+    for (std::size_t column = 0; column < stateCount && !exact; ++column) {
         const auto localIndex = differentialLocalIndices[column];
         const auto magnitude = std::abs(localStates[localIndex]);
         const auto epsilon = std::max(1e-6, magnitude * 1e-6);
@@ -461,18 +481,6 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     assessment.stepSize = globalTimeStep / static_cast<double>(stepsPerGlobalStep);
     std::vector<NodeParameterValues> parameters;
     for (const auto& node : plan.nodes) parameters.push_back(resolveParameterValues(node.contributions, {}));
-    // Each node's derivatives at `values` (every state of the plan), as a stage evaluates them: the node's own states and its
-    // neighbours' read alike from the one vector.
-    const auto derivatives = [&](std::size_t node, const StateValues& values) {
-        const auto& compiled = plan.nodes[node];
-        StateValues local(compiled.stateIndexes.size());
-        for (std::size_t index = 0; index < local.size(); ++index) local[index] = values[compiled.stateIndexes[index]];
-        std::vector<double> result(values.size(), 0.0);
-        for (const auto& [localIndex, value] : reduceContributions(evaluateContributionTasks(compiled, local, values, parameters[node]))) {
-            result[compiled.stateIndexes[localIndex]] = value;
-        }
-        return result;
-    };
     // The groups judged together: the whole model, or each node on its own.
     std::vector<std::vector<std::size_t>> groups;
     if (!assessment.perNode) {
@@ -490,28 +498,30 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     for (const auto& group : groups) {
         if (group.empty()) continue;
         const auto size = static_cast<Eigen::Index>(group.size());
-        Eigen::MatrixXd jacobian(size, size);
-        for (Eigen::Index column = 0; column < size; ++column) {
-            const auto state = integrated[group[static_cast<std::size_t>(column)]];
-            const auto epsilon = std::max(1e-6, std::abs(states[state]) * 1e-6);
-            auto up = states;
-            up[state] += epsilon;
-            auto down = states;
-            down[state] -= epsilon;
-            // Only the nodes in the group are evaluated; in a whole-model group, that is every node.
-            std::vector<double> rateUp(states.size(), 0.0);
-            std::vector<double> rateDown(states.size(), 0.0);
-            std::set<std::size_t> nodes;
-            for (const auto member : group) nodes.insert(nodeOf[member]);
-            for (const auto node : nodes) {
-                const auto upRates = derivatives(node, up);
-                const auto downRates = derivatives(node, down);
-                for (const auto index : plan.nodes[node].stateIndexes) { rateUp[index] = upRates[index]; rateDown[index] = downRates[index]; }
-            }
-            for (Eigen::Index row = 0; row < size; ++row) {
-                const auto rowState = integrated[group[static_cast<std::size_t>(row)]];
-                jacobian(row, column) = (rateUp[rowState] - rateDown[rowState]) / (2 * epsilon);
-            }
+        // Exactly, from the equations' derivatives (every node here is equations only, read without Updates).
+        Eigen::MatrixXd jacobian = Eigen::MatrixXd::Zero(size, size);
+        std::unordered_map<std::size_t, Eigen::Index> positionOf;
+        for (Eigen::Index position = 0; position < size; ++position) positionOf.emplace(integrated[group[static_cast<std::size_t>(position)]], position);
+        std::set<std::size_t> groupNodes;
+        for (const auto member : group) groupNodes.insert(nodeOf[member]);
+        for (const auto node : groupNodes) {
+            const auto& compiled = plan.nodes[node];
+            const auto planIndex = [&](const CompiledBinding& binding) {
+                if (binding.source == BindingSource::localState) return compiled.stateIndexes.at(binding.valueIndex);
+                if (binding.source == BindingSource::synchronizationSnapshot) return binding.valueIndex;
+                return std::numeric_limits<std::size_t>::max();
+            };
+            addExactDerivatives(compiled.contributions, parameters[node], 0.0,
+                [&](const CompiledBinding& binding) { return states.at(planIndex(binding)); },
+                [&](const CompiledBinding& binding) {
+                    const auto index = planIndex(binding);
+                    return positionOf.contains(index) ? index : std::numeric_limits<std::size_t>::max();
+                },
+                [&](std::size_t output, std::size_t column, double value) {
+                    const auto row = positionOf.find(compiled.stateIndexes.at(output));
+                    if (row == positionOf.end()) return;
+                    jacobian(row->second, positionOf.at(column)) += value;
+                });
         }
         const Eigen::EigenSolver<Eigen::MatrixXd> solver(jacobian, true);
         double spectralRadius = 0;

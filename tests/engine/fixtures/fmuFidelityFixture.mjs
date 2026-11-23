@@ -182,13 +182,14 @@ export const targetTime = 2;
 export const absoluteTolerance = 1e-6;
 export const relativeTolerance = 1e-6;
 
-export async function runRealEngine(executable, directory, doc, label) {
+// `run`: anything more the run configuration says (a method, its tolerances).
+export async function runRealEngine(executable, directory, doc, label, run = {}) {
     const inputPath = join(directory, `${label}.kjt`);
     const configurationPath = join(directory, `${label}Configuration.json`);
     const enginePath = join(directory, `${label}Result.bin`);
     const validationPath = join(directory, `${label}Validation.bin`);
     await writeFile(inputPath, await encodeProjectFile(JSON.stringify(doc)));
-    await writeFile(configurationPath, JSON.stringify({ name: label, targetTime, globalTimeStep, outputInterval: communicationStepSize }));
+    await writeFile(configurationPath, JSON.stringify({ name: label, targetTime, globalTimeStep, outputInterval: communicationStepSize, ...run }));
     const validateExitCode = (await execute(executable, ['validate', inputPath, '--report', validationPath])).code;
     if (validateExitCode !== 0) {
         const report = decodeValidationReport(await readFile(validationPath));

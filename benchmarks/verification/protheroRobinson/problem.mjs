@@ -62,6 +62,26 @@ export async function evaluate({ engine, config }) {
         add(`error${label}`, Math.max(...errors), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps: the largest error relative to range, at the coarsest step`);
         orderSeries.push(series(`Konjugate, Rodas4 at fixed steps, λ = ${lambdas[key]}`, { stiff: 'rodas4', moderate: 'semiImplicit', control: 'reference' }[key], settings.globalTimeSteps, errors));
         byCase[key] = errors;
+        if (key === 'control') {
+            // The exact Jacobian against finite differences (docs/proposals/integrators.md, Jacobians for Rodas4): a Rosenbrock method's
+            // order needs the exact Jacobian. With finite differences, good to about 1e-8 of each entry, the error at the finest steps
+            // (about 1e-11) is the Jacobian's as much as the method's, and the last halving's order is not four.
+            add('finestOrderControl', order.pairwise.at(-1), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps with the exact Jacobian: observed order over the finest halving`);
+            const differenced = [];
+            for (const step of settings.globalTimeSteps) {
+                const run = engineRun({ targetTime: config.targetTime, globalTimeStep: step, outputInterval: config.outputInterval });
+                const variant = { method: 'rodas4', stepsPerGlobalStep: 1, jacobian: 'finiteDifference' };
+                const result = await engine.run(modelPath(key), variant, run);
+                const metrics = errorMetrics(trajectory(result, ids), result.times.map((value) => [Math.sin(value)]));
+                differenced.push(metrics.relativeError);
+                rows.push(resultRow({ caseName: `Prothero–Robinson, λ = ${lambdas[key]}: convergence, finite-difference Jacobian`, model: key, variant, run, errors: metrics, work: result.work, unit: '' }));
+            }
+            const differencedOrder = observedOrder(settings.globalTimeSteps, differenced);
+            rows.at(-1).observedOrder = differencedOrder.fitted;
+            rows.at(-1).note = `observed order: fitted ${differencedOrder.fitted.toFixed(3)}; per halving ${differencedOrder.pairwise.map((value) => value.toFixed(3)).join(', ')}`;
+            add('finestOrderControlFiniteDifference', differencedOrder.pairwise.at(-1), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps with finite differences: observed order over the finest halving, the Jacobian's error showing`);
+            notes.push(`λ = ${lambdas[key]}, Rodas4 at fixed steps: with the exact Jacobian its order per halving is ${order.pairwise.map((value) => value.toFixed(2)).join(', ')}; with finite differences ${differencedOrder.pairwise.map((value) => value.toFixed(2)).join(', ')}, the finest step's error (${differenced.at(-1).toExponential(1)}) the Jacobian's as much as the method's.`);
+        }
     }
     // The error's scaling with the stiffness: a hundred times stiffer λ, a hundred times smaller error, at every step.
     const ratios = byCase.moderate.map((error, index) => error / byCase.stiff[index]);

@@ -23,6 +23,11 @@ namespace konjugate {
 
 enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4, bdf };
 
+// How the stiff methods work out the Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): from the model's own
+// derivatives where it can ("analytic", the default; the rest by finite differences), wholly by finite differences ("finiteDifference"),
+// or from the model's derivatives and checked against finite differences at every Jacobian ("check").
+enum class JacobianMethod { analytic, finiteDifference, check };
+
 struct IntegrationSettings {
     IntegrationMethod method = IntegrationMethod::nodeByNode;
     // Runge–Kutta 4: how many steps of the method make one global step. Dormand–Prince 5(4) and Rodas4: absent (0 here), the steps
@@ -32,6 +37,8 @@ struct IntegrationSettings {
     // 1e-9); a state may set its own absolute tolerance (absoluteTolerances).
     double relativeTolerance = 1e-6;
     double absoluteTolerance = 1e-9;
+    // Rodas4 and BDF: `jacobian`, absent meaning analytic.
+    JacobianMethod jacobian = JacobianMethod::analytic;
 };
 
 // The run configuration's `method` (absent: node by node), `stepsPerGlobalStep` (absent: 1) and `tolerance`, refused by name when the

@@ -59,6 +59,15 @@ export const stiffSolvers = Object.freeze([
     Object.freeze({ id: 'bdf', name: 'BDF (for large models, thousands of states)', description: 'Keeps the work of solving its equations from step to step, which pays on a large model. Less accurate for its tolerance, and best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
 ]);
 
+// How Stiff works out its Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): exactly from the equations, the
+// default; by small changes to each state (finite differences), as it first did; or exactly and checked against finite differences.
+export const defaultStiffJacobian = 'analytic';
+export const stiffJacobians = Object.freeze([
+    Object.freeze({ id: 'analytic', name: 'Exact (from the equations)', description: 'Each equation differentiated exactly; a program\'s terms worked out by small changes. Fewer evaluations, and no error from the Jacobian.' }),
+    Object.freeze({ id: 'finiteDifference', name: 'By small changes (finite differences)', description: 'Each state changed a little and the model evaluated again, as Stiff first did: good to about a hundred-millionth of each entry.' }),
+    Object.freeze({ id: 'check', name: 'Exact, checked by small changes', description: 'As Exact, and compared at every step with small changes; the run\'s summary says by how much they differ. For checking a model, not for speed.' })
+]);
+
 // The Method the Run dialog shows for a method: Stiff for each of Stiff's solvers.
 export function dialogMethodOf(method) {
     return stiffSolvers.some((solver) => solver.id === method) ? 'rodas4' : method;
@@ -106,11 +115,14 @@ export function toleranceOf(configuration) {
 
 // `configuration` with `method`, `stepsPerGlobalStep` and `tolerance` set as chosen, each written only when the method uses it and it is
 // not its default (a tolerance, each of its two numbers on its own).
-export function withIntegrationMethod(configuration, method, stepsPerGlobalStep = 1, tolerance = defaultTolerance) {
+export function withIntegrationMethod(configuration, method, stepsPerGlobalStep = 1, tolerance = defaultTolerance, jacobian = configuration?.jacobian) {
     const result = { ...configuration };
     delete result.method;
     delete result.stepsPerGlobalStep;
     delete result.tolerance;
+    delete result.jacobian;
+    // Stiff's Jacobian, only when it is not the default.
+    if (stiffSolvers.some((solver) => solver.id === method) && jacobian && jacobian !== defaultStiffJacobian) result.jacobian = jacobian;
     if (method && method !== defaultIntegrationMethod) result.method = method;
     if (integrationMethod(method)?.stepsPerGlobalStep && stepsPerGlobalStep !== 1) result.stepsPerGlobalStep = stepsPerGlobalStep;
     if (integrationMethod(method)?.tolerance) {

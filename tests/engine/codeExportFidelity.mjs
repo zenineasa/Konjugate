@@ -21,6 +21,7 @@ import { generateStandaloneProgram } from '../../src/codeExport.mjs';
 import { decodeValidationReport } from '../../src/reportProtocol.mjs';
 import { addScheduledNode } from './fixtures/scheduledNodeFixture.mjs';
 import { verletDocument } from './fixtures/verletFixture.mjs';
+import { everyOperationDocument } from './fixtures/everyOperationFixture.mjs';
 
 function execute(executable, args, options = {}) {
     return new Promise((resolve, reject) => {
@@ -699,6 +700,17 @@ class Feed(RelationshipProvider):
     await runAndCompareAll(structuredClone(document), bdf, 'BDF', orderedStateIds, ['cpp', 'python'], { absolute: 1e-5, relative: 1e-5 });
     await runAndCompareAll(scheduled, bdf, 'BDF, scheduled', [11, 21]);
     for (const kind of ['cpp', 'python']) await runAndCompareAll(feedDocument(kind), bdf, `BDF, held ${kind} program`, [11, 21], [kind]);
+
+    // --- 9. The exact Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): a model using every operation an equation
+    // can, its derivatives written by code export as the engine differentiates them (src/expressionDerivative.mjs), under Rodas4 and BDF;
+    // and finite differences, chosen by name, as before (a difference Jacobian magnifies the last bit, so within the tolerance's reach) ---
+    for (const [label, configuration, tolerances] of [
+        ['Stiff, every operation', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
+        ['BDF, every operation', { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
+        ['Stiff, every operation, finite differences', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 }, jacobian: 'finiteDifference' }, { absolute: 1e-5, relative: 1e-5 }]]) {
+        const reference = await runAndCompareAll(everyOperationDocument(), configuration, label, [11, 12, 13], ['cpp', 'python'], tolerances);
+        assert.equal(reference.integration.exactColumns, configuration.jacobian ? 0 : 3, `${label}: the engine's Jacobian as the run asks.`);
+    }
 
     // A node that is a program of its own is refused by name under a whole-model method, for now.
     const nodeProgram = providerAlgebraicDocument('python');

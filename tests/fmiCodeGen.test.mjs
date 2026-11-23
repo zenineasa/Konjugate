@@ -236,6 +236,22 @@ test('FMU export refuses a whole-model method by name, for now', () => {
     assert.throws(() => generateFmiModel(document), /method is Runge–Kutta 4, which FMU export cannot write yet/);
 });
 
+test('FMU export under Stiff takes each global step inside doStep with Rodas4 or BDF, keeping the solver\'s memory between steps', () => {
+    for (const method of ['rodas4', 'bdf']) {
+        const document = baseDocument();
+        document.runConfigurations = [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1, method }];
+        const nodeId = id(); const stateId = id();
+        document.nodes.push({ id: nodeId, name: 'Decay', states: [{ id: stateId, name: 'Y', symbol: 'y', initialValue: 1, unit: '' }],
+            sourceTerms: [{ id: id(), state: 'y', expression: '', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId, stateId, symbol: 'y' }],
+                output: { stateId }, mathJson: ['Multiply', '-1000', 'y'] } }] });
+        const { source, supportsStateCapture } = generateFmiModel(document);
+        assert.match(source, method === 'bdf' ? /konjugate::integrators::bdfGlobalStep\(currentTime, endTime, globalState, system/ : /konjugate::integrators::rodas4GlobalStep\(currentTime, endTime, globalState, system/);
+        assert.match(source, method === 'bdf' ? /konjugate::integrators::BdfHistory history_;/ : /konjugate::integrators::Rodas4Controller controller_;/);
+        assert.match(source, /system\.exact = /, 'The exact Jacobian, as the engine works it out.');
+        assert.equal(supportsStateCapture, false, 'The solver\'s memory is not in the captured state, so rollback is not offered.');
+    }
+});
+
 test('FMU export writes a Verlet node as code export does', async () => {
     const { verletDocument } = await import('./engine/fixtures/verletFixture.mjs');
     const document = { ...verletDocument(), runConfigurations: [{ id: 900, globalTimeStep: 0.1, outputInterval: 0.1 }], activeRunConfigurationId: 900 };

@@ -7,7 +7,8 @@
 //   integration  every node's numerics.integration ("explicit", "semiImplicit" or "verlet")
 //   substeps     every node's numerics.substepsPerGlobalStep
 //   method       the run's method ("rungeKutta4", "dormandPrince54" or "rodas4"; docs/proposals/integrators.md), its stepsPerGlobalStep
-//                and the tolerance of Adaptive and Stiff, set on the run configuration the engine is given rather than on the model
+//                and the tolerance of Adaptive and Stiff, and for Stiff its jacobian ("finiteDifference" to compare with the default,
+//                analytic), set on the run configuration the engine is given rather than on the model
 //
 // A run executes on the serial backend unless `execution` (docs/parallelExecution.md) chooses another, as the scaling benchmarks do.
 
@@ -97,7 +98,8 @@ export function createEngine(executable, workDirectory) {
             const configurationPath = join(workDirectory, `run${index}.json`);
             const outputPath = join(workDirectory, `run${index}.bin`);
             const method = variant?.method ? {
-                method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}), ...(variant.tolerance ? { tolerance: variant.tolerance } : {})
+                method: variant.method, ...(variant.stepsPerGlobalStep ? { stepsPerGlobalStep: variant.stepsPerGlobalStep } : {}), ...(variant.tolerance ? { tolerance: variant.tolerance } : {}),
+                ...(variant.jacobian ? { jacobian: variant.jacobian } : {})
             } : {};
             await writeFile(configurationPath, JSON.stringify({ name: 'Benchmark', ...run, ...method, execution: { backend: 'serial', ...(execution ?? {}) } }));
             const engineArgs = ['run', modelAsIs ? modelPath : await modelFile(modelPath, variant), '--configuration', configurationPath, '--output', outputPath];

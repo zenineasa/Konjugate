@@ -581,6 +581,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
 
 // An expression as a program (ExpressionProgram), its symbols already bound: as the plan compiles every equation's.
 ExpressionProgram compileExpressionProgram(const CompiledExpression& expression);
+// Its value at `symbols` (one per symbol index), as a task's expression is evaluated: the program when it has one, else the tree.
+double evaluateExpressionProgram(const CompiledExpression& expression, const ExpressionProgram& program, const std::vector<double>& symbols);
 
 // The values of a computational-node provider's parameters (NodeProviderTask::parameters) at
 // simulationTime, resolved as every other parameter is: live overrides, recorded interventions and

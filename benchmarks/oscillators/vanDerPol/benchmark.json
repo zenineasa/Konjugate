@@ -117,6 +117,8 @@
         "mu1000ExplicitStepRatio": { "min": 1000 },
         "mu1000RelativeErrorBdf": { "max": 0.001 },
         "mu1000PeriodErrorBdf": { "max": 1e-04 },
-        "mu1000AmplitudeErrorBdf": { "max": 0.015 }
+        "mu1000AmplitudeErrorBdf": { "max": 0.015 },
+        "mu1000EvaluationRatioRodas4": { "max": 0.85 },
+        "mu1000ErrorRatioRodas4": { "max": 1.2 }
     }
 }

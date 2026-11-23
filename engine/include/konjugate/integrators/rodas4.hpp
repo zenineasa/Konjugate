@@ -5,7 +5,8 @@
 // Rodas4, the stiff method, applied to the whole model at once (docs/proposals/integrators.md): a six-stage Rosenbrock method of order
 // four with an embedded order-three error estimate, L-stable and stiffly accurate, with a third-order dense output (Hairer and Wanner,
 // Solving Ordinary Differential Equations II, IV.7; the coefficients of the RODAS code, its first method). Each step works out the
-// Jacobian J = df/dy by finite differences, perturbing at once every column of one colour of the model's structure, factorises
+// Jacobian J = df/dy (exactly where the model's derivatives are known, the rest by finite differences, perturbing at once every column
+// of one colour of the model's structure; stiffSystem.hpp's assembleJacobian), factorises
 // I / (h gamma) - J once and solves six linear systems with it; no Newton iteration and no history, so a step can stop on any global
 // step and a run can restart from any checkpoint. Plain C++ with no dependency beyond the standard library (and linearSolve.hpp, also
 // Konjugate's own): the engine includes it, and C++ code export pastes it into the program it writes.
@@ -217,7 +218,7 @@ void rodas4GlobalStepWithEvents(double startTime, double endTime, std::vector<do
         const double target = towardEvent ? eventTarget : scheduled;
         if (!haveJacobian) {
             // The Jacobian at the step's start, and df/dt over a time step no longer than half the way to the next landing.
-            differenceJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, readsTime, globalStep, 0.5 * (target - time),
+            assembleJacobian(system, time, states, f0, tolerance.absolute, tolerance.relative, readsTime, globalStep, 0.5 * (target - time),
                 stage, derivative, jacobian, dT, call);
             ++statistics.jacobians;
             haveJacobian = true;

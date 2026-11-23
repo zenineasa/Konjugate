@@ -711,6 +711,9 @@
                 <!-- Stiff's solver (docs/proposals/integrators.md, BDF): Rosenbrock, the default, or BDF for large models. -->
                 <label id="runStiffSolverField" hidden><span>Solver</span><select id="runStiffSolver"></select></label>
                 <p id="runStiffSolverDescription" class="runConfigurationScope" hidden></p>
+                <!-- Stiff's Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): exact from the equations, the default. -->
+                <label id="runStiffJacobianField" hidden><span>Jacobian</span><select id="runStiffJacobian"></select></label>
+                <p id="runStiffJacobianDescription" class="runConfigurationScope" hidden></p>
                 <label><span>Global timestep (s)</span><input id="runGlobalTimeStep" type="number" min="0" step="any" required></label>
                 <label id="runStepsPerGlobalStepField" hidden><span>Steps per global step</span><input id="runStepsPerGlobalStep" type="number" min="1" max="10000" step="1" value="1" required></label>
                 <!-- Adaptive's tolerances (docs/proposals/integrators.md): a state may set its own absolute one on its node's Numerics tab. -->

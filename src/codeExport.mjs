@@ -26,6 +26,7 @@ import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
+import { differentiateNode } from './expressionDerivative.mjs';
 import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
     rungeKutta4Python, stiffSystemCpp, stiffSystemPython } from './integratorSources.mjs';
 import { programSourceVersion } from './providerTemplate.mjs';
@@ -636,9 +637,10 @@ function buildContribution(spec, stateRecord, schedules) {
             const record = stateRecord.get(binding.stateId);
             if (!record) throw new Error(`The ${entityLabel} references a disabled or missing state.`);
             const isLocal = alwaysLocal || binding.nodeId === ownerPlan.node.id;
+            // `globalIndex`: the state's place in the program's state vector, which the stiff methods' exact Jacobian differentiates by.
             symbols.set(key, isLocal
-                ? { text: `state[${ownerPlan.localIndexByStateId.get(binding.stateId)}]`, comment: `${ownerPlan.node.name}.${record.state.name}`, unit: record.state.unit ?? '' }
-                : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}`, unit: record.state.unit ?? '' });
+                ? { text: `state[${ownerPlan.localIndexByStateId.get(binding.stateId)}]`, comment: `${ownerPlan.node.name}.${record.state.name}`, unit: record.state.unit ?? '', globalIndex: record.globalIndex }
+                : { text: `snapshot[${record.globalIndex}]`, comment: `${record.node.name}.${record.state.name}`, unit: record.state.unit ?? '', globalIndex: record.globalIndex });
         }
     }
     // A provider may read any state it binds; an equation only the ones it uses (the node editor
@@ -774,6 +776,8 @@ export function generateStandaloneProgram(document, kind, options = {}) {
         } : {}),
         ...(method === 'rodas4' || method === 'bdf' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
     };
+    // The stiff methods' Jacobian exactly, from the equations' derivatives, unless the run asks for finite differences.
+    if (meta.stageReads) meta.exactJacobian = exactJacobianOf(model, meta.stageReads, runConfiguration?.jacobian);
     return kind === 'cpp' ? generateCpp(model, providers, meta, document) : generatePython(model, providers, meta, document);
 }
 
@@ -1219,6 +1223,143 @@ function stageReadsOf(model) {
     return reads.map((list) => [...new Set(list)].sort((left, right) => left - right));
 }
 
+// The stiff methods' exact Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF), as compileJacobianPlan in
+// engine/src/jacobianAssembly.cpp works it out: every equation into an integrated state differentiated (src/expressionDerivative.mjs)
+// with respect to each state it binds and the time, node by node, each node's terms in order, each term's bindings in order, each
+// derivative added into its entry of the Jacobian (laid out as makeStiffSystem lays it out) or of df/dt. A program is held through the
+// stages here, so no column is left to finite differences. df/dt is exact unless a parameter that follows a stored schedule is
+// differentiated through. Null when the run asks for finite differences.
+function exactJacobianOf(model, stageReads, jacobianMethod) {
+    if (jacobianMethod === 'finiteDifference') return null;
+    const integrated = integratedFlags(model);
+    const position = [];
+    let count = 0;
+    integrated.forEach((flag, index) => { position[index] = flag ? count++ : -1; });
+    const rows = [];
+    integrated.forEach((flag, index) => {
+        if (!flag) return;
+        const columns = new Set([position[index]]);
+        for (const read of stageReads[index] ?? []) if (position[read] >= 0) columns.add(position[read]);
+        rows.push([...columns].sort((left, right) => left - right));
+    });
+    const rowStart = [0];
+    rows.forEach((columns) => rowStart.push(rowStart.at(-1) + columns.length));
+    const entryOf = (row, column) => {
+        const found = rows[row].indexOf(column);
+        if (found < 0) throw new Error('A derivative falls outside the Jacobian\'s pattern.');
+        return rowStart[row] + found;
+    };
+    let scheduled = false;
+    const nodes = model.nodePlans.map((plan) => {
+        const terms = [];
+        const timeTerms = [];
+        for (const contribution of plan.contributions) {
+            if (contribution.implementation) continue;
+            const row = position[model.stateRecord.get(plan.node.states[contribution.outputLocalIndex].id).globalIndex];
+            if (!(row >= 0)) continue;
+            const compiled = compileExpressionNode(contribution.mathJson);
+            for (const [key, symbol] of contribution.symbols) {
+                if (symbol.parameter) {
+                    if (symbol.schedule !== undefined && differentiateNode(compiled, key)) scheduled = true;
+                    continue;
+                }
+                const time = symbol.time !== undefined;
+                if (!time && !(position[symbol.globalIndex] >= 0)) continue;
+                const derivative = differentiateNode(compiled, key);
+                if (!derivative) continue;
+                (time ? timeTerms : terms).push({ contribution, expression: derivative, negate: contribution.negate,
+                    target: time ? row : entryOf(row, position[symbol.globalIndex]) });
+            }
+        }
+        return { plan, terms, timeTerms };
+    });
+    return { nodes, exactTime: !scheduled };
+}
+
+// The exact Jacobian in C++: a lambda per node adding its terms' derivatives, read from the node's states as its stage reads them, and
+// the system told to take its columns from them (stiffSystem.hpp's exact). Each derivative is a statement of its own, then added, as the
+// engine adds it, so no compiler fuses the two.
+function cppExactJacobianLines(model, exactJacobian) {
+    if (!exactJacobian) return [];
+    const lambdas = [];
+    const calls = [];
+    exactJacobian.nodes.forEach(({ plan, terms, timeTerms }, nodeIndex) => {
+        if (!terms.length && !timeTerms.length) return;
+        const seed = plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ');
+        const termLines = (list, into, indent) => list.flatMap((term) => [
+            `${indent}{`,
+            `${indent}    const double value = ${emitExpression(term.expression, symbolTexts(term.contribution.symbols, 'cpp'), cppOperators)};`,
+            `${indent}    ${into}[${term.target}] += ${term.negate ? '-value' : 'value'};`,
+            `${indent}}`
+        ]);
+        lambdas.push([
+            `    // Node: ${plan.node.name}`,
+            `    const auto jacobianNode${nodeIndex} = [&]() {`,
+            '        [[maybe_unused]] const std::vector<double>& snapshot = *stageStates;',
+            `        [[maybe_unused]] double state[${plan.node.states.length}] = { ${seed} };`,
+            '        [[maybe_unused]] const double nodeTimeStep = globalTimeStep / static_cast<double>(stepsPerGlobalStep);',
+            ...termLines(terms, '(*jacobianEntries)', '        '),
+            ...(timeTerms.length ? ['        if (jacobianTime) {', ...termLines(timeTerms, '(*jacobianTime)', '            '), '        }'] : []),
+            '    };'
+        ].join('\n'));
+        calls.push(`        jacobianNode${nodeIndex}();`);
+    });
+    return [
+        '    // The Jacobian exactly, from every equation\'s derivatives, as the engine works it out (docs/proposals/integrators.md, Jacobians',
+        '    // for Rodas4 and BDF): no column is left to finite differences.',
+        '    std::vector<double>* jacobianEntries = nullptr;',
+        '    std::vector<double>* jacobianTime = nullptr;',
+        ...lambdas,
+        '    konjugate::integrators::useExactColumns(system, std::vector<unsigned char>(system.integratedStates.size(), 1));',
+        `    system.exactTime = ${exactJacobian.exactTime};`,
+        '    system.exact = [&](double time, const std::vector<double>& states, std::vector<double>& jacobian, std::vector<double>* dT) {',
+        '        stepTime = time;',
+        '        stageStates = &states;',
+        '        jacobianEntries = &jacobian;',
+        '        jacobianTime = dT;',
+        '        std::fill(jacobian.begin(), jacobian.end(), 0.0);',
+        '        if (dT) std::fill(dT->begin(), dT->end(), 0.0);',
+        ...calls,
+        '    };'
+    ];
+}
+
+// The same in Python: one function adding every node's terms.
+function pythonExactJacobianLines(model, exactJacobian) {
+    if (!exactJacobian) return [];
+    const body = [];
+    exactJacobian.nodes.forEach(({ plan, terms, timeTerms }) => {
+        if (!terms.length && !timeTerms.length) return;
+        body.push(`        # Node: ${plan.node.name}`, `        state = [${plan.node.states.map((state) => `snapshot[${model.stateRecord.get(state.id).globalIndex}]`).join(', ')}]`);
+        for (const term of terms) {
+            body.push(`        value = ${emitExpression(term.expression, symbolTexts(term.contribution.symbols, 'python'), pythonOperators)}`,
+                `        jacobian[${term.target}] += ${term.negate ? '-value' : 'value'}`);
+        }
+        if (timeTerms.length) {
+            body.push('        if d_t is not None:');
+            for (const term of timeTerms) {
+                body.push(`            value = ${emitExpression(term.expression, symbolTexts(term.contribution.symbols, 'python'), pythonOperators)}`,
+                    `            d_t[${term.target}] += ${term.negate ? '-value' : 'value'}`);
+            }
+        }
+    });
+    return [
+        "    # The Jacobian exactly, from every equation's derivatives, as the engine works it out: no column is left to finite differences.",
+        '    def exact_jacobian(step_time, snapshot, jacobian, d_t):',
+        '        node_time_step = global_time_step / steps_per_global_step',
+        '        for index in range(len(jacobian)):',
+        '            jacobian[index] = 0.0',
+        '        if d_t is not None:',
+        '            for index in range(len(d_t)):',
+        '                d_t[index] = 0.0',
+        ...body,
+        '',
+        '    use_exact_columns(system, [1] * len(system.integrated_states))',
+        `    system.exact_time = ${exactJacobian.exactTime ? 'True' : 'False'}`,
+        '    system.exact = exact_jacobian'
+    ];
+}
+
 // Whether an equation evaluated at stages uses the time, or a parameter that follows a stored schedule: then Stiff works out df/dt.
 function stagesReadTime(model) {
     return model.nodePlans.some((plan) => plan.contributions.some((contribution) => {
@@ -1278,6 +1419,135 @@ function cppSwitchingLines(model, functions) {
     ];
 }
 
+// FMU export under Stiff (src/fmiCodeGen.mjs): what fmi2DoStep needs to take one global step as the engine takes it, Rodas4 or BDF,
+// with the same stages, Jacobian, event location and Updates as the plain C++ export. The solver's memory between steps -- Rodas4's
+// controller, BDF's table, the conditions' latches -- lives in the model's members; everything else is set up again at each step.
+// Returns the integrator headers to paste in, the members, and the body of doStep(currentTime, globalTimeStep).
+export function cppStiffFmuPieces(model, providers, providerInfo, runConfiguration) {
+    const method = methodOf(runConfiguration);
+    const bdf = method === 'bdf';
+    const fixedSteps = bdf ? 0 : runConfiguration?.stepsPerGlobalStep ?? 0;
+    const switching = bdf || !fixedSteps ? latchConditions(model) : [];
+    const located = switching.length > 0;
+    const tolerance = toleranceOf(runConfiguration);
+    const absoluteTolerances = absoluteTolerancesOf(model, tolerance.absolute);
+    const stageReads = stageReadsOf(model);
+    const exactJacobian = exactJacobianOf(model, stageReads, runConfiguration?.jacobian);
+    const headers = [
+        `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n`,
+        `${stiffSystemCpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n`,
+        `${(bdf ? bdfCpp : rodas4Cpp).replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n`,
+        located ? `${eventsCpp.replace(/^#pragma once\n/m, '')}\n` : ''
+    ].join('');
+    const members = [
+        `    // ${bdf ? 'BDF' : 'Stiff'}: the solver's memory, carried from one global step to the next as the engine carries it.`,
+        ...(bdf ? [
+            '    konjugate::integrators::BdfHistory history_;',
+            '    konjugate::integrators::BdfStatistics statistics_;',
+            // The inputs the table was built under: a host that sets one between steps starts it again, as the engine does when a live
+            // parameter changes.
+            '    std::vector<double> bdfInputs_;'
+        ] : [
+            '    konjugate::integrators::Rodas4Controller controller_;',
+            '    konjugate::integrators::Rodas4Statistics statistics_;'
+        ]),
+        ...(located ? [
+            '    std::vector<double> latches_;',
+            '    std::vector<unsigned char> armed_;',
+            '    std::vector<double> scales_;',
+            '    bool established_ = false;',
+            ...(bdf ? ['    std::vector<double> bdfLatches_;'] : [])
+        ] : [])
+    ];
+    const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
+    const body = [
+        '        auto& globalState = state_;',
+        '        constexpr std::size_t stepsPerGlobalStep = 1;',
+        `        const std::vector<unsigned char> integrated = { ${integratedFlags(model).join(', ')} };`,
+        providers.length ? `        double heldValue[${providers.length}] = {};` : null,
+        '        const std::vector<double>* stageStates = nullptr;',
+        '        std::vector<double>* stageRates = nullptr;',
+        '        [[maybe_unused]] std::size_t stageStep = 0;',
+        '        [[maybe_unused]] std::size_t stageIndex = 0;',
+        '        double stepTime = 0;',
+        ...cppSwitchingLines(model, switching).map((line) => `    ${line}`),
+        ...(located ? [
+            '        if (established_) {',
+            '            switching.latches = latches_;',
+            '            switching.armed = armed_;',
+            '            switching.scales = scales_;',
+            '            switching.established = true;',
+            '        }'
+        ] : []),
+        ...cppStageLambdas(model, providerInfo).split('\n').map((line) => `    ${line}`),
+        `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
+        '        const auto evaluateStage = [&](std::size_t internalStep, std::size_t stage, double time, const std::vector<double>& states, std::vector<double>& rates) {',
+        '            stageStep = internalStep;',
+        '            stageIndex = stage;',
+        '            stepTime = time;',
+        '            stageStates = &states;',
+        '            stageRates = &rates;',
+        '            for (auto& integrateNode : nodeIntegrators) integrateNode();',
+        '        };',
+        `        const std::vector<std::vector<std::size_t>> errorGroups = { ${errorGroupsOf(model).map((group) => `{ ${group.join(', ')} }`).join(', ')} };`,
+        `        const konjugate::integrators::${bdf ? 'BdfTolerance' : 'Rodas4Tolerance'} tolerance{ ${doubleLiteral(tolerance.relative)}, { ${absoluteTolerances.map(doubleLiteral).join(', ')} } };`,
+        `        const std::vector<std::vector<std::size_t>> stageReads = { ${stageReads.map((reads) => `{ ${reads.join(', ')} }`).join(', ')} };`,
+        '        auto system = konjugate::integrators::makeStiffSystem(integrated, stageReads, errorGroups);',
+        ...cppExactJacobianLines(model, exactJacobian).map((line) => `    ${line}`),
+        '        const auto evaluateAdaptive = [&](std::size_t evaluation, double time, const std::vector<double>& states, std::vector<double>& rates) {',
+        '            evaluateStage(0, evaluation, time, states, rates);',
+        '        };',
+        '        const auto breakpointsWithin = [&](double from, double to) {',
+        '            std::vector<double> times;',
+        ...(model.schedules.length ? [
+            '            for (const auto& schedule : parameterSchedules) {',
+            '                for (std::size_t index = 0; index < schedule.count; ++index) {',
+            '                    if (schedule.times[index] > from && schedule.times[index] < to) times.push_back(schedule.times[index]);',
+            '                }',
+            '            }'
+        ] : []),
+        '            std::sort(times.begin(), times.end());',
+        '            const double gap = std::max(1e-9 * (to - from), 1e3 * std::numeric_limits<double>::epsilon() * std::max(std::abs(from), std::abs(to)));',
+        '            std::vector<double> kept;',
+        '            for (const double time : times) {',
+        '                if (time - from <= gap || to - time <= gap) continue;',
+        '                if (!kept.empty() && time - kept.back() <= gap) continue;',
+        '                kept.push_back(time);',
+        '            }',
+        '            return kept;',
+        '        };',
+        '        const double endTime = currentTime + globalTimeStep;',
+        located ? '        switching.beginGlobalStep(currentTime, globalState);' : null,
+        ...(bdf ? [
+            '        // The table starts again where a schedule turns a corner at this very instant, where a host set an input since the last',
+            '        // step, and where a condition changed between steps, as the engine starts it.',
+            '        const auto around = breakpointsWithin(currentTime - globalTimeStep, currentTime + globalTimeStep);',
+            '        const std::vector<double> inputs = currentInputs();',
+            '        const bool restart = std::any_of(around.begin(), around.end(), [&](double time) {',
+            '            return std::abs(time - currentTime) <= std::max(1e-9 * globalTimeStep, 1e3 * std::numeric_limits<double>::epsilon() * std::abs(currentTime));',
+            `        }) || inputs != bdfInputs_${located ? ' || (established_ && switching.latches != bdfLatches_)' : ''};`,
+            `        konjugate::integrators::bdfGlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance, breakpointsWithin(currentTime, endTime), {}, restart,`,
+            `            history_, statistics_,${located ? ' switching,' : ''} evaluateAdaptive, [](double, const std::vector<double>&) {});`,
+            '        bdfInputs_ = inputs;',
+            ...(located ? ['        bdfLatches_ = switching.latches;'] : [])
+        ] : [
+            `        constexpr std::size_t fixedSteps = ${fixedSteps};`,
+            `        constexpr bool readsTime = ${stagesReadTime(model)};`,
+            `        konjugate::integrators::rodas4GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
+            `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller_, statistics_,${located ? ' switching,' : ''}`,
+            '            evaluateAdaptive, [](double, const std::vector<double>&) {});'
+        ]),
+        ...(located ? [
+            '        latches_ = switching.latches;',
+            '        armed_ = switching.armed;',
+            '        scales_ = switching.scales;',
+            '        established_ = true;'
+        ] : []),
+        ...cppWholeModelUpdateLines(model, providerInfo)
+    ].filter((line) => line !== null);
+    return { headers, members, body, bdf };
+}
+
 function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
     const located = meta.switching?.length > 0;
     const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
@@ -1322,6 +1592,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 '    // The Jacobian\'s structure from the model\'s graph: the states each state\'s derivative reads.',
                 `    const std::vector<std::vector<std::size_t>> stageReads = { ${meta.stageReads.map((reads) => `{ ${reads.join(', ')} }`).join(', ')} };`,
                 `    auto system = konjugate::integrators::makeStiffSystem(integrated, stageReads, errorGroups);`,
+                ...cppExactJacobianLines(model, meta.exactJacobian),
                 '    konjugate::integrators::BdfHistory history;',
                 '    konjugate::integrators::BdfStatistics statistics;',
                 // The conditions' latches the table was built under: one that flips at a global step's start starts it again, as in the engine.
@@ -1332,6 +1603,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 '    // The Jacobian\'s structure from the model\'s graph: the states each state\'s derivative reads at a stage.',
                 `    const std::vector<std::vector<std::size_t>> stageReads = { ${meta.stageReads.map((reads) => `{ ${reads.join(', ')} }`).join(', ')} };`,
                 `    auto system = konjugate::integrators::makeRodas4System(integrated, stageReads, errorGroups);`,
+                ...cppExactJacobianLines(model, meta.exactJacobian),
                 `    constexpr bool readsTime = ${meta.stagesReadTime};`,
                 '    konjugate::integrators::Rodas4Controller controller;',
                 '    konjugate::integrators::Rodas4Statistics statistics;'
@@ -1838,12 +2110,14 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
                 "    # The Jacobian's structure from the model's graph: the states each state's derivative reads.",
                 `    stage_reads = [${meta.stageReads.map((reads) => `[${reads.join(', ')}]`).join(', ')}]`,
                 '    system = make_stiff_system(integrated, stage_reads, error_groups)',
+                ...pythonExactJacobianLines(model, meta.exactJacobian),
                 '    history = BdfHistory()',
                 ...(meta.switching?.length ? ['    bdf_latches = list(switching.latches)'] : [])
             ] : [
                 "    # The Jacobian's structure from the model's graph: the states each state's derivative reads at a stage.",
                 `    stage_reads = [${meta.stageReads.map((reads) => `[${reads.join(', ')}]`).join(', ')}]`,
                 '    system = make_rodas_4_system(integrated, stage_reads, error_groups)',
+                ...pythonExactJacobianLines(model, meta.exactJacobian),
                 `    reads_time = ${meta.stagesReadTime ? 'True' : 'False'}`,
                 '    controller = Rodas4Controller()'
             ]),

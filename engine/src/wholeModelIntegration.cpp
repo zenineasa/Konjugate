@@ -27,6 +27,19 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     if (settings.method == IntegrationMethod::bdf && configuration.get_optional<std::string>("stepsPerGlobalStep")) {
         throw std::runtime_error("stepsPerGlobalStep does not apply to the bdf method, which chooses its own steps.");
     }
+    // The stiff methods' Jacobian: analytic unless the run says otherwise.
+    if (const auto jacobian = configuration.get_optional<std::string>("jacobian")) {
+        if (settings.method != IntegrationMethod::rodas4 && settings.method != IntegrationMethod::bdf) {
+            throw std::runtime_error("jacobian applies to the stiff methods, rodas4 and bdf, which work out a Jacobian; this run's method does not.");
+        }
+        if (*jacobian == "analytic") settings.jacobian = JacobianMethod::analytic;
+        else if (*jacobian == "finiteDifference") settings.jacobian = JacobianMethod::finiteDifference;
+        else if (*jacobian == "check") settings.jacobian = JacobianMethod::check;
+        else {
+            throw std::runtime_error("The run's jacobian \"" + *jacobian + "\" is not one this version of Konjugate knows (it knows analytic, "
+                "finiteDifference and check).");
+        }
+    }
     // Dormand–Prince and Rodas4 choose their own steps unless told how many to take.
     if (settings.method == IntegrationMethod::dormandPrince54 || settings.method == IntegrationMethod::rodas4 || settings.method == IntegrationMethod::bdf) {
         settings.stepsPerGlobalStep = 0;

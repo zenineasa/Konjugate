@@ -2505,4 +2505,12 @@ ExpressionProgram compileExpressionProgram(const CompiledExpression& expression)
     return expressionProgram(expression);
 }
 
+double evaluateExpressionProgram(const CompiledExpression& expression, const ExpressionProgram& program, const std::vector<double>& symbols) {
+    const auto read = [&](std::size_t index) {
+        if (index >= symbols.size()) throw std::runtime_error("Executable symbol binding is invalid.");
+        return symbols[index];
+    };
+    return evaluateCompiled(expression, program, read);
+}
+
 }

@@ -5,6 +5,7 @@
         { "method": "rodas4", "tolerance": { "relative": 1e-6, "absolute": 1e-9 } },
         { "method": "bdf", "tolerance": { "relative": 1e-6, "absolute": 1e-9 } }
     ],
+    "jacobianComparison": { "family": "smooth", "size": 1024 },
     "families": [
         {
             "key": "smooth",
@@ -76,6 +77,10 @@
         "frequentJumps1024ErrorRodas4": { "max": 3e-5 },
         "frequentJumps1024ErrorBdf": { "max": 2e-3 },
         "frequentJumps1024FactorisationRatio": { "min": 0.6 },
-        "frequentJumps1024JacobianRatio": { "min": 72 }
+        "frequentJumps1024JacobianRatio": { "min": 72 },
+        "smooth1024EvaluationRatioRodas4": { "max": 0.55 },
+        "smooth1024ErrorRatioRodas4": { "max": 1.2 },
+        "smooth1024EvaluationRatioBdf": { "max": 0.9 },
+        "smooth1024ErrorRatioBdf": { "max": 1.2 }
     }
 }

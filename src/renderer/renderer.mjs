@@ -18,7 +18,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { bdfSuits, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { bdfSuits, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -512,7 +512,8 @@ function hydrateProjectDocument(document) {
             // The integration method (docs/proposals/integrators.md), kept as the file says it: absent, Euler node by node.
             ...(configuration.method !== undefined ? { method: configuration.method } : {}),
             ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {}),
-            ...(configuration.tolerance !== undefined ? { tolerance: structuredClone(configuration.tolerance) } : {})
+            ...(configuration.tolerance !== undefined ? { tolerance: structuredClone(configuration.tolerance) } : {}),
+            ...(configuration.jacobian !== undefined ? { jacobian: configuration.jacobian } : {})
         }))
         : [defaultRunConfiguration()];
     return {
@@ -6724,12 +6725,30 @@ function renderExecutionSummary() {
             plural(integration.evaluations ?? 0, 'evaluation')} of the model${integration.smallestStep !== undefined
             ? `; steps from ${formatResultTime(integration.smallestStep)} to ${formatResultTime(integration.largestStep)}` : ''}.`);
     }
-    // Stiff's linear algebra: its Jacobians (each a few evaluations, one per colour of the model's structure) and factorisations.
+    // Stiff's linear algebra: its Jacobians and factorisations, and how its Jacobian was worked out -- exactly from the equations, or by
+    // small changes to the states (each a model evaluation per colour of the model's structure), or both -- and under "check" how far
+    // the two were apart.
     if (integration?.jacobians !== undefined) {
         const plural = (count, word) => `${count.toLocaleString()} ${word}${count === 1 ? '' : 's'}`;
-        methodLines.push(`${plural(integration.jacobians, 'Jacobian')} (${plural(integration.jacobianColours ?? 0, 'colour')}), ${
-            plural(integration.factorisations ?? 0, 'factorisation')} of ${plural(integration.linearSystemSize ?? 0, 'equation')}${
-            integration.sparse ? ', sparse' : ''}.`);
+        const size = integration.linearSystemSize ?? 0;
+        const exact = integration.exactColumns ?? 0;
+        const differenced = `by small changes (${plural(integration.jacobianColours ?? 0, 'evaluation')} each)`;
+        const how = exact >= size && size ? 'exact, from the equations'
+            : exact ? `exact for ${exact.toLocaleString()} of its ${size.toLocaleString()} columns, the rest ${differenced}` : differenced;
+        methodLines.push(`${plural(integration.jacobians, 'Jacobian')}, ${how}; ${plural(integration.factorisations ?? 0, 'factorisation')} of ${
+            plural(size, 'equation')}${integration.sparse ? ', sparse' : ''}.`);
+        const check = integration.jacobianCheck;
+        if (check) {
+            const stateName = (stateId) => {
+                const node = model.nodes.find((candidate) => candidate.states?.some((state) => state.id === stateId));
+                const state = node?.states.find((candidate) => candidate.id === stateId);
+                return node && state ? `${node.name}.${state.name}` : `state ${stateId}`;
+            };
+            methodLines.push(`Checked against small changes at ${plural(check.checks ?? 0, 'Jacobian')}: ${check.largestDifference > 0
+                ? `they differ by at most ${check.largestDifference.toExponential(1)} of the largest entry (as the tolerances weigh them), in the rate of ${
+                    stateName(check.rowStateId)} by ${stateName(check.columnStateId)} at ${formatResultTime(check.time)}`
+                : 'they agree'}. Small changes are good to about 1e-8, so more than about 1e-6 points at an equation worth a look.`);
+        }
     }
     // BDF: the highest order it reached, and how often its history started again at order 1 (at a jump in the model's inputs).
     if (integration?.highestOrder !== undefined) {
@@ -8690,10 +8709,11 @@ function fillRunConfigurationFields({ continuing }) {
         ? withIntegrationMethod({ ...saved, globalTimeStep: activeResult.globalTimeStep ?? saved.globalTimeStep, outputInterval: activeResult.outputInterval ?? saved.outputInterval },
             // A continued or forked run opens with the method its result ran with.
             activeResult.integration?.method ?? 'nodeByNode', activeResult.integration?.stepsPerGlobalStep ?? 1,
-            activeResult.integration?.tolerance ?? defaultIntegrationTolerance)
+            activeResult.integration?.tolerance ?? defaultIntegrationTolerance, activeResult.integration?.jacobian ?? saved.jacobian)
         : saved;
     $('#runMethod').value = integrationMethod(methodOf(source)) ? dialogMethodOf(methodOf(source)) : 'nodeByNode';
     $('#runStiffSolver').value = stiffSolvers.some((solver) => solver.id === methodOf(source)) ? methodOf(source) : stiffSolvers[0].id;
+    $('#runStiffJacobian').value = stiffJacobians.some((jacobian) => jacobian.id === source.jacobian) ? source.jacobian : defaultStiffJacobian;
     $('#runStepsPerGlobalStep').value = stepsPerGlobalStepOf(source);
     $('#runRelativeTolerance').value = toleranceOf(source).relative;
     $('#runAbsoluteTolerance').value = toleranceOf(source).absolute;
@@ -8728,6 +8748,10 @@ function updateRunMethodFields() {
     $('#runStiffSolverField').hidden = !stiff;
     $('#runStiffSolverDescription').hidden = !stiff;
     $('#runStiffSolverDescription').textContent = stiffSolvers.find((solver) => solver.id === $('#runStiffSolver').value)?.description ?? '';
+    // And its Jacobian: exact from the equations, or by small changes.
+    $('#runStiffJacobianField').hidden = !stiff;
+    $('#runStiffJacobianDescription').hidden = !stiff;
+    $('#runStiffJacobianDescription').textContent = stiffJacobians.find((jacobian) => jacobian.id === $('#runStiffJacobian').value)?.description ?? '';
     $('#runStepsPerGlobalStepField').hidden = !method.stepsPerGlobalStep;
     $('#runStepsPerGlobalStep').disabled = !method.stepsPerGlobalStep;
     for (const field of ['Relative', 'Absolute']) {
@@ -8761,6 +8785,8 @@ function updateRunMethodFields() {
     $('#runMethodParticipation').hidden = !lines.length;
 }
 for (const solver of stiffSolvers) $('#runStiffSolver').append(new Option(solver.name, solver.id));
+for (const jacobian of stiffJacobians) $('#runStiffJacobian').append(new Option(jacobian.name, jacobian.id));
+$('#runStiffJacobian').addEventListener('change', updateRunMethodFields);
 $('#runMethod').addEventListener('change', updateRunMethodFields);
 $('#runStiffSolver').addEventListener('change', updateRunMethodFields);
 $('#runStepsPerGlobalStep').addEventListener('input', updateRunMethodFields);
@@ -8775,6 +8801,7 @@ function readRunConfigurationFields() {
         method: $('#runMethod').value === stiffIntegrationMethod ? $('#runStiffSolver').value : $('#runMethod').value,
         stepsPerGlobalStep: Number($('#runStepsPerGlobalStep').value),
         tolerance: { relative: Number($('#runRelativeTolerance').value), absolute: Number($('#runAbsoluteTolerance').value) },
+        jacobian: $('#runStiffJacobian').value,
         execution: {
             backend: $('#runExecutionBackend').value,
             partitionAlgorithm: $('#runPartitionAlgorithm').value,

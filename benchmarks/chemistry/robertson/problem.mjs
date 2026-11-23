@@ -88,6 +88,8 @@ export async function evaluate({ engine, config }) {
     // Stiff (Rodas4), and BDF beside it: each check of BDF's is named as Rodas4's with Bdf after it.
     const variants = [[config.variant, ''], ...(config.bdfVariant ? [[config.bdfVariant, 'Bdf']] : [])];
     const byModel = {};
+    // The one-node model's largest error over every checkpoint and species, and the work to 1e11 s, for the Jacobian's comparison below.
+    const measured = {};
     for (const [variant, suffix] of variants) for (const [name, build] of [['oneNode', buildOneNode], ['twoNodes', buildTwoNodes]]) {
         const method = suffix ? 'BDF' : 'Stiff';
         const ids = build().ids;
@@ -126,12 +128,34 @@ export async function evaluate({ engine, config }) {
             lowest = Math.min(lowest, ...reached);
         }
         byModel[`${name}${suffix}`] = values;
+        measured[`${name}${suffix}`] = { worst: Math.max(...worst), evaluations, steps, linearAlgebra };
         const label = `${name === 'oneNode' ? 'OneNode' : 'TwoNodes'}${suffix}`;
         ['A', 'B', 'C'].forEach((species, index) => add(`relativeError${species}${label}`, worst[index], `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: largest relative error of ${species} at the checkpoints 0.4 s to 1e11 s`));
         add(`conservation${label}`, conservation, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: largest |A + B + C - 1| at the checkpoints and every 1e9 s to 1e11 s`);
         add(`lowestConcentration${label}`, lowest, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: the lowest concentration reached (negative would be unphysical)`);
         add(`steps${label}`, steps, `Robertson, ${name === 'oneNode' ? 'one node' : 'two nodes'}, ${method}: steps taken from 0 to 1e11 s`);
         notes.push(`${method}, ${name === 'oneNode' ? 'one node' : 'two nodes'}: ${steps.toLocaleString()} steps, ${evaluations.toLocaleString()} evaluations of the model (each Jacobian one evaluation per colour, three here), ${linearAlgebra}, from 0 to 1e11 s at relative tolerance ${variant.tolerance.relative}.`);
+    }
+    // The exact Jacobian against finite differences (docs/proposals/integrators.md, Jacobians for Rodas4): the one-node model again with
+    // the Jacobian worked out by finite differences, as Stiff first did, its largest error at the checkpoints and the work to 1e11 s.
+    for (const [variant, suffix, method] of [[config.variant, '', 'Stiff'], ...(config.bdfVariant ? [[config.bdfVariant, 'Bdf', 'BDF']] : [])]) {
+        const differenced = { ...variant, jacobian: 'finiteDifference' };
+        const ids = buildOneNode().ids;
+        let worst = 0;
+        let work = null;
+        for (const [index, time] of data.times.entries()) {
+            const result = await engine.run(modelPath('oneNode'), differenced, engineRun({ targetTime: time, globalTimeStep: time, outputInterval: time }));
+            const reached = at(result, ids);
+            worst = Math.max(worst, ...reached.map((value, species) => Math.abs(value - data.states[index][species]) / data.states[index][species]));
+            if (time === data.times.at(-1)) work = result.work;
+        }
+        const exact = measured[`oneNode${suffix}`];
+        rows.push(resultRow({ caseName: 'Robertson, one node: the exact Jacobian against finite differences', model: 'oneNode', variant: differenced, work, unit: 'mol/L',
+            errors: { relativeError: worst }, note: `${work.methodSteps.toLocaleString()} steps and ${work.modelEvaluations.toLocaleString()} evaluations to 1e11 s, against ${
+                exact.steps.toLocaleString()} and ${exact.evaluations.toLocaleString()} with the exact Jacobian, whose largest error is ${exact.worst.toExponential(2)}` }));
+        const label = suffix || 'Rodas4';
+        add(`evaluationRatio${label}`, exact.evaluations / work.modelEvaluations, `Robertson, one node, ${method}: evaluations of the model to 1e11 s with the exact Jacobian over those with finite differences`);
+        add(`errorRatio${label}`, exact.worst / worst, `Robertson, one node, ${method}: the largest error at the checkpoints with the exact Jacobian over that with finite differences`);
     }
     // The split model against the one node: the same equations under the same tolerances, their error norms summed in different groups.
     const split = Math.max(...byModel.twoNodes.flatMap((reached, index) => reached.map((value, species) => Math.abs(value - byModel.oneNode[index][species]) / data.states[index][species])));

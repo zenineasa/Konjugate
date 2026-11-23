@@ -1043,7 +1043,6 @@ private:
     std::optional<DuringRunStabilityMonitor> stabilityMonitor;
     std::vector<DuringRunStabilityFinding> stabilityFindings;
     std::chrono::steady_clock::time_point lastControlReadAt;
-    double nextOutputTime = 0;
     // How many parameter changes the algebraic states were last set with (see settleIfParametersChanged).
     std::size_t settledInterventions = 0;
     // How many times a ring of settling Updates stopped at its limit without settling; for each such ring (by its index in
@@ -1062,6 +1061,9 @@ private:
     std::map<long long, Checkpoint> sessionCheckpoints;
     double baseTime = 0;
     long long stepsSinceBase = 0;
+    // Global steps between samples: the output interval is a whole number of them (checkTimeSettings). A run samples after every
+    // outputSteps-th step counted from its start, so its samples fall on the same steps however long it runs; a time accumulated
+    // interval by interval drifted from the step's own time and, late in a long run, missed a sample.
     long long outputSteps = 1;
     std::size_t stepCounter = 0;
     std::unordered_set<std::size_t> algebraicIndexes;
@@ -1279,7 +1281,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         writeFramedEvent(*eventStream, event);
     }
     currentTime = startTime;
-    nextOutputTime = startTime + outputInterval;
+    outputSteps = std::llround(outputInterval / globalTimeStep);
     settledInterventions = runControl.interventions.size();
     if (!sessionMode) {
         appendStreamRecord("sample", startTime, states);
@@ -1297,7 +1299,6 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     } else {
         for (const auto stateId : executionPlan.stateIds) reportedIndexes.push_back(executionPlan.stateIndexes.at(stateId));
     }
-    outputSteps = std::llround(outputInterval / globalTimeStep);
     checkpointInterval = configuration.get<double>("checkpointInterval", outputInterval);
     const auto checkpointRatio = checkpointInterval / globalTimeStep;
     if (!(checkpointInterval > 0) || !std::isfinite(checkpointInterval) || std::abs(checkpointRatio - std::round(checkpointRatio)) > 1e-9) {
@@ -2051,7 +2052,7 @@ void Simulation::paceStep(std::chrono::steady_clock::time_point wallStepStarted,
 
 // At an output boundary (and at the last step): the sample, a checkpoint, and now and then the result file.
 void Simulation::recordStepOutput(std::size_t step, double elapsed) {
-    if (!(elapsed + 1e-12 >= nextOutputTime || step + 1 == steps)) return;
+    if (!((step + 1) % static_cast<std::size_t>(outputSteps) == 0 || step + 1 == steps)) return;
     samples.push_back({elapsed, states, partsAt(elapsed)});
     appendStreamRecord("sample", elapsed, states);
     // A checkpoint is captured at every output boundary (not only the final step) so any
@@ -2064,7 +2065,6 @@ void Simulation::recordStepOutput(std::size_t step, double elapsed) {
         checkpoints.push_back({createUuid(), elapsed, states, captureProviderStates(), solverState()});
         appendStreamRecord("checkpoint", elapsed, states, checkpoints.back().uuid);
     }
-    while (nextOutputTime <= elapsed + 1e-12) nextOutputTime += outputInterval;
     const auto publicationTime = std::chrono::steady_clock::now();
     if (step + 1 == steps || publicationTime - lastPublishedAt >= std::chrono::milliseconds(250)) {
         writeResult(step + 1 == steps ? "completed" : "running", elapsed, step + 1 == steps);

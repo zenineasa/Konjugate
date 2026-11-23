@@ -318,6 +318,7 @@ class Reading(NodeProvider):
     const thermalExample = join(root, 'examples', 'thermalManagement.kjt');
     const longRun = await run(thermalExample, { targetTime: 600, globalTimeStep: 0.1, outputInterval: 0.1, method: 'dormandPrince54' });
     assert.ok(Math.abs(longRun.samples.at(-1).time - 600) <= 1e-9, 'The run reaches its end.');
+    assert.equal(longRun.samples.length, 6001, 'Every sample is kept, one each 0.1 s (tests/engine/outputSampling.mjs).');
     assert.ok(longRun.integration.smallestStep > 1e-9, `No sliver step is taken: ${longRun.integration.smallestStep}.`);
 
     // The tolerance sets the error: y' = -y over 8 s against e^-t, each tighter tolerance closer, with more steps.

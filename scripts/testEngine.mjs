@@ -19,6 +19,7 @@ await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'logisticsPo
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'timeBindingContract.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'wholeModelIntegration.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'eventLocation.mjs'), executable]);
+await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'outputSampling.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'programWarnings.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'algebraicSnapshotContract.mjs'), executable]);
 await run(process.execPath, [join(rootDirectory, 'tests', 'engine', 'ringSettling.mjs'), executable]);

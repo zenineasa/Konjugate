@@ -43,10 +43,15 @@ function combineRuns(perSession) {
     };
 }
 
+// A session folder counts only if a part in it wrote its results: a session stopped before any part finished (its preflight refused, or it was
+// interrupted) leaves an empty folder, which is not a session.
+const sessionResults = [join('problems', 'summary.json'), join('scaling', 'summary.json'), join('comparisons', 'comparisons.json'), join('openmodelica', 'comparisons.json')];
+
 function sessionList(machineDirectory, chosen) {
     const directory = join(machineDirectory, 'sessions');
     if (!existsSync(directory)) return [];
-    return readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory() && (!chosen || chosen.includes(name))).sort()
+    return readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory() && (!chosen || chosen.includes(name))
+        && sessionResults.some((result) => existsSync(join(directory, name, result)))).sort()
         .map((name) => ({ name, directory: join(directory, name) }));
 }
 

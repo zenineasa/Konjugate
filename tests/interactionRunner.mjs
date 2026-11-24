@@ -465,11 +465,18 @@ export async function runInteractionTests(driver) {
             const named = `${name}: ${error?.message ?? error}`;
             try { error.message = named; } catch { /* read-only */ }
             const failure = error?.message === named ? error : new Error(named, { cause: error });
-            outcomes.push({ name, status: 'failed', ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
+            const message = failure.message.slice(name.length + 2).split('\n')[0].slice(0, 500);
+            outcomes.push({ name, status: 'failed', message, ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
             if (stopOnFailure) throw failure;
             failures.push({ name, error: failure });
             console.log(`✗ ${name} · ${took()}`);
             console.error(failure);
+            // What the failure left on screen, kept for a run nobody watched (KONJUGATE_INTERACTION_ARTIFACTS names the folder).
+            if (process.env.KONJUGATE_INTERACTION_ARTIFACTS && driver.captureWindows) {
+                const prefix = `${String(failures.length).padStart(2, '0')}-${name.replaceAll(/[^\w-]+/g, '-').slice(0, 60)}`;
+                const saved = await driver.captureWindows(join(process.env.KONJUGATE_INTERACTION_ARTIFACTS, 'screenshots'), prefix).catch(() => []);
+                if (saved.length) console.log(`  (${saved.length} screenshot${saved.length === 1 ? '' : 's'} saved as ${prefix}-window*.png)`);
+            }
             await putAwayLeftovers();
         }
         // Coverage, when it is on, is taken a scenario at a time where the driver needs it (the web edition's).

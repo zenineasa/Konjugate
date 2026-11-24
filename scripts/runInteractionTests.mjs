@@ -1,11 +1,12 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import electronPath from 'electron';
-import { execFile, spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installInteractionAddons } from './interactionAddons.mjs';
+import { failureLine, spawnLogged, summarize } from './interactionArtifacts.mjs';
 
 const environment = { ...process.env };
 delete environment.ELECTRON_RUN_AS_NODE;
@@ -15,15 +16,18 @@ const userDataDirectory = await mkdtemp(join(tmpdir(), 'konjugate-interaction-')
 // driver (tests/drivers/electronWindowDriver.mjs).
 if (environment.KONJUGATE_INTERACTION_COVERAGE) environment.NODE_V8_COVERAGE = join(environment.KONJUGATE_INTERACTION_COVERAGE, 'main');
 environment.KONJUGATE_INTERACTION_USER_DATA = userDataDirectory;
+// How each scenario went, read back at the end for GitHub's job summary.
+const resultsFile = environment.KONJUGATE_INTERACTION_RESULTS || join(userDataDirectory, 'interactionResults.json');
+environment.KONJUGATE_INTERACTION_RESULTS = resultsFile;
 environment.KONJUGATE_INTERACTION_INSTALLED_ADDONS = (await installInteractionAddons(process.cwd(), userDataDirectory)).join(',');
 // --use-mock-keychain: listing model configurations asks Electron's safeStorage whether encryption is
 // available, which on macOS looks up (or creates) an item in the login Keychain and prompts for access.
-// The tests do not need the real Keychain, so Chromium's mock one keeps them from asking.
-const child = spawn(electronPath, ['.', '--interaction-test', '--disable-gpu', '--enable-unsafe-swiftshader', '--use-mock-keychain'], {
+// The tests do not need the real Keychain, so Chromium's mock one keeps them from asking. With KONJUGATE_INTERACTION_ARTIFACTS
+// set, the output is also logged there, with screenshots of the failures (scripts/interactionArtifacts.mjs).
+const child = await spawnLogged(electronPath, ['.', '--interaction-test', '--disable-gpu', '--enable-unsafe-swiftshader', '--use-mock-keychain'], {
     cwd: process.cwd(),
-    env: environment,
-    stdio: 'inherit'
-});
+    env: environment
+}, 'interaction.log');
 
 // A watchdog on the app's memory: every process of it (the main process, its windows, its engines) is looked at every two seconds, and
 // one past the limit stops the run at once, saying which, rather than leaving a leak to grow until the computer swaps and freezes.
@@ -80,9 +84,15 @@ child.once('error', (error) => {
     console.error(error);
     process.exitCode = 1;
 });
-child.once('exit', (code, signal) => {
+child.once('close', async (code, signal) => {
     clearInterval(watchdog);
-    rm(userDataDirectory, { recursive: true, force: true }).finally(() => {
-        process.exitCode = stoppedForMemory ? 1 : code ?? (signal ? 1 : 0);
-    });
+    process.exitCode = stoppedForMemory ? 1 : code ?? (signal ? 1 : 0);
+    if (process.env.GITHUB_STEP_SUMMARY && process.exitCode) {
+        const outcomes = await readFile(resultsFile, 'utf8').then((text) => JSON.parse(text).outcomes, () => null);
+        const failed = outcomes?.filter(({ status }) => status === 'failed') ?? [];
+        await summarize(['### Interaction tests', ...(!outcomes ? ['The app ended before the suite finished (see the log).']
+            : failed.length ? [`**${failed.length} failed:**`, ...failed.map(failureLine)]
+                : ['No scenario failed, but the suite ended with an error (see the log).'])]);
+    }
+    await rm(userDataDirectory, { recursive: true, force: true });
 });

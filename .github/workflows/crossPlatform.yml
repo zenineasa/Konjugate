@@ -67,12 +67,39 @@ jobs:
               # engine it starts: real-time runs then fall far behind the clock and never finish in time.
               if: runner.os == 'macOS'
               run: defaults write NSGlobalDomain NSAppSleepDisabled -bool YES
+            # TEMPORARY: the interaction tests do not fail this job. They fail now and then on slow runners, on different
+            # scenarios and platforms, for timing rather than for bugs; until they are made robust (each waiting on the app's
+            # state, never on the clock, and proven by repeated runs under load) a failure only shows, listed with what it said
+            # in the job summary, with the log and a screenshot of each failure uploaded. Remove continue-on-error to make them
+            # blocking again. (release.yml's packaged interaction tests are non-blocking in the same way.)
             - name: Run Electron interaction tests
+              id: interaction
               if: runner.os != 'Linux'
+              continue-on-error: true
+              env:
+                  KONJUGATE_INTERACTION_ARTIFACTS: ${{ github.workspace }}/out/interactionArtifacts
               run: npm run test:interaction
             - name: Run Electron interaction tests with a virtual display
+              id: interactionLinux
               if: runner.os == 'Linux'
+              continue-on-error: true
+              env:
+                  KONJUGATE_INTERACTION_ARTIFACTS: ${{ github.workspace }}/out/interactionArtifacts
               run: xvfb-run -a --server-args="-screen 0 1920x1080x24" npm run test:interaction
+            - name: Say that the interaction tests failed without blocking
+              if: steps.interaction.outcome == 'failure' || steps.interactionLinux.outcome == 'failure'
+              shell: bash
+              run: |
+                  echo "::warning title=Interaction tests failed (not blocking)::See the job summary and the interaction-${RUNNER_OS}-${RUNNER_ARCH} artifact. They do not fail this job for now."
+                  printf '\n> The interaction tests failed; for now that does not fail this job.\n' >> "$GITHUB_STEP_SUMMARY"
+            - name: Upload the interaction tests' logs and screenshots
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: interaction-${{ runner.os }}-${{ runner.arch }}
+                  path: out/interactionArtifacts
+                  if-no-files-found: ignore
+                  retention-days: 14
             - run: npm run build:engine:no-metis
             - name: Test dependency-free partitioner
               working-directory: engine

@@ -318,6 +318,30 @@ export function createElectronDriver(mainWindow) {
         async simulateOsFileOpen(path) {
             app.emit('open-file', { preventDefault() {} }, path);
         },
+        // Every open window as a PNG in `directory`, named from `prefix`: what a failed scenario left on screen, for a CI run
+        // nobody watched. Best effort: a window that is gone, hidden or slow to draw is left out rather than holding the run.
+        async captureWindows(directory, prefix) {
+            const saved = [];
+            await mkdir(directory, { recursive: true });
+            // A capture lags the drawing, and taken at once can show a frame from before the failure: each window is asked to draw
+            // again, and given a moment.
+            for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.webContents.invalidate();
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            for (const [index, win] of BrowserWindow.getAllWindows().entries()) {
+                if (win.isDestroyed() || !win.isVisible()) continue;
+                try {
+                    const image = await Promise.race([
+                        win.webContents.capturePage(),
+                        new Promise((resolve) => setTimeout(() => resolve(null), 5000))
+                    ]);
+                    if (!image || image.isEmpty()) continue;
+                    const file = join(directory, `${prefix}-window${index + 1}.png`);
+                    await writeFile(file, image.toPNG());
+                    saved.push(file);
+                } catch { /* the window went while it was being taken */ }
+            }
+            return saved;
+        },
         // Whether minimizing a window does anything on this display (probed once, see probeMinimize).
         canMinimize: probeMinimize,
         capabilities: {

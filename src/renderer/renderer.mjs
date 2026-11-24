@@ -7166,6 +7166,14 @@ function updateSteeringTargets(live = liveControlsOffered()) {
     steering.setTargets(targets);
 }
 
+// A command to the running engine (a live value, pause, pacing) can reach it just as the run ends: the main process then refuses it
+// ("The run has finished; the change was not applied."). Said in the status line while that run is still the one shown as running;
+// once its end has been shown, its own message stands.
+function reportLiveCommandError(jobId, error) {
+    if (jobId !== activeEngineJobId || !simulationRunning) return;
+    $('#statusText').textContent = String(error.message).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+}
+
 function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
     liveParameterValues.set(parameterId, value);
     // Setting a value outright ends any waveform on the parameter (the engine drops it too).
@@ -7174,10 +7182,11 @@ function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
     const apply = async () => {
         liveParameterUpdateTimers.delete(parameterId);
         if (!activeEngineJobId || !simulationRunning) return;
+        const jobId = activeEngineJobId;
         try {
-            await window.engine.setParameterValue(activeEngineJobId, parameterId, value);
+            await window.engine.setParameterValue(jobId, parameterId, value);
         } catch (error) {
-            $('#statusText').textContent = error.message;
+            reportLiveCommandError(jobId, error);
         }
     };
     if (immediate) apply();
@@ -7191,13 +7200,14 @@ function scheduleLiveParameterUpdate(parameterId, value, immediate = false) {
 async function sendLiveParameterSchedule(parameterId, schedule) {
     if (!activeEngineJobId || !simulationRunning) return;
     const startTime = Number(activeResult?.samples?.at(-1)?.time ?? 0);
+    const jobId = activeEngineJobId;
     try {
-        await window.engine.scheduleParameterValue(activeEngineJobId, parameterId, { ...schedule, startTime });
+        await window.engine.scheduleParameterValue(jobId, parameterId, { ...schedule, startTime });
         if (schedule.mode === 'waveform') liveWaveformRuns.set(parameterId, { startTime, waveform: schedule.waveform, centre: schedule.baseValue, duration: schedule.duration });
         else liveWaveformRuns.delete(parameterId);
         updateLiveWaveformCursors(startTime);
     } catch (error) {
-        $('#statusText').textContent = error.message;
+        reportLiveCommandError(jobId, error);
     }
 }
 
@@ -8298,7 +8308,8 @@ $('#resultPlaybackRate').addEventListener('change', () => {
 });
 $('#simulationPacing').addEventListener('change', async (event) => {
     if (!activeEngineJobId) return;
-    await window.engine.setPacing(activeEngineJobId, pacingFromValue(event.target.value));
+    const jobId = activeEngineJobId;
+    await window.engine.setPacing(jobId, pacingFromValue(event.target.value)).catch((error) => reportLiveCommandError(jobId, error));
 });
 $('#liveParameterButton').addEventListener('click', () => {
     const panel = $('#liveParameterPanel');
@@ -8313,11 +8324,13 @@ $('#closeLiveParameterPanel').addEventListener('click', () => {
 $('#simulationPauseResume').addEventListener('click', async () => {
     if (!activeEngineJobId || !simulationRunning) return;
     const nextState = activeResult?.lifecycle === 'paused' ? 'running' : 'paused';
-    await window.engine.setExecutionState(activeEngineJobId, nextState);
+    const jobId = activeEngineJobId;
+    await window.engine.setExecutionState(jobId, nextState).catch((error) => reportLiveCommandError(jobId, error));
 });
 $('#simulationStop').addEventListener('click', async () => {
     if (!activeEngineJobId || !simulationRunning) return;
-    await window.engine.setExecutionState(activeEngineJobId, 'stopped');
+    const jobId = activeEngineJobId;
+    await window.engine.setExecutionState(jobId, 'stopped').catch((error) => reportLiveCommandError(jobId, error));
 });
 $('#continueRun').addEventListener('click', () => {
     const checkpoint = activeResult.checkpoints.at(-1);
@@ -8585,9 +8598,9 @@ async function startSimulation() {
             // Checked (the default) omits the field so engineAdapter.mjs's own "monitor every
             // node" default applies unchanged; unchecked explicitly disables it for this run.
             ...(runLaunchSettings.stabilityMonitoring ? {} : { stabilityMonitoring: { nodeIds: [] } }),
-            // A repeat is held before its first step until every recorded change is in: a fast run could otherwise be over before a
-            // pause sent after its start was read.
-            ...(runLaunchSettings.startPaused || pendingFork?.repeat?.length ? { startPaused: true } : {}),
+            // A fork with changed values, or a repeat, is held before its first step until every change is in: a fast run could
+            // otherwise be over before a pause sent after its start was read, and run without them.
+            ...(runLaunchSettings.startPaused || pendingFork?.overrides?.length || pendingFork?.repeat?.length ? { startPaused: true } : {}),
             ...(pendingFork ? { startCheckpoint: pendingFork.checkpoint } : pendingRestart ? { startCheckpoint: pendingRestart.checkpoint } : {}),
             // Extended, not forked: the engine writes the run so far into this one's result, so it is one result from the start.
             ...(pendingRestart && !pendingFork && previousResultSessionId ? { continuesJobId: previousResultSessionId } : {})
@@ -8597,7 +8610,6 @@ async function startSimulation() {
         // Which version of every component the run used, so a result can be told apart from one made before an update.
         componentVersionsByJob.set(execution.jobId, await componentVersionsOf(runDocument));
         if (tutorialRunModel?.document === runDocument) tutorialRunModel.jobId = execution.jobId;
-        if (tour.active && pendingFork) tutorialForkValues.set(execution.jobId, (pendingFork.overrides ?? []).map(({ entry }) => Number(entry.value)));
         // A fork must keep the parent's job/result alive as an immutable sibling branch rather
         // than releasing it the way an ordinary new run replaces its predecessor.
         if (previousResultSessionId && previousResultSessionId !== execution.jobId && !forkingFromSessionId) {
@@ -8611,33 +8623,27 @@ async function startSimulation() {
             openLiveControlsOnStart = true;
             await window.engine.setExecutionState(execution.jobId, 'paused');
         }
+        // The fork started held (startPaused, above), so its changed values are in before its first step however fast it runs: the
+        // engine reads every queued command before integrating step 0 (simulationRunner.cpp). It is let go once they are, unless the
+        // person asked for it to start paused.
         const overrides = pendingFork?.overrides ?? [];
-        if (overrides.length) {
-            // Pause -> apply overrides -> run, all awaited in order onto the same ordered stdin
-            // pipe (see engineAdapter.mjs's sendCommand), guarantees the child's first
-            // synchronization step already has these values: the engine always drains queued
-            // control commands before integrating step 0 (simulationRunner.cpp), regardless of
-            // scheduling, so this ordering -- not timing -- is what makes it race-free.
-            await window.engine.setExecutionState(execution.jobId, 'paused');
-            for (const { parameterId, entry } of overrides) {
-                if (entry.kind === 'schedule') {
-                    await window.engine.scheduleParameterValue(execution.jobId, parameterId, { ...entry.schedule, startTime: pendingFork.checkpoint.time });
-                } else {
-                    await window.engine.setParameterValue(execution.jobId, parameterId, entry.value);
-                }
+        for (const { parameterId, entry } of overrides) {
+            if (entry.kind === 'schedule') {
+                await window.engine.scheduleParameterValue(execution.jobId, parameterId, { ...entry.schedule, startTime: pendingFork.checkpoint.time });
+            } else {
+                await window.engine.setParameterValue(execution.jobId, parameterId, entry.value);
             }
-            await window.engine.setExecutionState(execution.jobId, 'running');
         }
+        // What a tutorial's step asks of the fork: the values it runs with, once they are in.
+        if (tour.active && pendingFork) tutorialForkValues.set(execution.jobId, overrides.map(({ entry }) => Number(entry.value)));
+        // A repeat's recorded changes, each sent with the time it was made at: the engine holds it until that step
+        // (EngineCommand.apply_at).
         const repeat = pendingFork?.repeat ?? [];
-        if (repeat.length) {
-            // Started held (startPaused, above), then each recorded change sent with the time it was made at: the engine holds it
-            // until that step (EngineCommand.apply_at), however fast this run goes.
-            for (const command of repeat) {
-                if (command.type === 'setParameterValue') await window.engine.setParameterValue(execution.jobId, command.parameterId, command.value, { applyAt: command.applyAt });
-                else await window.engine.scheduleParameterValue(execution.jobId, command.parameterId, command.schedule, { applyAt: command.applyAt });
-            }
-            if (!runLaunchSettings.startPaused) await window.engine.setExecutionState(execution.jobId, 'running');
+        for (const command of repeat) {
+            if (command.type === 'setParameterValue') await window.engine.setParameterValue(execution.jobId, command.parameterId, command.value, { applyAt: command.applyAt });
+            else await window.engine.scheduleParameterValue(execution.jobId, command.parameterId, command.schedule, { applyAt: command.applyAt });
         }
+        if ((overrides.length || repeat.length) && !runLaunchSettings.startPaused) await window.engine.setExecutionState(execution.jobId, 'running');
     } catch (error) {
         console.error('C++ simulation failed.', error);
         // A run that never started is not the latest run.

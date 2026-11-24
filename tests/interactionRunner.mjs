@@ -10447,6 +10447,10 @@ export async function runInteractionTests(driver) {
         await press('#startRun');
         await waitForStep('plot', 60000);
         assert.equal(await evaluate(window, `document.querySelector('#branchesButtonCount').textContent`), '2');
+        // The fork ran with the new target: the engine itself recorded the change. The fork is held before its first step until the
+        // change is in, so a fork that runs fast cannot finish first (it once did on CI, sending the change to an engine that had exited).
+        const forkRecord = await evaluate(window, `window.__debugSteering.result().interventions`);
+        assert.ok(forkRecord.some((change) => change.parameterId === 21 && change.value === -0.5), `The fork did not run with the new target: ${JSON.stringify(forkRecord)}`);
         await clickLabel('Joint link');
         await readAndGoOn('plot');
         await waitForStep('compare');

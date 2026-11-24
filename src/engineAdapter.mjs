@@ -512,14 +512,24 @@ export async function startEngineRun(content, configuration, options, { onUpdate
         child.once('exit', (code) => { void finalize(code); });
     });
 
+    // A run that ends closes its end of the pipe: a command written as it finishes fails with EPIPE (or finds the stream already
+    // closed). That is the run being over, not a fault, so it is said so, and never left as an 'error' event nobody listens to, which
+    // the main process would raise as an uncaught exception.
+    const runOver = () => new Error('The run has finished; the change was not applied.');
+    child.stdin.on('error', () => {});
     const sendCommand = (command) => {
         const frame = encodeEngineCommand(++commandSequence, command);
-        commandWrite = commandWrite.then(() => new Promise((resolve, reject) => {
-            if (childExited || child.stdin.destroyed) {
-                reject(new Error('The simulation engine is no longer accepting commands.'));
+        // Each command waits for the one before it to be written, whether or not that one could be: a failed write must not fail
+        // every command after it with its error.
+        commandWrite = commandWrite.catch(() => {}).then(() => new Promise((resolve, reject) => {
+            if (childExited || child.stdin.destroyed || child.stdin.writableEnded) {
+                reject(runOver());
                 return;
             }
-            child.stdin.write(frame, (error) => error ? reject(error) : resolve());
+            child.stdin.write(frame, (error) => {
+                if (!error) resolve();
+                else reject(['EPIPE', 'ECONNRESET', 'ERR_STREAM_DESTROYED', 'ERR_STREAM_WRITE_AFTER_END'].includes(error.code) ? runOver() : error);
+            });
         }));
         commandWrite.catch(() => {});
         return commandWrite;

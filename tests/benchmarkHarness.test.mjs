@@ -12,6 +12,12 @@ import { loadModel } from '../benchmarks/lib/engine.mjs';
 import { busyPatterns, machineSlug } from '../benchmarks/lib/machine.mjs';
 import { renderReport } from '../benchmarks/lib/report.mjs';
 import { modelDocuments } from '../benchmarks/generateModels.mjs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
+import { selectSessions } from '../benchmarks/combine.mjs';
+import { resultsDirectory } from '../benchmarks/lib/results.mjs';
 
 test('the matrix exponential matches closed forms', () => {
     const t = 37.3;
@@ -115,4 +121,47 @@ test('a --full report shows the timings, their spread and the machine', () => {
     for (const text of ['Timing and memory', 'A case', '12.5', '12 – 14', '1.50e7', 'MacBookAir10,1', 'AC Power · 80 % battery · Low Power Mode off', 'interaction test runner', 'under caffeinate', 'with uncommitted changes']) {
         assert.ok(html.includes(text), text);
     }
+});
+
+test('results are kept per computer, not per version', () => {
+    const directory = resultsDirectory({ modelIdentifier: 'MacBookAir10,1', chip: 'Apple M1', platform: 'darwin' });
+    assert.ok(directory.endsWith(['benchmarks', 'results', 'macbookair10-1-apple-m1-darwin'].join(sep)), directory);
+});
+
+test('only the sessions timed from the newest source are combined; the others are listed as superseded', (t) => {
+    const machineDirectory = mkdtempSync(join(tmpdir(), 'konjugateCombine-'));
+    t.after(() => rmSync(machineDirectory, { recursive: true, force: true }));
+    const write = (session, part, file, content) => {
+        mkdirSync(join(machineDirectory, 'sessions', session, part), { recursive: true });
+        writeFileSync(join(machineDirectory, 'sessions', session, part, file), JSON.stringify(content));
+    };
+    const run = (commit, workingTreeChanges = false) => ({ run: { konjugateVersion: '2.0.0', gitCommit: commit, workingTreeChanges } });
+    const comparisons = (commit, tools) => ({ versions: { konjugate: { version: '2.0.0', commit } }, records: tools.map((tool) => ({ tool })) });
+    write('2026-01-01T00-00-00', 'problems', 'summary.json', run('aaaaaaa'));
+    write('2026-01-01T00-00-00', 'scaling', 'summary.json', run('aaaaaaa', true));
+    write('2026-01-02T00-00-00', 'comparisons', 'comparisons.json', comparisons('bbbbbbb', ['Konjugate', 'SciPy']));
+    write('2026-01-03T00-00-00', 'problems', 'summary.json', run('ccccccc'));
+    write('2026-01-03T00-00-00', 'comparisons', 'comparisons.json', comparisons('ccccccc', ['Konjugate', 'Julia']));
+    write('2026-01-04T00-00-00', 'scaling', 'summary.json', run('unknown'));
+    // OpenModelica alone, from a later commit: it times no Konjugate, so it does not decide which source is newest.
+    write('2026-01-05T00-00-00-openmodelica', 'openmodelica', 'comparisons.json', comparisons('ddddddd', ['OpenModelica']));
+    mkdirSync(join(machineDirectory, 'sessions', '2026-01-06T00-00-00'), { recursive: true });
+
+    const { sessions, source, superseded } = selectSessions(machineDirectory);
+    assert.deepEqual(source, { konjugateVersion: '2.0.0', gitCommit: 'ccccccc', fullCommit: null, commitUrl: null });
+    // A part that recorded no start time is dated by its session folder's name, in UTC.
+    assert.equal(superseded.find((entry) => entry.session === '2026-01-04T00-00-00').startedAt, '2026-01-04T00:00:00.000Z');
+    assert.deepEqual(sessions.map((session) => [session.name, [...session.parts]]), [['2026-01-03T00-00-00', ['problems', 'comparisons']]]);
+    assert.deepEqual(superseded.map((entry) => `${entry.session} ${entry.part} ${entry.gitCommit}`), [
+        '2026-01-01T00-00-00 problems aaaaaaa', '2026-01-01T00-00-00 scaling aaaaaaa', '2026-01-02T00-00-00 comparisons bbbbbbb',
+        '2026-01-04T00-00-00 scaling unknown', '2026-01-05T00-00-00-openmodelica openmodelica ddddddd'
+    ]);
+    assert.deepEqual(selectSessions(machineDirectory, ['2026-01-01T00-00-00']).sessions.map((session) => [...session.parts]), [['problems', 'scaling']]);
+
+    // A commit the repository has is linked to its page by its full hash.
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    write('2026-01-07T00-00-00', 'problems', 'summary.json', run(head.slice(0, 7)));
+    const linked = selectSessions(machineDirectory).source;
+    assert.equal(linked.fullCommit, head);
+    assert.equal(linked.commitUrl, `https://github.com/zenineasa/Konjugate/commit/${head}`);
 });

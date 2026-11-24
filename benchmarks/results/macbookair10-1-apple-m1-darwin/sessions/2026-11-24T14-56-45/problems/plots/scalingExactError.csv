@@ -1,0 +1,3 @@
+"chain, explicit Euler x","chain, explicit Euler y","chain, Runge–Kutta 4 x","chain, Runge–Kutta 4 y","grid, explicit Euler x","grid, explicit Euler y","grid, Runge–Kutta 4 x","grid, Runge–Kutta 4 y","random network, explicit Euler x","random network, explicit Euler y","random network, Runge–Kutta 4 x","random network, Runge–Kutta 4 y"
+100,0.005593788009263578,100,2.7400758217943633e-8,100,0.005396349133531375,100,1.2658940895526882e-7,100,0.010132421665013873,100,5.044186751484991e-7
+400,0.005632159840017303,400,2.755278805111061e-8,400,0.00546443497911471,400,1.3162247025633178e-7,,,,

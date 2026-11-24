@@ -1,0 +1,4337 @@
+{
+ "machine": {
+  "model": "MacBook Air",
+  "modelIdentifier": "MacBookAir10,1",
+  "chip": "Apple M1",
+  "cpu": "Apple M1",
+  "performanceCores": 4,
+  "efficiencyCores": 4,
+  "operatingSystem": "macOS 26.7.3 (25G342)",
+  "power": {
+   "source": "AC Power",
+   "batteryPercent": 80,
+   "lowPowerMode": false
+  },
+  "platform": "darwin",
+  "architecture": "arm64",
+  "logicalProcessors": 8,
+  "memoryBytes": 8589934592,
+  "node": "v24.19.0",
+  "loadAverage": [
+   1.16,
+   1.69,
+   3.88
+  ],
+  "engineBuild": {
+   "buildType": "RelWithDebInfo",
+   "compiler": "/usr/bin/c++",
+   "compilerVersion": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+   "flags": "-O2 -g -DNDEBUG",
+   "compileFlags": "-O2 -g -DNDEBUG -std=c++20 -arch arm64 -mmacosx-version-min=11.0",
+   "optimisation": "-O2",
+   "shipped": true
+  }
+ },
+ "source": {
+  "konjugateVersion": "2.0.0",
+  "gitCommit": "41b2450",
+  "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+  "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad"
+ },
+ "sessions": [
+  "2026-11-24T14-56-45"
+ ],
+ "sessionParts": [
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "problems",
+   "startedAt": "2026-11-24T14:59:46.908Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": false
+  },
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "scaling",
+   "startedAt": "2026-11-24T15:08:48.436Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": true
+  },
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "comparisons",
+   "startedAt": "2026-11-24T16:47:32.613Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": null
+  }
+ ],
+ "supersededSessions": [
+  {
+   "session": "2026-11-23T22-06-11",
+   "part": "problems",
+   "startedAt": "2026-11-23T22:09:12.616Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "212d40f",
+   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "workingTreeChanges": false
+  },
+  {
+   "session": "2026-11-23T22-06-11",
+   "part": "scaling",
+   "startedAt": "2026-11-23T22:19:34.236Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "212d40f",
+   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "workingTreeChanges": true
+  },
+  {
+   "session": "2026-11-24T06-25-38",
+   "part": "comparisons",
+   "startedAt": "2026-11-24T06:30:41.227Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "5a7148d",
+   "fullCommit": "5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
+   "workingTreeChanges": null
+  }
+ ],
+ "problems": [
+  {
+   "problem": "thermal/rcNetwork",
+   "label": "Network, 8,192 steps of 2 s",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 27.980584000004455,
+    "median": 28.217333000007784,
+    "interquartileRange": 0.30202050000661984,
+    "minimumOverMedian": 0.9916098023862403,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     27.980584000004455
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.010703368032922761,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 15.915456,
+    "median": 16.175863,
+    "interquartileRange": 0.20995700000000284,
+    "minimumOverMedian": 0.9839015080679159,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     15.915456
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01297964751556086,
+    "noisy": false
+   },
+   "peakResidentBytes": 10043392,
+   "substepsPerSecond": 3088318.6758833677,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "electrical/rlcCircuits",
+   "label": "Series circuit, 65,536 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 53.83316700000432,
+    "median": 54.127040999999736,
+    "interquartileRange": 0.3488120000110939,
+    "minimumOverMedian": 0.9945706620098554,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     53.83316700000432
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006444320501671163,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 38.535228,
+    "median": 38.870713,
+    "interquartileRange": 0.3185114999999996,
+    "minimumOverMedian": 0.9913692089980443,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     38.535228
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008194125484654723,
+    "noisy": false
+   },
+   "peakResidentBytes": 9617408,
+   "substepsPerSecond": 3401355.2482419466,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "electrical/rlcCircuits",
+   "label": "Coupled pair, 65,536 steps, semi-implicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 334.24533299999894,
+    "median": 335.6934170000022,
+    "interquartileRange": 3.3228130000061356,
+    "minimumOverMedian": 0.9956862901484801,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     334.24533299999894
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009898356153960902,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 317.035784,
+    "median": 318.158992,
+    "interquartileRange": 3.145448999999985,
+    "minimumOverMedian": 0.9964696644500306,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     317.035784
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009886406102267212,
+    "noisy": false
+   },
+   "peakResidentBytes": 10371072,
+   "substepsPerSecond": 620144.5070945051,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/harmonicOscillator",
+   "label": "262,144 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 112.03683299999102,
+    "median": 112.31541700000525,
+    "interquartileRange": 0.39847900001041126,
+    "minimumOverMedian": 0.9975196281378341,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     112.03683299999102
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0035478566580970147,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 80.361124,
+    "median": 80.536705,
+    "interquartileRange": 0.20835550000001035,
+    "minimumOverMedian": 0.9978198636261566,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     80.361124
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0025870874652745026,
+    "noisy": false
+   },
+   "peakResidentBytes": 10747904,
+   "substepsPerSecond": 3262074.831108634,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/harmonicOscillator",
+   "label": "262,144 steps, semi-implicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 238.74487500000396,
+    "median": 239.12804199999664,
+    "interquartileRange": 0.5882089999940945,
+    "minimumOverMedian": 0.9983976492393448,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     238.74487500000396
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0024598077041675555,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 206.751731,
+    "median": 207.697724,
+    "interquartileRange": 1.31429049999997,
+    "minimumOverMedian": 0.9954453376677349,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     206.751731
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006327900348103815,
+    "noisy": false
+   },
+   "peakResidentBytes": 10911744,
+   "substepsPerSecond": 1267916.833063903,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/harmonicOscillator",
+   "label": "262,144 steps, Verlet",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 275.3270419999899,
+    "median": 277.10874999998487,
+    "interquartileRange": 1.721896499991999,
+    "minimumOverMedian": 0.9935703654251442,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     275.3270419999899
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006213793321185611,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 245.452806,
+    "median": 247.281556,
+    "interquartileRange": 1.5211085000000253,
+    "minimumOverMedian": 0.9926045839019227,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     245.452806
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006151322098604173,
+    "noisy": false
+   },
+   "peakResidentBytes": 10928128,
+   "substepsPerSecond": 1068001.6426457148,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/pendulum",
+   "label": "131,072 steps, semi-implicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 129.93645799998194,
+    "median": 131.16412500001024,
+    "interquartileRange": 1.5764380000036908,
+    "minimumOverMedian": 0.9906402226978741,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     129.93645799998194
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012018819932687903,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 109.375595,
+    "median": 110.531065,
+    "interquartileRange": 1.3763709999999918,
+    "minimumOverMedian": 0.9895461968090148,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     109.375595
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012452345410767477,
+    "noisy": false
+   },
+   "peakResidentBytes": 10272768,
+   "substepsPerSecond": 1198366.0523172468,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/pendulum",
+   "label": "131,072 steps, Verlet",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 148.6435000000056,
+    "median": 149.10416699998314,
+    "interquartileRange": 0.9627710000058869,
+    "minimumOverMedian": 0.9969104351055621,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     148.6435000000056
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0064570361739521055,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 129.223814,
+    "median": 129.477833,
+    "interquartileRange": 0.9665785000000255,
+    "minimumOverMedian": 0.9980381274993998,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     129.223814
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007465204487937526,
+    "noisy": false
+   },
+   "peakResidentBytes": 10223616,
+   "substepsPerSecond": 1014302.2090340098,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "population/lotkaVolterra",
+   "label": "One node, 131,072 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 80.77566600000137,
+    "median": 81.02216600000975,
+    "interquartileRange": 0.5025209999876097,
+    "minimumOverMedian": 0.9969576226830525,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     80.77566600000137
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006202265686004361,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 59.522805,
+    "median": 59.699725,
+    "interquartileRange": 0.4027719999999988,
+    "minimumOverMedian": 0.9970365022619451,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     59.522805
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006746630742436398,
+    "noisy": false
+   },
+   "peakResidentBytes": 10846208,
+   "substepsPerSecond": 2202046.761741151,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "population/lotkaVolterra",
+   "label": "Two nodes, 131,072 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 101.44429099999252,
+    "median": 101.6302920000162,
+    "interquartileRange": 0.1051045000058366,
+    "minimumOverMedian": 0.9981698271611416,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     101.44429099999252
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00103418476851193,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 78.552423,
+    "median": 78.934025,
+    "interquartileRange": 0.42025999999998476,
+    "minimumOverMedian": 0.9951655575653211,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     78.552423
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0053241932107223056,
+    "noisy": false
+   },
+   "peakResidentBytes": 10960896,
+   "substepsPerSecond": 3337185.4105633376,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "coupling/graphSplit",
+   "label": "One node, h = 2^-10 s",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 82.48791600001277,
+    "median": 82.72766599999159,
+    "interquartileRange": 0.28281299998343457,
+    "minimumOverMedian": 0.9971019368541252,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     82.48791600001277
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003418602429608776,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 66.310017,
+    "median": 66.477148,
+    "interquartileRange": 0.26996950000000197,
+    "minimumOverMedian": 0.9974858879324968,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     66.310017
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0040610872776913045,
+    "noisy": false
+   },
+   "peakResidentBytes": 10862592,
+   "substepsPerSecond": 988327.2990263297,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "coupling/graphSplit",
+   "label": "Three nodes, H = 2^-6 s with 16 substeps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 67.8853329999838,
+    "median": 68.13645800002269,
+    "interquartileRange": 0.22477049998997245,
+    "minimumOverMedian": 0.9963143813545635,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     67.8853329999838
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0032988286533752256,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 56.686063,
+    "median": 56.777454,
+    "interquartileRange": 0.19332500000000152,
+    "minimumOverMedian": 0.9983903645978912,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     56.686063
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003404960708523519,
+    "noisy": false
+   },
+   "peakResidentBytes": 10960896,
+   "substepsPerSecond": 3468365.7603809955,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "coupling/graphSplit",
+   "label": "Three nodes, h = 2^-10 s",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 102.7582500000135,
+    "median": 103.17691699997522,
+    "interquartileRange": 1.323208000016166,
+    "minimumOverMedian": 0.9959422416162927,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     102.7582500000135
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012824651467502985,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 85.287127,
+    "median": 85.855546,
+    "interquartileRange": 1.1045785000000024,
+    "minimumOverMedian": 0.9933793560639634,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     85.287127
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012865546274669341,
+    "noisy": false
+   },
+   "peakResidentBytes": 10993664,
+   "substepsPerSecond": 2305248.246901317,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "oscillators/vanDerPol",
+   "label": "μ = 10, Runge–Kutta 4, 51,200 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 54.22279199998593,
+    "median": 54.705291000020225,
+    "interquartileRange": 0.5055420000280719,
+    "minimumOverMedian": 0.9911800304648024,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     54.22279199998593
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009241190217375591,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 33.312541,
+    "median": 33.450258,
+    "interquartileRange": 0.34135450000000134,
+    "minimumOverMedian": 0.9958829316054904,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     33.312541
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.010204839077773371,
+    "noisy": false
+   },
+   "peakResidentBytes": 16154624,
+   "substepsPerSecond": 1536958.7087337468,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "chaos/lorenz",
+   "label": "One node with tangent equations, Runge–Kutta 4, 66,560 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 107.1341249999823,
+    "median": 107.33079199999338,
+    "interquartileRange": 0.17768750002142042,
+    "minimumOverMedian": 0.9981676553732028,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     107.1341249999823
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0016555128002915637,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 78.487287,
+    "median": 78.646363,
+    "interquartileRange": 0.10450550000000192,
+    "minimumOverMedian": 0.9979773254104579,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     78.487287
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0013288027063629367,
+    "noisy": false
+   },
+   "peakResidentBytes": 21544960,
+   "substepsPerSecond": 848035.4276992657,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "chaos/lorenz",
+   "label": "Two nodes, explicit Euler, 98,304 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 88.14237499999581,
+    "median": 88.25575000001118,
+    "interquartileRange": 0.19785350002348423,
+    "minimumOverMedian": 0.9987153811506293,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     88.14237499999581
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002241819938343498,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 67.537902,
+    "median": 67.753614,
+    "interquartileRange": 0.32504449999998997,
+    "minimumOverMedian": 0.9968162288730459,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     67.537902
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004797448885899872,
+    "noisy": false
+   },
+   "peakResidentBytes": 11780096,
+   "substepsPerSecond": 2911076.5093058413,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/doublePendulum",
+   "label": "Runge–Kutta 4, 15,360 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 47.801832999975886,
+    "median": 48.164792000025045,
+    "interquartileRange": 0.1386040000070352,
+    "minimumOverMedian": 0.9924642257346618,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     47.801832999975886
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002877703697069078,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 35.410569,
+    "median": 35.730873,
+    "interquartileRange": 0.1603344999999976,
+    "minimumOverMedian": 0.9910356514379036,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     35.410569
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004487281908841062,
+    "noisy": false
+   },
+   "peakResidentBytes": 10960896,
+   "substepsPerSecond": 433768.79936608754,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "mechanical/bouncingBall",
+   "label": "Runge–Kutta 4 with its contacts located, 4,096 steps",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 17.26387500000419,
+    "median": 17.331000000005588,
+    "interquartileRange": 0.09129149999353103,
+    "minimumOverMedian": 0.9961268824648678,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     17.26387500000419
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005267526397409359,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 7.964558,
+    "median": 7.980346,
+    "interquartileRange": 0.043785500000000255,
+    "minimumOverMedian": 0.9980216396632428,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     7.964558
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00548666686883003,
+    "noisy": false
+   },
+   "peakResidentBytes": 9699328,
+   "substepsPerSecond": 514278.3818009738,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "electrical/switchedCircuits",
+   "label": "Buck, switched, 2^20 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 1291.9330830000108,
+    "median": 1297.6348749999888,
+    "interquartileRange": 5.358999499992933,
+    "minimumOverMedian": 0.9956060120532919,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     1291.9330830000108
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004129820801859213,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1171.381743,
+    "median": 1179.867988,
+    "interquartileRange": 3.8590245000000323,
+    "minimumOverMedian": 0.9928074622870435,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     1171.381743
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0032707256568096942,
+    "noisy": false
+   },
+   "peakResidentBytes": 12140544,
+   "substepsPerSecond": 2685484.9145450615,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "electrical/switchedCircuits",
+   "label": "Buck, switched, 2^20 steps, Runge–Kutta 4",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 4656.786667000037,
+    "median": 4678.0793330000015,
+    "interquartileRange": 21.167687500012107,
+    "minimumOverMedian": 0.9954484170779742,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     4656.786667000037
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0045248671502194256,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 4550.732995,
+    "median": 4572.846216,
+    "interquartileRange": 22.31906549999985,
+    "minimumOverMedian": 0.9951642325248928,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     4550.732995
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004880782000039131,
+    "noisy": false
+   },
+   "peakResidentBytes": 12746752,
+   "substepsPerSecond": 691257.431155879,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "thermal/heatExchanger",
+   "label": "Counterflow, 40 segments, 2^16 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 1778.64641700004,
+    "median": 1783.228833000001,
+    "interquartileRange": 1.0206044999940787,
+    "minimumOverMedian": 0.9974302703527669,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     1778.64641700004
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0005723351266573414,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1694.126398,
+    "median": 1698.629386,
+    "interquartileRange": 1.8108099999999467,
+    "minimumOverMedian": 0.9973490462150759,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     1694.126398
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0010660418422785644,
+    "noisy": false
+   },
+   "peakResidentBytes": 20103168,
+   "substepsPerSecond": 3249476.548207355,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "thermal/heatExchanger",
+   "label": "Counterflow, 40 segments, 2^14 steps, Runge–Kutta 4",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 487.49379199999385,
+    "median": 489.50633300002664,
+    "interquartileRange": 3.5834170000161976,
+    "minimumOverMedian": 0.9958886313325129,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     487.49379199999385
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0073204711735895,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 450.353974,
+    "median": 452.343558,
+    "interquartileRange": 3.6279044999999996,
+    "minimumOverMedian": 0.9956016086339402,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     450.353974
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008020241331700362,
+    "noisy": false
+   },
+   "peakResidentBytes": 20480000,
+   "substepsPerSecond": 3055942.8348688227,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "fluid/pipeNetwork",
+   "label": "Fluid network, 2^16 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 169.27720800001407,
+    "median": 170.70358299999498,
+    "interquartileRange": 0.6407084999955259,
+    "minimumOverMedian": 0.9916441414121873,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     169.27720800001407
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0037533394949041273,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 149.585625,
+    "median": 151.073458,
+    "interquartileRange": 0.6923819999999807,
+    "minimumOverMedian": 0.9901515923465524,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     149.585625
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004583081695263643,
+    "noisy": false
+   },
+   "peakResidentBytes": 10747904,
+   "substepsPerSecond": 2628701.7886912595,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "fluid/pipeNetwork",
+   "label": "Fluid network, 9,600 steps, Runge–Kutta 4",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 63.29975000000559,
+    "median": 63.893708000017796,
+    "interquartileRange": 0.5596664999611676,
+    "minimumOverMedian": 0.9907039672824741,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     63.29975000000559
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0087593366777369,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 50.972058,
+    "median": 51.456801,
+    "interquartileRange": 0.3281134999999935,
+    "minimumOverMedian": 0.9905796125958161,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     50.972058
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006376484616678629,
+    "noisy": false
+   },
+   "peakResidentBytes": 11223040,
+   "substepsPerSecond": 1130030.888688073,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "multiDomain/dcMotor",
+   "label": "DC motor, 2^17 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 410.75291699997615,
+    "median": 412.0324580000015,
+    "interquartileRange": 1.4287914999877103,
+    "minimumOverMedian": 0.9968945626122849,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     410.75291699997615
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003467667345730576,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 377.92324,
+    "median": 378.845688,
+    "interquartileRange": 1.4404969999999366,
+    "minimumOverMedian": 0.9975651088841218,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     377.92324
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0038023317821158273,
+    "noisy": false
+   },
+   "peakResidentBytes": 14155776,
+   "substepsPerSecond": 2080930.5085339553,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "multiDomain/dcMotor",
+   "label": "DC motor, 49,152 steps, Runge–Kutta 4",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 496.95350000000326,
+    "median": 498.6460000000079,
+    "interquartileRange": 2.172000999969896,
+    "minimumOverMedian": 0.9966058085294885,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     496.95350000000326
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004355797499568555,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 477.943782,
+    "median": 479.666028,
+    "interquartileRange": 2.1075439999999617,
+    "minimumOverMedian": 0.9964094893124263,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     477.943782
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004393773744593731,
+    "noisy": false
+   },
+   "peakResidentBytes": 13746176,
+   "substepsPerSecond": 617043.2822996743,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "showcase/dataCentre",
+   "label": "Data centre, 57,600 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 922.0331669999869,
+    "median": 924.9399580000318,
+    "interquartileRange": 2.715062000002945,
+    "minimumOverMedian": 0.996857319250938,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     922.0331669999869
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002935392699298706,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 874.853998,
+    "median": 877.405007,
+    "interquartileRange": 2.4535885000000235,
+    "minimumOverMedian": 0.9970925524932639,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     874.853998
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002796414974185375,
+    "noisy": false
+   },
+   "peakResidentBytes": 15695872,
+   "substepsPerSecond": 1711828.4918668221,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "showcase/dataCentre",
+   "label": "Data centre, 7,200 steps, Runge–Kutta 4",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 239.40533300000243,
+    "median": 239.5815419999999,
+    "interquartileRange": 0.4641460000129882,
+    "minimumOverMedian": 0.9992645134573953,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     239.40533300000243
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.001937319528617895,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 214.956512,
+    "median": 215.311253,
+    "interquartileRange": 0.5427065000000084,
+    "minimumOverMedian": 0.9983524270326921,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     214.956512
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0025205672831229513,
+    "noisy": false
+   },
+   "peakResidentBytes": 16187392,
+   "substepsPerSecond": 870873.8258648334,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "modelica/standardLibrary",
+   "label": "Cauer filter, 24,000 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 61.520875000045635,
+    "median": 61.94420899997931,
+    "interquartileRange": 0.30725100002018735,
+    "minimumOverMedian": 0.9931658825454722,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     61.520875000045635
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004960124682846301,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 45.947796,
+    "median": 46.34754,
+    "interquartileRange": 0.3249284999999986,
+    "minimumOverMedian": 0.9913750762176373,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     45.947796
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007010695713299964,
+    "noisy": false
+   },
+   "peakResidentBytes": 12206080,
+   "substepsPerSecond": 2089327.6360850912,
+   "nodeStepsPerSecond": null
+  },
+  {
+   "problem": "modelica/standardLibrary",
+   "label": "Rotational First, 16,000 steps, explicit",
+   "family": null,
+   "nodes": null,
+   "method": null,
+   "backend": null,
+   "workers": null,
+   "wall": {
+    "minimum": 26.580040999979246,
+    "median": 26.8559580000001,
+    "interquartileRange": 0.15697850001743063,
+    "minimumOverMedian": 0.9897260414236255,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     26.580040999979246
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0058452020224871535,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 14.449352,
+    "median": 14.787258,
+    "interquartileRange": 0.2561630000000008,
+    "minimumOverMedian": 0.9771488398998651,
+    "runs": 7,
+    "sessions": 1,
+    "sessionMinimums": [
+     14.449352
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0173232251712928,
+    "noisy": false
+   },
+   "peakResidentBytes": 10600448,
+   "substepsPerSecond": 3321948.278372622,
+   "nodeStepsPerSecond": null
+  }
+ ],
+ "scaling": [
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, explicit Euler, serial",
+   "family": "chain",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 262.8657919999969,
+    "median": 263.08545899999444,
+    "interquartileRange": 1.9047500000015134,
+    "minimumOverMedian": 0.9991650355712074,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     262.8657919999969
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007240042863796412,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 231.419337,
+    "median": 231.647701,
+    "interquartileRange": 1.9013789999999915,
+    "minimumOverMedian": 0.9990141754094076,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     231.419337
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008208063329754312,
+    "noisy": false
+   },
+   "peakResidentBytes": 13320192,
+   "substepsPerSecond": 4321160.076610193,
+   "nodeStepsPerSecond": 4321160.076610193,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 690.546834000008,
+    "median": 696.1837079999968,
+    "interquartileRange": 6.895458000013605,
+    "minimumOverMedian": 0.9919031802450785,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     690.546834000008
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009904652925336248,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 652.713257,
+    "median": 658.547999,
+    "interquartileRange": 6.871632000000091,
+    "minimumOverMedian": 0.9911399897822786,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     652.713257
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.010434519595283276,
+    "noisy": false
+   },
+   "peakResidentBytes": 14303232,
+   "substepsPerSecond": 1532066.3235739977,
+   "nodeStepsPerSecond": 1532066.3235739977,
+   "speedUp": 0.35454977284152206,
+   "efficiency": 0.08863744321038051
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 520.8853330000129,
+    "median": 522.4555000000109,
+    "interquartileRange": 2.1455840000126045,
+    "minimumOverMedian": 0.9969946397348712,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     520.8853330000129
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0041067306211008585,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 486.903364,
+    "median": 488.820154,
+    "interquartileRange": 2.089804000000015,
+    "minimumOverMedian": 0.996078741876097,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     486.903364
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004275200158788901,
+    "noisy": false
+   },
+   "peakResidentBytes": 14188544,
+   "substepsPerSecond": 2053795.6275036128,
+   "nodeStepsPerSecond": 2053795.6275036128,
+   "speedUp": 0.47528802245038504,
+   "efficiency": 0.11882200561259626
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, Runge–Kutta 4, serial",
+   "family": "chain",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 193.38420899998164,
+    "median": 195.1187079999945,
+    "interquartileRange": 1.876542000012705,
+    "minimumOverMedian": 0.9911105448688553,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     193.38420899998164
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009617437606304558,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 168.842255,
+    "median": 170.64478,
+    "interquartileRange": 1.9993510000000185,
+    "minimumOverMedian": 0.9894369754527504,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     168.842255
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01171644980877832,
+    "noisy": false
+   },
+   "peakResidentBytes": 13991936,
+   "substepsPerSecond": 5922688.014324376,
+   "nodeStepsPerSecond": 5922688.014324376,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2533.267124999984,
+    "median": 2536.5814169999794,
+    "interquartileRange": 11.487999000004493,
+    "minimumOverMedian": 0.9986934020813275,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2533.267124999984
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004528929733149025,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 2506.25956,
+    "median": 2509.463549,
+    "interquartileRange": 11.374586000000363,
+    "minimumOverMedian": 0.9987232374818606,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2506.25956
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004532676318224681,
+    "noisy": false
+   },
+   "peakResidentBytes": 14499840,
+   "substepsPerSecond": 399000.97179080686,
+   "nodeStepsPerSecond": 399000.97179080686,
+   "speedUp": 0.06736822382435122,
+   "efficiency": 0.016842055956087804
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 1329.9574169999978,
+    "median": 1343.09266699999,
+    "interquartileRange": 5.639082999987295,
+    "minimumOverMedian": 0.9902201461427589,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1329.9574169999978
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004198580737234669,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1302.718561,
+    "median": 1315.634691,
+    "interquartileRange": 5.842010000000073,
+    "minimumOverMedian": 0.9901825863301137,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1302.718561
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004440449951619642,
+    "noisy": false
+   },
+   "peakResidentBytes": 14843904,
+   "substepsPerSecond": 767625.5101734136,
+   "nodeStepsPerSecond": 767625.5101734136,
+   "speedUp": 0.12960762213320456,
+   "efficiency": 0.03240190553330114
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, explicit Euler, serial",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 388.1553750000021,
+    "median": 388.2479170000006,
+    "interquartileRange": 0.1563330000208225,
+    "minimumOverMedian": 0.9997616419922776,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     388.1553750000021
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.000402662817173137,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 235.300782,
+    "median": 236.325195,
+    "interquartileRange": 0.7535469999999975,
+    "minimumOverMedian": 0.9956652400096401,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     235.300782
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0031886020447375383,
+    "noisy": false
+   },
+   "peakResidentBytes": 48119808,
+   "substepsPerSecond": 4249879.628534341,
+   "nodeStepsPerSecond": 4249879.628534341,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 780.2593750000233,
+    "median": 793.532750000013,
+    "interquartileRange": 8.78762500002631,
+    "minimumOverMedian": 0.9832730596185355,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     780.2593750000233
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.011074054599543831,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 620.436835,
+    "median": 634.098409,
+    "interquartileRange": 8.328789000000029,
+    "minimumOverMedian": 0.9784551202051668,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     620.436835
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01313485238534959,
+    "noisy": false
+   },
+   "peakResidentBytes": 49463296,
+   "substepsPerSecond": 1611767.6185360593,
+   "nodeStepsPerSecond": 1611767.6185360593,
+   "speedUp": 0.3792501810438125,
+   "efficiency": 0.09481254526095312
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 303.47979199999827,
+    "median": 304.3233749999781,
+    "interquartileRange": 1.3199169999570586,
+    "minimumOverMedian": 0.9972280045856488,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     303.47979199999827
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00433721859176001,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 148.294002,
+    "median": 149.697076,
+    "interquartileRange": 1.7976740000000007,
+    "minimumOverMedian": 0.9906272451173328,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     148.294002
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012008744913628109,
+    "noisy": false
+   },
+   "peakResidentBytes": 49053696,
+   "substepsPerSecond": 6743361.069991219,
+   "nodeStepsPerSecond": 6743361.069991219,
+   "speedUp": 1.5867181330772906,
+   "efficiency": 0.39667953326932265
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, Runge–Kutta 4, serial",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 329.48562500000116,
+    "median": 330.27887500001816,
+    "interquartileRange": 0.469000999990385,
+    "minimumOverMedian": 0.9975982417888006,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     329.48562500000116
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0014200151311232342,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 182.370218,
+    "median": 183.164673,
+    "interquartileRange": 0.7063300000000083,
+    "minimumOverMedian": 0.995662618850088,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     182.370218
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0038562567138697556,
+    "noisy": false
+   },
+   "peakResidentBytes": 51216384,
+   "substepsPerSecond": 5483351.453799326,
+   "nodeStepsPerSecond": 5483351.453799326,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2587.4260829999985,
+    "median": 2671.4228750000184,
+    "interquartileRange": 147.1506250000093,
+    "minimumOverMedian": 0.9685572835412591,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2587.4260829999985
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.055083239114664055,
+    "noisy": true
+   },
+   "compute": {
+    "minimum": 2439.348837,
+    "median": 2523.623484,
+    "interquartileRange": 146.67791199999965,
+    "minimumOverMedian": 0.9666056971119864,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2439.348837
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.05812194763995136,
+    "noisy": true
+   },
+   "peakResidentBytes": 52314112,
+   "substepsPerSecond": 409945.4677543522,
+   "nodeStepsPerSecond": 409945.4677543522,
+   "speedUp": 0.07476184432247318,
+   "efficiency": 0.018690461080618295
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 1000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 534.8650830000115,
+    "median": 541.8233340000152,
+    "interquartileRange": 4.820498999994015,
+    "minimumOverMedian": 0.9871577125543223,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     534.8650830000115
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008896809527206298,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 386.462157,
+    "median": 393.067587,
+    "interquartileRange": 5.381913000000054,
+    "minimumOverMedian": 0.9831951801205119,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     386.462157
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.013692080390235927,
+    "noisy": false
+   },
+   "peakResidentBytes": 53215232,
+   "substepsPerSecond": 2587575.4763745214,
+   "nodeStepsPerSecond": 2587575.4763745214,
+   "speedUp": 0.4718967037178753,
+   "efficiency": 0.11797417592946882
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, explicit Euler, serial",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 1633.7080839999835,
+    "median": 1635.5228330000245,
+    "interquartileRange": 0.70150000002468,
+    "minimumOverMedian": 0.9988904165913035,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1633.7080839999835
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0004289148313129478,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 255.714288,
+    "median": 258.880709,
+    "interquartileRange": 1.2837499999999977,
+    "minimumOverMedian": 0.9877688028118,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     255.714288
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004958847667556402,
+    "noisy": false
+   },
+   "peakResidentBytes": 419348480,
+   "substepsPerSecond": 3910614.4901844515,
+   "nodeStepsPerSecond": 3910614.4901844515,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2092.0024169999815,
+    "median": 2105.00791700001,
+    "interquartileRange": 18.68862500000978,
+    "minimumOverMedian": 0.9938216384389834,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2092.0024169999815
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00887817325962565,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 704.516459,
+    "median": 711.382786,
+    "interquartileRange": 13.222710000000006,
+    "minimumOverMedian": 0.9903479151658866,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     704.516459
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01858733477984384,
+    "noisy": false
+   },
+   "peakResidentBytes": 401293312,
+   "substepsPerSecond": 1419413.2546163835,
+   "nodeStepsPerSecond": 1419413.2546163835,
+   "speedUp": 0.36296424978199127,
+   "efficiency": 0.09074106244549782
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 1492.2377080000006,
+    "median": 1508.4530839999788,
+    "interquartileRange": 9.005874999973457,
+    "minimumOverMedian": 0.9892503279207201,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1492.2377080000006
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005970271860290474,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 121.484958,
+    "median": 122.358249,
+    "interquartileRange": 1.4906130000000104,
+    "minimumOverMedian": 0.9928628350999041,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     121.484958
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012182366225263737,
+    "noisy": false
+   },
+   "peakResidentBytes": 421576704,
+   "substepsPerSecond": 8231471.751424567,
+   "nodeStepsPerSecond": 8231471.751424567,
+   "speedUp": 2.104904938107646,
+   "efficiency": 0.5262262345269115
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, Runge–Kutta 4, serial",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 1720.9092079999973,
+    "median": 1735.7002920000232,
+    "interquartileRange": 15.579709000012372,
+    "minimumOverMedian": 0.9914783191152302,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1720.9092079999973
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008976036399728948,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 358.942581,
+    "median": 362.602005,
+    "interquartileRange": 4.135380999999995,
+    "minimumOverMedian": 0.9899078770951639,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     358.942581
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.011404738371482516,
+    "noisy": false
+   },
+   "peakResidentBytes": 450281472,
+   "substepsPerSecond": 2785960.911112967,
+   "nodeStepsPerSecond": 2785960.911112967,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 4407.396250000049,
+    "median": 4411.85583299998,
+    "interquartileRange": 12.694458000012673,
+    "minimumOverMedian": 0.998989182065612,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     4407.396250000049
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002877351046935883,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3012.037748,
+    "median": 3031.622045,
+    "interquartileRange": 16.32896299999993,
+    "minimumOverMedian": 0.9935399938682,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3012.037748
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005386213306810787,
+    "noisy": false
+   },
+   "peakResidentBytes": 453787648,
+   "substepsPerSecond": 332001.1512684402,
+   "nodeStepsPerSecond": 332001.1512684402,
+   "speedUp": 0.11916935013126535,
+   "efficiency": 0.029792337532816338
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 10000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 1875.8246659999713,
+    "median": 1877.8127080000122,
+    "interquartileRange": 1.8541660000337288,
+    "minimumOverMedian": 0.9989412991021036,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1875.8246659999713
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0009874073128456626,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 478.275824,
+    "median": 482.840127,
+    "interquartileRange": 4.890078000000017,
+    "minimumOverMedian": 0.9905469683550141,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     478.275824
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01012773737423861,
+    "noisy": false
+   },
+   "peakResidentBytes": 453869568,
+   "substepsPerSecond": 2090843.7136475458,
+   "nodeStepsPerSecond": 2090843.7136475458,
+   "speedUp": 0.750492839044275,
+   "efficiency": 0.18762320976106875
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, explicit Euler, serial",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 14634.829792000004,
+    "median": 14723.084957999992,
+    "interquartileRange": 87.45304199995007,
+    "minimumOverMedian": 0.9940056607530453,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     14634.829792000004
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0059398585452318025,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 258.883999,
+    "median": 278.403997,
+    "interquartileRange": 17.367417999999986,
+    "minimumOverMedian": 0.9298860712836677,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     258.883999
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0623820713321152,
+    "noisy": true
+   },
+   "peakResidentBytes": 3068985344,
+   "substepsPerSecond": 3862733.9034576635,
+   "nodeStepsPerSecond": 3862733.9034576635,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 15293.646083,
+    "median": 15410.806041999953,
+    "interquartileRange": 38.750751000014134,
+    "minimumOverMedian": 0.9923975450290756,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     15293.646083
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002514518117638006,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 719.749458,
+    "median": 722.95821,
+    "interquartileRange": 4.217330000000061,
+    "minimumOverMedian": 0.9955616355750355,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     719.749458
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005833435379342411,
+    "noisy": false
+   },
+   "peakResidentBytes": 3090808832,
+   "substepsPerSecond": 1389372.3557343755,
+   "nodeStepsPerSecond": 1389372.3557343755,
+   "speedUp": 0.3596862715525658,
+   "efficiency": 0.08992156788814144
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 14824.962500000023,
+    "median": 14984.57816699997,
+    "interquartileRange": 141.90587499993853,
+    "minimumOverMedian": 0.9893480039797541,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     14824.962500000023
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009470128115615095,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 126.923126,
+    "median": 130.582041,
+    "interquartileRange": 2.088247999999993,
+    "minimumOverMedian": 0.9719799524346536,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     126.923126
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.015991846842093645,
+    "noisy": false
+   },
+   "peakResidentBytes": 3063201792,
+   "substepsPerSecond": 7878784.832324411,
+   "nodeStepsPerSecond": 7878784.832324411,
+   "speedUp": 2.039691324652688,
+   "efficiency": 0.509922831163172
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, Runge–Kutta 4, serial",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 15405.44858299999,
+    "median": 15497.088542000041,
+    "interquartileRange": 47.69725000008475,
+    "minimumOverMedian": 0.9940866338375954,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     15405.44858299999
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0030778200608982892,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 546.928501,
+    "median": 553.669291,
+    "interquartileRange": 11.911751999999979,
+    "minimumOverMedian": 0.9878252413316525,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     546.928501
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.021514200252077873,
+    "noisy": false
+   },
+   "peakResidentBytes": 3038920704,
+   "substepsPerSecond": 1828392.556196299,
+   "nodeStepsPerSecond": 1828392.556196299,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 19046.824125000043,
+    "median": 19109.133583999937,
+    "interquartileRange": 7.393500000122003,
+    "minimumOverMedian": 0.9967392839279712,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     19046.824125000043
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0003869092215835769,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3984.362374,
+    "median": 4023.236457,
+    "interquartileRange": 33.947875000000295,
+    "minimumOverMedian": 0.9903376091821888,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3984.362374
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008437951724397067,
+    "noisy": false
+   },
+   "peakResidentBytes": 2921299968,
+   "substepsPerSecond": 250981.18748573447,
+   "nodeStepsPerSecond": 250981.18748573447,
+   "speedUp": 0.1372687646507727,
+   "efficiency": 0.034317191162693175
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "chain, 100000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "chain",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 15682.084749999922,
+    "median": 15742.509957999922,
+    "interquartileRange": 266.2367919998942,
+    "minimumOverMedian": 0.9961616534999049,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     15682.084749999922
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.016911965926030732,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 544.510961,
+    "median": 555.258085,
+    "interquartileRange": 14.391707999999994,
+    "minimumOverMedian": 0.9806448131232522,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     544.510961
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.025918952625426414,
+    "noisy": false
+   },
+   "peakResidentBytes": 2726199296,
+   "substepsPerSecond": 1836510.3214148155,
+   "nodeStepsPerSecond": 1836510.3214148155,
+   "speedUp": 1.0044398371624332,
+   "efficiency": 0.2511099592906083
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, explicit Euler, serial",
+   "family": "grid",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 355.60337499994785,
+    "median": 355.79429200012237,
+    "interquartileRange": 1.4815010000020266,
+    "minimumOverMedian": 0.9994634062308834,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     355.60337499994785
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0041639257102008735,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 313.049266,
+    "median": 313.314598,
+    "interquartileRange": 0.12801200000001245,
+    "minimumOverMedian": 0.9991531451081638,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     313.049266
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00040857336624963914,
+    "noisy": false
+   },
+   "peakResidentBytes": 15990784,
+   "substepsPerSecond": 3194385.384695328,
+   "nodeStepsPerSecond": 3194385.384695328,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 736.3141659998801,
+    "median": 789.7197499999311,
+    "interquartileRange": 41.03225000016391,
+    "minimumOverMedian": 0.9323740048288577,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     736.3141659998801
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0519579888943736,
+    "noisy": true
+   },
+   "compute": {
+    "minimum": 685.994101,
+    "median": 739.984132,
+    "interquartileRange": 41.15504999999996,
+    "minimumOverMedian": 0.9270389341267657,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     685.994101
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.05561612502252948,
+    "noisy": true
+   },
+   "peakResidentBytes": 17022976,
+   "substepsPerSecond": 1457738.482797828,
+   "nodeStepsPerSecond": 1457738.482797828,
+   "speedUp": 0.45634396205981365,
+   "efficiency": 0.11408599051495341
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 535.1258750001434,
+    "median": 537.4084579998162,
+    "interquartileRange": 1.13391700014472,
+    "minimumOverMedian": 0.99575261057824,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     535.1258750001434
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002109972374392939,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 490.353736,
+    "median": 492.527219,
+    "interquartileRange": 2.407791999999972,
+    "minimumOverMedian": 0.9955870804370713,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     490.353736
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004888647585586477,
+    "noisy": false
+   },
+   "peakResidentBytes": 17088512,
+   "substepsPerSecond": 2039344.103212869,
+   "nodeStepsPerSecond": 2039344.103212869,
+   "speedUp": 0.6384151746322169,
+   "efficiency": 0.15960379365805422
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, Runge–Kutta 4, serial",
+   "family": "grid",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 328.0282920000609,
+    "median": 328.718499999959,
+    "interquartileRange": 2.375541999936104,
+    "minimumOverMedian": 0.9979003067977671,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     328.0282920000609
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0072266757116998285,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 292.866866,
+    "median": 293.749397,
+    "interquartileRange": 1.2168659999999818,
+    "minimumOverMedian": 0.9969956329816739,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     292.866866
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004142531056838159,
+    "noisy": false
+   },
+   "peakResidentBytes": 16711680,
+   "substepsPerSecond": 3414520.780920297,
+   "nodeStepsPerSecond": 3414520.780920297,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2657.6707499998156,
+    "median": 2751.2019160001073,
+    "interquartileRange": 60.14879100001417,
+    "minimumOverMedian": 0.9660035254205283,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2657.6707499998156
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.02186273230263766,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 2618.598795,
+    "median": 2711.878285,
+    "interquartileRange": 72.66973599999983,
+    "minimumOverMedian": 0.965603364090509,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2618.598795
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.026796828014720372,
+    "noisy": false
+   },
+   "peakResidentBytes": 17416192,
+   "substepsPerSecond": 381883.6249025311,
+   "nodeStepsPerSecond": 381883.6249025311,
+   "speedUp": 0.11184106040192386,
+   "efficiency": 0.027960265100480965
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 100 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 1628.042666999856,
+    "median": 1637.9684580001049,
+    "interquartileRange": 24.507125000236556,
+    "minimumOverMedian": 0.9939401818443026,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1628.042666999856
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.014961902886798438,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1590.275513,
+    "median": 1599.98482,
+    "interquartileRange": 23.684565999999904,
+    "minimumOverMedian": 0.9939316255512975,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1590.275513
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01480299419340735,
+    "noisy": false
+   },
+   "peakResidentBytes": 17727488,
+   "substepsPerSecond": 628821.8562288835,
+   "nodeStepsPerSecond": 628821.8562288835,
+   "speedUp": 0.1841610863060557,
+   "efficiency": 0.04604027157651393
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, explicit Euler, serial",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 582.4133339999244,
+    "median": 585.1826669999864,
+    "interquartileRange": 1.297624999890104,
+    "minimumOverMedian": 0.9952675751415205,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     582.4133339999244
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0022174699851288215,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 311.664805,
+    "median": 312.636046,
+    "interquartileRange": 0.5677059999999869,
+    "minimumOverMedian": 0.9968933812577708,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     311.664805
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0018158686666603597,
+    "noisy": false
+   },
+   "peakResidentBytes": 76447744,
+   "substepsPerSecond": 3210012.757135025,
+   "nodeStepsPerSecond": 3210012.757135025,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 907.3429580000229,
+    "median": 919.7247920001391,
+    "interquartileRange": 6.455250000115484,
+    "minimumOverMedian": 0.9865374576092603,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     907.3429580000229
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007018675647611016,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 631.0657,
+    "median": 642.748458,
+    "interquartileRange": 10.756531999999993,
+    "minimumOverMedian": 0.9818237479147713,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     631.0657
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.016735212455383272,
+    "noisy": false
+   },
+   "peakResidentBytes": 78036992,
+   "substepsPerSecond": 1585330.972670516,
+   "nodeStepsPerSecond": 1585330.972670516,
+   "speedUp": 0.49387061442255537,
+   "efficiency": 0.12346765360563884
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 452.85141700017266,
+    "median": 455.44458299991675,
+    "interquartileRange": 0.407666000071913,
+    "minimumOverMedian": 0.9943062974145758,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     452.85141700017266
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0008950946290473006,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 180.893391,
+    "median": 183.830579,
+    "interquartileRange": 0.663833000000011,
+    "minimumOverMedian": 0.9840223100205762,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     180.893391
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003611113034681847,
+    "noisy": false
+   },
+   "peakResidentBytes": 77791232,
+   "substepsPerSecond": 5530594.536756735,
+   "nodeStepsPerSecond": 5530594.536756735,
+   "speedUp": 1.7229197997620598,
+   "efficiency": 0.43072994994051494
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, Runge–Kutta 4, serial",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 548.4079999998212,
+    "median": 549.9260000002105,
+    "interquartileRange": 0.9593749998603016,
+    "minimumOverMedian": 0.997239628603869,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     548.4079999998212
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0017445529032268604,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 283.107381,
+    "median": 284.955952,
+    "interquartileRange": 0.7730829999999855,
+    "minimumOverMedian": 0.9935127833371241,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     283.107381
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0027129912345188897,
+    "noisy": false
+   },
+   "peakResidentBytes": 82100224,
+   "substepsPerSecond": 3533811.0806796663,
+   "nodeStepsPerSecond": 3533811.0806796663,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2758.3520420000423,
+    "median": 2796.0308330000844,
+    "interquartileRange": 1.8509579999372363,
+    "minimumOverMedian": 0.9865241861587007,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2758.3520420000423
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0006619948457260738,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 2490.268426,
+    "median": 2530.002261,
+    "interquartileRange": 3.015997999999854,
+    "minimumOverMedian": 0.984294940912703,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2490.268426
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0011920930058014103,
+    "noisy": false
+   },
+   "peakResidentBytes": 83591168,
+   "substepsPerSecond": 401743.03683678474,
+   "nodeStepsPerSecond": 401743.03683678474,
+   "speedUp": 0.11368548789527157,
+   "efficiency": 0.028421371973817892
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 1024 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 1024,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 750.3237920000684,
+    "median": 765.0636249999516,
+    "interquartileRange": 10.223959000082687,
+    "minimumOverMedian": 0.9807338468092975,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     750.3237920000684
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.013363540842872165,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 483.849591,
+    "median": 497.293716,
+    "interquartileRange": 11.502014999999972,
+    "minimumOverMedian": 0.9729654235164314,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     483.849591
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.02312921846774346,
+    "noisy": false
+   },
+   "peakResidentBytes": 83623936,
+   "substepsPerSecond": 2067683.8807124258,
+   "nodeStepsPerSecond": 2067683.8807124258,
+   "speedUp": 0.5851144369366637,
+   "efficiency": 0.1462786092341659
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, explicit Euler, serial",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 2872.575124999974,
+    "median": 2883.2801669999026,
+    "interquartileRange": 2.486916999798268,
+    "minimumOverMedian": 0.9962872002095213,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2872.575124999974
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0008625304707679321,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 349.210995,
+    "median": 352.784205,
+    "interquartileRange": 4.906042999999954,
+    "minimumOverMedian": 0.9898714002799531,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     349.210995
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.013906640179653039,
+    "noisy": false
+   },
+   "peakResidentBytes": 666140672,
+   "substepsPerSecond": 2863598.2667155135,
+   "nodeStepsPerSecond": 2863598.2667155135,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 3250.8087090000045,
+    "median": 3270.871749999933,
+    "interquartileRange": 7.41012499993667,
+    "minimumOverMedian": 0.9938661486804156,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3250.8087090000045
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002265489314870515,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 704.95229,
+    "median": 729.879375,
+    "interquartileRange": 5.154421999999954,
+    "minimumOverMedian": 0.9658476648966824,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     704.95229
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007062018980876058,
+    "noisy": false
+   },
+   "peakResidentBytes": 672710656,
+   "substepsPerSecond": 1418535.7139559048,
+   "nodeStepsPerSecond": 1418535.7139559048,
+   "speedUp": 0.4953682681135769,
+   "efficiency": 0.12384206702839423
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 2700.2921250001527,
+    "median": 2709.263416999951,
+    "interquartileRange": 4.081708000041544,
+    "minimumOverMedian": 0.9966886601193868,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2700.2921250001527
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.001506574803479738,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 160.096998,
+    "median": 161.899413,
+    "interquartileRange": 0.6419610000000091,
+    "minimumOverMedian": 0.9888670689621339,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     160.096998
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003965184234485205,
+    "noisy": false
+   },
+   "peakResidentBytes": 670957568,
+   "substepsPerSecond": 6246213.311257715,
+   "nodeStepsPerSecond": 6246213.311257715,
+   "speedUp": 2.181246365406552,
+   "efficiency": 0.545311591351638
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, Runge–Kutta 4, serial",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 3189.2960000000894,
+    "median": 3196.874749999959,
+    "interquartileRange": 18.109834000002593,
+    "minimumOverMedian": 0.9976293253278472,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3189.2960000000894
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005664855653166526,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 657.644789,
+    "median": 666.532075,
+    "interquartileRange": 5.992119000000002,
+    "minimumOverMedian": 0.9866663791086122,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     657.644789
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008989993467306135,
+    "noisy": false
+   },
+   "peakResidentBytes": 719323136,
+   "substepsPerSecond": 1520577.6989742105,
+   "nodeStepsPerSecond": 1520577.6989742105,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 5957.416958000045,
+    "median": 5983.890083999839,
+    "interquartileRange": 53.43458399991505,
+    "minimumOverMedian": 0.9955759337774972,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     5957.416958000045
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008929740227480503,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3410.828336,
+    "median": 3437.801623,
+    "interquartileRange": 42.026676999999836,
+    "minimumOverMedian": 0.9921539140538128,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3410.828336
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012224869730361354,
+    "noisy": false
+   },
+   "peakResidentBytes": 724533248,
+   "substepsPerSecond": 293183.91355125647,
+   "nodeStepsPerSecond": 293183.91355125647,
+   "speedUp": 0.19281087296561028,
+   "efficiency": 0.04820271824140257
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 10000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 3232.3986249999143,
+    "median": 3235.768875000067,
+    "interquartileRange": 12.759125999873504,
+    "minimumOverMedian": 0.9989584392055342,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3232.3986249999143
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003943151223949282,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 688.121876,
+    "median": 690.797542,
+    "interquartileRange": 0.9397480000000087,
+    "minimumOverMedian": 0.9961267001728852,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     688.121876
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.001360381215716614,
+    "noisy": false
+   },
+   "peakResidentBytes": 723566592,
+   "substepsPerSecond": 1453230.9389913944,
+   "nodeStepsPerSecond": 1453230.9389913944,
+   "speedUp": 0.9557097542412675,
+   "efficiency": 0.23892743856031687
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, explicit Euler, serial",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 30987.239791999804,
+    "median": 31275.653875000076,
+    "interquartileRange": 19.935708000091836,
+    "minimumOverMedian": 0.9907783196427169,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     30987.239791999804
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0006374193831332579,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 345.321791,
+    "median": 347.316206,
+    "interquartileRange": 2.5348339999999894,
+    "minimumOverMedian": 0.9942576391036587,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     345.321791
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.00729834645262706,
+    "noisy": false
+   },
+   "peakResidentBytes": 3778134016,
+   "substepsPerSecond": 2891679.6623471696,
+   "nodeStepsPerSecond": 2891679.6623471696,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 31675.554000000004,
+    "median": 31752.757624999853,
+    "interquartileRange": 58.39620899991132,
+    "minimumOverMedian": 0.9975686009413222,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     31675.554000000004
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0018390909441495034,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 732.683708,
+    "median": 743.377791,
+    "interquartileRange": 1.4087509999999384,
+    "minimumOverMedian": 0.9856142016489164,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     732.683708
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0018950673763132888,
+    "noisy": false
+   },
+   "peakResidentBytes": 3599482880,
+   "substepsPerSecond": 1362880.0382715757,
+   "nodeStepsPerSecond": 1362880.0382715757,
+   "speedUp": 0.47131086337735245,
+   "efficiency": 0.11782771584433811
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 30940.567083000205,
+    "median": 31345.87691699993,
+    "interquartileRange": 308.7423340000678,
+    "minimumOverMedian": 0.9870697560935068,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     30940.567083000205
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009849535708239395,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 162.046165,
+    "median": 168.175415,
+    "interquartileRange": 6.3429610000000025,
+    "minimumOverMedian": 0.9635544232193511,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     162.046165
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.03771633921640689,
+    "noisy": false
+   },
+   "peakResidentBytes": 3916398592,
+   "substepsPerSecond": 6162194.582019267,
+   "nodeStepsPerSecond": 6162194.582019267,
+   "speedUp": 2.1310087221132323,
+   "efficiency": 0.5327521805283081
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, Runge–Kutta 4, serial",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 31825.60520800017,
+    "median": 32183.59791699983,
+    "interquartileRange": 103.39162499969825,
+    "minimumOverMedian": 0.988876547925968,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     31825.60520800017
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003212556447739031,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 770.315041,
+    "median": 783.302581,
+    "interquartileRange": 2.1692070000000285,
+    "minimumOverMedian": 0.983419510780343,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     770.315041
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0027693091438952227,
+    "noisy": false
+   },
+   "peakResidentBytes": 3622420480,
+   "substepsPerSecond": 1296300.7949367044,
+   "nodeStepsPerSecond": 1296300.7949367044,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 35462.81841700012,
+    "median": 35629.33862499986,
+    "interquartileRange": 171.49649999989197,
+    "minimumOverMedian": 0.9953263177362799,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     35462.81841700012
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004813350643549664,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3808.149751,
+    "median": 4077.896377,
+    "interquartileRange": 125.82995599999958,
+    "minimumOverMedian": 0.9338515251340336,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3808.149751
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.030856584956327246,
+    "noisy": false
+   },
+   "peakResidentBytes": 3583131648,
+   "substepsPerSecond": 262216.5789929305,
+   "nodeStepsPerSecond": 262216.5789929305,
+   "speedUp": 0.20228065894670222,
+   "efficiency": 0.050570164736675555
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "grid, 99856 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "grid",
+   "nodes": 99856,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 31882.91541699972,
+    "median": 32061.474125000183,
+    "interquartileRange": 66.42008400009945,
+    "minimumOverMedian": 0.9944307392946343,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     31882.91541699972
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002071647851909213,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 724.693749,
+    "median": 728.964374,
+    "interquartileRange": 28.401834000000008,
+    "minimumOverMedian": 0.9941415175386884,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     724.693749
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0389618958251038,
+    "noisy": false
+   },
+   "peakResidentBytes": 3462529024,
+   "substepsPerSecond": 1377906.186410337,
+   "nodeStepsPerSecond": 1377906.186410337,
+   "speedUp": 1.0629525120962509,
+   "efficiency": 0.2657381280240627
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, explicit Euler, serial",
+   "family": "random",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 408.3053339999169,
+    "median": 409.1547079999,
+    "interquartileRange": 2.7920409995131195,
+    "minimumOverMedian": 0.9979240761908005,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     408.3053339999169
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006823924899121048,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 355.254159,
+    "median": 355.709901,
+    "interquartileRange": 0.5177079999999705,
+    "minimumOverMedian": 0.9987187817974176,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     355.254159
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0014554219563316865,
+    "noisy": false
+   },
+   "peakResidentBytes": 17039360,
+   "substepsPerSecond": 2814886.116505676,
+   "nodeStepsPerSecond": 2814886.116505676,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 875.1957910000347,
+    "median": 880.494207999669,
+    "interquartileRange": 3.5170840001665056,
+    "minimumOverMedian": 0.9939824510468145,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     875.1957910000347
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0039944430845907705,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 813.851734,
+    "median": 819.307757,
+    "interquartileRange": 2.9712109999999257,
+    "minimumOverMedian": 0.9933406916346331,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     813.851734
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003626489526816387,
+    "noisy": false
+   },
+   "peakResidentBytes": 18563072,
+   "substepsPerSecond": 1228725.034577367,
+   "nodeStepsPerSecond": 1228725.034577367,
+   "speedUp": 0.4365096788010284,
+   "efficiency": 0.1091274197002571
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 100,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 571.7638749997132,
+    "median": 573.1005830001086,
+    "interquartileRange": 1.9943750002421439,
+    "minimumOverMedian": 0.9976675856908085,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     571.7638749997132
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003479973776683047,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 515.716788,
+    "median": 516.614447,
+    "interquartileRange": 2.5710040000000163,
+    "minimumOverMedian": 0.9982624198660861,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     515.716788
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0049766397647799734,
+    "noisy": false
+   },
+   "peakResidentBytes": 18481152,
+   "substepsPerSecond": 1939048.7633301555,
+   "nodeStepsPerSecond": 1939048.7633301555,
+   "speedUp": 0.6888551376768446,
+   "efficiency": 0.17221378441921115
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, Runge–Kutta 4, serial",
+   "family": "random",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 501.6950409999117,
+    "median": 502.18533300003037,
+    "interquartileRange": 3.2591260001063347,
+    "minimumOverMedian": 0.9990236831546042,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     501.6950409999117
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.006489886872315599,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 454.973183,
+    "median": 456.032666,
+    "interquartileRange": 3.9076309999999808,
+    "minimumOverMedian": 0.9976767387974791,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     454.973183
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008568752397224063,
+    "noisy": false
+   },
+   "peakResidentBytes": 17547264,
+   "substepsPerSecond": 2197931.7405175506,
+   "nodeStepsPerSecond": 2197931.7405175506,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 3166.9237080002204,
+    "median": 3176.74141700007,
+    "interquartileRange": 9.227999999653548,
+    "minimumOverMedian": 0.9969095032578632,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3166.9237080002204
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0029048634397092145,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3117.250992,
+    "median": 3126.919116,
+    "interquartileRange": 9.3443970000003,
+    "minimumOverMedian": 0.9969080991092704,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3117.250992
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002988371829698552,
+    "noisy": false
+   },
+   "peakResidentBytes": 18415616,
+   "substepsPerSecond": 320795.4709346035,
+   "nodeStepsPerSecond": 320795.4709346035,
+   "speedUp": 0.14595333650310055,
+   "efficiency": 0.03648833412577514
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 100,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 1993.7135000000708,
+    "median": 2024.2794160000049,
+    "interquartileRange": 6.46474999981001,
+    "minimumOverMedian": 0.9849003473738163,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1993.7135000000708
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0031936055609281533,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1943.237104,
+    "median": 1973.521444,
+    "interquartileRange": 7.489013999999997,
+    "minimumOverMedian": 0.9846546688955056,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1943.237104
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003794746706588103,
+    "noisy": false
+   },
+   "peakResidentBytes": 18694144,
+   "substepsPerSecond": 514605.24191390694,
+   "nodeStepsPerSecond": 514605.24191390694,
+   "speedUp": 0.23413158490205527,
+   "efficiency": 0.05853289622551382
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, explicit Euler, serial",
+   "family": "random",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 728.787416999694,
+    "median": 732.3212500000373,
+    "interquartileRange": 7.2383749997243285,
+    "minimumOverMedian": 0.9951744770476849,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     728.787416999694
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.009884152617070664,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 362.026218,
+    "median": 363.097379,
+    "interquartileRange": 1.6864869999999996,
+    "minimumOverMedian": 0.9970499346402607,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     362.026218
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004644723695458016,
+    "noisy": false
+   },
+   "peakResidentBytes": 81330176,
+   "substepsPerSecond": 2762230.8835102106,
+   "nodeStepsPerSecond": 2762230.8835102106,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 990.1213750001043,
+    "median": 1010.257750000339,
+    "interquartileRange": 27.4802919998765,
+    "minimumOverMedian": 0.9800680816353767,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     990.1213750001043
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.027201268191080225,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 614.976253,
+    "median": 633.861732,
+    "interquartileRange": 27.640459000000078,
+    "minimumOverMedian": 0.9702056804400997,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     614.976253
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.043606448543260665,
+    "noisy": false
+   },
+   "peakResidentBytes": 83361792,
+   "substepsPerSecond": 1626079.0479661007,
+   "nodeStepsPerSecond": 1626079.0479661007,
+   "speedUp": 0.588683247904208,
+   "efficiency": 0.147170811976052
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 1000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 591.5245419996791,
+    "median": 593.8521670000628,
+    "interquartileRange": 1.8540839995257556,
+    "minimumOverMedian": 0.9960804639105014,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     591.5245419996791
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0031221305613684147,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 217.608938,
+    "median": 220.370451,
+    "interquartileRange": 2.815768999999989,
+    "minimumOverMedian": 0.9874687691227714,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     217.608938
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01277743448462602,
+    "noisy": false
+   },
+   "peakResidentBytes": 83148800,
+   "substepsPerSecond": 4595399.477571092,
+   "nodeStepsPerSecond": 4595399.477571092,
+   "speedUp": 1.663655093064238,
+   "efficiency": 0.4159137732660595
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, Runge–Kutta 4, serial",
+   "family": "random",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 824.323500000406,
+    "median": 826.6432910002768,
+    "interquartileRange": 11.388042000122368,
+    "minimumOverMedian": 0.9971937218566624,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     824.323500000406
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.013776246809361155,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 460.860126,
+    "median": 462.545677,
+    "interquartileRange": 11.677278999999999,
+    "minimumOverMedian": 0.9963559252981624,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     460.860126
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.025245677520406268,
+    "noisy": false
+   },
+   "peakResidentBytes": 88391680,
+   "substepsPerSecond": 2169855.7622665754,
+   "nodeStepsPerSecond": 2169855.7622665754,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 2836.4245420000516,
+    "median": 3153.8782499996014,
+    "interquartileRange": 146.05895800003782,
+    "minimumOverMedian": 0.8993449705930817,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2836.4245420000516
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.04631090562866727,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 2470.664551,
+    "median": 2787.081002,
+    "interquartileRange": 146.3415070000001,
+    "minimumOverMedian": 0.8864703068289222,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     2470.664551
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.05250708784387175,
+    "noisy": true
+   },
+   "peakResidentBytes": 89669632,
+   "substepsPerSecond": 404749.40217815107,
+   "nodeStepsPerSecond": 404749.40217815107,
+   "speedUp": 0.18653286048624737,
+   "efficiency": 0.04663321512156184
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 1000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 1000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 993.5340829999186,
+    "median": 1010.2557089999318,
+    "interquartileRange": 7.21633299998939,
+    "minimumOverMedian": 0.9834481252112238,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     993.5340829999186
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.007143075694304122,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 626.910779,
+    "median": 642.820987,
+    "interquartileRange": 8.07390799999996,
+    "minimumOverMedian": 0.9752493955210584,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     626.910779
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01256011885623137,
+    "noisy": false
+   },
+   "peakResidentBytes": 89980928,
+   "substepsPerSecond": 1595123.3149876976,
+   "nodeStepsPerSecond": 1595123.3149876976,
+   "speedUp": 0.735128731930768,
+   "efficiency": 0.183782182982692
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, explicit Euler, serial",
+   "family": "random",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 3988.511708999984,
+    "median": 3997.0546659999527,
+    "interquartileRange": 7.955917000304908,
+    "minimumOverMedian": 0.9978626869748274,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3988.511708999984
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0019904448813222717,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 442.616923,
+    "median": 445.030583,
+    "interquartileRange": 1.6394950000000108,
+    "minimumOverMedian": 0.9945764176840853,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     442.616923
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0036840052406016573,
+    "noisy": false
+   },
+   "peakResidentBytes": 722354176,
+   "substepsPerSecond": 2259290.027191301,
+   "nodeStepsPerSecond": 2259290.027191301,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 4347.400083000306,
+    "median": 4355.06799999997,
+    "interquartileRange": 14.630790999624878,
+    "minimumOverMedian": 0.9982393117628325,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     4347.400083000306
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.003359486235260845,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 756.807294,
+    "median": 768.252292,
+    "interquartileRange": 3.203288999999927,
+    "minimumOverMedian": 0.9851025527431814,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     756.807294
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004169579490170824,
+    "noisy": false
+   },
+   "peakResidentBytes": 728842240,
+   "substepsPerSecond": 1321340.3305280514,
+   "nodeStepsPerSecond": 1321340.3305280514,
+   "speedUp": 0.584847591334129,
+   "efficiency": 0.14621189783353225
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 10000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 3824.919166999869,
+    "median": 3841.063165999949,
+    "interquartileRange": 6.506208000238985,
+    "minimumOverMedian": 0.9957969972628978,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3824.919166999869
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0016938560286720032,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 242.143913,
+    "median": 243.777506,
+    "interquartileRange": 0.496877000000012,
+    "minimumOverMedian": 0.9932988361936889,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     242.143913
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0020382397381652267,
+    "noisy": false
+   },
+   "peakResidentBytes": 728236032,
+   "substepsPerSecond": 4129775.5025541363,
+   "nodeStepsPerSecond": 4129775.5025541363,
+   "speedUp": 1.8279085256212904,
+   "efficiency": 0.4569771314053226
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, Runge–Kutta 4, serial",
+   "family": "random",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 4524.316709000152,
+    "median": 4527.102791999932,
+    "interquartileRange": 84.89249999960884,
+    "minimumOverMedian": 0.9993845770401537,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     4524.316709000152
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.018752059297090975,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 960.913331,
+    "median": 970.365377,
+    "interquartileRange": 76.39803500000005,
+    "minimumOverMedian": 0.990259291784274,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     960.913331
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.07873120456563863,
+    "noisy": true
+   },
+   "peakResidentBytes": 790036480,
+   "substepsPerSecond": 1040676.5810599417,
+   "nodeStepsPerSecond": 1040676.5810599417,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 7109.1244169999845,
+    "median": 7148.402625000104,
+    "interquartileRange": 86.30737600009888,
+    "minimumOverMedian": 0.9945053167734632,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     7109.1244169999845
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012073659043526192,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3518.797834,
+    "median": 3558.77854,
+    "interquartileRange": 87.04305199999999,
+    "minimumOverMedian": 0.9887656100117992,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3518.797834
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.024458687446170784,
+    "noisy": false
+   },
+   "peakResidentBytes": 794722304,
+   "substepsPerSecond": 284187.96622460353,
+   "nodeStepsPerSecond": 284187.96622460353,
+   "speedUp": 0.27308000525499926,
+   "efficiency": 0.06827000131374981
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 10000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 10000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 4554.837042000145,
+    "median": 4601.292750000022,
+    "interquartileRange": 9.704541000537574,
+    "minimumOverMedian": 0.9899037704132436,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     4554.837042000145
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002109090103110159,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 964.466962,
+    "median": 998.585589,
+    "interquartileRange": 12.745299000000045,
+    "minimumOverMedian": 0.9658330468856786,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     964.466962
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01276335162493522,
+    "noisy": false
+   },
+   "peakResidentBytes": 794935296,
+   "substepsPerSecond": 1036842.1515718027,
+   "nodeStepsPerSecond": 1036842.1515718027,
+   "speedUp": 0.9963154455880677,
+   "efficiency": 0.24907886139701693
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, explicit Euler, serial",
+   "family": "random",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 41538.5074169999,
+    "median": 42005.43324999977,
+    "interquartileRange": 169.72587500000373,
+    "minimumOverMedian": 0.9888841562418625,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     41538.5074169999
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.004040569561319896,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 467.440793,
+    "median": 469.640292,
+    "interquartileRange": 1.8422069999999735,
+    "minimumOverMedian": 0.995316630541572,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     467.440793
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0039225914628295425,
+    "noisy": false
+   },
+   "peakResidentBytes": 4283498496,
+   "substepsPerSecond": 2139308.3679797715,
+   "nodeStepsPerSecond": 2139308.3679797715,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, explicit Euler, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 42488.879292000085,
+    "median": 42777.90845800005,
+    "interquartileRange": 249.47687499970198,
+    "minimumOverMedian": 0.9932434946817529,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     42488.879292000085
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.005831909132365409,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 815.229208,
+    "median": 815.926501,
+    "interquartileRange": 1.94662500000004,
+    "minimumOverMedian": 0.9991453972886707,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     815.229208
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002385784746069965,
+    "noisy": false
+   },
+   "peakResidentBytes": 3745759232,
+   "substepsPerSecond": 1226648.8862111527,
+   "nodeStepsPerSecond": 1226648.8862111527,
+   "speedUp": 0.573385728103108,
+   "efficiency": 0.143346432025777
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, explicit Euler, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 100000,
+   "method": "explicitEuler",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 42088.74166600034,
+    "median": 42258.818334000185,
+    "interquartileRange": 97.9871249999851,
+    "minimumOverMedian": 0.9959753567490786,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     42088.74166600034
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.002318737931229553,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 316.002917,
+    "median": 319.038167,
+    "interquartileRange": 2.5810030000000097,
+    "minimumOverMedian": 0.9904862479980335,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     316.002917
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.008089950566948969,
+    "noisy": false
+   },
+   "peakResidentBytes": 3751165952,
+   "substepsPerSecond": 3164527.750229596,
+   "nodeStepsPerSecond": 3164527.750229596,
+   "speedUp": 1.4792293610378284,
+   "efficiency": 0.3698073402594571
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, Runge–Kutta 4, serial",
+   "family": "random",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "serial",
+   "workers": 1,
+   "wall": {
+    "minimum": 42980.11054100003,
+    "median": 43368.56816600077,
+    "interquartileRange": 687.9605000000447,
+    "minimumOverMedian": 0.9910428764096189,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     42980.11054100003
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.015863113058442596,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1141.545373,
+    "median": 1157.068001,
+    "interquartileRange": 17.132580999999846,
+    "minimumOverMedian": 0.9865845153555498,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1141.545373
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.01480689206269031,
+    "noisy": false
+   },
+   "peakResidentBytes": 3822272512,
+   "substepsPerSecond": 876005.4778830066,
+   "nodeStepsPerSecond": 876005.4778830066,
+   "speedUp": 1,
+   "efficiency": 1
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, Runge–Kutta 4, thread pool (4 workers)",
+   "family": "random",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "threadPool",
+   "workers": 4,
+   "wall": {
+    "minimum": 45866.47708299942,
+    "median": 46757.45116700046,
+    "interquartileRange": 632.531415999867,
+    "minimumOverMedian": 0.9809447679083532,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     45866.47708299942
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.013527927639611853,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 3794.283542,
+    "median": 4045.594707,
+    "interquartileRange": 70.85929000000033,
+    "minimumOverMedian": 0.9378802912300725,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     3794.283542
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.017515172708080253,
+    "noisy": false
+   },
+   "peakResidentBytes": 3860414464,
+   "substepsPerSecond": 263554.36775631463,
+   "nodeStepsPerSecond": 263554.36775631463,
+   "speedUp": 0.3008592690461613,
+   "efficiency": 0.07521481726154032
+  },
+  {
+   "problem": "scaling/graphScalability",
+   "label": "random network, 100000 nodes, Runge–Kutta 4, partitioned (4 partitions)",
+   "family": "random",
+   "nodes": 100000,
+   "method": "rungeKutta4",
+   "backend": "partitioned",
+   "workers": 4,
+   "wall": {
+    "minimum": 43307.19079199992,
+    "median": 44261.6315829996,
+    "interquartileRange": 696.9623330002651,
+    "minimumOverMedian": 0.9784363848131105,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     43307.19079199992
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.0157464220832736,
+    "noisy": false
+   },
+   "compute": {
+    "minimum": 1336.293624,
+    "median": 1371.404292,
+    "interquartileRange": 35.9621689999999,
+    "minimumOverMedian": 0.9743980179989111,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     1336.293624
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.026222879139129823,
+    "noisy": false
+   },
+   "peakResidentBytes": 4004315136,
+   "substepsPerSecond": 748338.5253359558,
+   "nodeStepsPerSecond": 748338.5253359558,
+   "speedUp": 0.8542623810349035,
+   "efficiency": 0.21356559525872587
+  }
+ ],
+ "statistic": "minimum over all runs of all combined sessions (those timed from the source commit); median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session's interquartile range exceeds 5 % of its median"
+}

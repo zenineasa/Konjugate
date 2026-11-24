@@ -1,0 +1,401 @@
+at,label,load1,docker,waitedAgain
+2026-11-24T15:10:53.633Z,"chain100.kjt explicit serial",1.16,false,false
+2026-11-24T15:10:53.970Z,"chain100.kjt explicit serial",1.16,false,false
+2026-11-24T15:10:54.304Z,"chain100.kjt explicit serial",1.16,false,false
+2026-11-24T15:10:54.640Z,"chain100.kjt explicit serial",1.16,false,false
+2026-11-24T15:10:54.974Z,"chain100.kjt explicit serial",1.16,false,false
+2026-11-24T15:10:55.999Z,"chain100.kjt explicit threadPool 4",1.16,false,false
+2026-11-24T15:10:56.762Z,"chain100.kjt explicit threadPool 4",1.16,false,false
+2026-11-24T15:10:57.547Z,"chain100.kjt explicit threadPool 4",1.16,false,false
+2026-11-24T15:10:58.313Z,"chain100.kjt explicit threadPool 4",1.47,false,false
+2026-11-24T15:10:59.073Z,"chain100.kjt explicit threadPool 4",1.47,false,false
+2026-11-24T15:11:00.361Z,"chain100.kjt explicit partitioned 4",1.47,false,false
+2026-11-24T15:11:00.953Z,"chain100.kjt explicit partitioned 4",1.47,false,false
+2026-11-24T15:11:01.546Z,"chain100.kjt explicit partitioned 4",1.47,false,false
+2026-11-24T15:11:02.137Z,"chain100.kjt explicit partitioned 4",1.47,false,false
+2026-11-24T15:11:02.735Z,"chain100.kjt explicit partitioned 4",1.47,false,false
+2026-11-24T15:11:03.520Z,"chain100.kjt rungeKutta4 serial",1.51,false,false
+2026-11-24T15:11:03.786Z,"chain100.kjt rungeKutta4 serial",1.51,false,false
+2026-11-24T15:11:04.050Z,"chain100.kjt rungeKutta4 serial",1.51,false,false
+2026-11-24T15:11:04.317Z,"chain100.kjt rungeKutta4 serial",1.51,false,false
+2026-11-24T15:11:04.582Z,"chain100.kjt rungeKutta4 serial",1.51,false,false
+2026-11-24T15:11:07.379Z,"chain100.kjt rungeKutta4 threadPool 4",1.51,false,false
+2026-11-24T15:11:09.985Z,"chain100.kjt rungeKutta4 threadPool 4",1.79,false,false
+2026-11-24T15:11:12.591Z,"chain100.kjt rungeKutta4 threadPool 4",1.79,false,false
+2026-11-24T15:11:15.206Z,"chain100.kjt rungeKutta4 threadPool 4",1.89,false,false
+2026-11-24T15:11:17.838Z,"chain100.kjt rungeKutta4 threadPool 4",2.14,false,false
+2026-11-24T15:11:21.773Z,"chain100.kjt rungeKutta4 partitioned 4",2.14,false,false
+2026-11-24T15:11:23.184Z,"chain100.kjt rungeKutta4 partitioned 4",2.13,false,false
+2026-11-24T15:11:24.605Z,"chain100.kjt rungeKutta4 partitioned 4",2.13,false,false
+2026-11-24T15:11:26.004Z,"chain100.kjt rungeKutta4 partitioned 4",2.13,false,false
+2026-11-24T15:11:27.421Z,"chain100.kjt rungeKutta4 partitioned 4",2.13,false,false
+2026-11-24T15:11:29.249Z,"chain1000.kjt explicit serial",2.12,false,false
+2026-11-24T15:11:29.712Z,"chain1000.kjt explicit serial",2.12,false,false
+2026-11-24T15:11:30.173Z,"chain1000.kjt explicit serial",2.12,false,false
+2026-11-24T15:11:30.633Z,"chain1000.kjt explicit serial",2.12,false,false
+2026-11-24T15:11:31.094Z,"chain1000.kjt explicit serial",2.12,false,false
+2026-11-24T15:11:32.346Z,"chain1000.kjt explicit threadPool 4",2.12,false,false
+2026-11-24T15:11:33.209Z,"chain1000.kjt explicit threadPool 4",2.35,false,false
+2026-11-24T15:11:34.077Z,"chain1000.kjt explicit threadPool 4",2.35,false,false
+2026-11-24T15:11:34.930Z,"chain1000.kjt explicit threadPool 4",2.35,false,false
+2026-11-24T15:11:35.801Z,"chain1000.kjt explicit threadPool 4",2.35,false,false
+2026-11-24T15:11:36.995Z,"chain1000.kjt explicit partitioned 4",2.35,false,false
+2026-11-24T15:11:37.372Z,"chain1000.kjt explicit partitioned 4",2.35,false,false
+2026-11-24T15:11:37.750Z,"chain1000.kjt explicit partitioned 4",2.35,false,false
+2026-11-24T15:11:38.128Z,"chain1000.kjt explicit partitioned 4",2.56,false,false
+2026-11-24T15:11:38.507Z,"chain1000.kjt explicit partitioned 4",2.56,false,false
+2026-11-24T15:11:39.223Z,"chain1000.kjt rungeKutta4 serial",2.56,false,false
+2026-11-24T15:11:39.627Z,"chain1000.kjt rungeKutta4 serial",2.56,false,false
+2026-11-24T15:11:40.030Z,"chain1000.kjt rungeKutta4 serial",2.56,false,false
+2026-11-24T15:11:40.434Z,"chain1000.kjt rungeKutta4 serial",2.56,false,false
+2026-11-24T15:11:40.838Z,"chain1000.kjt rungeKutta4 serial",2.56,false,false
+2026-11-24T15:11:44.063Z,"chain1000.kjt rungeKutta4 threadPool 4",2.83,false,false
+2026-11-24T15:11:46.883Z,"chain1000.kjt rungeKutta4 threadPool 4",2.83,false,false
+2026-11-24T15:11:49.695Z,"chain1000.kjt rungeKutta4 threadPool 4",3.01,false,false
+2026-11-24T15:11:52.440Z,"chain1000.kjt rungeKutta4 threadPool 4",3.01,false,false
+2026-11-24T15:11:55.103Z,"chain1000.kjt rungeKutta4 threadPool 4",3.17,false,false
+2026-11-24T15:11:58.317Z,"chain1000.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:11:58.926Z,"chain1000.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:11:59.545Z,"chain1000.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:12:00.160Z,"chain1000.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:12:00.776Z,"chain1000.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:12:03.256Z,"chain10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:12:05.008Z,"chain10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:12:06.750Z,"chain10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:12:08.490Z,"chain10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:12:10.227Z,"chain10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:12:14.092Z,"chain10000.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:12:16.308Z,"chain10000.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:12:18.499Z,"chain10000.kjt explicit threadPool 4",2.69,false,false
+2026-11-24T15:12:20.694Z,"chain10000.kjt explicit threadPool 4",2.69,false,false
+2026-11-24T15:12:22.900Z,"chain10000.kjt explicit threadPool 4",2.55,false,false
+2026-11-24T15:12:26.651Z,"chain10000.kjt explicit partitioned 4",2.55,false,false
+2026-11-24T15:12:28.260Z,"chain10000.kjt explicit partitioned 4",2.43,false,false
+2026-11-24T15:12:29.869Z,"chain10000.kjt explicit partitioned 4",2.43,false,false
+2026-11-24T15:15:43.534Z,"chain10000.kjt explicit partitioned 4",1.29,false,true
+2026-11-24T15:15:45.157Z,"chain10000.kjt explicit partitioned 4",1.35,false,false
+2026-11-24T15:15:48.570Z,"chain10000.kjt rungeKutta4 serial",1.35,false,false
+2026-11-24T15:15:50.418Z,"chain10000.kjt rungeKutta4 serial",1.56,false,false
+2026-11-24T15:15:52.251Z,"chain10000.kjt rungeKutta4 serial",1.56,false,false
+2026-11-24T15:15:54.080Z,"chain10000.kjt rungeKutta4 serial",1.56,false,false
+2026-11-24T15:15:55.926Z,"chain10000.kjt rungeKutta4 serial",1.76,false,false
+2026-11-24T15:16:02.212Z,"chain10000.kjt rungeKutta4 threadPool 4",2.02,false,false
+2026-11-24T15:16:06.732Z,"chain10000.kjt rungeKutta4 threadPool 4",2.17,false,false
+2026-11-24T15:16:11.277Z,"chain10000.kjt rungeKutta4 threadPool 4",2.48,false,false
+2026-11-24T15:16:15.811Z,"chain10000.kjt rungeKutta4 threadPool 4",2.68,false,false
+2026-11-24T15:16:20.325Z,"chain10000.kjt rungeKutta4 threadPool 4",2.87,false,false
+2026-11-24T15:16:26.759Z,"chain10000.kjt rungeKutta4 partitioned 4",3.04,false,false
+2026-11-24T15:16:28.743Z,"chain10000.kjt rungeKutta4 partitioned 4",3.04,false,false
+2026-11-24T15:16:30.729Z,"chain10000.kjt rungeKutta4 partitioned 4",2.87,false,false
+2026-11-24T15:16:32.716Z,"chain10000.kjt rungeKutta4 partitioned 4",2.87,false,false
+2026-11-24T15:16:34.708Z,"chain10000.kjt rungeKutta4 partitioned 4",2.96,false,false
+2026-11-24T15:16:54.248Z,"chain100000.kjt explicit serial",2.69,false,false
+2026-11-24T15:17:09.742Z,"chain100000.kjt explicit serial",2.56,false,false
+2026-11-24T15:17:24.868Z,"chain100000.kjt explicit serial",2.56,false,false
+2026-11-24T15:17:40.112Z,"chain100000.kjt explicit serial",2.29,false,false
+2026-11-24T15:17:55.272Z,"chain100000.kjt explicit serial",2.23,false,false
+2026-11-24T15:18:26.240Z,"chain100000.kjt explicit threadPool 4",2.18,false,false
+2026-11-24T15:18:42.054Z,"chain100000.kjt explicit threadPool 4",2.36,false,false
+2026-11-24T15:18:57.983Z,"chain100000.kjt explicit threadPool 4",2.26,false,false
+2026-11-24T15:19:13.883Z,"chain100000.kjt explicit threadPool 4",2.06,false,false
+2026-11-24T15:19:29.809Z,"chain100000.kjt explicit threadPool 4",1.96,false,false
+2026-11-24T15:20:01.175Z,"chain100000.kjt explicit partitioned 4",2.28,false,false
+2026-11-24T15:20:16.712Z,"chain100000.kjt explicit partitioned 4",2.44,false,false
+2026-11-24T15:20:32.115Z,"chain100000.kjt explicit partitioned 4",2.19,false,false
+2026-11-24T15:20:47.716Z,"chain100000.kjt explicit partitioned 4",2.23,false,false
+2026-11-24T15:21:03.221Z,"chain100000.kjt explicit partitioned 4",2.49,false,false
+2026-11-24T15:21:34.964Z,"chain100000.kjt rungeKutta4 serial",2.59,false,false
+2026-11-24T15:21:51.184Z,"chain100000.kjt rungeKutta4 serial",2.32,false,false
+2026-11-24T15:22:07.273Z,"chain100000.kjt rungeKutta4 serial",2.47,false,false
+2026-11-24T15:22:23.257Z,"chain100000.kjt rungeKutta4 serial",2.45,false,false
+2026-11-24T15:22:39.268Z,"chain100000.kjt rungeKutta4 serial",2.35,false,false
+2026-11-24T15:23:14.995Z,"chain100000.kjt rungeKutta4 threadPool 4",2.68,false,false
+2026-11-24T15:23:34.612Z,"chain100000.kjt rungeKutta4 threadPool 4",2.56,false,false
+2026-11-24T15:23:54.277Z,"chain100000.kjt rungeKutta4 threadPool 4",2.77,false,false
+2026-11-24T15:24:14.035Z,"chain100000.kjt rungeKutta4 threadPool 4",2.5,false,false
+2026-11-24T15:24:33.716Z,"chain100000.kjt rungeKutta4 threadPool 4",2.38,false,false
+2026-11-24T15:25:09.882Z,"chain100000.kjt rungeKutta4 partitioned 4",2.22,false,false
+2026-11-24T15:25:26.137Z,"chain100000.kjt rungeKutta4 partitioned 4",2.03,false,false
+2026-11-24T15:25:42.426Z,"chain100000.kjt rungeKutta4 partitioned 4",2.03,false,false
+2026-11-24T15:25:58.818Z,"chain100000.kjt rungeKutta4 partitioned 4",1.96,false,false
+2026-11-24T15:26:15.327Z,"chain100000.kjt rungeKutta4 partitioned 4",2.25,false,false
+2026-11-24T15:26:32.388Z,"grid100.kjt explicit serial",2.05,false,false
+2026-11-24T15:26:32.820Z,"grid100.kjt explicit serial",2.05,false,false
+2026-11-24T15:26:33.252Z,"grid100.kjt explicit serial",2.05,false,false
+2026-11-24T15:26:33.684Z,"grid100.kjt explicit serial",2.05,false,false
+2026-11-24T15:26:34.117Z,"grid100.kjt explicit serial",2.05,false,false
+2026-11-24T15:26:35.294Z,"grid100.kjt explicit threadPool 4",2.05,false,false
+2026-11-24T15:26:36.158Z,"grid100.kjt explicit threadPool 4",2.05,false,false
+2026-11-24T15:26:37.026Z,"grid100.kjt explicit threadPool 4",2.2,false,false
+2026-11-24T15:26:38.152Z,"grid100.kjt explicit threadPool 4",2.2,false,false
+2026-11-24T15:26:38.979Z,"grid100.kjt explicit threadPool 4",2.2,false,false
+2026-11-24T15:26:40.319Z,"grid100.kjt explicit partitioned 4",2.2,false,false
+2026-11-24T15:26:40.933Z,"grid100.kjt explicit partitioned 4",2.2,false,false
+2026-11-24T15:26:41.548Z,"grid100.kjt explicit partitioned 4",2.2,false,false
+2026-11-24T15:26:42.158Z,"grid100.kjt explicit partitioned 4",2.1,false,false
+2026-11-24T15:26:42.772Z,"grid100.kjt explicit partitioned 4",2.1,false,false
+2026-11-24T15:26:43.716Z,"grid100.kjt rungeKutta4 serial",2.1,false,false
+2026-11-24T15:26:44.121Z,"grid100.kjt rungeKutta4 serial",2.1,false,false
+2026-11-24T15:26:44.527Z,"grid100.kjt rungeKutta4 serial",2.1,false,false
+2026-11-24T15:26:44.934Z,"grid100.kjt rungeKutta4 serial",2.1,false,false
+2026-11-24T15:26:45.343Z,"grid100.kjt rungeKutta4 serial",2.1,false,false
+2026-11-24T15:26:48.482Z,"grid100.kjt rungeKutta4 threadPool 4",2.1,false,false
+2026-11-24T15:26:51.215Z,"grid100.kjt rungeKutta4 threadPool 4",2.1,false,false
+2026-11-24T15:26:53.988Z,"grid100.kjt rungeKutta4 threadPool 4",2.33,false,false
+2026-11-24T15:26:56.829Z,"grid100.kjt rungeKutta4 threadPool 4",2.54,false,false
+2026-11-24T15:26:59.656Z,"grid100.kjt rungeKutta4 threadPool 4",2.54,false,false
+2026-11-24T15:27:04.144Z,"grid100.kjt rungeKutta4 partitioned 4",2.9,false,false
+2026-11-24T15:27:05.877Z,"grid100.kjt rungeKutta4 partitioned 4",2.9,false,false
+2026-11-24T15:27:07.590Z,"grid100.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:27:09.300Z,"grid100.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:27:11.003Z,"grid100.kjt rungeKutta4 partitioned 4",2.99,false,false
+2026-11-24T15:27:13.380Z,"grid1024.kjt explicit serial",2.99,false,false
+2026-11-24T15:27:14.045Z,"grid1024.kjt explicit serial",2.99,false,false
+2026-11-24T15:27:14.709Z,"grid1024.kjt explicit serial",2.99,false,false
+2026-11-24T15:27:15.371Z,"grid1024.kjt explicit serial",2.99,false,false
+2026-11-24T15:27:16.039Z,"grid1024.kjt explicit serial",2.99,false,false
+2026-11-24T15:27:17.640Z,"grid1024.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:27:18.642Z,"grid1024.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:27:19.642Z,"grid1024.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:27:20.628Z,"grid1024.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:27:21.623Z,"grid1024.kjt explicit threadPool 4",2.83,false,false
+2026-11-24T15:27:23.204Z,"grid1024.kjt explicit partitioned 4",2.76,false,false
+2026-11-24T15:27:23.740Z,"grid1024.kjt explicit partitioned 4",2.76,false,false
+2026-11-24T15:27:24.274Z,"grid1024.kjt explicit partitioned 4",2.76,false,false
+2026-11-24T15:27:24.809Z,"grid1024.kjt explicit partitioned 4",2.76,false,false
+2026-11-24T15:27:25.342Z,"grid1024.kjt explicit partitioned 4",2.76,false,false
+2026-11-24T15:27:26.433Z,"grid1024.kjt rungeKutta4 serial",2.76,false,false
+2026-11-24T15:27:27.063Z,"grid1024.kjt rungeKutta4 serial",2.78,false,false
+2026-11-24T15:27:27.692Z,"grid1024.kjt rungeKutta4 serial",2.78,false,false
+2026-11-24T15:27:28.319Z,"grid1024.kjt rungeKutta4 serial",2.78,false,false
+2026-11-24T15:27:28.947Z,"grid1024.kjt rungeKutta4 serial",2.78,false,false
+2026-11-24T15:27:32.325Z,"grid1024.kjt rungeKutta4 threadPool 4",2.96,false,false
+2026-11-24T15:27:35.163Z,"grid1024.kjt rungeKutta4 threadPool 4",2.96,false,false
+2026-11-24T15:27:38.037Z,"grid1024.kjt rungeKutta4 threadPool 4",3.12,false,false
+2026-11-24T15:27:40.912Z,"grid1024.kjt rungeKutta4 threadPool 4",3.12,false,false
+2026-11-24T15:27:43.790Z,"grid1024.kjt rungeKutta4 threadPool 4",3.27,false,false
+2026-11-24T15:27:47.437Z,"grid1024.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:27:48.265Z,"grid1024.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:27:49.116Z,"grid1024.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:27:49.957Z,"grid1024.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:27:50.819Z,"grid1024.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:27:54.889Z,"grid10000.kjt explicit serial",3.08,false,false
+2026-11-24T15:27:57.909Z,"grid10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:28:00.912Z,"grid10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:28:03.917Z,"grid10000.kjt explicit serial",2.99,false,false
+2026-11-24T15:28:06.921Z,"grid10000.kjt explicit serial",2.83,false,false
+2026-11-24T15:28:13.289Z,"grid10000.kjt explicit threadPool 4",2.76,false,false
+2026-11-24T15:28:16.690Z,"grid10000.kjt explicit threadPool 4",2.76,false,false
+2026-11-24T15:28:20.061Z,"grid10000.kjt explicit threadPool 4",2.78,false,false
+2026-11-24T15:28:23.459Z,"grid10000.kjt explicit threadPool 4",2.72,false,false
+2026-11-24T15:28:26.848Z,"grid10000.kjt explicit threadPool 4",2.72,false,false
+2026-11-24T15:28:33.006Z,"grid10000.kjt explicit partitioned 4",2.53,false,false
+2026-11-24T15:28:35.836Z,"grid10000.kjt explicit partitioned 4",2.53,false,false
+2026-11-24T15:28:38.664Z,"grid10000.kjt explicit partitioned 4",2.49,false,false
+2026-11-24T15:28:41.506Z,"grid10000.kjt explicit partitioned 4",2.49,false,false
+2026-11-24T15:28:44.335Z,"grid10000.kjt explicit partitioned 4",2.37,false,false
+2026-11-24T15:28:50.343Z,"grid10000.kjt explicit threadPool 1",2.5,false,false
+2026-11-24T15:28:53.518Z,"grid10000.kjt explicit threadPool 1",2.46,false,false
+2026-11-24T15:28:56.820Z,"grid10000.kjt explicit threadPool 1",2.46,false,false
+2026-11-24T15:28:59.987Z,"grid10000.kjt explicit threadPool 1",2.34,false,false
+2026-11-24T15:29:03.157Z,"grid10000.kjt explicit threadPool 1",2.31,false,false
+2026-11-24T15:29:09.301Z,"grid10000.kjt explicit partitioned 1",2.29,false,false
+2026-11-24T15:29:12.371Z,"grid10000.kjt explicit partitioned 1",2.26,false,false
+2026-11-24T15:29:15.456Z,"grid10000.kjt explicit partitioned 1",2.26,false,false
+2026-11-24T15:29:18.537Z,"grid10000.kjt explicit partitioned 1",2.16,false,false
+2026-11-24T15:29:21.610Z,"grid10000.kjt explicit partitioned 1",2.16,false,false
+2026-11-24T15:29:27.787Z,"grid10000.kjt explicit threadPool 2",2.14,false,false
+2026-11-24T15:29:31.005Z,"grid10000.kjt explicit threadPool 2",2.14,false,false
+2026-11-24T15:29:34.264Z,"grid10000.kjt explicit threadPool 2",2.29,false,false
+2026-11-24T15:29:37.456Z,"grid10000.kjt explicit threadPool 2",2.43,false,false
+2026-11-24T15:29:40.599Z,"grid10000.kjt explicit threadPool 2",2.43,false,false
+2026-11-24T15:29:46.658Z,"grid10000.kjt explicit partitioned 2",2.31,false,false
+2026-11-24T15:29:49.579Z,"grid10000.kjt explicit partitioned 2",2.21,false,false
+2026-11-24T15:29:52.486Z,"grid10000.kjt explicit partitioned 2",2.19,false,false
+2026-11-24T15:29:55.398Z,"grid10000.kjt explicit partitioned 2",2.19,false,false
+2026-11-24T15:29:58.321Z,"grid10000.kjt explicit partitioned 2",2.18,false,false
+2026-11-24T15:30:04.564Z,"grid10000.kjt explicit threadPool 4",2.08,false,false
+2026-11-24T15:30:07.976Z,"grid10000.kjt explicit threadPool 4",2.31,false,false
+2026-11-24T15:30:11.379Z,"grid10000.kjt explicit threadPool 4",2.31,false,false
+2026-11-24T15:32:16.039Z,"grid10000.kjt explicit threadPool 4",1.65,false,true
+2026-11-24T15:32:19.432Z,"grid10000.kjt explicit threadPool 4",1.92,false,false
+2026-11-24T15:32:25.579Z,"grid10000.kjt explicit partitioned 4",1.93,false,false
+2026-11-24T15:32:28.395Z,"grid10000.kjt explicit partitioned 4",1.93,false,false
+2026-11-24T15:32:31.216Z,"grid10000.kjt explicit partitioned 4",2.01,false,false
+2026-11-24T15:32:34.036Z,"grid10000.kjt explicit partitioned 4",2.01,false,false
+2026-11-24T15:32:36.851Z,"grid10000.kjt explicit partitioned 4",2.01,false,false
+2026-11-24T15:32:43.605Z,"grid10000.kjt explicit threadPool 8",2.09,false,false
+2026-11-24T15:32:47.511Z,"grid10000.kjt explicit threadPool 8",2.16,false,false
+2026-11-24T15:32:51.469Z,"grid10000.kjt explicit threadPool 8",2.07,false,false
+2026-11-24T15:32:55.515Z,"grid10000.kjt explicit threadPool 8",1.98,false,false
+2026-11-24T15:32:59.521Z,"grid10000.kjt explicit threadPool 8",2.54,false,false
+2026-11-24T15:33:06.189Z,"grid10000.kjt explicit partitioned 8",2.58,false,false
+2026-11-24T15:33:09.012Z,"grid10000.kjt explicit partitioned 8",2.69,false,false
+2026-11-24T15:33:11.827Z,"grid10000.kjt explicit partitioned 8",2.69,false,false
+2026-11-24T15:33:14.648Z,"grid10000.kjt explicit partitioned 8",2.56,false,false
+2026-11-24T15:33:17.456Z,"grid10000.kjt explicit partitioned 8",2.56,false,false
+2026-11-24T15:33:23.519Z,"grid10000.kjt rungeKutta4 serial",2.51,false,false
+2026-11-24T15:33:26.856Z,"grid10000.kjt rungeKutta4 serial",2.39,false,false
+2026-11-24T15:33:30.172Z,"grid10000.kjt rungeKutta4 serial",2.36,false,false
+2026-11-24T15:33:33.507Z,"grid10000.kjt rungeKutta4 serial",2.36,false,false
+2026-11-24T15:33:36.825Z,"grid10000.kjt rungeKutta4 serial",2.25,false,false
+2026-11-24T15:33:46.343Z,"grid10000.kjt rungeKutta4 threadPool 4",2.67,false,false
+2026-11-24T15:33:52.486Z,"grid10000.kjt rungeKutta4 threadPool 4",2.86,false,false
+2026-11-24T15:33:58.598Z,"grid10000.kjt rungeKutta4 threadPool 4",2.71,false,false
+2026-11-24T15:34:04.733Z,"grid10000.kjt rungeKutta4 threadPool 4",2.84,false,false
+2026-11-24T15:34:10.814Z,"grid10000.kjt rungeKutta4 threadPool 4",2.93,false,false
+2026-11-24T15:34:20.165Z,"grid10000.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:34:23.524Z,"grid10000.kjt rungeKutta4 partitioned 4",3.17,false,false
+2026-11-24T15:34:26.897Z,"grid10000.kjt rungeKutta4 partitioned 4",3,false,false
+2026-11-24T15:34:30.254Z,"grid10000.kjt rungeKutta4 partitioned 4",3.08,false,false
+2026-11-24T15:34:33.629Z,"grid10000.kjt rungeKutta4 partitioned 4",3.08,false,false
+2026-11-24T15:35:12.783Z,"grid99856.kjt explicit serial",2.27,false,false
+2026-11-24T15:35:44.388Z,"grid99856.kjt explicit serial",2.15,false,false
+2026-11-24T15:36:16.459Z,"grid99856.kjt explicit serial",2.04,false,false
+2026-11-24T15:36:48.386Z,"grid99856.kjt explicit serial",1.77,false,false
+2026-11-24T15:37:20.312Z,"grid99856.kjt explicit serial",1.67,false,false
+2026-11-24T15:38:24.639Z,"grid99856.kjt explicit threadPool 4",1.69,false,false
+2026-11-24T15:38:57.117Z,"grid99856.kjt explicit threadPool 4",1.57,false,false
+2026-11-24T15:39:29.532Z,"grid99856.kjt explicit threadPool 4",1.72,false,false
+2026-11-24T15:40:02.166Z,"grid99856.kjt explicit threadPool 4",1.67,false,false
+2026-11-24T15:40:34.545Z,"grid99856.kjt explicit threadPool 4",2.09,false,false
+2026-11-24T15:41:38.684Z,"grid99856.kjt explicit partitioned 4",2.09,false,false
+2026-11-24T15:42:10.552Z,"grid99856.kjt explicit partitioned 4",2.25,false,false
+2026-11-24T15:42:42.492Z,"grid99856.kjt explicit partitioned 4",2.43,false,false
+2026-11-24T15:43:14.775Z,"grid99856.kjt explicit partitioned 4",2.33,false,false
+2026-11-24T15:45:48.165Z,"grid99856.kjt explicit partitioned 4",1.67,false,true
+2026-11-24T15:46:52.610Z,"grid99856.kjt rungeKutta4 serial",1.8,false,false
+2026-11-24T15:47:25.422Z,"grid99856.kjt rungeKutta4 serial",1.87,false,false
+2026-11-24T15:47:58.015Z,"grid99856.kjt rungeKutta4 serial",1.84,false,false
+2026-11-24T15:48:30.960Z,"grid99856.kjt rungeKutta4 serial",1.96,false,false
+2026-11-24T15:49:03.868Z,"grid99856.kjt rungeKutta4 serial",1.78,false,false
+2026-11-24T15:50:12.863Z,"grid99856.kjt rungeKutta4 threadPool 4",2.08,false,false
+2026-11-24T15:50:49.547Z,"grid99856.kjt rungeKutta4 threadPool 4",2.05,false,false
+2026-11-24T15:51:25.904Z,"grid99856.kjt rungeKutta4 threadPool 4",2.13,false,false
+2026-11-24T15:52:02.080Z,"grid99856.kjt rungeKutta4 threadPool 4",2.13,false,false
+2026-11-24T15:52:38.432Z,"grid99856.kjt rungeKutta4 threadPool 4",2.22,false,false
+2026-11-24T15:53:48.080Z,"grid99856.kjt rungeKutta4 partitioned 4",1.95,false,false
+2026-11-24T15:54:20.869Z,"grid99856.kjt rungeKutta4 partitioned 4",2.07,false,false
+2026-11-24T15:54:53.730Z,"grid99856.kjt rungeKutta4 partitioned 4",2.01,false,false
+2026-11-24T15:55:26.774Z,"grid99856.kjt rungeKutta4 partitioned 4",2.32,false,false
+2026-11-24T15:55:59.580Z,"grid99856.kjt rungeKutta4 partitioned 4",2,false,false
+2026-11-24T16:00:14.993Z,"random100.kjt explicit serial",1.66,false,true
+2026-11-24T16:00:15.473Z,"random100.kjt explicit serial",1.66,false,false
+2026-11-24T16:00:15.950Z,"random100.kjt explicit serial",1.66,false,false
+2026-11-24T16:00:16.430Z,"random100.kjt explicit serial",1.66,false,false
+2026-11-24T16:00:16.905Z,"random100.kjt explicit serial",1.66,false,false
+2026-11-24T16:00:18.260Z,"random100.kjt explicit threadPool 4",1.69,false,false
+2026-11-24T16:00:19.206Z,"random100.kjt explicit threadPool 4",1.69,false,false
+2026-11-24T16:00:20.166Z,"random100.kjt explicit threadPool 4",1.69,false,false
+2026-11-24T16:00:21.114Z,"random100.kjt explicit threadPool 4",1.69,false,false
+2026-11-24T16:00:22.055Z,"random100.kjt explicit threadPool 4",2.04,false,false
+2026-11-24T16:00:23.574Z,"random100.kjt explicit partitioned 4",2.04,false,false
+2026-11-24T16:00:24.217Z,"random100.kjt explicit partitioned 4",2.04,false,false
+2026-11-24T16:00:24.855Z,"random100.kjt explicit partitioned 4",2.04,false,false
+2026-11-24T16:00:25.494Z,"random100.kjt explicit partitioned 4",2.04,false,false
+2026-11-24T16:00:26.133Z,"random100.kjt explicit partitioned 4",2.04,false,false
+2026-11-24T16:00:27.337Z,"random100.kjt rungeKutta4 serial",1.95,false,false
+2026-11-24T16:00:27.905Z,"random100.kjt rungeKutta4 serial",1.95,false,false
+2026-11-24T16:00:28.473Z,"random100.kjt rungeKutta4 serial",1.95,false,false
+2026-11-24T16:00:29.041Z,"random100.kjt rungeKutta4 serial",1.95,false,false
+2026-11-24T16:00:29.622Z,"random100.kjt rungeKutta4 serial",1.95,false,false
+2026-11-24T16:00:33.352Z,"random100.kjt rungeKutta4 threadPool 4",2.2,false,false
+2026-11-24T16:00:36.584Z,"random100.kjt rungeKutta4 threadPool 4",2.2,false,false
+2026-11-24T16:00:39.827Z,"random100.kjt rungeKutta4 threadPool 4",2.34,false,false
+2026-11-24T16:00:43.079Z,"random100.kjt rungeKutta4 threadPool 4",2.55,false,false
+2026-11-24T16:00:46.338Z,"random100.kjt rungeKutta4 threadPool 4",2.55,false,false
+2026-11-24T16:00:51.595Z,"random100.kjt rungeKutta4 partitioned 4",2.67,false,false
+2026-11-24T16:00:53.697Z,"random100.kjt rungeKutta4 partitioned 4",2.54,false,false
+2026-11-24T16:00:55.787Z,"random100.kjt rungeKutta4 partitioned 4",2.54,false,false
+2026-11-24T16:00:57.880Z,"random100.kjt rungeKutta4 partitioned 4",2.57,false,false
+2026-11-24T16:00:59.940Z,"random100.kjt rungeKutta4 partitioned 4",2.57,false,false
+2026-11-24T16:01:02.887Z,"random1000.kjt explicit serial",2.45,false,false
+2026-11-24T16:01:03.700Z,"random1000.kjt explicit serial",2.45,false,false
+2026-11-24T16:01:04.503Z,"random1000.kjt explicit serial",2.45,false,false
+2026-11-24T16:01:05.303Z,"random1000.kjt explicit serial",2.45,false,false
+2026-11-24T16:01:06.143Z,"random1000.kjt explicit serial",2.45,false,false
+2026-11-24T16:01:08.120Z,"random1000.kjt explicit threadPool 4",2.41,false,false
+2026-11-24T16:01:09.201Z,"random1000.kjt explicit threadPool 4",2.41,false,false
+2026-11-24T16:01:10.261Z,"random1000.kjt explicit threadPool 4",2.41,false,false
+2026-11-24T16:01:11.374Z,"random1000.kjt explicit threadPool 4",2.41,false,false
+2026-11-24T16:01:12.449Z,"random1000.kjt explicit threadPool 4",2.78,false,false
+2026-11-24T16:01:14.148Z,"random1000.kjt explicit partitioned 4",2.78,false,false
+2026-11-24T16:01:14.812Z,"random1000.kjt explicit partitioned 4",2.78,false,false
+2026-11-24T16:01:15.477Z,"random1000.kjt explicit partitioned 4",2.78,false,false
+2026-11-24T16:01:16.141Z,"random1000.kjt explicit partitioned 4",2.78,false,false
+2026-11-24T16:01:16.803Z,"random1000.kjt explicit partitioned 4",2.78,false,false
+2026-11-24T16:01:18.328Z,"random1000.kjt rungeKutta4 serial",2.64,false,false
+2026-11-24T16:01:19.238Z,"random1000.kjt rungeKutta4 serial",2.64,false,false
+2026-11-24T16:01:20.145Z,"random1000.kjt rungeKutta4 serial",2.64,false,false
+2026-11-24T16:01:21.042Z,"random1000.kjt rungeKutta4 serial",2.64,false,false
+2026-11-24T16:01:21.937Z,"random1000.kjt rungeKutta4 serial",2.64,false,false
+2026-11-24T16:01:26.128Z,"random1000.kjt rungeKutta4 threadPool 4",2.66,false,false
+2026-11-24T16:01:29.478Z,"random1000.kjt rungeKutta4 threadPool 4",2.85,false,false
+2026-11-24T16:01:32.678Z,"random1000.kjt rungeKutta4 threadPool 4",3.02,false,false
+2026-11-24T16:01:36.039Z,"random1000.kjt rungeKutta4 threadPool 4",3.02,false,false
+2026-11-24T16:01:38.945Z,"random1000.kjt rungeKutta4 threadPool 4",3.18,false,false
+2026-11-24T16:01:43.186Z,"random1000.kjt rungeKutta4 partitioned 4",3.09,false,false
+2026-11-24T16:01:44.275Z,"random1000.kjt rungeKutta4 partitioned 4",3.09,false,false
+2026-11-24T16:01:45.339Z,"random1000.kjt rungeKutta4 partitioned 4",3.09,false,false
+2026-11-24T16:01:46.420Z,"random1000.kjt rungeKutta4 partitioned 4",3.09,false,false
+2026-11-24T16:01:47.499Z,"random1000.kjt rungeKutta4 partitioned 4",3.08,false,false
+2026-11-24T16:01:53.143Z,"random10000.kjt explicit serial",2.99,false,false
+2026-11-24T16:01:57.257Z,"random10000.kjt explicit serial",2.83,false,false
+2026-11-24T16:02:01.359Z,"random10000.kjt explicit serial",2.83,false,false
+2026-11-24T16:02:05.482Z,"random10000.kjt explicit serial",2.69,false,false
+2026-11-24T16:02:09.595Z,"random10000.kjt explicit serial",2.55,false,false
+2026-11-24T16:02:18.085Z,"random10000.kjt explicit threadPool 4",2.61,false,false
+2026-11-24T16:02:22.568Z,"random10000.kjt explicit threadPool 4",2.8,false,false
+2026-11-24T16:02:27.035Z,"random10000.kjt explicit threadPool 4",2.8,false,false
+2026-11-24T16:02:31.501Z,"random10000.kjt explicit threadPool 4",2.66,false,false
+2026-11-24T16:02:35.964Z,"random10000.kjt explicit threadPool 4",2.61,false,false
+2026-11-24T16:02:44.313Z,"random10000.kjt explicit partitioned 4",2.67,false,false
+2026-11-24T16:02:48.269Z,"random10000.kjt explicit partitioned 4",2.69,false,false
+2026-11-24T16:02:52.206Z,"random10000.kjt explicit partitioned 4",2.69,false,false
+2026-11-24T16:02:56.155Z,"random10000.kjt explicit partitioned 4",3.12,false,false
+2026-11-24T16:03:00.111Z,"random10000.kjt explicit partitioned 4",2.95,false,false
+2026-11-24T16:03:08.760Z,"random10000.kjt rungeKutta4 serial",2.73,false,false
+2026-11-24T16:03:13.408Z,"random10000.kjt rungeKutta4 serial",2.75,false,false
+2026-11-24T16:03:18.045Z,"random10000.kjt rungeKutta4 serial",2.69,false,false
+2026-11-24T16:03:22.771Z,"random10000.kjt rungeKutta4 serial",2.71,false,false
+2026-11-24T16:03:27.418Z,"random10000.kjt rungeKutta4 serial",2.58,false,false
+2026-11-24T16:03:39.477Z,"random10000.kjt rungeKutta4 threadPool 4",2.65,false,false
+2026-11-24T16:03:46.813Z,"random10000.kjt rungeKutta4 threadPool 4",2.68,false,false
+2026-11-24T16:03:54.082Z,"random10000.kjt rungeKutta4 threadPool 4",2.74,false,false
+2026-11-24T16:04:01.305Z,"random10000.kjt rungeKutta4 threadPool 4",2.6,false,false
+2026-11-24T16:04:08.559Z,"random10000.kjt rungeKutta4 threadPool 4",2.76,false,false
+2026-11-24T16:04:20.564Z,"random10000.kjt rungeKutta4 partitioned 4",2.87,false,false
+2026-11-24T16:04:25.274Z,"random10000.kjt rungeKutta4 partitioned 4",2.72,false,false
+2026-11-24T16:04:30.022Z,"random10000.kjt rungeKutta4 partitioned 4",2.58,false,false
+2026-11-24T16:04:34.693Z,"random10000.kjt rungeKutta4 partitioned 4",2.46,false,false
+2026-11-24T16:04:39.411Z,"random10000.kjt rungeKutta4 partitioned 4",2.34,false,false
+2026-11-24T16:05:32.694Z,"random100000.kjt explicit serial",1.92,false,false
+2026-11-24T16:06:15.352Z,"random100000.kjt explicit serial",1.68,false,false
+2026-11-24T16:08:58.991Z,"random100000.kjt explicit serial",1.2,false,true
+2026-11-24T16:09:41.173Z,"random100000.kjt explicit serial",1.48,false,false
+2026-11-24T16:10:23.895Z,"random100000.kjt explicit serial",1.79,false,false
+2026-11-24T16:11:49.840Z,"random100000.kjt explicit threadPool 4",1.88,false,false
+2026-11-24T16:12:33.114Z,"random100000.kjt explicit threadPool 4",2.06,false,false
+2026-11-24T16:13:16.711Z,"random100000.kjt explicit threadPool 4",1.8,false,false
+2026-11-24T16:14:00.159Z,"random100000.kjt explicit threadPool 4",1.59,false,false
+2026-11-24T16:14:43.472Z,"random100000.kjt explicit threadPool 4",2.01,false,false
+2026-11-24T16:16:09.638Z,"random100000.kjt explicit partitioned 4",1.86,false,false
+2026-11-24T16:20:55.160Z,"random100000.kjt explicit partitioned 4",1.35,false,true
+2026-11-24T16:21:38.078Z,"random100000.kjt explicit partitioned 4",1.64,false,false
+2026-11-24T16:22:21.080Z,"random100000.kjt explicit partitioned 4",1.69,false,false
+2026-11-24T16:23:03.860Z,"random100000.kjt explicit partitioned 4",1.65,false,false
+2026-11-24T16:24:31.143Z,"random100000.kjt rungeKutta4 serial",2.14,false,false
+2026-11-24T16:25:15.867Z,"random100000.kjt rungeKutta4 serial",1.92,false,false
+2026-11-24T16:25:59.946Z,"random100000.kjt rungeKutta4 serial",1.71,false,false
+2026-11-24T16:26:44.705Z,"random100000.kjt rungeKutta4 serial",1.92,false,false
+2026-11-24T16:27:28.511Z,"random100000.kjt rungeKutta4 serial",2.01,false,false
+2026-11-24T16:28:59.767Z,"random100000.kjt rungeKutta4 threadPool 4",2.21,false,false
+2026-11-24T16:32:07.813Z,"random100000.kjt rungeKutta4 threadPool 4",1.29,false,true
+2026-11-24T16:32:54.913Z,"random100000.kjt rungeKutta4 threadPool 4",1.79,false,false
+2026-11-24T16:33:42.529Z,"random100000.kjt rungeKutta4 threadPool 4",2.01,false,false
+2026-11-24T16:34:30.133Z,"random100000.kjt rungeKutta4 threadPool 4",2.59,false,false
+2026-11-24T16:36:02.954Z,"random100000.kjt rungeKutta4 partitioned 4",2.25,false,false
+2026-11-24T16:36:48.514Z,"random100000.kjt rungeKutta4 partitioned 4",1.72,false,false
+2026-11-24T16:37:33.596Z,"random100000.kjt rungeKutta4 partitioned 4",1.89,false,false
+2026-11-24T16:40:59.683Z,"random100000.kjt rungeKutta4 partitioned 4",1.59,false,true
+2026-11-24T16:41:43.870Z,"random100000.kjt rungeKutta4 partitioned 4",1.95,false,false

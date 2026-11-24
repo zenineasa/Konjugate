@@ -8,7 +8,7 @@
 // Options:
 //   --engine <path>      the konjugateEngine executable (default: $KONJUGATE_ENGINE, else out/engine/konjugateEngine)
 //   --output <dir>       where to write results (default: out/benchmarks/accuracy for --accuracy,
-//                        benchmarks/results/<version>/<machine>/ for --full)
+//                        benchmarks/results/<machine>/ for --full)
 //   --only <text>        run only the problems whose ID contains the text
 //   --repeats <n>        timed runs per timing case in --full (default 7)
 //   --warmup <n>         untimed runs before them (default 1)
@@ -17,14 +17,15 @@
 //   --scaling-up-to <n>  under --full, time the generated graphs up to n nodes only (a quick check of the harness, not for publishing)
 //   --wait-for-quiet     before timing, wait for a quiet computer, and check again before every timed run (lib/quiet.mjs)
 
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, relative } from 'node:path';
 import { isDeepStrictEqual, parseArgs } from 'node:util';
 import { createEngine, loadModel, repositoryRoot, resolveEngineExecutable } from './lib/engine.mjs';
-import { busyProcesses, conditions, engineBuild, machineDetails, machineSlug } from './lib/machine.mjs';
+import { busyProcesses, conditions, engineBuild, machineDetails } from './lib/machine.mjs';
+import { resultsDirectory, sourceIdentity } from './lib/results.mjs';
 import { createQuietGate } from './lib/quiet.mjs';
 import { timingStatistics } from './lib/metrics.mjs';
 import { formatNumber, plotCsv, renderSvg } from './lib/plots.mjs';
@@ -62,14 +63,6 @@ if (mode === 'full' && process.platform === 'darwin' && !options['no-caffeinate'
     process.exitCode = await main();
 }
 
-function git(args) {
-    try {
-        return execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-    } catch {
-        return '';
-    }
-}
-
 function csv(rows, columns) {
     const quote = (value) => {
         if (value === null || value === undefined) return '';
@@ -81,7 +74,8 @@ function csv(rows, columns) {
 
 async function main() {
     const startedAt = new Date();
-    const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
+    const source = sourceIdentity();
+    const packageVersion = source.konjugateVersion;
     const executable = resolveEngineExecutable(options.engine);
     const workDirectory = await mkdtemp(join(tmpdir(), 'konjugateBenchmarks-'));
     const quiet = options['wait-for-quiet'] ? createQuietGate() : null;
@@ -183,14 +177,14 @@ async function main() {
         }
 
         const outputDirectory = options.output
-            ?? (mode === 'full' ? join(repositoryRoot, 'benchmarks', 'results', packageVersion, machineSlug(machine)) : join(repositoryRoot, 'out', 'benchmarks', 'accuracy'));
+            ?? (mode === 'full' ? resultsDirectory(machine) : join(repositoryRoot, 'out', 'benchmarks', 'accuracy'));
         await rm(join(outputDirectory, 'plots'), { recursive: true, force: true });
         await mkdir(join(outputDirectory, 'plots'), { recursive: true });
         const allChecks = results.flatMap((entry) => entry.checks.map((check) => ({ problem: entry.id, ...check })));
         const summary = {
             run: {
                 mode, startedAt: startedAt.toISOString(), konjugateVersion: packageVersion, engineVersion, engine: basename(executable),
-                gitCommit: git(['rev-parse', '--short', 'HEAD']) || 'unknown', workingTreeChanges: Boolean(git(['status', '--porcelain']))
+                gitCommit: source.gitCommit, workingTreeChanges: source.workingTreeChanges
             },
             totals: { ...totals, checks: allChecks.length, passed: allChecks.filter((check) => check.pass).length },
             problems: results.map(({ plots, ...entry }) => ({ ...entry, plots: plots.map((plot) => `plots/${plot.id}.svg`) })),

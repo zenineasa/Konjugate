@@ -1,23 +1,28 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// npm run benchmark:combine: the timing sessions of one version on one computer combined into one report (benchmarks/README.md, Reproduce
+// npm run benchmark:combine: the timing sessions of one engine on one computer combined into one report (benchmarks/README.md, Reproduce
 // these results). npm run benchmark:performance calls it at the end of every session; run it alone to combine again, or a choice of sessions:
 //
 //   node benchmarks/combine.mjs [<results directory>] [--sessions <name,name>]
 //
-// The results directory is benchmarks/results/<version>/<machine>/ (by default this version's, for this computer), holding sessions/<name>/
-// with the parts each session ran (problems/, scaling/, comparisons/, and openmodelica/ from npm run benchmark:openmodelica). For every
-// measurement: the minimum over every session's runs, the headline (noise only adds time); the median and interquartile range over all the
+// The results directory is benchmarks/results/<machine>/ (by default this computer's), holding sessions/<name>/ with the parts each session
+// ran (problems/, scaling/, comparisons/, and openmodelica/ from npm run benchmark:openmodelica). Each part records the source it timed: the
+// Konjugate version, the commit and whether the checkout had uncommitted changes (lib/results.mjs). Only the parts timed from the newest
+// source are combined, the commit of the latest part that timed Konjugate; the others are kept in sessions/ and listed in the report as
+// superseded, never mixed into the numbers. A part that recorded no commit counts as the newest source's only if its session started after
+// that commit was made. For every measurement: the minimum over every session's runs, the headline (noise only adds time); the median and interquartile range over all the
 // runs; the spread between sessions, (largest − smallest) / smallest of the sessions' minimums; and a flag where any session's own runs
 // spread more than 5 % (interquartile range over median). Written beside sessions/: report.html, combined.json, timings.csv and comparisons/
 // (comparisons.json, comparisons.csv, plots/, performance.html).
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { noisyWithinRun, writeComparisonReport } from './comparisons/report.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
-import { describeEngineBuild, machineDetails, machineSlug } from './lib/machine.mjs';
+import { describeEngineBuild } from './lib/machine.mjs';
+import { resultsDirectory } from './lib/results.mjs';
 import { timingStatistics } from './lib/metrics.mjs';
 import { darkTheme, formatNumber, lightTheme } from './lib/plots.mjs';
 
@@ -45,23 +50,93 @@ function combineRuns(perSession) {
 
 // A session folder counts only if a part in it wrote its results: a session stopped before any part finished (its preflight refused, or it was
 // interrupted) leaves an empty folder, which is not a session.
-const sessionResults = [join('problems', 'summary.json'), join('scaling', 'summary.json'), join('comparisons', 'comparisons.json'), join('openmodelica', 'comparisons.json')];
+const sessionParts = { problems: 'summary.json', scaling: 'summary.json', comparisons: 'comparisons.json', openmodelica: 'comparisons.json' };
 
-function sessionList(machineDirectory, chosen) {
+// The source a part timed, as it recorded it, and whether it timed Konjugate at all (an OpenModelica session times only OpenModelica).
+function partSource(directory, part) {
+    const summary = readJson(join(directory, part, sessionParts[part]));
+    if (!summary) return null;
+    if (summary.run) return { startedAt: summary.run.startedAt ?? null, konjugateVersion: summary.run.konjugateVersion ?? null, gitCommit: summary.run.gitCommit ?? null, workingTreeChanges: summary.run.workingTreeChanges ?? null, timesKonjugate: true };
+    const konjugate = summary.versions?.konjugate;
+    const conditions = summary.conditions?.start ? summary.conditions : Object.values(summary.conditions ?? {})[0] ?? null;
+    return {
+        startedAt: conditions?.start?.at ?? null, konjugateVersion: konjugate?.version ?? null, gitCommit: konjugate?.commit ?? null, workingTreeChanges: konjugate?.workingTreeChanges ?? null,
+        timesKonjugate: (summary.records ?? []).some((record) => String(record.tool).startsWith('Konjugate'))
+    };
+}
+
+const known = (commit) => Boolean(commit) && commit !== 'unknown';
+
+// Session folders are named by when they started, in UTC: 2026-11-24T14-56-45, or with a suffix such as -openmodelica.
+function sessionStart(name) {
+    const match = /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})/.exec(name);
+    return match ? Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`) : null;
+}
+
+function git(args) {
+    try {
+        return execFileSync('git', args, { cwd: repositoryRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    } catch {
+        return '';
+    }
+}
+
+function commitTime(commit) {
+    const time = git(['show', '-s', '--format=%cI', commit]);
+    return time ? Date.parse(time) : null;
+}
+
+// The repository's commit pages, from package.json's repository: https://github.com/<owner>/<name>/commit/<full hash>.
+const repositoryUrl = (() => {
+    const repository = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).repository;
+    const url = typeof repository === 'string' ? repository : repository?.url;
+    return url ? url.replace(/^git\+/, '').replace(/\.git$/, '') : null;
+})();
+
+// A part as the report and combined.json describe it: when it started (UTC), the version, and the commit the timed engine was built
+// from, short and full with its page, and whether the checkout had uncommitted changes then.
+function describePart(session, part, source) {
+    const fullCommit = known(source.gitCommit) ? git(['rev-parse', '--verify', '--quiet', `${source.gitCommit}^{commit}`]) || null : null;
+    return {
+        session, part, startedAt: source.startedAt ?? (sessionStart(session) !== null ? new Date(sessionStart(session)).toISOString() : null), konjugateVersion: source.konjugateVersion,
+        gitCommit: source.gitCommit, fullCommit, commitUrl: fullCommit && repositoryUrl ? `${repositoryUrl}/commit/${fullCommit}` : null, workingTreeChanges: source.workingTreeChanges
+    };
+}
+
+// Every session with results, each part marked as timed from the newest source (combined) or not (superseded). A session folder counts only
+// if a part in it wrote its results: a session stopped before any part finished (its preflight refused, or it was interrupted) leaves an
+// empty folder, which is not a session.
+export function selectSessions(machineDirectory, chosen = null) {
     const directory = join(machineDirectory, 'sessions');
-    if (!existsSync(directory)) return [];
-    return readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory() && (!chosen || chosen.includes(name))
-        && sessionResults.some((result) => existsSync(join(directory, name, result)))).sort()
-        .map((name) => ({ name, directory: join(directory, name) }));
+    if (!existsSync(directory)) return { sessions: [], source: null, superseded: [] };
+    const all = readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory() && (!chosen || chosen.includes(name))).sort()
+        .map((name) => ({ name, directory: join(directory, name), parts: Object.keys(sessionParts).map((part) => ({ part, source: partSource(join(directory, name), part) })).filter((entry) => entry.source) }))
+        .filter((session) => session.parts.length);
+    const newest = all.flatMap((session) => session.parts).filter((entry) => entry.source.timesKonjugate && known(entry.source.gitCommit)).at(-1)?.source ?? null;
+    const newestTime = newest ? commitTime(newest.gitCommit) : null;
+    const current = (session, source) => !newest || (known(source.gitCommit) ? source.gitCommit === newest.gitCommit : newestTime !== null && sessionStart(session.name) !== null && sessionStart(session.name) > newestTime);
+    const superseded = [];
+    const sessions = all.map((session) => {
+        const parts = new Set();
+        for (const { part, source } of session.parts) {
+            if (current(session, source)) parts.add(part);
+            else superseded.push(describePart(session.name, part, source));
+        }
+        return { name: session.name, directory: session.directory, parts, details: Object.fromEntries(session.parts.map(({ part, source }) => [part, describePart(session.name, part, source)])) };
+    }).filter((session) => session.parts.size);
+    const newestPart = newest && describePart('', '', newest);
+    const source = newest ? { konjugateVersion: newest.konjugateVersion, gitCommit: newest.gitCommit, fullCommit: newestPart.fullCommit, commitUrl: newestPart.commitUrl } : null;
+    return { sessions, source, superseded };
 }
 
 function combineSuite(sessions, part) {
     const byKey = new Map();
     const sessionsWithPart = [];
     for (const session of sessions) {
+        if (!session.parts.has(part)) continue;
         const summary = readJson(join(session.directory, part, 'summary.json'));
         if (!summary?.timings) continue;
-        sessionsWithPart.push({ session: session.name, conditions: summary.timing?.conditions ?? null, quietGate: summary.timing?.quietGate ?? null, machine: summary.machine, run: summary.run });
+        sessionsWithPart.push({ ...session.details[part], conditions: summary.timing?.conditions ?? null, quietGate: summary.timing?.quietGate ?? null, machine: summary.machine, run: summary.run });
         for (const timing of summary.timings) {
             const key = `${timing.problem}|${timing.label}`;
             if (!byKey.has(key)) byKey.set(key, { timing, wall: [], compute: [], memory: [] });
@@ -96,11 +171,12 @@ function combineComparisons(sessions) {
     const included = [];
     for (const session of sessions) {
         for (const part of ['comparisons', 'openmodelica']) {
+            if (!session.parts.has(part)) continue;
             const summary = readJson(join(session.directory, part, 'comparisons.json'));
             if (!summary) continue;
             latest = { ...(latest ?? {}), ...summary, versions: { ...(latest?.versions ?? {}), ...summary.versions }, startup: { ...(latest?.startup ?? {}), ...summary.startup },
                 references: { ...(latest?.references ?? {}), ...summary.references }, openModelicaTranslation: { ...(latest?.openModelicaTranslation ?? {}), ...summary.openModelicaTranslation } };
-            included.push({ session: session.name, part, conditions: summary.conditions, quietGate: summary.quietGate, rounds: summary.rounds });
+            included.push({ ...session.details[part], conditions: summary.conditions, quietGate: summary.quietGate, rounds: summary.rounds });
             for (const record of summary.records) {
                 const key = [record.problem, record.tool, record.method, record.switching ?? '', record.tolerance].join('|');
                 if (!byKey.has(key)) byKey.set(key, { first: record, perSession: [], errors: new Set() });
@@ -140,6 +216,9 @@ function suiteTable(rows, { scaling }) {
     return `<div class="scroll"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
+const utc = (iso) => (iso ? `${iso.replace('T', ' ').replace(/(\.\d+)?Z$/, '')} UTC` : 'not recorded');
+const commitHtml = (entry) => `${entry.commitUrl ? `<a href="${escapeXml(entry.commitUrl)}"><code>${escapeXml(entry.gitCommit)}</code></a>` : `<code>${escapeXml(entry.gitCommit ?? 'not recorded')}</code>`}${entry.workingTreeChanges ? ' (dirty: uncommitted changes)' : entry.workingTreeChanges === null || entry.workingTreeChanges === undefined ? (entry.part ? ' (uncommitted changes not recorded)' : '') : ''}`;
+
 function sessionsTable(entries) {
     const condition = (value) => (value ? `load ${value.loadAverage?.join(' / ')}; ${value.power ?? ''}; ${value.thermal ?? ''}` : '–');
     const gate = (value) => {
@@ -148,9 +227,14 @@ function sessionsTable(entries) {
     };
     const rows = entries.map((entry) => {
         const conditions = entry.conditions?.start ? entry.conditions : Object.values(entry.conditions ?? {})[0] ?? null;
-        return `<tr><td>${escapeXml(entry.session)}</td><td>${escapeXml(entry.part)}</td><td>${escapeXml(condition(conditions?.start))}</td><td>${escapeXml(condition(conditions?.end))}</td><td>${escapeXml(gate(entry.quietGate))}</td></tr>`;
+        return `<tr><td>${escapeXml(entry.session)}</td><td>${escapeXml(entry.part)}</td><td>${escapeXml(utc(entry.startedAt))}</td><td>${escapeXml(entry.konjugateVersion ?? 'not recorded')}, ${commitHtml(entry)}</td><td>${escapeXml(condition(conditions?.start))}</td><td>${escapeXml(condition(conditions?.end))}</td><td>${escapeXml(gate(entry.quietGate))}</td></tr>`;
     }).join('');
-    return `<div class="scroll"><table><thead><tr><th>Session</th><th>Part</th><th>At the start</th><th>At the end</th><th>Quiet gate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+    return `<div class="scroll"><table><thead><tr><th>Session</th><th>Part</th><th>Started</th><th>Konjugate, commit</th><th>At the start</th><th>At the end</th><th>Quiet gate</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function supersededTable(entries) {
+    const rows = entries.map((entry) => `<tr><td>${escapeXml(entry.session)}</td><td>${escapeXml(entry.part)}</td><td>${escapeXml(utc(entry.startedAt))}</td><td>${escapeXml(entry.konjugateVersion ?? 'not recorded')}</td><td>${commitHtml(entry)}</td></tr>`).join('');
+    return `<div class="scroll"><table><thead><tr><th>Session</th><th>Part</th><th>Started</th><th>Version</th><th>Commit</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 function csv(rows) {
@@ -165,17 +249,18 @@ function csv(rows) {
 }
 
 export async function combineSessions(machineDirectory, { sessions: chosen = null } = {}) {
-    const sessions = sessionList(machineDirectory, chosen);
+    const { sessions, source, superseded } = selectSessions(machineDirectory, chosen);
     if (!sessions.length) throw new Error(`No sessions under ${join(machineDirectory, 'sessions')}: run npm run benchmark:performance first.`);
     const problems = combineSuite(sessions, 'problems');
     const scaling = combineSuite(sessions, 'scaling');
     const comparisons = combineComparisons(sessions);
     const machine = [...problems.sessions, ...scaling.sessions].at(-1)?.machine ?? comparisons?.machine ?? null;
-    const combined = { machine, sessions: sessions.map((session) => session.name), problems: problems.rows, scaling: scaling.rows, statistic: 'minimum over all runs of all sessions; median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session\'s interquartile range exceeds 5 % of its median' };
+    const combined = { machine, source, sessions: sessions.map((session) => session.name), sessionParts: sessions.flatMap((session) => [...session.parts].map((part) => session.details[part])), supersededSessions: superseded, problems: problems.rows, scaling: scaling.rows, statistic: 'minimum over all runs of all combined sessions (those timed from the source commit); median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session\'s interquartile range exceeds 5 % of its median' };
     writeFileSync(join(machineDirectory, 'combined.json'), `${JSON.stringify(combined, null, 1)}\n`);
     writeFileSync(join(machineDirectory, 'timings.csv'), csv([...problems.rows.map((row) => ({ part: 'problems', row })), ...scaling.rows.map((row) => ({ part: 'scaling', row }))]));
-    const latestProblems = [...sessions].reverse().find((session) => existsSync(join(session.directory, 'problems', 'report.html')));
-    const latestScaling = [...sessions].reverse().find((session) => existsSync(join(session.directory, 'scaling', 'report.html')));
+    const latestProblems = [...sessions].reverse().find((session) => session.parts.has('problems') && existsSync(join(session.directory, 'problems', 'report.html')));
+    const latestScaling = [...sessions].reverse().find((session) => session.parts.has('scaling') && existsSync(join(session.directory, 'scaling', 'report.html')));
+    const supersededSessions = [...new Set(superseded.map((entry) => entry.session))];
     const reportPath = join(machineDirectory, 'report.html');
     const machineText = machine ? [machine.model, machine.chip ?? machine.cpu, `${machine.logicalProcessors} cores`, `${Math.round(machine.memoryBytes / 2 ** 30)} GiB`, machine.operatingSystem, machine.engineBuild ? `engine ${describeEngineBuild(machine.engineBuild)}` : null].filter(Boolean).join(' · ') : '';
     const sessionEntries = [...problems.sessions.map((entry) => ({ ...entry, part: 'problems' })), ...scaling.sessions.map((entry) => ({ ...entry, part: 'scaling' })),
@@ -194,12 +279,12 @@ th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid
 <body class="viz-root"><main>
 <h1>Konjugate performance report</h1>
 <p>${escapeXml(machineText)}</p>
-<p class="lede">Konjugate evaluated against established tools, reproducibly, on this computer: ${sessions.length} timing session${sessions.length === 1 ? '' : 's'} combined. Every timing's headline is its minimum over all runs of all sessions, since noise on a computer only adds time; beside it are the median and interquartile range over all runs, the spread between the sessions' minimums, and a flag where a session's runs spread more than 5 %. The accuracy checks are in each session's own report${latestProblems ? ` (<a href="sessions/${latestProblems.name}/problems/report.html">the latest</a>)` : ''}; the methods are in benchmarks/README.md.</p>
-<nav><p><a href="#sessions">Sessions</a> · <a href="#problems">Problem timings</a> · <a href="#scaling">Graph scalability</a></p></nav>
+${source ? `<p>Timed from Konjugate ${escapeXml(source.konjugateVersion ?? 'version not recorded')}, the engine built from commit ${commitHtml(source)}: ${sessions.flatMap((session) => [...session.parts].map((part) => session.details[part])).map((entry) => `${escapeXml(entry.part)} started ${escapeXml(utc(entry.startedAt))}${entry.workingTreeChanges ? ' (dirty: uncommitted changes)' : ''}`).join('; ')}.</p>\n` : ''}<p class="lede">Konjugate evaluated against established tools, reproducibly, on this computer: ${sessions.length} timing session${sessions.length === 1 ? '' : 's'} combined${superseded.length ? `, all timed from that commit; ${supersededSessions.length} earlier session${supersededSessions.length === 1 ? '' : 's'}, timed from an older source, ${supersededSessions.length === 1 ? 'is' : 'are'} kept but not combined (<a href="#superseded">Superseded sessions</a>)` : ''}. Every timing's headline is its minimum over all runs of the combined sessions, since noise on a computer only adds time; beside it are the median and interquartile range over all runs, the spread between the sessions' minimums, and a flag where a session's runs spread more than 5 %. The accuracy checks are in each session's own report${latestProblems ? ` (<a href="sessions/${latestProblems.name}/problems/report.html">the latest</a>)` : ''}; the methods are in benchmarks/README.md.</p>
+<nav><p><a href="#sessions">Sessions</a> · <a href="#problems">Problem timings</a> · <a href="#scaling">Graph scalability</a>${superseded.length ? ' · <a href="#superseded">Superseded sessions</a>' : ''}</p></nav>
 <section id="sessions"><h2>Sessions and their conditions</h2>${sessionsTable(sessionEntries)}</section>
 <section id="problems"><h2>Problem timings</h2><p>Each problem's timing cases: the engine process's wall time and its own integration time.</p>${problems.rows.length ? suiteTable(problems.rows, { scaling: false }) : '<p>Not run in these sessions.</p>'}</section>
 <section id="scaling"><h2>Graph scalability</h2><p>Generated thermal graphs on the serial, thread-pool and partitioned backends: the engine's integration time, node steps per second and each parallel backend's speed-up over serial, all from the minimums.${latestScaling ? ` The plots are in <a href="sessions/${latestScaling.name}/scaling/report.html">the latest session's report</a>.` : ''}</p>${scaling.rows.length ? suiteTable(scaling.rows, { scaling: true }) : '<p>Not run in these sessions.</p>'}</section>
-</main></body></html>
+${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>Timed from an older source than commit ${commitHtml(source)}, so not combined: their results stay in sessions/ for the record, and none of their numbers are above.</p>${supersededTable(superseded)}</section>\n` : ''}</main></body></html>
 `);
     if (comparisons) {
         const directory = join(machineDirectory, 'comparisons');
@@ -207,14 +292,13 @@ th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid
         writeFileSync(join(directory, 'comparisons.json'), `${JSON.stringify(comparisons, (_key, value) => (typeof value === 'number' && !Number.isFinite(value) ? String(value) : value), 1)}\n`);
         await writeComparisonReport(directory, reportPath);
     }
-    console.log(`Combined ${sessions.length} session${sessions.length === 1 ? '' : 's'}: ${reportPath}`);
+    console.log(`Combined ${sessions.length} session${sessions.length === 1 ? '' : 's'}${source ? ` timed from commit ${source.gitCommit}` : ''}${superseded.length ? `; superseded, not combined: ${supersededSessions.join(', ')}` : ''}: ${reportPath}`);
     return reportPath;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
     const { values: options, positionals } = parseArgs({ options: { sessions: { type: 'string' } }, allowPositionals: true });
-    const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
-    const machineDirectory = positionals[0] ?? join(repositoryRoot, 'benchmarks', 'results', packageVersion, machineSlug(machineDetails()));
+    const machineDirectory = positionals[0] ?? resultsDirectory();
     try {
         await combineSessions(machineDirectory, { sessions: options.sessions?.split(',') ?? null });
     } catch (error) {

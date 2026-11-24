@@ -15,8 +15,8 @@
 // baseline plus 1 (lib/quiet.mjs), and logging its time, load and Docker state. Everything runs under caffeinate, printing progress and the
 // time left.
 //
-// Each session writes to its own folder, benchmarks/results/<version>/<machine>/sessions/<date and time>/<part>/, and then the sessions so
-// far are combined (benchmarks/combine.mjs) into benchmarks/results/<version>/<machine>/report.html: so a long run may be split into
+// Each session writes to its own folder, benchmarks/results/<machine>/sessions/<date and time>/<part>/, and then the sessions so far that
+// timed the newest source are combined (benchmarks/combine.mjs) into benchmarks/results/<machine>/report.html: so a long run may be split into
 // sessions on different days, and repeated sessions show how much the computer's own variation moves the numbers.
 //
 // Options:
@@ -37,7 +37,8 @@ import { combineSessions } from './combine.mjs';
 import { writeComparisonReport } from './comparisons/report.mjs';
 import { comparisonProblems } from './comparisons/problems.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
-import { conditions, machineDetails, machineSlug } from './lib/machine.mjs';
+import { conditions } from './lib/machine.mjs';
+import { resultsDirectory } from './lib/results.mjs';
 import { engineExecutable } from './lib/shippedEngine.mjs';
 import { preflight } from './lib/quiet.mjs';
 import { problems } from './problems.mjs';
@@ -152,8 +153,7 @@ async function main() {
     const setup = spawnSync(process.execPath, [join(repositoryRoot, 'benchmarks', 'setup.mjs'), '--skip-openmodelica'], { stdio: 'inherit' });
     if (setup.status !== 0) throw new Error('Setup did not complete; see above.');
 
-    const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
-    const machineDirectory = dryRun ? join(repositoryRoot, 'out', 'benchmarks', 'performance-dry-run') : join(repositoryRoot, 'benchmarks', 'results', packageVersion, machineSlug(machineDetails()));
+    const machineDirectory = dryRun ? join(repositoryRoot, 'out', 'benchmarks', 'performance-dry-run') : resultsDirectory();
     if (dryRun) rmSync(machineDirectory, { recursive: true, force: true });
     const session = new Date().toISOString().replace(/\.\d+Z$/, '').replaceAll(':', '-');
     const sessionDirectory = join(machineDirectory, 'sessions', session);

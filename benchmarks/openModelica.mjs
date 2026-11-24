@@ -15,14 +15,14 @@
 // Options: --dry-run (one round, the smaller problems, into out/benchmarks/performance-dry-run/), --rounds <n> (default 3).
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { parseArgs } from 'node:util';
 import { combineSessions } from './combine.mjs';
 import { image } from './comparisons/openmodelica/openmodelica.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
-import { machineDetails, machineSlug } from './lib/machine.mjs';
+import { resultsDirectory } from './lib/results.mjs';
 
 const { values: options } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false }, rounds: { type: 'string', default: '3' } } });
 const dryRun = options['dry-run'];
@@ -60,8 +60,7 @@ async function main() {
         console.error('Docker is not running. Start Docker (Docker Desktop on a Mac), wait until it is ready, and run this again; quit Docker Desktop afterwards.');
         return 2;
     }
-    const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
-    const machineDirectory = dryRun ? join(repositoryRoot, 'out', 'benchmarks', 'performance-dry-run') : join(repositoryRoot, 'benchmarks', 'results', packageVersion, machineSlug(machineDetails()));
+    const machineDirectory = dryRun ? join(repositoryRoot, 'out', 'benchmarks', 'performance-dry-run') : resultsDirectory();
     if (!existsSync(join(machineDirectory, 'sessions'))) {
         console.error(`Run npm run benchmark:performance${dryRun ? ' -- --dry-run' : ''} first: ${join(machineDirectory, 'sessions')} is missing.`);
         return 2;

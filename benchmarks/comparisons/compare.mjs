@@ -22,7 +22,7 @@
 // state) is recorded at the start and the end. Timing is local: run it on a quiet computer on mains power (the README's Timing).
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -30,7 +30,8 @@ import { parseArgs } from 'node:util';
 import { generateStandaloneProgram } from '../../src/codeExport.mjs';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import { createEngine, repositoryRoot, resolveEngineExecutable, trajectory } from '../lib/engine.mjs';
-import { conditions, engineBuild, machineDetails, machineSlug } from '../lib/machine.mjs';
+import { conditions, engineBuild, machineDetails } from '../lib/machine.mjs';
+import { resultsDirectory, sourceIdentity } from '../lib/results.mjs';
 import { errorMetrics, spread } from '../lib/metrics.mjs';
 import { createQuietGate } from '../lib/quiet.mjs';
 import { createOpenModelica, solvers as openModelicaSolvers } from './openmodelica/openmodelica.mjs';
@@ -149,9 +150,9 @@ async function main() {
     // The runners' own timed runs are logged here by the quiet check they call (lib/quiet.mjs), beside this process's.
     const quietLog = join(work, 'quiet.jsonl');
     oneThread.KONJUGATE_QUIET_LOG = quietLog;
-    const packageVersion = JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version;
+    const source = sourceIdentity();
     const machine = { ...machineDetails(), engineBuild: engineBuild(executable) };
-    const outputDirectory = options.output ?? join(repositoryRoot, 'benchmarks', 'results', packageVersion, machineSlug(machine), 'comparisons');
+    const outputDirectory = options.output ?? join(resultsDirectory(machine), 'comparisons');
     await mkdir(outputDirectory, { recursive: true });
     const summaryPath = join(outputDirectory, 'comparisons.json');
     const previous = existsSync(summaryPath) ? JSON.parse(await readFile(summaryPath, 'utf8')) : null;
@@ -406,7 +407,7 @@ async function main() {
             'Compiling the generated C (median over problems)': spread(translations.map((entry) => entry.compile)).median
         };
     }
-    versions.konjugate = { version: packageVersion, commit: command('git', ['-C', repositoryRoot, 'rev-parse', '--short', 'HEAD']), engineBuild: machine.engineBuild, exportCompiler: `${command(options.cxx, ['--version']).split('\n')[0]} ${compileFlags.join(' ')}` };
+    versions.konjugate = { version: source.konjugateVersion, commit: source.gitCommit, workingTreeChanges: source.workingTreeChanges, engineBuild: machine.engineBuild, exportCompiler: `${command(options.cxx, ['--version']).split('\n')[0]} ${compileFlags.join(' ')}` };
     // Records of problems and tools run now replace those of an earlier run; the rest are kept, so the comparisons can be run in parts.
     const records = [...merged.values()];
     const ran = new Set(records.map((record) => `${record.problem}|${record.tool}`));

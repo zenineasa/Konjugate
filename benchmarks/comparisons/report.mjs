@@ -191,7 +191,7 @@ function startupTable(summary) {
 function versionsList(summary) {
     const v = summary.versions;
     const items = [
-        v.konjugate && ['Konjugate', `${v.konjugate.version}, commit ${v.konjugate.commit}; engine ${describeEngineBuild(v.konjugate.engineBuild) ?? 'build not recorded'}; code export compiled with ${v.konjugate.exportCompiler}`],
+        v.konjugate && ['Konjugate', `${v.konjugate.version}, commit ${v.konjugate.commit}${v.konjugate.workingTreeChanges ? ' (with uncommitted changes)' : ''}; engine ${describeEngineBuild(v.konjugate.engineBuild) ?? 'build not recorded'}; code export compiled with ${v.konjugate.exportCompiler}`],
         v.scipy && ['SciPy', `SciPy ${v.scipy.scipy}, NumPy ${v.scipy.numpy}, Python ${v.scipy.python}`],
         v.julia && ['Julia', `Julia ${v.julia.julia}; ${Object.entries(v.julia.packages).map(([name, version]) => `${name} ${version}`).join(', ')}`],
         v.openmodelica && ['OpenModelica', v.openmodelica]

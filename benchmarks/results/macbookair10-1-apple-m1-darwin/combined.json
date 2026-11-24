@@ -36,7 +36,21 @@
   "konjugateVersion": "2.0.0",
   "gitCommit": "1dcf5fb",
   "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-  "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
+  "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+  "provenance": {
+   "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
+   "builtFrom": {
+    "gitCommit": "1dcf5fb",
+    "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
+   },
+   "committedAs": {
+    "gitCommit": "5817a58",
+    "fullCommit": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
+    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5817a58a1e4e40a33137f37322c9667e8f4aab83"
+   },
+   "file": "sessions/2026-11-24T21-11-16/provenance.json"
+  }
  },
  "sessions": [
   "2026-11-24T21-11-16"
@@ -50,7 +64,21 @@
    "gitCommit": "1dcf5fb",
    "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-   "workingTreeChanges": true
+   "workingTreeChanges": true,
+   "provenance": {
+    "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
+    "builtFrom": {
+     "gitCommit": "1dcf5fb",
+     "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
+    },
+    "committedAs": {
+     "gitCommit": "5817a58",
+     "fullCommit": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5817a58a1e4e40a33137f37322c9667e8f4aab83"
+    },
+    "file": "sessions/2026-11-24T21-11-16/provenance.json"
+   }
   },
   {
    "session": "2026-11-24T21-11-16",
@@ -60,7 +88,21 @@
    "gitCommit": "1dcf5fb",
    "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-   "workingTreeChanges": true
+   "workingTreeChanges": true,
+   "provenance": {
+    "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
+    "builtFrom": {
+     "gitCommit": "1dcf5fb",
+     "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
+    },
+    "committedAs": {
+     "gitCommit": "5817a58",
+     "fullCommit": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5817a58a1e4e40a33137f37322c9667e8f4aab83"
+    },
+    "file": "sessions/2026-11-24T21-11-16/provenance.json"
+   }
   },
   {
    "session": "2026-11-24T21-11-16",
@@ -70,7 +112,21 @@
    "gitCommit": "1dcf5fb",
    "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-   "workingTreeChanges": true
+   "workingTreeChanges": true,
+   "provenance": {
+    "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
+    "builtFrom": {
+     "gitCommit": "1dcf5fb",
+     "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
+    },
+    "committedAs": {
+     "gitCommit": "5817a58",
+     "fullCommit": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
+     "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5817a58a1e4e40a33137f37322c9667e8f4aab83"
+    },
+    "file": "sessions/2026-11-24T21-11-16/provenance.json"
+   }
   }
  ],
  "supersededSessions": [

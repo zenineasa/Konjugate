@@ -1,0 +1,17 @@
+{
+ "about": "A note on the source this session timed, written after it ran (benchmarks/README.md, Sessions). The session's recorded results are unchanged: each part recorded gitCommit 1dcf5fb with workingTreeChanges true, and that record stands. benchmarks/combine.mjs reads this note and shows it beside the recorded commit.",
+ "recorded": { "gitCommit": "1dcf5fb", "workingTreeChanges": true },
+ "parts": ["problems", "scaling", "comparisons"],
+ "builtFrom": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
+ "uncommittedChangesCommittedAs": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
+ "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
+ "established": [
+  "The engine timed was out/engine/konjugateEngine in the checkout that ran the session, last built at 2026-11-24 21:00:35 UTC (02:30:35 IST on 25 November), before the session started at 21:11:16 UTC, and not rebuilt since: its modification time was unchanged when this note was written, and the session's own setup step compiled nothing.",
+  "5817a58's parent is 1dcf5fb, and between them only engine/ (CMakeLists.txt, executionPlan, modelValidator, main, simulationRunner, wholeModelIntegration and a validator test) and docs/engineCli.md changed; protocol/, src/, scripts/, benchmarks/ (other than results/), package.json and vcpkg.json did not. dbbaf22, which committed this session, changed only benchmarks/results/.",
+  "konjugateEngine was built again from a clean export of 5817a58 (git archive), with the same preset (development, RelWithDebInfo, -O2 -g -DNDEBUG), the same compiler (Apple clang 21.0.0) and the same vcpkg dependencies, in a directory whose path has the same length as the original checkout's, and compared with the timed binary. They are the same size, 11,345,152 bytes. Every section of code and data is byte for byte identical: __TEXT,__text (6,144,076 bytes of machine code), __TEXT,__const, __stubs, __stub_helper, __gcc_except_tab, __unwind_info, __eh_frame and every __DATA and __DATA_CONST section, and so are the symbol table and the linked libraries. The only differences, 2,755 bytes in all, are the build directory's path inside 108 bytes of __TEXT,__cstring (__FILE__ strings of Boost headers), the binary's UUID, and in __LINKEDIT the debug map's object file paths and times and the ad hoc code signature, all of which follow from building in another directory at another time."
+ ],
+ "notEstablished": [
+  "Which other files, if any, were uncommitted in that checkout while the session ran. The timed engine's code and data equal 5817a58's, so any other uncommitted engine change then left them unchanged (a comment, say); but an uncommitted change to the benchmark harness (benchmarks/ or the src/ modules it imports) would not show in the engine, and cannot be ruled out from the binary."
+ ],
+ "annotated": "2026-11-25"
+}

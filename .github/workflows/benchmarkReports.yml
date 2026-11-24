@@ -1,0 +1,41 @@
+# Copyright © 2026 Zenin Easa Panthakkalakath
+
+name: Benchmark reports
+
+# Builds and checks the published benchmark reports (benchmarks/pages.mjs) whenever new results are pushed: the site's index, and only
+# the files of benchmarks/results/ the reports link to, every link checked (a link to a missing file fails the job). It does not deploy.
+# The reports are published with the web edition, at web.konjugate.com/benchmarks/, by webEdition.yml at each release: this repository's
+# GitHub Pages site is the web edition, and a deploy from here would replace it. The built site is kept with the run for inspection.
+on:
+    push:
+        branches: [master]
+        paths:
+            - 'benchmarks/results/**'
+            - 'benchmarks/pages.mjs'
+            - '.github/workflows/benchmarkReports.yml'
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: benchmark-reports-${{ github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    check:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24.19.0
+            - name: Build the reports site
+              run: node benchmarks/pages.mjs out/benchmarkReports | tee -a "$GITHUB_STEP_SUMMARY"
+            - name: Upload the site for inspection
+              uses: actions/upload-artifact@v4
+              with:
+                  name: benchmark-reports
+                  path: out/benchmarkReports
+                  if-no-files-found: error
+                  retention-days: 30

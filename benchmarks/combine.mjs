@@ -56,11 +56,11 @@ const sessionParts = { problems: 'summary.json', scaling: 'summary.json', compar
 function partSource(directory, part) {
     const summary = readJson(join(directory, part, sessionParts[part]));
     if (!summary) return null;
-    if (summary.run) return { startedAt: summary.run.startedAt ?? null, konjugateVersion: summary.run.konjugateVersion ?? null, gitCommit: summary.run.gitCommit ?? null, workingTreeChanges: summary.run.workingTreeChanges ?? null, timesKonjugate: true };
+    if (summary.run) return { startedAt: summary.run.startedAt ?? null, konjugateVersion: summary.run.konjugateVersion ?? null, gitCommit: summary.run.gitCommit ?? null, workingTreeChanges: summary.run.workingTreeChanges ?? null, uncommittedSources: summary.run.uncommittedSources, timesKonjugate: true };
     const konjugate = summary.versions?.konjugate;
     const conditions = summary.conditions?.start ? summary.conditions : Object.values(summary.conditions ?? {})[0] ?? null;
     return {
-        startedAt: conditions?.start?.at ?? null, konjugateVersion: konjugate?.version ?? null, gitCommit: konjugate?.commit ?? null, workingTreeChanges: konjugate?.workingTreeChanges ?? null,
+        startedAt: conditions?.start?.at ?? null, konjugateVersion: konjugate?.version ?? null, gitCommit: konjugate?.commit ?? null, workingTreeChanges: konjugate?.workingTreeChanges ?? null, uncommittedSources: konjugate?.uncommittedSources,
         timesKonjugate: (summary.records ?? []).some((record) => String(record.tool).startsWith('Konjugate'))
     };
 }
@@ -94,12 +94,41 @@ const repositoryUrl = (() => {
 })();
 
 // A part as the report and combined.json describe it: when it started (UTC), the version, and the commit the timed engine was built
-// from, short and full with its page, and whether the checkout had uncommitted changes then.
-function describePart(session, part, source) {
+// from, short and full with its page, whether the checkout had uncommitted changes then, and the session's provenance note, if any.
+function describePart(session, part, source, note = null) {
     const fullCommit = known(source.gitCommit) ? git(['rev-parse', '--verify', '--quiet', `${source.gitCommit}^{commit}`]) || null : null;
+    const provenance = note && (!note.parts || note.parts.includes(part)) ? describeProvenance(session, note, source) : null;
     return {
         session, part, startedAt: source.startedAt ?? (sessionStart(session) !== null ? new Date(sessionStart(session)).toISOString() : null), konjugateVersion: source.konjugateVersion,
-        gitCommit: source.gitCommit, fullCommit, commitUrl: fullCommit && repositoryUrl ? `${repositoryUrl}/commit/${fullCommit}` : null, workingTreeChanges: source.workingTreeChanges
+        gitCommit: source.gitCommit, fullCommit, commitUrl: fullCommit && repositoryUrl ? `${repositoryUrl}/commit/${fullCommit}` : null, workingTreeChanges: source.workingTreeChanges,
+        ...(source.uncommittedSources !== undefined ? { uncommittedSources: source.uncommittedSources } : {}), ...(provenance ? { provenance } : {})
+    };
+}
+
+// A session's provenance note, sessions/<name>/provenance.json, written after it ran when what a part recorded is not the whole story: for a
+// part timed with uncommitted changes, the commit they were built on (builtFrom) and the commit they were later committed as
+// (uncommittedChangesCommittedAs), each a full hash, with how that was established (established, notEstablished). It never changes the
+// recorded results or which sessions are combined; the report shows it beside the recorded commit. A note about another commit than the
+// one its session recorded is refused.
+function readProvenance(directory) {
+    const path = join(directory, 'provenance.json');
+    const note = readJson(path);
+    if (!note) return null;
+    if (!/^[0-9a-f]{40}$/.test(note.builtFrom ?? '') || (note.uncommittedChangesCommittedAs !== undefined && !/^[0-9a-f]{40}$/.test(note.uncommittedChangesCommittedAs)) || !note.recorded?.gitCommit) {
+        throw new Error(`${path}: builtFrom and uncommittedChangesCommittedAs must be full commit hashes, and recorded.gitCommit the commit the session recorded.`);
+    }
+    return note;
+}
+
+const commitLink = (fullCommit) => ({ gitCommit: fullCommit.slice(0, 7), fullCommit, commitUrl: repositoryUrl ? `${repositoryUrl}/commit/${fullCommit}` : null });
+
+function describeProvenance(session, note, source) {
+    if (!note.builtFrom.startsWith(note.recorded.gitCommit) || note.recorded.gitCommit !== source.gitCommit) {
+        throw new Error(`sessions/${session}/provenance.json is about commit ${note.recorded.gitCommit}, but the session recorded ${source.gitCommit}.`);
+    }
+    return {
+        summary: note.summary ?? null, builtFrom: commitLink(note.builtFrom),
+        committedAs: note.uncommittedChangesCommittedAs ? commitLink(note.uncommittedChangesCommittedAs) : null, file: `sessions/${session}/provenance.json`
     };
 }
 
@@ -111,8 +140,10 @@ export function selectSessions(machineDirectory, chosen = null) {
     if (!existsSync(directory)) return { sessions: [], source: null, superseded: [] };
     const all = readdirSync(directory).filter((name) => statSync(join(directory, name)).isDirectory() && (!chosen || chosen.includes(name))).sort()
         .map((name) => ({ name, directory: join(directory, name), parts: Object.keys(sessionParts).map((part) => ({ part, source: partSource(join(directory, name), part) })).filter((entry) => entry.source) }))
-        .filter((session) => session.parts.length);
-    const newest = all.flatMap((session) => session.parts).filter((entry) => entry.source.timesKonjugate && known(entry.source.gitCommit)).at(-1)?.source ?? null;
+        .filter((session) => session.parts.length)
+        .map((session) => ({ ...session, note: readProvenance(session.directory) }));
+    const newestEntry = all.flatMap((session) => session.parts.map((entry) => ({ ...entry, session }))).filter((entry) => entry.source.timesKonjugate && known(entry.source.gitCommit)).at(-1) ?? null;
+    const newest = newestEntry?.source ?? null;
     const newestTime = newest ? commitTime(newest.gitCommit) : null;
     const current = (session, source) => !newest || (known(source.gitCommit) ? source.gitCommit === newest.gitCommit : newestTime !== null && sessionStart(session.name) !== null && sessionStart(session.name) > newestTime);
     const superseded = [];
@@ -120,12 +151,12 @@ export function selectSessions(machineDirectory, chosen = null) {
         const parts = new Set();
         for (const { part, source } of session.parts) {
             if (current(session, source)) parts.add(part);
-            else superseded.push(describePart(session.name, part, source));
+            else superseded.push(describePart(session.name, part, source, session.note));
         }
-        return { name: session.name, directory: session.directory, parts, details: Object.fromEntries(session.parts.map(({ part, source }) => [part, describePart(session.name, part, source)])) };
+        return { name: session.name, directory: session.directory, parts, details: Object.fromEntries(session.parts.map(({ part, source }) => [part, describePart(session.name, part, source, session.note)])) };
     }).filter((session) => session.parts.size);
-    const newestPart = newest && describePart('', '', newest);
-    const source = newest ? { konjugateVersion: newest.konjugateVersion, gitCommit: newest.gitCommit, fullCommit: newestPart.fullCommit, commitUrl: newestPart.commitUrl } : null;
+    const newestPart = newest && describePart(newestEntry.session.name, newestEntry.part, newest, newestEntry.session.note);
+    const source = newest ? { konjugateVersion: newest.konjugateVersion, gitCommit: newest.gitCommit, fullCommit: newestPart.fullCommit, commitUrl: newestPart.commitUrl, ...(newestPart.provenance ? { provenance: newestPart.provenance } : {}) } : null;
     return { sessions, source, superseded };
 }
 
@@ -176,6 +207,10 @@ function combineComparisons(sessions) {
             if (!summary) continue;
             latest = { ...(latest ?? {}), ...summary, versions: { ...(latest?.versions ?? {}), ...summary.versions }, startup: { ...(latest?.startup ?? {}), ...summary.startup },
                 references: { ...(latest?.references ?? {}), ...summary.references }, openModelicaTranslation: { ...(latest?.openModelicaTranslation ?? {}), ...summary.openModelicaTranslation } };
+            const provenance = session.details[part].provenance;
+            if (provenance && summary.versions?.konjugate) {
+                latest.versions.konjugate = { ...summary.versions.konjugate, provenance: { summary: provenance.summary, builtFrom: provenance.builtFrom.gitCommit, committedAs: provenance.committedAs?.gitCommit ?? null } };
+            }
             included.push({ ...session.details[part], conditions: summary.conditions, quietGate: summary.quietGate, rounds: summary.rounds });
             for (const record of summary.records) {
                 const key = [record.problem, record.tool, record.method, record.switching ?? '', record.tolerance].join('|');
@@ -217,7 +252,29 @@ function suiteTable(rows, { scaling }) {
 }
 
 const utc = (iso) => (iso ? `${iso.replace('T', ' ').replace(/(\.\d+)?Z$/, '')} UTC` : 'not recorded');
-const commitHtml = (entry) => `${entry.commitUrl ? `<a href="${escapeXml(entry.commitUrl)}"><code>${escapeXml(entry.gitCommit)}</code></a>` : `<code>${escapeXml(entry.gitCommit ?? 'not recorded')}</code>`}${entry.workingTreeChanges ? ' (dirty: uncommitted changes)' : entry.workingTreeChanges === null || entry.workingTreeChanges === undefined ? (entry.part ? ' (uncommitted changes not recorded)' : '') : ''}`;
+const commitLinkHtml = (entry) => (entry.commitUrl ? `<a href="${escapeXml(entry.commitUrl)}"><code>${escapeXml(entry.gitCommit)}</code></a>` : `<code>${escapeXml(entry.gitCommit ?? 'not recorded')}</code>`);
+// The commit a part timed; with a provenance note, what the note established instead of only "dirty".
+const commitHtml = (entry) => (entry.provenance
+    ? `built from ${commitLinkHtml(entry.provenance.builtFrom)} with uncommitted changes${entry.provenance.committedAs ? `, committed as ${commitLinkHtml(entry.provenance.committedAs)}` : ''} (<a href="${escapeXml(entry.provenance.file)}">provenance</a>)`
+    : `${commitLinkHtml(entry)}${entry.workingTreeChanges ? (timedUncommitted(entry) ? ' (dirty: uncommitted changes)' : ' (uncommitted changes, none to what the engine and harness are built from)') : entry.workingTreeChanges === null || entry.workingTreeChanges === undefined ? (entry.part ? ' (uncommitted changes not recorded)' : '') : ''}`);
+const sourceHtml = (source) => (source.provenance ? commitHtml(source) : `built from commit ${commitHtml(source)}`);
+
+// Whether a part was timed with uncommitted changes to what the engine or the harness is built from: a part that recorded which
+// (uncommittedSources, lib/sourceGuard.mjs) and found none had changes elsewhere only; an older part that did not record them counts.
+const timedUncommitted = (entry) => Boolean(entry.workingTreeChanges) && !(Array.isArray(entry.uncommittedSources) && !entry.uncommittedSources.length);
+
+// Shown at the top of the report whenever a combined part was timed with uncommitted changes: with a provenance note, what it established;
+// without one, that the numbers cannot be traced to a commit.
+function uncommittedNotice(parts) {
+    const dirty = parts.filter(timedUncommitted);
+    if (!dirty.length) return '';
+    const explained = dirty.filter((entry) => entry.provenance);
+    const unexplained = dirty.filter((entry) => !entry.provenance);
+    // Each session once, with its parts: "session 2026-11-24T21-11-16 (problems, scaling, comparisons)".
+    const names = (entries) => [...new Set(entries.map((entry) => entry.session))].map((session) => `session ${escapeXml(session)} (${entries.filter((entry) => entry.session === session).map((entry) => escapeXml(entry.part)).join(', ')})`).join('; ');
+    const notes = [...new Map(explained.map((entry) => [entry.provenance.file, entry.provenance])).values()];
+    return `${notes.map((note) => `<p class="notice"><strong>Timed with uncommitted changes, committed since.</strong> ${names(explained.filter((entry) => entry.provenance.file === note.file))}: ${escapeXml(note.summary ?? `the engine was ${note.builtFrom.gitCommit} with uncommitted changes.`)} <a href="${escapeXml(note.file)}">How this was established, and what was not</a>.</p>\n`).join('')}${unexplained.length ? `<p class="notice"><strong>Timed with uncommitted changes.</strong> ${names(unexplained)} ran from a checkout with uncommitted changes${unexplained.some((entry) => entry.uncommittedSources?.length) ? ` to what the engine or the harness is built from (<code>--allow-uncommitted</code>; the files are listed in combined.json)` : ''}, so what was timed is not a commit, and these numbers cannot be reproduced from the repository.</p>\n` : ''}`;
+}
 
 function sessionsTable(entries) {
     const condition = (value) => (value ? `load ${value.loadAverage?.join(' / ')}; ${value.power ?? ''}; ${value.thermal ?? ''}` : '–');
@@ -255,7 +312,8 @@ export async function combineSessions(machineDirectory, { sessions: chosen = nul
     const scaling = combineSuite(sessions, 'scaling');
     const comparisons = combineComparisons(sessions);
     const machine = [...problems.sessions, ...scaling.sessions].at(-1)?.machine ?? comparisons?.machine ?? null;
-    const combined = { machine, source, sessions: sessions.map((session) => session.name), sessionParts: sessions.flatMap((session) => [...session.parts].map((part) => session.details[part])), supersededSessions: superseded, problems: problems.rows, scaling: scaling.rows, statistic: 'minimum over all runs of all combined sessions (those timed from the source commit); median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session\'s interquartile range exceeds 5 % of its median' };
+    const combinedParts = sessions.flatMap((session) => [...session.parts].map((part) => session.details[part]));
+    const combined = { machine, source, sessions: sessions.map((session) => session.name), sessionParts: combinedParts, supersededSessions: superseded, problems: problems.rows, scaling: scaling.rows, statistic: 'minimum over all runs of all combined sessions (those timed from the source commit); median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session\'s interquartile range exceeds 5 % of its median' };
     writeFileSync(join(machineDirectory, 'combined.json'), `${JSON.stringify(combined, null, 1)}\n`);
     writeFileSync(join(machineDirectory, 'timings.csv'), csv([...problems.rows.map((row) => ({ part: 'problems', row })), ...scaling.rows.map((row) => ({ part: 'scaling', row }))]));
     const latestProblems = [...sessions].reverse().find((session) => session.parts.has('problems') && existsSync(join(session.directory, 'problems', 'report.html')));
@@ -274,17 +332,17 @@ body { margin: 0; } .viz-root { background: var(--page); color: var(--text-prima
 main { max-width: 1200px; margin: 0 auto; padding: 24px; } p, dd, li { color: var(--text-secondary); } .lede { color: var(--text-primary); }
 h2 { margin-top: 36px; padding-top: 12px; border-top: 1px solid var(--grid); } table { border-collapse: collapse; width: 100%; background: var(--surface-1); font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; } .number { text-align: right; font-variant-numeric: tabular-nums; }
-.scroll { overflow-x: auto; } a { color: var(--series-1); } dl.machine { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; } dt { font-weight: 600; }
+.scroll { overflow-x: auto; } a { color: var(--series-1); } .notice { color: var(--text-primary); background: var(--surface-1); border-left: 4px solid var(--series-4); padding: 8px 12px; } dl.machine { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; } dt { font-weight: 600; }
 </style></head>
 <body class="viz-root"><main>
 <h1>Konjugate performance report</h1>
 <p>${escapeXml(machineText)}</p>
-${source ? `<p>Timed from Konjugate ${escapeXml(source.konjugateVersion ?? 'version not recorded')}, the engine built from commit ${commitHtml(source)}: ${sessions.flatMap((session) => [...session.parts].map((part) => session.details[part])).map((entry) => `${escapeXml(entry.part)} started ${escapeXml(utc(entry.startedAt))}${entry.workingTreeChanges ? ' (dirty: uncommitted changes)' : ''}`).join('; ')}.</p>\n` : ''}<p class="lede">Konjugate evaluated against established tools, reproducibly, on this computer: ${sessions.length} timing session${sessions.length === 1 ? '' : 's'} combined${superseded.length ? `, all timed from that commit; ${supersededSessions.length} earlier session${supersededSessions.length === 1 ? '' : 's'}, timed from an older source, ${supersededSessions.length === 1 ? 'is' : 'are'} kept but not combined (<a href="#superseded">Superseded sessions</a>)` : ''}. Every timing's headline is its minimum over all runs of the combined sessions, since noise on a computer only adds time; beside it are the median and interquartile range over all runs, the spread between the sessions' minimums, and a flag where a session's runs spread more than 5 %. The accuracy checks are in each session's own report${latestProblems ? ` (<a href="sessions/${latestProblems.name}/problems/report.html">the latest</a>)` : ''}; the methods are in benchmarks/README.md.</p>
+${source ? `<p>Timed from Konjugate ${escapeXml(source.konjugateVersion ?? 'version not recorded')}, the engine ${sourceHtml(source)}: ${combinedParts.map((entry) => `${escapeXml(entry.part)} started ${escapeXml(utc(entry.startedAt))}${timedUncommitted(entry) && !entry.provenance ? ' (dirty: uncommitted changes)' : ''}`).join('; ')}.</p>\n` : ''}${uncommittedNotice(combinedParts)}<p class="lede">Konjugate evaluated against established tools, reproducibly, on this computer: ${sessions.length} timing session${sessions.length === 1 ? '' : 's'} combined${superseded.length ? `, all timed from that commit; ${supersededSessions.length} earlier session${supersededSessions.length === 1 ? '' : 's'}, timed from an older source, ${supersededSessions.length === 1 ? 'is' : 'are'} kept but not combined (<a href="#superseded">Superseded sessions</a>)` : ''}. Every timing's headline is its minimum over all runs of the combined sessions, since noise on a computer only adds time; beside it are the median and interquartile range over all runs, the spread between the sessions' minimums, and a flag where a session's runs spread more than 5 %. The accuracy checks are in each session's own report${latestProblems ? ` (<a href="sessions/${latestProblems.name}/problems/report.html">the latest</a>)` : ''}; the methods are in benchmarks/README.md.</p>
 <nav><p><a href="#sessions">Sessions</a> · <a href="#problems">Problem timings</a> · <a href="#scaling">Graph scalability</a>${superseded.length ? ' · <a href="#superseded">Superseded sessions</a>' : ''}</p></nav>
 <section id="sessions"><h2>Sessions and their conditions</h2>${sessionsTable(sessionEntries)}</section>
 <section id="problems"><h2>Problem timings</h2><p>Each problem's timing cases: the engine process's wall time and its own integration time.</p>${problems.rows.length ? suiteTable(problems.rows, { scaling: false }) : '<p>Not run in these sessions.</p>'}</section>
 <section id="scaling"><h2>Graph scalability</h2><p>Generated thermal graphs on the serial, thread-pool and partitioned backends: the engine's integration time, node steps per second and each parallel backend's speed-up over serial, all from the minimums.${latestScaling ? ` The plots are in <a href="sessions/${latestScaling.name}/scaling/report.html">the latest session's report</a>.` : ''}</p>${scaling.rows.length ? suiteTable(scaling.rows, { scaling: true }) : '<p>Not run in these sessions.</p>'}</section>
-${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>Timed from an older source than commit ${commitHtml(source)}, so not combined: their results stay in sessions/ for the record, and none of their numbers are above.</p>${supersededTable(superseded)}</section>\n` : ''}</main></body></html>
+${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>Timed from an older source than the engine ${sourceHtml(source)}, so not combined: their results stay in sessions/ for the record, and none of their numbers are above.</p>${supersededTable(superseded)}</section>\n` : ''}</main></body></html>
 `);
     if (comparisons) {
         const directory = join(machineDirectory, 'comparisons');
@@ -292,7 +350,7 @@ ${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>T
         writeFileSync(join(directory, 'comparisons.json'), `${JSON.stringify(comparisons, (_key, value) => (typeof value === 'number' && !Number.isFinite(value) ? String(value) : value), 1)}\n`);
         await writeComparisonReport(directory, reportPath);
     }
-    console.log(`Combined ${sessions.length} session${sessions.length === 1 ? '' : 's'}${source ? ` timed from commit ${source.gitCommit}` : ''}${superseded.length ? `; superseded, not combined: ${supersededSessions.join(', ')}` : ''}: ${reportPath}`);
+    console.log(`Combined ${sessions.length} session${sessions.length === 1 ? '' : 's'}${source ? ` timed from commit ${source.gitCommit}${source.provenance?.committedAs ? ` with uncommitted changes, committed as ${source.provenance.committedAs.gitCommit} (provenance note)` : ''}` : ''}${superseded.length ? `; superseded, not combined: ${supersededSessions.join(', ')}` : ''}: ${reportPath}`);
     return reportPath;
 }
 

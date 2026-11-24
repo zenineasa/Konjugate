@@ -16,8 +16,11 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
-import { selectSessions } from '../benchmarks/combine.mjs';
+import { combineSessions, selectSessions } from '../benchmarks/combine.mjs';
 import { resultsDirectory } from '../benchmarks/lib/results.mjs';
+import { checkTimedSources, harnessImports, parsePorcelain, uncommittedTimedSources } from '../benchmarks/lib/sourceGuard.mjs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { largestSupersededPage, relativeLinks, writeSite } from '../benchmarks/pages.mjs';
 
 test('the matrix exponential matches closed forms', () => {
     const t = 37.3;
@@ -164,4 +167,143 @@ test('only the sessions timed from the newest source are combined; the others ar
     const linked = selectSessions(machineDirectory).source;
     assert.equal(linked.fullCommit, head);
     assert.equal(linked.commitUrl, `https://github.com/zenineasa/Konjugate/commit/${head}`);
+});
+
+test('a session refuses to time uncommitted changes to the engine or the harness, naming them, unless allowed', (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'konjugateSourceGuard-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const write = (path, content) => {
+        mkdirSync(join(root, path, '..'), { recursive: true });
+        writeFileSync(join(root, path), content);
+    };
+    const git = (...args) => execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd: root, stdio: 'ignore' });
+    write('engine/src/main.cpp', 'int main() {}\n');
+    write('protocol/engine.proto', 'syntax = "proto3";\n');
+    write('benchmarks/run.mjs', "import { decode } from '../src/decoder.mjs';\n");
+    write('benchmarks/lib/plot.mjs', "export const plot = await import('./axes.mjs');\n");
+    write('benchmarks/lib/axes.mjs', 'export {};\n');
+    write('benchmarks/results/machine/combined.json', '{}\n');
+    write('src/decoder.mjs', "export { units } from './units.mjs';\nexport function decode() {}\n");
+    write('src/units.mjs', 'export const units = {};\n');
+    write('src/renderer.mjs', "import './decoder.mjs';\n");
+    write('docs/notes.md', 'Notes.\n');
+    write('package.json', '{ "version": "2.0.0" }\n');
+    git('init', '-q');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'start');
+
+    // The harness's imports outside benchmarks/ are followed from module to module; a module that only imports the harness's is not one.
+    assert.deepEqual(harnessImports(root), ['src/decoder.mjs', 'src/units.mjs']);
+    assert.deepEqual(checkTimedSources({ root }), { ok: true, files: [], message: null });
+
+    // Changes the timed engine and harness are not built from: documentation, another module, results.
+    write('docs/notes.md', 'More notes.\n');
+    write('src/renderer.mjs', '// changed\n');
+    write('benchmarks/results/machine/sessions/new/summary.json', '{}\n');
+    assert.deepEqual(uncommittedTimedSources(root), []);
+
+    // Changes they are: a changed engine source, a changed module the harness imports, a new protocol file, a deleted harness module and
+    // a renamed one.
+    write('engine/src/main.cpp', 'int main() { return 0; }\n');
+    write('src/units.mjs', 'export const units = { metre: 1 };\n');
+    write('protocol/new.proto', 'syntax = "proto3";\n');
+    rmSync(join(root, 'benchmarks/lib/axes.mjs'));
+    git('mv', 'benchmarks/run.mjs', 'benchmarks/runner.mjs');
+    const files = ['benchmarks/lib/axes.mjs', 'benchmarks/runner.mjs', 'engine/src/main.cpp', 'protocol/new.proto', 'src/units.mjs'];
+    const refused = checkTimedSources({ root, action: 'start problems' });
+    assert.equal(refused.ok, false);
+    assert.deepEqual(refused.files, files);
+    assert.match(refused.message, /^Not going to start problems: 5 files that the timed engine or the benchmark harness are built from have uncommitted changes:/);
+    for (const file of files) assert.ok(refused.message.includes(`\n  ${file}`), file);
+    assert.match(refused.message, /Commit them first.*--allow-uncommitted/s);
+    const allowed = checkTimedSources({ root, allowUncommitted: true });
+    assert.equal(allowed.ok, true);
+    assert.deepEqual(allowed.files, files);
+    assert.match(allowed.message, /^Going on with uncommitted changes \(--allow-uncommitted\).*marked as timed with uncommitted changes/s);
+
+    // Outside a git checkout it cannot be told, so it refuses too.
+    rmSync(join(root, '.git'), { recursive: true, force: true });
+    const unknown = checkTimedSources({ root });
+    assert.equal(unknown.ok, false);
+    assert.equal(unknown.files, null);
+    assert.match(unknown.message, /not a git checkout/);
+});
+
+test('git status output is read path by path, a rename by its new path', () => {
+    assert.deepEqual(parsePorcelain('R  benchmarks/new.mjs\0benchmarks/old.mjs\0 M engine/a b.cpp\0?? protocol/x.proto\0D  src/y.mjs\0'),
+        ['benchmarks/new.mjs', 'engine/a b.cpp', 'protocol/x.proto', 'src/y.mjs']);
+    assert.deepEqual(parsePorcelain(''), []);
+});
+
+test('a session timed with uncommitted changes is shown prominently, with its provenance note when it has one', async (t) => {
+    const machineDirectory = mkdtempSync(join(tmpdir(), 'konjugateProvenance-'));
+    t.after(() => rmSync(machineDirectory, { recursive: true, force: true }));
+    const sessionDirectory = join(machineDirectory, 'sessions', '2026-01-01T00-00-00');
+    const write = (path, content) => {
+        mkdirSync(join(sessionDirectory, path, '..'), { recursive: true });
+        writeFileSync(join(sessionDirectory, path), JSON.stringify(content));
+    };
+    const run = (extra) => ({ run: { konjugateVersion: '2.0.0', gitCommit: '1111111', workingTreeChanges: true, ...extra } });
+    const report = async () => readFileSync(await combineSessions(machineDirectory), 'utf8');
+
+    // Changes only to what the engine and harness are not built from: recorded, but not a warning.
+    write('problems/summary.json', run({ uncommittedSources: [] }));
+    assert.doesNotMatch(await report(), /class="notice"/);
+
+    // Changes to them, without a note: the report says the numbers are not a commit.
+    write('problems/summary.json', run({ uncommittedSources: ['engine/src/main.cpp'] }));
+    const unexplained = await report();
+    assert.match(unexplained, /<p class="notice"><strong>Timed with uncommitted changes\.<\/strong> session 2026-01-01T00-00-00 \(problems\) ran from a checkout with uncommitted changes to what the engine or the harness is built from/);
+    assert.match(unexplained, /cannot be reproduced from the repository/);
+
+    // With a note: both commits, linked, and the note; the recorded results are untouched.
+    const builtFrom = '1111111'.padEnd(40, 'a');
+    const committedAs = '2222222'.padEnd(40, 'b');
+    const note = { recorded: { gitCommit: '1111111', workingTreeChanges: true }, builtFrom, uncommittedChangesCommittedAs: committedAs, summary: 'Committed afterwards, unchanged.' };
+    write('provenance.json', note);
+    const { source } = selectSessions(machineDirectory);
+    assert.equal(source.gitCommit, '1111111');
+    assert.deepEqual(source.provenance, {
+        summary: 'Committed afterwards, unchanged.', file: 'sessions/2026-01-01T00-00-00/provenance.json',
+        builtFrom: { gitCommit: '1111111', fullCommit: builtFrom, commitUrl: `https://github.com/zenineasa/Konjugate/commit/${builtFrom}` },
+        committedAs: { gitCommit: '2222222', fullCommit: committedAs, commitUrl: `https://github.com/zenineasa/Konjugate/commit/${committedAs}` }
+    });
+    const explained = await report();
+    assert.match(explained, /<strong>Timed with uncommitted changes, committed since\.<\/strong> session 2026-01-01T00-00-00 \(problems\): Committed afterwards, unchanged\./);
+    assert.ok(explained.includes(`built from <a href="https://github.com/zenineasa/Konjugate/commit/${builtFrom}"><code>1111111</code></a> with uncommitted changes, committed as <a href="https://github.com/zenineasa/Konjugate/commit/${committedAs}"><code>2222222</code></a> (<a href="sessions/2026-01-01T00-00-00/provenance.json">provenance</a>)`));
+    assert.doesNotMatch(explained, /dirty/);
+    assert.deepEqual(JSON.parse(readFileSync(join(sessionDirectory, 'problems', 'summary.json'), 'utf8')), run({ uncommittedSources: ['engine/src/main.cpp'] }));
+
+    // A note about another commit than the session recorded is refused.
+    write('provenance.json', { ...note, recorded: { gitCommit: '3333333' }, builtFrom: '3333333'.padEnd(40, 'c') });
+    assert.throws(() => selectSessions(machineDirectory), /is about commit 3333333, but the session recorded 1111111/);
+});
+
+test('a page\'s relative links are the files it names, not other sites or places on the page', () => {
+    assert.deepEqual(relativeLinks('<a href="report.html#problems">x</a><a href="#top">y</a><img src="plots/a.svg"><a href="https://github.com/x">z</a><a href="mailto:a@b.c">m</a><a href="a.csv?x=1&amp;y=2">d</a>'),
+        ['report.html', 'plots/a.svg', 'a.csv?x=1&y=2']);
+});
+
+test('the published reports are the index and only the committed files the reports link to, every link there', (t) => {
+    const site = mkdtempSync(join(tmpdir(), 'konjugatePages-'));
+    t.after(() => rmSync(site, { recursive: true, force: true }));
+    const { files, bytes } = writeSite(site);
+    const results = join(import.meta.dirname, '..', 'benchmarks', 'results');
+    // Every page's relative links resolve within the site (writeSite refuses otherwise; checked here independently).
+    for (const file of files.filter((name) => name.endsWith('.html'))) {
+        for (const link of relativeLinks(readFileSync(join(site, file), 'utf8'))) assert.ok(existsSync(join(site, file, '..', link)), `${file} → ${link}`);
+    }
+    for (const machine of files.filter((name) => name.endsWith('/combined.json')).map((name) => name.split('/')[0])) {
+        const combined = JSON.parse(readFileSync(join(results, machine, 'combined.json'), 'utf8'));
+        assert.ok(files.includes(`${machine}/report.html`));
+        // Every combined session's own report is published, whatever its size; a superseded one only when small.
+        for (const entry of combined.sessionParts.filter((part) => part.part !== 'comparisons')) assert.ok(files.includes(`${machine}/sessions/${entry.session}/${entry.part}/report.html`), entry.session);
+        for (const entry of combined.supersededSessions.filter((part) => part.part !== 'comparisons')) {
+            const path = `${machine}/sessions/${entry.session}/${entry.part}/report.html`;
+            if (existsSync(join(results, path))) assert.equal(files.includes(path), statSync(join(results, path)).size <= largestSupersededPage, path);
+        }
+    }
+    // Not everything: the raw session files stay in the repository.
+    assert.ok(!files.some((name) => /\/sessions\/[^/]+\/(problems|scaling)\/(results|checks)\.csv$/.test(name)));
+    assert.equal(bytes, files.reduce((sum, name) => sum + statSync(join(site, name)).size, 0));
 });

@@ -184,7 +184,7 @@ async function main() {
         const summary = {
             run: {
                 mode, startedAt: startedAt.toISOString(), konjugateVersion: packageVersion, engineVersion, engine: basename(executable),
-                gitCommit: source.gitCommit, workingTreeChanges: source.workingTreeChanges
+                gitCommit: source.gitCommit, workingTreeChanges: source.workingTreeChanges, uncommittedSources: source.uncommittedSources
             },
             totals: { ...totals, checks: allChecks.length, passed: allChecks.filter((check) => check.pass).length },
             problems: results.map(({ plots, ...entry }) => ({ ...entry, plots: plots.map((plot) => `plots/${plot.id}.svg`) })),

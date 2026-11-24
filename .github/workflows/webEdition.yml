@@ -64,6 +64,11 @@ jobs:
                   # Mirrors each registry entry's newest usable release onto the site, for Discover, installs and update checks (stage 4 of
                   # docs/proposals/webEditionPackages.md). A release that cannot be fetched is left out with a warning; it does not fail the build.
                   KONJUGATE_MIRROR_PACKAGES: '1'
+            # The published benchmark reports (benchmarks/pages.mjs), at web.konjugate.com/benchmarks/: the committed reports as of this
+            # release and only the files they link to. Added after the build, so they are not in the app's offline copy or its build id,
+            # and the service worker (scripts/webServiceWorker.js) leaves benchmarks/ to the network. No npm packages needed.
+            - name: Add the benchmark reports under benchmarks/
+              run: node benchmarks/pages.mjs out/webShell/benchmarks
             - name: Upload the built shell for inspection
               uses: actions/upload-artifact@v4
               with:

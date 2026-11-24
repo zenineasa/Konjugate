@@ -407,7 +407,7 @@ async function main() {
             'Compiling the generated C (median over problems)': spread(translations.map((entry) => entry.compile)).median
         };
     }
-    versions.konjugate = { version: source.konjugateVersion, commit: source.gitCommit, workingTreeChanges: source.workingTreeChanges, engineBuild: machine.engineBuild, exportCompiler: `${command(options.cxx, ['--version']).split('\n')[0]} ${compileFlags.join(' ')}` };
+    versions.konjugate = { version: source.konjugateVersion, commit: source.gitCommit, workingTreeChanges: source.workingTreeChanges, uncommittedSources: source.uncommittedSources, engineBuild: machine.engineBuild, exportCompiler: `${command(options.cxx, ['--version']).split('\n')[0]} ${compileFlags.join(' ')}` };
     // Records of problems and tools run now replace those of an earlier run; the rest are kept, so the comparisons can be run in parts.
     const records = [...merged.values()];
     const ran = new Set(records.map((record) => `${record.problem}|${record.tool}`));

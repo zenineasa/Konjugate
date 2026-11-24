@@ -13,6 +13,8 @@
 //   4. optionally, OpenModelica's Docker image, pinned by digest, when Docker is running (skipped, and said, when it is not).
 //
 // Run again, it checks each and repairs what is missing or not as pinned. --check only reports what is installed and its versions.
+// Building the engine is refused, naming the files, while any the timed engine or the benchmark harness is built from has uncommitted changes
+// (lib/sourceGuard.mjs): the engine built is the one a session times. --allow-uncommitted builds it regardless; --skip-engine skips it.
 // Other options: --skip-engine, --skip-openmodelica. macOS (arm64, x64) and Linux (x64, arm64); Windows is not supported.
 
 import { spawnSync } from 'node:child_process';
@@ -26,6 +28,7 @@ import {
 } from './comparisons/tools.mjs';
 import { engineDirectory, engineExecutable, repositoryRoot, shippedBuildType } from './lib/shippedEngine.mjs';
 import { describeEngineBuild, engineBuild } from './lib/machine.mjs';
+import { checkTimedSources } from './lib/sourceGuard.mjs';
 
 const checkOnly = process.argv.includes('--check');
 const skip = (name) => process.argv.includes(`--skip-${name}`);
@@ -91,6 +94,9 @@ function engine() {
         if (!shipped) return `NOT the shipped build: ${buildType ?? 'no CMake cache'}, not ${shippedBuildType} (${engineExecutable})`;
         return `${describeEngineBuild(engineBuild(engineExecutable))} (${engineExecutable})`;
     }
+    const sources = checkTimedSources({ allowUncommitted: process.argv.includes('--allow-uncommitted'), action: 'build the engine for timing' });
+    if (!sources.ok) throw new Error(`${sources.message}\nOr skip the engine with --skip-engine.`);
+    if (sources.message) console.log(`    ${sources.message.replaceAll('\n', '\n    ')}`);
     if (!existsSync(join(repositoryRoot, '.tools', 'vcpkg', 'scripts', 'buildsystems', 'vcpkg.cmake'))) {
         throw new Error('The engine\'s development dependencies are not set up: run npm run setup first (once), then this again.');
     }

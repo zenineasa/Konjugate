@@ -25,6 +25,9 @@
 //                      without the largest grid; the preflight is reported but does not stop it, and there is no baseline and no waiting for
 //                      quiet; into out/benchmarks/performance-dry-run/
 //   --baseline <s>     seconds of idle baseline before each part (default 180)
+//   --allow-uncommitted  time even though files the engine or the harness is built from have uncommitted changes (lib/sourceGuard.mjs);
+//                      without it the session refuses to start, and refuses each part, naming them. The session is then marked as
+//                      timed with uncommitted changes, in its results and at the top of its report
 //
 // OpenModelica, which runs here only in Docker, is a separate command afterwards: npm run benchmark:openmodelica.
 
@@ -41,12 +44,18 @@ import { conditions } from './lib/machine.mjs';
 import { resultsDirectory } from './lib/results.mjs';
 import { engineExecutable } from './lib/shippedEngine.mjs';
 import { preflight } from './lib/quiet.mjs';
+import { checkTimedSources } from './lib/sourceGuard.mjs';
 import { problems } from './problems.mjs';
 
 const { values: options } = parseArgs({
-    options: { 'dry-run': { type: 'boolean', default: false }, only: { type: 'string', default: 'problems,scaling,comparisons' }, baseline: { type: 'string' } }
+    options: {
+        'dry-run': { type: 'boolean', default: false }, only: { type: 'string', default: 'problems,scaling,comparisons' }, baseline: { type: 'string' },
+        'allow-uncommitted': { type: 'boolean', default: false }
+    }
 });
 const dryRun = options['dry-run'];
+// A dry run's numbers are not published, so it only says what is uncommitted.
+const allowUncommitted = options['allow-uncommitted'] || dryRun;
 const parts = options.only.split(',').map((part) => part.trim()).filter(Boolean);
 for (const part of parts) if (!['problems', 'scaling', 'comparisons'].includes(part)) throw new Error(`--only takes problems, scaling and comparisons, not ${part}.`);
 const rounds = dryRun ? 1 : 5;
@@ -131,6 +140,17 @@ function preflightOrRefuse(part) {
     return false;
 }
 
+// Before the engine is built and before each part: the timed sources must be a commit (lib/sourceGuard.mjs), unless --allow-uncommitted.
+function sourcesCommittedOrRefuse(when) {
+    const { ok, message } = checkTimedSources({ allowUncommitted, action: `start ${when}` });
+    if (!ok) {
+        console.error(message);
+        return false;
+    }
+    if (message) console.log(dryRun && !options['allow-uncommitted'] ? `(dry run, untimed) ${message}` : message);
+    return true;
+}
+
 function baseline() {
     const result = spawnSync(process.execPath, [join(repositoryRoot, 'benchmarks', 'lib', 'quiet.mjs'), '--baseline', String(baselineSeconds)], { encoding: 'utf8' });
     if (result.status !== 0) throw new Error(`The baseline could not be measured: ${result.stderr}`);
@@ -149,8 +169,10 @@ async function main() {
     console.log(`Parts: ${parts.map((part) => `${part} (about ${clock(expectedMinutes[part] * 60000)})`).join(', ')}; about ${clock(total * 60000)} in all, longer when it waits for a quiet computer.`);
     if (!dryRun) console.log('Leave the computer alone, on mains power, with every other application closed, until it says Done.');
 
+    if (!sourcesCommittedOrRefuse('the timing session')) return 2;
+
     say('Bringing the shipped engine (out/engine, RelWithDebInfo) and the tools up to date (benchmarks/setup.mjs)');
-    const setup = spawnSync(process.execPath, [join(repositoryRoot, 'benchmarks', 'setup.mjs'), '--skip-openmodelica'], { stdio: 'inherit' });
+    const setup = spawnSync(process.execPath, [join(repositoryRoot, 'benchmarks', 'setup.mjs'), '--skip-openmodelica', ...(allowUncommitted ? ['--allow-uncommitted'] : [])], { stdio: 'inherit' });
     if (setup.status !== 0) throw new Error('Setup did not complete; see above.');
 
     const machineDirectory = dryRun ? join(repositoryRoot, 'out', 'benchmarks', 'performance-dry-run') : resultsDirectory();
@@ -163,7 +185,7 @@ async function main() {
 
     for (const [index, part] of parts.entries()) {
         say(`Part ${index + 1} of ${parts.length}: ${part} (about ${clock(expectedMinutes[part] * 60000)})`);
-        if (!preflightOrRefuse(part)) return 2;
+        if (!sourcesCommittedOrRefuse(part) || !preflightOrRefuse(part)) return 2;
         // A dry run's numbers are discarded, so it neither measures a baseline nor waits for quiet.
         let env = { ...process.env, KONJUGATE_BENCHMARK_CAFFEINATED: '1' };
         if (!dryRun) {

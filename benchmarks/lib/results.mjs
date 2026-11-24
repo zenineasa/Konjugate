@@ -11,6 +11,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { repositoryRoot } from './engine.mjs';
 import { machineDetails, machineSlug } from './machine.mjs';
+import { uncommittedTimedSources } from './sourceGuard.mjs';
 
 export function resultsDirectory(machine = machineDetails()) {
     return join(repositoryRoot, 'benchmarks', 'results', machineSlug(machine));
@@ -25,11 +26,13 @@ function git(args) {
 }
 
 // The checkout the engine was built from. Uncommitted changes under benchmarks/results/ are not counted: a session writes its own results
-// there, so every part after the first would otherwise be marked as changed.
+// there, so every part after the first would otherwise be marked as changed. uncommittedSources lists those of them the timed engine or the
+// harness is built from (lib/sourceGuard.mjs), which npm run benchmark:performance refuses to time without --allow-uncommitted.
 export function sourceIdentity() {
     return {
         konjugateVersion: JSON.parse(readFileSync(join(repositoryRoot, 'package.json'), 'utf8')).version,
         gitCommit: git(['rev-parse', '--short', 'HEAD']) || 'unknown',
-        workingTreeChanges: Boolean(git(['status', '--porcelain', '--', '.', ':(exclude)benchmarks/results']))
+        workingTreeChanges: Boolean(git(['status', '--porcelain', '--', '.', ':(exclude)benchmarks/results'])),
+        uncommittedSources: uncommittedTimedSources()
     };
 }

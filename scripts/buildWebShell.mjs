@@ -310,7 +310,9 @@ for (const packageName of vendoredPackages) {
 // to work offline. Left out of that copy are the packages that few sessions touch -- the Python runtime, the C++ toolchain and the STEP
 // importer (about 35 MB); the worker keeps those when they are first used.
 // registry/ is the package mirror (src/webRegistryMirror.mjs): read when Discover is opened, kept like any file used after the copy was made.
-const notPrecached = [/^registry\//, /^node_modules\/(pyodide|@wasmer|occt-import-js)\//, /(^|\/)\.DS_Store$/];
+// benchmarks/ is the published benchmark reports, which the deploy puts beside the build afterwards (.github/workflows/webEdition.yml)
+// and the worker never handles; left out here too, should a build ever find them.
+const notPrecached = [/^registry\//, /^benchmarks\//, /^node_modules\/(pyodide|@wasmer|occt-import-js)\//, /(^|\/)\.DS_Store$/];
 
 // Files this large are copied a piece at a time, so a dropped connection costs one piece and not the whole file.
 const largeFileBytes = 8 * 1024 * 1024;

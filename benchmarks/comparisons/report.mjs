@@ -191,7 +191,7 @@ function startupTable(summary) {
 function versionsList(summary) {
     const v = summary.versions;
     const items = [
-        v.konjugate && ['Konjugate', `${v.konjugate.version}, commit ${v.konjugate.commit}${v.konjugate.workingTreeChanges ? ' (with uncommitted changes)' : ''}; engine ${describeEngineBuild(v.konjugate.engineBuild) ?? 'build not recorded'}; code export compiled with ${v.konjugate.exportCompiler}`],
+        v.konjugate && ['Konjugate', `${v.konjugate.version}, ${v.konjugate.provenance ? `built from commit ${v.konjugate.provenance.builtFrom} with uncommitted changes${v.konjugate.provenance.committedAs ? `, committed as ${v.konjugate.provenance.committedAs}` : ''} (the session's provenance note)` : `commit ${v.konjugate.commit}${v.konjugate.workingTreeChanges ? ' (with uncommitted changes)' : ''}`}; engine ${describeEngineBuild(v.konjugate.engineBuild) ?? 'build not recorded'}; code export compiled with ${v.konjugate.exportCompiler}`],
         v.scipy && ['SciPy', `SciPy ${v.scipy.scipy}, NumPy ${v.scipy.numpy}, Python ${v.scipy.python}`],
         v.julia && ['Julia', `Julia ${v.julia.julia}; ${Object.entries(v.julia.packages).map(([name, version]) => `${name} ${version}`).join(', ')}`],
         v.openmodelica && ['OpenModelica', v.openmodelica]
@@ -250,7 +250,9 @@ function standalone(section, summary) {
 export async function writeComparisonReport(comparisons, reportPath = null) {
     const summary = JSON.parse(readFileSync(join(comparisons, 'comparisons.json'), 'utf8'));
 
+    // The section in report.html links its data from beside report.html (comparisons/plots/); performance.html, inside comparisons/, from plots/.
     const { html, files } = performanceSection(summary);
+    const standaloneHtml = performanceSection(summary, 'plots').html;
     await mkdir(join(comparisons, 'plots'), { recursive: true });
     for (const { id, svg, csv } of files) {
         await writeFile(join(comparisons, 'plots', `${id}.svg`), `<?xml version="1.0" encoding="UTF-8"?>\n${svg.replace('<svg ', `<svg style="${lightTheme.replace(/\s+/g, ' ')} ${extraTheme.light} --surface-1: #fcfcfb; background: #fcfcfb" `)}\n`);
@@ -265,7 +267,7 @@ export async function writeComparisonReport(comparisons, reportPath = null) {
             record.work?.nfev, record.work?.njev, record.work?.nlu, record.work?.steps, record.work?.rejected, record.error].map(quote).join(',');
     });
     await writeFile(join(comparisons, 'comparisons.csv'), `${columns.join(',')}\n${rows.join('\n')}\n`);
-    await writeFile(join(comparisons, 'performance.html'), standalone(html, summary));
+    await writeFile(join(comparisons, 'performance.html'), standalone(standaloneHtml, summary));
     if (reportPath && existsSync(reportPath)) {
         let report = readFileSync(reportPath, 'utf8').replace(/\n?<style id="performance-styles">[\s\S]*?<\/style>/, '').replace(/\n?<section id="performance">[\s\S]*?<\/section>\n<!-- end performance -->/, '');
         report = report.replace('</head>', `<style id="performance-styles">${styles}</style>\n</head>`).replace('\n</main>', `\n${html}\n<!-- end performance -->\n</main>`);

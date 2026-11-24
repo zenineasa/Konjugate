@@ -14,6 +14,7 @@
 import argparse
 import json
 import math
+import os
 import platform
 import shlex
 import subprocess
@@ -175,9 +176,19 @@ def solve(spec, method, rtol, switching_mode):
     return result.y.T, work
 
 
+class QuietCheckFailed(Exception):
+    pass
+
+
 def quiet(command):
-    if command:
-        subprocess.run(shlex.split(command), check=True)
+    # The quiet check before a timed run. Its exit is 0 once the computer is quiet, after waiting or not; anything else is a refusal or
+    # an error. Its output goes to our stderr and it reads nothing: our stdout and stdin are the JSON-lines protocol with compare.mjs.
+    if not command:
+        return
+    sys.stdout.flush()
+    result = subprocess.run(shlex.split(command), stdin=subprocess.DEVNULL, stdout=sys.stderr.fileno(), stderr=sys.stderr.fileno())
+    if result.returncode != 0:
+        raise QuietCheckFailed(f'the quiet check before the timed run failed (exit {result.returncode}): {command}')
 
 
 def measure(spec, method, switching_mode, quiet_command, skip=(), first_seen=None):
@@ -274,4 +285,10 @@ def main():
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        # compare.mjs has stopped reading: nothing more can be reported, and it says why itself.
+        sys.stderr.write('scipyRunner.py: compare.mjs closed the protocol pipe; stopping.\n')
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(1)

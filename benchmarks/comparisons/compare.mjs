@@ -26,7 +26,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
 import { generateStandaloneProgram } from '../../src/codeExport.mjs';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
@@ -36,6 +35,7 @@ import { errorMetrics, spread } from '../lib/metrics.mjs';
 import { createQuietGate } from '../lib/quiet.mjs';
 import { createOpenModelica, solvers as openModelicaSolvers } from './openmodelica/openmodelica.mjs';
 import { comparisonProblems, families, tolerances, toolSpecification } from './problems.mjs';
+import { startServer } from './runnerServer.mjs';
 import { juliaArguments, juliaEnvironment, juliaLauncher, pythonExecutable } from './tools.mjs';
 
 const { values: options } = parseArgs({
@@ -75,24 +75,6 @@ function execute(command, args, { env = process.env } = {}) {
         child.once('error', reject);
         child.once('exit', (code) => resolve({ code, output, diagnostics }));
     });
-}
-
-// A runner that serves commands, one JSON line each way (scipyRunner.py --serve, julia/juliaRunner.jl). Its progress goes to our stderr.
-async function startServer(command, args) {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'inherit'], env: oneThread });
-    const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
-    const next = async () => {
-        const { value, done } = await lines.next();
-        if (done) throw new Error(`${command} stopped serving`);
-        return JSON.parse(value);
-    };
-    const started = performance.now();
-    const hello = await next();
-    return {
-        hello: { ...hello, readySeconds: (performance.now() - started) / 1000 },
-        async ask(message) { child.stdin.write(`${JSON.stringify(message)}\n`); return next(); },
-        stop() { child.stdin.end(); }
-    };
 }
 
 function command(file, args) {
@@ -192,8 +174,8 @@ async function main() {
     if (quiet) await quiet.full('comparisons');
     const startConditions = conditions();
     console.log(`Start: load ${startConditions.loadAverage.join(' ')}; ${startConditions.power}; ${startConditions.thermal}`);
-    const python = tools.has('scipy') ? await startServer(options.python, ['-I', join(here, 'scipyRunner.py'), '--serve', '--quiet-command', quietCommand]) : null;
-    const julia = tools.has('julia') ? await startServer(options.julia, juliaArguments(`--project=${join(here, 'julia')}`, '--startup-file=no', join(here, 'julia', 'juliaRunner.jl'), '--quiet-command', quietCommand)) : null;
+    const python = tools.has('scipy') ? await startServer(options.python, ['-I', join(here, 'scipyRunner.py'), '--serve', '--quiet-command', quietCommand], { env: oneThread }) : null;
+    const julia = tools.has('julia') ? await startServer(options.julia, juliaArguments(`--project=${join(here, 'julia')}`, '--startup-file=no', join(here, 'julia', 'juliaRunner.jl'), '--quiet-command', quietCommand), { env: oneThread }) : null;
     if (python) versions.scipy = python.hello.versions;
     if (julia) versions.julia = julia.hello.versions;
     const openModelica = tools.has('openmodelica') ? createOpenModelica(work) : null;

@@ -11,7 +11,8 @@
 // The processes that disturb a timing run: a compiler, CMake or a build tool; Konjugate's own Electron (the development build or the
 // installed app) and its interaction test runners; browsers driven by tests (lib/machine.mjs, busyPatterns); and Docker. Other Electron-based
 // applications the computer happens to have open (an editor, the agent host) are not counted: their load, if any, is in the load average.
-// Every wait is written to the console and counted, and the counts are kept with the results, with every timed run's instant, one-minute
+// Every wait is written to standard error, never standard output (the comparisons' runners call --wait as a child whose standard output
+// would otherwise reach their JSON-lines protocol), and counted, and the counts are kept with the results, with every timed run's instant, one-minute
 // load average and whether Docker was up (timing-conditions.csv).
 
 import { execFileSync } from 'node:child_process';
@@ -71,11 +72,54 @@ export function dockerRunning(table = processTable()) {
 }
 
 // Under KONJUGATE_QUIET_STRICT=1 (npm run benchmark:performance) any Electron-based application, Agent Orchestrator among them, an editor
-// with a terminal or a chat app, also stands in the way: the published timings are taken with everything else closed.
+// with a terminal or a chat app, also stands in the way: the published timings are taken with everything else closed. An application
+// counts as running only while its own executable (Name.app/Contents/MacOS/...) is; a crash reporter (chrome_crashpad_handler) it leaves
+// behind is ignored, and any other process left behind once it has quit is named by its executable's path, so the user knows what to quit.
 const electronPattern = /Electron Framework\.framework|\/Agent Orchestrator\.app\/|node_modules\/electron\/dist\//;
-function electronApplications(table, own) {
-    return [...new Set(table.filter((entry) => !own.has(entry.pid) && electronPattern.test(entry.command))
-        .map((entry) => /\/([^/]+)\.app\/Contents\//.exec(entry.command)?.[1] ?? 'Electron'))];
+const crashReporterPattern = /crashpad_handler/;
+// The outermost application bundle a path is in, and whether the path is that bundle's own executable.
+function bundleOf(path) {
+    const match = /^(.*?\/([^/]+)\.app)\/Contents\/(.*)$/.exec(path ?? '');
+    if (!match) return null;
+    return { bundle: match[1], name: match[2], main: /^MacOS\/[^/]+$/.test(match[3]) };
+}
+// pid → the executable's full path (ps -o comm=), which, unlike the command line, does not run on into the arguments.
+function executables() {
+    try {
+        return new Map(execFileSync('ps', ['-axo', 'pid=,comm='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 16 * 1024 * 1024 })
+            .split('\n').map((line) => /^\s*(\d+)\s+(.*)$/.exec(line)).filter(Boolean).map(([, pid, path]) => [Number(pid), path.trim()]));
+    } catch {
+        return new Map();
+    }
+}
+export function electronProcesses(table, own, paths = executables()) {
+    const home = os.homedir();
+    const matched = table.filter((entry) => !own.has(entry.pid) && electronPattern.test(entry.command))
+        .map((entry) => ({ ...entry, path: paths.get(entry.pid) ?? entry.command.split(/\s+-/)[0].trim() }))
+        .filter((entry) => !crashReporterPattern.test(entry.path));
+    // The bundles whose own executable runs (a .app's Contents/MacOS/..., which need not itself match: Electron is in its helpers), taken
+    // over the whole table, since an application this run was started from (a terminal in it) is still running.
+    const bundleOfPid = new Map(table.map((entry) => [entry.pid, bundleOf(paths.get(entry.pid) ?? entry.command)]));
+    const runningBundles = new Set([...bundleOfPid.values()].filter((bundle) => bundle?.main).map((bundle) => bundle.bundle));
+    // A process started by a running application (its helpers, a tool it runs) is part of it, not left behind.
+    const parentOf = new Map(table.map((entry) => [entry.pid, entry.ppid]));
+    const runningAncestor = (pid) => {
+        for (let current = pid, hops = 0; current > 1 && hops < 64; current = parentOf.get(current) ?? 1, hops += 1) {
+            const bundle = bundleOfPid.get(current);
+            if (bundle && runningBundles.has(bundle.bundle)) return bundle;
+        }
+        return null;
+    };
+    const running = new Map();
+    const leftovers = [];
+    for (const entry of matched) {
+        const bundle = runningAncestor(entry.pid);
+        if (bundle) running.set(bundle.bundle, bundle.name);
+        // Electron from node_modules outside a bundle (Linux): Konjugate's development build, running.
+        else if (/node_modules\/electron\/dist\//.test(entry.path)) running.set('electron', 'Electron');
+        else leftovers.push(`${entry.path.startsWith(home) ? `~${entry.path.slice(home.length)}` : entry.path} (pid ${entry.pid})`);
+    }
+    return { applications: [...new Set(running.values())], leftovers: [...new Set(leftovers)] };
 }
 
 // What stands in the way of timing now, as plain reasons; empty when nothing does.
@@ -89,8 +133,9 @@ export function obstacles({ quick }) {
     if (compilers.length) reasons.push(`compiler or build tool running: ${[...new Set(compilers.map((entry) => entry.command.split(/\s+/)[0].split('/').at(-1)))].join(', ')}`);
     if (process.env.KONJUGATE_QUIET_ALLOW_DOCKER !== '1' && dockerRunning(table)) reasons.push('Docker is running');
     if (process.env.KONJUGATE_QUIET_STRICT === '1') {
-        const applications = electronApplications(table, own);
+        const { applications, leftovers } = electronProcesses(table, own);
         if (applications.length) reasons.push(`Electron applications running: ${applications.join(', ')}`);
+        if (leftovers.length) reasons.push(`processes left behind by Electron applications that have quit, still running: ${leftovers.join(', ')}`);
     }
     const busy = busyProcesses().filter((entry) => !own.has(entry.pid));
     if (busy.length) reasons.push(`${[...new Set(busy.map((entry) => entry.kind))].join(', ')} running`);
@@ -116,7 +161,9 @@ export function preflight() {
     }
 }
 
-export function createQuietGate({ log = console.log } = {}) {
+// Progress goes to standard error: standard output may be a runner's protocol pipe (above).
+// check, holdSeconds and sampleEvery stand in for the real check and its timing in the tests.
+export function createQuietGate({ log = console.error, check = obstacles, holdSeconds = quietSeconds, sampleEvery = sampleSeconds } = {}) {
     const stats = { fullGates: 0, quickChecks: 0, quickFailures: 0, waitedSeconds: 0, loadAtTimedRuns: [], timedRuns: [] };
 
     async function full(label = '') {
@@ -125,7 +172,7 @@ export function createQuietGate({ log = console.log } = {}) {
         let quietSince = null;
         let lastSaid = '';
         for (;;) {
-            const reasons = obstacles({ quick: false });
+            const reasons = check({ quick: false });
             if (reasons.length) {
                 quietSince = null;
                 const said = reasons.join('; ');
@@ -133,11 +180,11 @@ export function createQuietGate({ log = console.log } = {}) {
                 lastSaid = said;
             } else {
                 quietSince ??= Date.now();
-                if ((Date.now() - quietSince) / 1000 >= quietSeconds) break;
-                if (lastSaid !== 'holding') log(`[quiet] quiet; holding for ${quietSeconds} s (load ${os.loadavg()[0].toFixed(2)})`);
+                if ((Date.now() - quietSince) / 1000 >= holdSeconds) break;
+                if (lastSaid !== 'holding') log(`[quiet] quiet; holding for ${holdSeconds} s (load ${os.loadavg()[0].toFixed(2)})`);
                 lastSaid = 'holding';
             }
-            await sleep(sampleSeconds);
+            await sleep(sampleEvery);
         }
         const waited = (Date.now() - started) / 1000;
         stats.waitedSeconds += waited;
@@ -146,7 +193,7 @@ export function createQuietGate({ log = console.log } = {}) {
 
     async function beforeTimedRun(label = '') {
         stats.quickChecks += 1;
-        const reasons = obstacles({ quick: true });
+        const reasons = check({ quick: true });
         if (reasons.length) {
             stats.quickFailures += 1;
             log(`[quiet] not quiet before a timed run${label ? ` (${label})` : ''}: ${reasons.join('; ')}`);
@@ -162,7 +209,7 @@ export function createQuietGate({ log = console.log } = {}) {
     function summary() {
         const loads = stats.loadAtTimedRuns.slice().sort((a, b) => a - b);
         return {
-            rule: `${process.env.KONJUGATE_QUIET_BASELINE ? 'limits an idle baseline plus 1.0; ' : ''}full gate: AC power, no compiler, build tool, Konjugate Electron, interaction test or Docker, 1-minute load below ${loadLimit} for ${quietSeconds} s; before every timed run: AC power, none of those, other processes below ${externalCoreLimit} cores`,
+            rule: `${process.env.KONJUGATE_QUIET_BASELINE ? 'limits an idle baseline plus 1.0; ' : ''}full gate: AC power, no compiler, build tool, Konjugate Electron, interaction test or Docker, 1-minute load below ${loadLimit} for ${holdSeconds} s; before every timed run: AC power, none of those, other processes below ${externalCoreLimit} cores`,
             fullGates: stats.fullGates, quickChecks: stats.quickChecks, quickFailures: stats.quickFailures, waitedSeconds: Math.round(stats.waitedSeconds),
             loadAverageAtTimedRuns: loads.length ? { median: loads[Math.floor(loads.length / 2)], maximum: loads.at(-1) } : null,
             timedRunsWithDockerUp: stats.timedRuns.filter((entry) => entry.docker).length,
@@ -197,9 +244,11 @@ if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes('--
     console.log(JSON.stringify({ startedAt, seconds, samples: loads.length, loadMedian: Number(middle(loads).toFixed(2)), loadMaximum: Number(Math.max(...loads).toFixed(2)),
         otherCoresMedian: Number(middle(cores).toFixed(2)), otherCoresMaximum: Number(Math.max(...cores).toFixed(2)), docker: dockerRunning() }));
 } else if (import.meta.url === `file://${process.argv[1]}` && process.argv.includes('--wait')) {
+    // Exit 0 once it is quiet, whether or not it had to wait first; a reader that has gone away (a closed pipe) does not make the wait fail.
+    for (const stream of [process.stdout, process.stderr]) stream.on('error', (error) => { if (error.code !== 'EPIPE') throw error; });
     await createQuietGate().beforeTimedRun();
 } else if (import.meta.url === `file://${process.argv[1]}`) {
     const reasons = obstacles({ quick: process.argv.includes('--quick') });
-    console.log(reasons.length ? `Not quiet: ${reasons.join('; ')}` : 'Quiet.');
+    console.error(reasons.length ? `Not quiet: ${reasons.join('; ')}` : 'Quiet.');
     process.exitCode = reasons.length ? 1 : 0;
 }

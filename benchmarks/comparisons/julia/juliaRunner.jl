@@ -144,6 +144,14 @@ function runOnce(spec, method, rtol, switching)
     solve(problem, ALGORITHMS[method](); options...)
 end
 
+# The quiet check before a timed run. It exits 0 once the computer is quiet, after waiting or not; anything else is a refusal or an error.
+# Its output goes to our stderr and it reads nothing: our stdout and stdin are the JSON-lines protocol with compare.mjs.
+function quietCheck(command)
+    flush(stdout)
+    process = run(pipeline(ignorestatus(Cmd(String.(split(command)))); stdin = devnull, stdout = stderr, stderr = stderr))
+    success(process) || error("the quiet check before the timed run failed (exit $(process.exitcode)): $(command)")
+end
+
 function measure(spec, method, switching, quiet, skip, firstSeen)
     reference = spec["reference"]["samples"]
     records = Any[]
@@ -159,7 +167,7 @@ function measure(spec, method, switching, quiet, skip, firstSeen)
                 firstSeen[key] = warm
                 record["firstSolveSeconds"] = warm
             end
-            isempty(quiet) || run(Cmd(String.(split(quiet))))
+            isempty(quiet) || quietCheck(quiet)
             timed = @elapsed sol = runOnce(spec, method, rtol, switching)
             stats = sol.stats
             record["ok"] = true; record["solveSeconds"] = [timed]

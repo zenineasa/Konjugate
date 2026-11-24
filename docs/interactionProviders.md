@@ -27,7 +27,7 @@ Both are managed local child processes using the same engine-owned protocol and 
 
 The initial providers are stateless, accept bound scalar states (and, for relationships, parameters), and return one derivative contribution to an explicitly selected output state. They are evaluated with the same simulation-time semantics as an equation. Persistent provider state, computational-node providers, algebraic outputs, events and commands are deferred until checkpoint and solver interactions have been designed.
 
-The repository includes a minimal Python provider in [examples/providers](../examples/providers/README.md). It is the recommended starting point for understanding the author-facing provider contract before working on a larger model or future reusable plugin.
+The provider classes this document describes are the older program format (`konjugate/relationshipProvider.hpp`, `from konjugate import ...`), which keeps working as it did. New programs are written in the current format, the program SDK (`konjugate/sdk/v2/program.hpp`, `konjugate.v2`), which Konjugate's templates write: see [Writing a program](programs.md), and its examples in [examples/providers](../examples/providers/README.md), the recommended starting point before working on a larger model or a reusable plugin.
 
 The initial implementation does not integrate FMUs, Simulink, Modelica, hardware, remote services or arbitrary third-party applications. Those systems will generally require a dedicated plugin and protocol adapter. The generalized manifest, binding and lifecycle design should avoid preventing such plugins later, but no external-software integration is required to validate the first C++ and Python relationship providers.
 
@@ -229,6 +229,8 @@ A relationship provider receives only declared input values and returns only dec
 Add-ons remain outside this interface. A result visualizer continues to receive read-only, bounded result access through its Electron bridge. Installing an add-on must not grant engine-plugin permissions, and installing a plugin must not grant application UI or result-storage access.
 
 ## Author-facing provider classes
+
+This section and the next describe the older program format; the current one is in [Writing a program](programs.md).
 
 **Implemented**, as `engine/include/konjugate/relationshipProvider.hpp`. It defines the `konjugate::sdk::v1::RelationshipProvider` abstract class and SDK-owned description, port, input-view and output-collector types. A C++ author implements that class rather than writing a `main` function or handling the worker protocol.
 

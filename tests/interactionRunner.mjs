@@ -2324,7 +2324,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), false);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), false);
-        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), /#include <konjugate\/relationshipProvider\.hpp>/);
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), /#include <konjugate\/sdk\/v2\/program\.hpp>/);
 
         const source = 'int main() {}';
         await evaluate(window, `(() => {
@@ -2358,8 +2358,8 @@ export async function runInteractionTests(driver) {
             document.querySelector('#editInsertProviderTemplate').click();
         })()`);
         const regeneratedSource = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
-        assert.match(regeneratedSource, /ScalarPort\{"delta", "delta", ""\}/);
-        assert.match(regeneratedSource, /ScalarPort\{"gradient", "gradient", ""\}/);
+        assert.match(regeneratedSource, /k::Input delta\{this, "delta"\};/);
+        assert.match(regeneratedSource, /k::Output gradient\{this, "gradient"\};/);
 
         // Switch back to Equation so the following equation-editor tests see their expected state.
         await evaluate(window, writeRelationshipAs('equation'));
@@ -2556,8 +2556,8 @@ export async function runInteractionTests(driver) {
             document.querySelector('#termInsertProviderTemplate').click();
         })()`);
         const regenerated = await evaluate(window, `document.querySelector('#termProviderSource').value`);
-        assert.match(regenerated, /ScalarPort\{"temperature", "temperature", ""\}/);
-        assert.match(regenerated, /ScalarPort\{"heatRate", "heatRate", ""\}/);
+        assert.match(regenerated, /k::Input temperature\{this, "temperature"\};/);
+        assert.match(regenerated, /k::Output heatRate\{this, "heatRate"\};/);
 
         await settle(window, 'validation');
         await waitFor(window, `document.querySelector('#validationSummary').dataset.validationSource === 'engine'`,
@@ -9783,7 +9783,7 @@ export async function runInteractionTests(driver) {
         const select = (selector, value) => evaluate(window, `(() => { const element = ${selector}; element.value = ${JSON.stringify(value)}; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
         await select(`document.querySelector('#editNodeProgramKind')`, 'python');
         await waitFor(window, `!document.querySelector('#nodeProgramFields').hidden`, 'The program fields did not open.');
-        assert.match((await program()).source, /class Mass\(NodeProvider\)/, 'A new program starts from a template.');
+        assert.match((await program()).source, /class Mass\(Node\)/, 'A new program starts from a template.');
         assert.match(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), /Add an output/);
         // An input reading another node's state, one reading a shared parameter, and an output setting a value.
         await evaluate(window, `document.querySelector('#editAddNodeProgramInput').click()`);
@@ -9802,19 +9802,19 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#editNodeProgramTemplate').click()`);
         await evaluate(window, `(() => { window.confirm = window.__confirmAnswer; })()`);
         implementation = await program();
-        assert.match(implementation.source, /ScalarPort\("setpoint", "setpoint", ""\)/);
-        assert.match(implementation.source, /outputs\.add_gradient\("output", 0\.0\)/);
-        await typeInto(`document.querySelector('#editNodeProgramSource')`, implementation.source.replace('0.0)', 'inputs["setpoint"])'));
-        assert.match((await program()).source, /add_gradient\("output", inputs\["setpoint"\]\)/);
+        assert.match(implementation.source, /^    setpoint = Input\(\)$/m);
+        assert.match(implementation.source, /return self\.outputs\(output=0\.0\)/);
+        await typeInto(`document.querySelector('#editNodeProgramSource')`, implementation.source.replace('output=0.0', 'output=x.setpoint'));
+        assert.match((await program()).source, /return self\.outputs\(output=x\.setpoint\)/);
         assert.equal(await engineVerdict('The node with a program was not validated.'), true);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
-        assert.match((await program()).source, /add_gradient\("output", 0\.0\)/, 'Undo takes back the typing.');
+        assert.match((await program()).source, /return self\.outputs\(output=0\.0\)/, 'Undo takes back the typing.');
         // C++, then none.
         await openNode('Mass');
         await select(`document.querySelector('#editNodeProgramKind')`, 'cpp');
         implementation = await program();
         assert.equal(implementation.kind, 'cpp');
-        assert.match(implementation.source, /public konjugate::sdk::v1::NodeProvider/);
+        assert.match(implementation.source, /class Mass final : public k::Node \{/);
         assert.equal(implementation.bindings.length, 2, 'The inputs carry over to another language.');
         await select(`document.querySelector('#editNodeProgramKind')`, '');
         assert.equal(await program(), undefined);

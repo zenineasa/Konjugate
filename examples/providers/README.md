@@ -1,11 +1,13 @@
 # Provider examples
 
-These examples use the shipped Python relationship-provider SDK. They are
-standalone source files that can be embedded in a project's `implementation`
-object or adapted into a reusable provider package when that packaging layer
-becomes available.
+Programs in the current format, written against the program SDK (`konjugate/sdk/v2/program.hpp` in C++, `konjugate.v2` in Python), are what Konjugate's templates write and where a new program should start; [Writing a program](../../docs/programs.md) explains them:
 
-## Hello World
+- [conduction.py](conduction.py) and [conduction.cpp](conduction.cpp): a relationship, the heat conducted from a hot body to a cold one, giving to the bit the numbers of the equation it replaces.
+- [pidController.py](pidController.py) and [pidController.cpp](pidController.cpp): a node, a digital PID controller sampled every 10 ms, with memory and a clock.
+
+The rest of this folder is written in the older program format (`from konjugate import ...`, `konjugate/relationshipProvider.hpp`), which keeps working as it did: [helloWorld.py](helloWorld.py), [accumulatorNode.py](accumulatorNode.py), [piControllerNode.py](piControllerNode.py) and the project [piControlledTankProject.json](piControlledTankProject.json). They are described below.
+
+## Hello World (older format)
 
 [helloWorld.py](helloWorld.py) declares one input port and one output port. For
 each evaluation it returns twice the input as an additive derivative
@@ -51,13 +53,12 @@ for module loading; a complete protocol interaction should be exercised through
 
 ## Provider boundary
 
-A provider receives only the values declared in its bindings and returns an
-additive contribution through `OutputCollector`. It does not receive mutable
+A provider receives only the values declared in its bindings and returns its result (in the older format, an additive contribution through `OutputCollector`). It does not receive mutable
 engine memory, a project object or an ambient filesystem/network capability.
 Keep provider source deterministic unless the model explicitly documents an
 external dependency.
 
-## Checkpointable node-provider contract
+## Checkpointable node-provider contract (older format)
 
 The [accumulator node](accumulatorNode.py) demonstrates the next provider
 capability: multiple named outputs and deterministic checkpoint/restore state.
@@ -67,8 +68,4 @@ Run its cross-platform conformance check from the repository root:
 npm run test:node-provider
 ```
 
-This verifies one evaluation, serializes the provider state, changes the live
-state, restores the checkpoint and confirms the original value is recovered.
-The current engine does not launch `NodeProvider` instances from `.kjt` models
-yet; the command is the supported author-facing contract test until the
-protocol and execution-plan lifecycle are implemented.
+This verifies one evaluation, serializes the provider state, changes the live state, restores the checkpoint and confirms the original value is recovered, without the engine. The engine itself runs node programs from a project, as it runs the Tank of [piControlledTankProject.json](piControlledTankProject.json); in the current format a node program declares its memory instead, and the engine saves and restores it (see [Writing a program](../../docs/programs.md)).

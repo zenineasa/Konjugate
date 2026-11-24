@@ -535,9 +535,10 @@ test('a program relationship is written only when it declares the keys it reads,
     const write = tutorialById('programRelationship').steps.find((step) => step.id === 'write');
     const line = programRelationshipValues.line;
     const programWith = (source) => ({ edges: [{ name: 'Conduction', implementation: { kind: 'python', source } }] });
-    const declared = '            [\n                ScalarPort("hot", "hot", ""),\n                ScalarPort("cold", "cold", ""),\n            ],';
+    const declared = '    hot = Input()\n    cold = Input()\n    output = Output()';
     assert.equal(write.done({ document: programWith(`${declared}\n${line}`) }), true);
-    assert.equal(write.done({ document: programWith(`            [\n                # No bindings declared yet\n            ],\n${line}`) }), false, 'A template from before the bindings reads keys it does not declare, and fails when run.');
+    assert.equal(write.done({ document: programWith(`${declared}\n        # The output's value from the inputs: x.hot, x.cold.\n        return 0.0`) }), false, 'The template as written, its inputs named only in a comment, is not written yet.');
+    assert.equal(write.done({ document: programWith(`    # No bindings declared yet: add one, and it appears here.\n    output = Output()\n${line}`) }), false, 'A template from before the bindings reads keys it does not declare, and fails when run.');
     const leak = tutorialById('equationsThatDoMore').steps.find((step) => step.id === 'sourceTerm');
     const hotWith = (expressionModel) => ({ nodes: [{ name: 'Hot body', states: [{ id: 2, symbol: 'temperature' }], sourceTerms: [{ state: 'temperature', expression: expressionModel.latex, expressionModel }] }] });
     assert.equal(leak.done({ document: hotWith({ latex: '-0.01\\cdot(\\mathrm{temperature}-290)', mathJson: ['Multiply', -0.01, ['Subtract', 'temperature', 290]], output: { stateId: 2 } }) }), true);

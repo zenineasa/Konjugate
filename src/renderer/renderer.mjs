@@ -15569,7 +15569,7 @@ const tour = createTour({
             try { $('#editInsertProviderTemplate').click(); } finally { window.confirm = confirm; }
             await new Promise((resolve) => setTimeout(resolve, 100));
             const source = $('#editEdgeProviderSource');
-            source.value = source.value.replace('        outputs.add_gradient(0)', step.line);
+            source.value = source.value.replace('        return 0.0', step.line);
             source.dispatchEvent(new Event('input', { bubbles: true }));
             source.dispatchEvent(new Event('change', { bubbles: true }));
         },

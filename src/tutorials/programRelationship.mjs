@@ -10,7 +10,7 @@ export const programRelationshipValues = Object.freeze({
     relationship: 'Conduction',
     cold: 'Cold body',
     bindings: [{ key: 'hot', reference: 'source.temperature' }, { key: 'cold', reference: 'target.temperature' }],
-    line: '        outputs.add_gradient(0.05 * (inputs["hot"] - inputs["cold"]))',
+    line: '        return 0.05 * (x.hot - x.cold)',
     runSeconds: 60
 });
 const values = programRelationshipValues;
@@ -21,13 +21,13 @@ const bound = (document) => {
     const bindings = conduction(document)?.implementation?.bindings ?? [];
     return values.bindings.every(({ key, reference }) => bindings.some((binding) => binding.key === key && binding.kind === 'state' && binding.role === reference.split('.')[0]));
 };
-// The program declares both keys (as the template writes them, ScalarPort("hot", …)), and adds something computed from both (the
-// template's own lines that mention them are comments): one that reads a key it does not declare fails when it is run.
+// The program declares both keys as inputs (as the template writes them, hot = Input()), and returns something computed from both
+// (the template's own line that mentions them is a comment): one that reads a key it does not declare fails when it is run.
 const written = (document) => {
     const lines = String(conduction(document)?.implementation?.source ?? '').split('\n').filter((line) => !line.trim().startsWith('#'));
-    const declares = (key) => lines.some((line) => line.includes(`ScalarPort("${key}"`));
+    const declares = (key) => lines.some((line) => new RegExp(`^\\s*${key}\\s*=\\s*Input\\(`).test(line));
     return values.bindings.every(({ key }) => declares(key))
-        && lines.some((line) => line.includes('add_gradient(') && line.includes('inputs["hot"]') && line.includes('inputs["cold"]'));
+        && lines.some((line) => /^\s*return\b/.test(line) && line.includes('x.hot') && line.includes('x.cold'));
 };
 
 const steps = Object.freeze([
@@ -61,7 +61,7 @@ const steps = Object.freeze([
     {
         id: 'write',
         title: 'Write the program',
-        text: 'The program already declares both keys. In its evaluate method, replace outputs.add_gradient(0) with outputs.add_gradient(0.05 * (inputs["hot"] - inputs["cold"])): the conductance over the capacitance, times the difference. "Open code editor" opens it in a larger editor that checks it as you type; "Reset template" writes the template again, from the bindings as they are.',
+        text: 'The program already declares both keys as inputs, hot and cold. In its evaluate method, replace return 0.0 with return 0.05 * (x.hot - x.cold): the conductance over the capacitance, times the difference. "Open code editor" opens it in a larger editor that checks it as you type; "Reset template" writes the template again, from the bindings as they are.',
         target: () => '#editEdgeProviderSource', skip: 'writeProgram', relationship: values.relationship, line: values.line,
         done: ({ document }) => written(document)
     },

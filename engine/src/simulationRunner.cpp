@@ -756,10 +756,24 @@ public:
 
     std::vector<NodeIntegrationResult> integrate(const Values& snapshot, const RunControl& control, double time, double step,
         double endTime, std::size_t, ProviderRuntime* providers) override {
+        // The nodes are integrated one after another, so the step is timed once and its time shared among them by the work each
+        // does (estimated operations a substep times substeps), as the stages are: timing every node cost a large part of a run.
+        const auto startedAt = std::chrono::steady_clock::now();
         std::vector<NodeIntegrationResult> nodeResults(plan_.nodes.size());
         for (std::size_t index = 0; index < plan_.nodes.size(); ++index) {
-            nodeResults[index] = integrateNode(plan_.nodes[index], snapshot, control.parameterValues, time, step, providers, control.activeSchedules, endTime);
+            nodeResults[index] = integrateNode(plan_.nodes[index], snapshot, control.parameterValues, time, step, providers, control.activeSchedules,
+                endTime, false);
         }
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
+        nodeWeights_.resize(plan_.nodes.size());
+        nodeShares_.assign(plan_.nodes.size(), 0);
+        allNodes_.assign(plan_.nodes.size(), true);
+        for (std::size_t index = 0; index < plan_.nodes.size(); ++index) {
+            const auto& node = plan_.nodes[index];
+            nodeWeights_[index] = static_cast<std::uint64_t>(node.estimatedOperationsPerSubstep) * static_cast<std::uint64_t>(node.substeps);
+        }
+        shareMeasuredTime(nodeWeights_, allNodes_, static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed)), nodeShares_);
+        for (std::size_t index = 0; index < plan_.nodes.size(); ++index) nodeResults[index].computeNanoseconds = nodeShares_[index];
         return nodeResults;
     }
 
@@ -785,6 +799,8 @@ public:
 
 private:
     std::vector<bool> evaluatedNodes_;
+    std::vector<std::uint64_t> nodeWeights_, nodeShares_;
+    std::vector<bool> allNodes_;
 };
 
 class ThreadPoolStepExecutor final : public StepExecutor {

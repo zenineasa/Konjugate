@@ -14,17 +14,11 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string_view>
 #include <unordered_map>
 
 namespace konjugate {
 namespace {
-// NOLINTBEGIN(bugprone-throwing-static-initialization) -- fixed, hand-written regex literals,
-// verified valid; std::regex's constructor cannot actually throw for these at runtime.
-const std::regex entityIdPattern("^[1-9][0-9]{0,15}$");
-const std::regex symbolPattern("^[a-z][A-Za-z0-9]*$");
-const std::regex providerKeyPattern("^[a-z][A-Za-z0-9]*$");
-// NOLINTEND(bugprone-throwing-static-initialization)
-
 ValidationIssue& add(ValidationResult& result, std::string code, std::string severity, std::string message,
          std::string kind = "model", std::string entityId = {}, std::string field = {}) {
     result.issues.push_back({std::move(code), std::move(severity), std::move(message), {std::move(kind), std::move(entityId), std::move(field)}, std::nullopt});
@@ -226,7 +220,7 @@ void validateProviderOutput(ValidationResult& result,
     const auto role = value(implementation, "output.role");
     const auto stateId = value(implementation, "output.stateId");
     const auto key = value(implementation, "output.key");
-    if (key.empty() || !std::regex_match(key, providerKeyPattern)) {
+    if (key.empty() || !isLowerCamelSymbol(key)) {
         add(result, "providerOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "edge", edgeId, "implementation");
     }
     if (role != "source" && role != "target") {
@@ -292,9 +286,9 @@ void validateTypedMathJson(const boost::property_tree::ptree& expression,
     }
     const auto operation = items.front()->data();
     const auto arguments = items.size() - 1;
-    const std::set<std::string> unary = {"Abs", "Arccos", "Arcsin", "Arctan", "Cos", "Exp", "Ln", "Log", "Negate", "Sin", "Sqrt", "Tan", "Tanh"};
-    const std::set<std::string> binary = {"Arctan2", "Divide", "Max", "Min", "Power"};
-    const std::set<std::string> comparisons = {"Less", "LessEqual", "Greater", "GreaterEqual", "Equal", "NotEqual"};
+    static const std::set<std::string> unary = {"Abs", "Arccos", "Arcsin", "Arctan", "Cos", "Exp", "Ln", "Log", "Negate", "Sin", "Sqrt", "Tan", "Tanh"};
+    static const std::set<std::string> binary = {"Arctan2", "Divide", "Max", "Min", "Power"};
+    static const std::set<std::string> comparisons = {"Less", "LessEqual", "Greater", "GreaterEqual", "Equal", "NotEqual"};
     const bool numericOperation = unary.contains(operation) || binary.contains(operation) || operation == "Add" || operation == "Multiply" || operation == "Which";
     const bool booleanOperation = comparisons.contains(operation) || operation == "And" || operation == "Or" || operation == "Not";
     if (!numericOperation && !booleanOperation) {
@@ -371,10 +365,6 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
     // misplaced comparison by the typed MathJSON check).
     const bool hasCases = latex.find("\\begin{cases}") != std::string::npos;
     if (!hasCases && latex.find('=') != std::string::npos) errors.push_back("Assignments are not supported in relationship expressions.");
-    const std::regex environmentExpression(R"(\\begin\{([A-Za-z*]+)\})");
-    for (auto match = std::sregex_iterator(latex.begin(), latex.end(), environmentExpression); match != std::sregex_iterator(); ++match) {
-        if ((*match)[1].str() != "cases") errors.push_back("Unsupported LaTeX environment: " + (*match)[1].str() + ".");
-    }
 
     std::set<std::string> knownSymbols;
     const auto addStates = [&](const boost::property_tree::ptree& node, const std::string& role) {
@@ -387,47 +377,8 @@ std::vector<std::string> equationErrors(const boost::property_tree::ptree& edge,
     if (const auto parameters = edge.get_child_optional("parameters")) for (const auto& item : *parameters) knownSymbols.insert(value(item.second, "symbol"));
     if (const auto bindings = edge.get_child_optional("equationModel.bindings")) for (const auto& item : *bindings) knownSymbols.insert(value(item.second, "symbol"));
 
-    // \operatorname{Word} is standard LaTeX for an unfamiliar function name -- a common shape
-    // for AI-generated equations even when the prompt is steered toward the shorter \max/\min
-    // form. Accept it when Word names a real operator (case-insensitively) and strip the whole
-    // construct before the general command/identifier scans below, so neither "operatorname"
-    // nor the operator word itself get flagged again by those broader, name-agnostic checks.
-    const std::set<std::string> operatorNames = {
-        "abs", "cos", "exp", "ln", "log", "max", "min", "negate", "sin", "tan"
-    };
-    const std::regex operatornameExpression(R"(\\operatorname\{([A-Za-z]+)\})");
-    for (auto match = std::sregex_iterator(latex.begin(), latex.end(), operatornameExpression); match != std::sregex_iterator(); ++match) {
-        auto name = (*match)[1].str();
-        std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (!operatorNames.contains(name)) errors.push_back("\\operatorname{} does not name a supported function: " + (*match)[1].str() + ".");
-    }
-    // Strip the cases environment markers and \text{...} labels ("if", "otherwise") so their words
-    // aren't scanned as commands or symbols below.
-    const std::regex casesMarkupExpression(R"(\\(?:begin|end)\{[A-Za-z*]+\}|\\text\{[^}]*\})");
-    const auto latexWithoutOperatorname = std::regex_replace(std::regex_replace(latex, operatornameExpression, " "), casesMarkupExpression, " ");
-
-    const std::set<std::string> supportedCommands = {
-        "cdot", "cos", "exp", "frac", "left", "ln", "log", "max", "min", "mathrm", "right", "sin", "sqrt", "tan",
-        // cases conditions
-        "ge", "geq", "gt", "land", "le", "leq", "lnot", "lor", "lt", "ne", "neg", "neq", "vee", "wedge"
-    };
-    const std::regex commandExpression(R"(\\([A-Za-z]+))");
-    for (auto match = std::sregex_iterator(latexWithoutOperatorname.begin(), latexWithoutOperatorname.end(), commandExpression); match != std::sregex_iterator(); ++match) {
-        const auto command = (*match)[1].str();
-        if (!supportedCommands.contains(command)) errors.push_back("Unsupported LaTeX command: \\" + command + ".");
-    }
-
-    // Remove command names before scanning identifiers. Their arguments remain,
-    // so both plain symbols and symbols rendered as \mathrm{symbol} are checked.
-    const auto expressionWithoutCommands = std::regex_replace(latexWithoutOperatorname, commandExpression, " ");
-    const std::regex identifierExpression(R"([A-Za-z][A-Za-z0-9]*)");
-    std::set<std::string> unknownSymbols;
-    for (auto match = std::sregex_iterator(expressionWithoutCommands.begin(), expressionWithoutCommands.end(), identifierExpression);
-         match != std::sregex_iterator(); ++match) {
-        const auto symbol = match->str();
-        if (!knownSymbols.contains(symbol)) unknownSymbols.insert(symbol);
-    }
-    for (const auto& symbol : unknownSymbols) errors.push_back("Unknown symbol: " + symbol + ".");
+    const auto textErrors = latexTextErrors(latex, knownSymbols);
+    errors.insert(errors.end(), textErrors.begin(), textErrors.end());
     return errors;
 }
 }
@@ -463,9 +414,7 @@ void validateAlgebraicRelationship(ValidationResult& result, const boost::proper
         const auto mathJson = definition.get_child_optional("mathJson");
         if (!mathJson) errors.push_back("Its expression is missing.");
         else validateMathJson(*mathJson, symbols, errors);
-        // Compiled once: a model with contact has tens of thousands of definitions.
-        static const std::regex definitionSymbol("^[A-Za-z][A-Za-z0-9_]*$");
-        if (!std::regex_match(symbol, definitionSymbol) || !symbols.insert(symbol).second) {
+        if (!isDefinitionSymbol(symbol) || !symbols.insert(symbol).second) {
             errors.push_back("A definition needs a name of its own (letters and digits).");
         }
         if (!errors.empty()) add(result, "relationshipDefinitionInvalid", "error", "Definition \"" + symbol + "\": " + errors.front(), "edge", id, "equation");
@@ -525,7 +474,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     std::unordered_map<std::string, int> stateContributorCounts;
     std::set<std::string> setsValueStateIds;
     auto registerId = [&](const std::string& id, const std::string& kind, const std::string& entityId, const std::string& label) {
-        bool validId = std::regex_match(id, entityIdPattern);
+        bool validId = isEntityId(id);
         if (validId) {
             try { validId = std::stoull(id) <= 9007199254740991ULL; } catch (...) { validId = false; }
         }
@@ -544,7 +493,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         registerId(sharedId, "sharedParameter", sharedId, "Shared parameter \"" + value(shared, "name") + "\"");
         sharedParameterIds.insert(sharedId);
         const auto symbol = value(shared, "symbol");
-        if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Shared parameter symbol must be lower camel case.", "sharedParameter", sharedId, "symbol");
+        if (!isLowerCamelSymbol(symbol)) add(result, "parameterSymbolInvalid", "error", "Shared parameter symbol must be lower camel case.", "sharedParameter", sharedId, "symbol");
         else if (!sharedParameterSymbols.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Shared parameter symbol \"" + symbol + "\" is duplicated.", "sharedParameter", sharedId, "symbol");
         const auto mode = value(shared, "mode");
         if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "sharedParameter", sharedId, "mode");
@@ -739,7 +688,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             registerId(stateId, "node", id, "State \"" + value(state, "name") + "\"");
             stateIds[id].insert(stateId);
             if (!nodeEnabled) continue;
-            if (!std::regex_match(symbol, symbolPattern)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
+            if (!isLowerCamelSymbol(symbol)) add(result, "stateSymbolInvalid", "error", "State symbol must be lower camel case.", "node", id, "states");
             stateOwners[stateId] = id;
             stateLabels[stateId] = value(node, "name") + " · " + value(state, "name");
             if (const auto kind = state.get_optional<std::string>("kind")) {
@@ -786,7 +735,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 validateSharedLink(parameter, "node", id, "sourceTerms");
                 if (!nodeEnabled) continue;
                 const auto symbol = value(parameter, "symbol");
-                if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "node", id, "sourceTerms");
+                if (!isLowerCamelSymbol(symbol)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "node", id, "sourceTerms");
                 else if (!sourceParameterSymbols.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Source-term parameter symbols must be unique.", "node", id, "sourceTerms");
                 const auto mode = value(parameter, "mode");
                 if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "node", id, "sourceTerms");
@@ -871,7 +820,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
                     const auto& binding = bindingEntry.second;
                     const auto key = value(binding, "key");
-                    if (!std::regex_match(key, providerKeyPattern)) {
+                    if (!isLowerCamelSymbol(key)) {
                         add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "node", id, "sourceTerms");
                     } else if (!providerKeys.insert(key).second) {
                         add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "sourceTerms");
@@ -884,7 +833,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 }
                 const auto outputKey = value(*termImplementation, "output.key");
                 const auto outputStateId = value(*termImplementation, "output.stateId");
-                if (outputKey.empty() || !std::regex_match(outputKey, providerKeyPattern)) {
+                if (outputKey.empty() || !isLowerCamelSymbol(outputKey)) {
                     add(result, "providerOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "node", id, "sourceTerms");
                 }
                 if (outputStateId.empty() || !stateIds[id].contains(outputStateId)) {
@@ -962,7 +911,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
                     const auto& binding = bindingEntry.second;
                     const auto key = value(binding, "key");
-                    if (!std::regex_match(key, providerKeyPattern)) {
+                    if (!isLowerCamelSymbol(key)) {
                         add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "node", id, "implementation");
                     } else if (!nodeProviderKeys.insert(key).second) {
                         add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "node", id, "implementation");
@@ -1000,7 +949,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
                 } else for (const auto& outputEntry : *outputs) {
                     const auto& output = outputEntry.second;
                     const auto key = value(output, "key");
-                    if (key.empty() || !std::regex_match(key, providerKeyPattern)) {
+                    if (key.empty() || !isLowerCamelSymbol(key)) {
                         add(result, "nodeProviderOutputKeyInvalid", "error", "Provider output key must be lower camel case.", "node", id, "implementation");
                     } else if (!outputKeys.insert(key).second) {
                         add(result, "nodeProviderOutputKeyDuplicate", "error", "Provider output key \"" + key + "\" is duplicated.", "node", id, "implementation");
@@ -1102,7 +1051,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             validateSharedLink(parameter, "edge", id, "parameters");
             if (!edgeEnabled) continue;
             const auto symbol = value(parameter, "symbol");
-            if (!std::regex_match(symbol, symbolPattern)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");
+            if (!isLowerCamelSymbol(symbol)) add(result, "parameterSymbolInvalid", "error", "Parameter symbol must be lower camel case.", "edge", id, "parameters");
             else if (!parameters.insert(symbol).second) add(result, "parameterSymbolDuplicate", "error", "Parameter symbol \"" + symbol + "\" is duplicated.", "edge", id, "parameters");
             const auto mode = value(parameter, "mode");
             if (mode != "constant" && mode != "live") add(result, "parameterModeInvalid", "error", "Parameter mode must be constant or live.", "edge", id, "parameters");
@@ -1167,7 +1116,7 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (providerBindings) for (const auto& bindingEntry : *providerBindings) {
                 const auto& binding = bindingEntry.second;
                 const auto key = value(binding, "key");
-                if (!std::regex_match(key, providerKeyPattern)) {
+                if (!isLowerCamelSymbol(key)) {
                     add(result, "providerBindingKeyInvalid", "error", "Provider input keys must be lower camel case.", "edge", id, "implementation");
                 } else if (!providerKeys.insert(key).second) {
                     add(result, "providerBindingKeyDuplicate", "error", "Provider input key \"" + key + "\" is duplicated.", "edge", id, "implementation");
@@ -1424,6 +1373,132 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
     result.valid = std::none_of(result.issues.begin(), result.issues.end(), [](const auto& item) { return item.severity == "error"; });
     if (result.valid) result.plan = std::move(compiledPlan);
     return result;
+}
+
+
+namespace {
+bool isAsciiLetter(char character) { return (character >= 'A' && character <= 'Z') || (character >= 'a' && character <= 'z'); }
+bool isAsciiDigit(char character) { return character >= '0' && character <= '9'; }
+
+// At `at`, `opening` (as "\\begin{") then one or more name characters (letters, and '*' when `star`) then '}': where the name
+// starts and ends (the '}' is at its end), or nothing.
+std::optional<std::pair<std::size_t, std::size_t>> bracedName(const std::string& text, std::size_t at, std::string_view opening, bool star) {
+    if (text.compare(at, opening.size(), opening) != 0) return std::nullopt;
+    const auto start = at + opening.size();
+    auto end = start;
+    while (end < text.size() && (isAsciiLetter(text[end]) || (star && text[end] == '*'))) ++end;
+    if (end == start || end >= text.size() || text[end] != '}') return std::nullopt;
+    return std::pair{start, end};
+}
+}
+
+std::vector<std::string> latexTextErrors(const std::string& latex, const std::set<std::string>& knownSymbols) {
+    std::vector<std::string> errors;
+    // Environments: \begin{name}, each one but cases.
+    for (std::size_t at = 0; at < latex.size();) {
+        if (const auto name = bracedName(latex, at, "\\begin{", true)) {
+            const auto environment = latex.substr(name->first, name->second - name->first);
+            if (environment != "cases") errors.push_back("Unsupported LaTeX environment: " + environment + ".");
+            at = name->second + 1;
+        } else {
+            ++at;
+        }
+    }
+
+    // \operatorname{Word} is standard LaTeX for an unfamiliar function name -- a common shape for AI-generated equations even when
+    // the prompt is steered toward the shorter \max/\min form. Accept it when Word names a real operator (case-insensitively) and take
+    // the whole construct out before the general command and identifier scans below, so neither "operatorname" nor the operator word
+    // itself is flagged again by those broader, name-agnostic checks.
+    static const std::set<std::string> operatorNames = {"abs", "cos", "exp", "ln", "log", "max", "min", "negate", "sin", "tan"};
+    std::string withoutOperatorname;
+    withoutOperatorname.reserve(latex.size());
+    for (std::size_t at = 0; at < latex.size();) {
+        if (const auto name = bracedName(latex, at, "\\operatorname{", false)) {
+            const auto word = latex.substr(name->first, name->second - name->first);
+            auto lower = word;
+            std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            if (!operatorNames.contains(lower)) errors.push_back("\\operatorname{} does not name a supported function: " + word + ".");
+            withoutOperatorname += ' ';
+            at = name->second + 1;
+        } else {
+            withoutOperatorname += latex[at++];
+        }
+    }
+    // Take out the cases environment's markers and \text{...} labels ("if", "otherwise") so their words are not scanned as commands or
+    // symbols below.
+    std::string withoutMarkup;
+    withoutMarkup.reserve(withoutOperatorname.size());
+    for (std::size_t at = 0; at < withoutOperatorname.size();) {
+        auto marker = bracedName(withoutOperatorname, at, "\\begin{", true);
+        if (!marker) marker = bracedName(withoutOperatorname, at, "\\end{", true);
+        if (marker) {
+            withoutMarkup += ' ';
+            at = marker->second + 1;
+            continue;
+        }
+        if (withoutOperatorname.compare(at, 6, "\\text{") == 0) {
+            const auto close = withoutOperatorname.find('}', at + 6);
+            if (close != std::string::npos) {
+                withoutMarkup += ' ';
+                at = close + 1;
+                continue;
+            }
+        }
+        withoutMarkup += withoutOperatorname[at++];
+    }
+
+    // Commands: a backslash and the letters after it. Each unsupported one is named, as often as it appears; then each is taken out,
+    // its arguments left, so both plain symbols and symbols written \mathrm{symbol} are checked.
+    static const std::set<std::string> supportedCommands = {
+        "cdot", "cos", "exp", "frac", "left", "ln", "log", "max", "min", "mathrm", "right", "sin", "sqrt", "tan",
+        // cases conditions
+        "ge", "geq", "gt", "land", "le", "leq", "lnot", "lor", "lt", "ne", "neg", "neq", "vee", "wedge"
+    };
+    std::string withoutCommands;
+    withoutCommands.reserve(withoutMarkup.size());
+    for (std::size_t at = 0; at < withoutMarkup.size();) {
+        if (withoutMarkup[at] == '\\' && at + 1 < withoutMarkup.size() && isAsciiLetter(withoutMarkup[at + 1])) {
+            auto end = at + 1;
+            while (end < withoutMarkup.size() && isAsciiLetter(withoutMarkup[end])) ++end;
+            const auto command = withoutMarkup.substr(at + 1, end - at - 1);
+            if (!supportedCommands.contains(command)) errors.push_back("Unsupported LaTeX command: \\" + command + ".");
+            withoutCommands += ' ';
+            at = end;
+        } else {
+            withoutCommands += withoutMarkup[at++];
+        }
+    }
+
+    // Identifiers: a letter, then letters and digits.
+    std::set<std::string> unknownSymbols;
+    for (std::size_t at = 0; at < withoutCommands.size();) {
+        if (!isAsciiLetter(withoutCommands[at])) {
+            ++at;
+            continue;
+        }
+        auto end = at + 1;
+        while (end < withoutCommands.size() && (isAsciiLetter(withoutCommands[end]) || isAsciiDigit(withoutCommands[end]))) ++end;
+        auto symbol = withoutCommands.substr(at, end - at);
+        if (!knownSymbols.contains(symbol)) unknownSymbols.insert(std::move(symbol));
+        at = end;
+    }
+    for (const auto& symbol : unknownSymbols) errors.push_back("Unknown symbol: " + symbol + ".");
+    return errors;
+}
+
+bool isEntityId(const std::string& text) {
+    if (text.empty() || text.size() > 16 || text[0] < '1' || text[0] > '9') return false;
+    return std::all_of(text.begin(), text.end(), isAsciiDigit);
+}
+
+bool isLowerCamelSymbol(const std::string& text) {
+    if (text.empty() || text[0] < 'a' || text[0] > 'z') return false;
+    return std::all_of(text.begin(), text.end(), [](char c) { return isAsciiLetter(c) || isAsciiDigit(c); });
+}
+
+bool isDefinitionSymbol(const std::string& text) {
+    if (text.empty() || !isAsciiLetter(text[0])) return false;
+    return std::all_of(text.begin(), text.end(), [](char c) { return isAsciiLetter(c) || isAsciiDigit(c) || c == '_'; });
 }
 
 }

@@ -720,7 +720,16 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     double synchronizationStep,
                                     ProviderEvaluator* providerEvaluator = nullptr,
                                     const std::vector<ParameterSchedule>& activeSchedules = {},
-                                    double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN());
+                                    double synchronizationEndTime = std::numeric_limits<double>::quiet_NaN(),
+                                    bool timeNode = true);
+// Without `timeNode`, integrateNode leaves computeNanoseconds 0: a caller integrating the nodes one after another times them together
+// and shares the time (shareMeasuredTime), since reading the clock around every node cost a large part of a run of small nodes.
+
+// A measured time, `total`, shared among the entries `included` marks, in proportion to `weights` (equally when every included weight
+// is 0), into `shares`; an entry not included keeps its share. The shares of the included entries add up to `total` exactly, the
+// rounding spread over them. The total stays a measurement; each share is an estimate.
+void shareMeasuredTime(const std::vector<std::uint64_t>& weights, const std::vector<bool>& included, std::uint64_t total,
+                       std::vector<std::uint64_t>& shares);
 
 // What one run of the update phase did: how many relationship definitions it worked out (each at most once per
 // sweep, and only if an equation needed it), and how many rings stopped at their limit without settling.

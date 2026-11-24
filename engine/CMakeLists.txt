@@ -343,6 +343,20 @@ if(BUILD_TESTING)
     target_link_libraries(algebraicRelationshipTests PRIVATE Eigen3::Eigen Threads::Threads)
     add_test(NAME algebraicRelationshipTests COMMAND algebraicRelationshipTests)
 
+    # The validator's hand-written text checks against the regular expressions they replace.
+    add_executable(modelValidatorTests
+        tests/modelValidatorTests.cpp
+        src/executionPlan.cpp
+        src/wholeModelIntegration.cpp
+        src/eventLocation.cpp
+        src/jacobianAssembly.cpp
+        src/modelValidator.cpp
+        src/stabilityAnalysis.cpp
+    )
+    target_include_directories(modelValidatorTests PRIVATE include ${BOOST_INCLUDE_DIR})
+    target_link_libraries(modelValidatorTests PRIVATE Eigen3::Eigen Threads::Threads)
+    add_test(NAME modelValidatorTests COMMAND modelValidatorTests)
+
     add_executable(verletIntegrationTests
         tests/verletIntegrationTests.cpp
         src/executionPlan.cpp

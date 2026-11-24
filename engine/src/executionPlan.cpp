@@ -1326,7 +1326,12 @@ std::unordered_map<EntityId, SubsystemUpdates> readSubsystemUpdates(const boost:
 
 ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) {
     checkRequiredFeatures(document);
-    const auto programContext = scanProgramContext(document);
+    // Only a version 2 program reads the model's names, units and labels: worked out the first time one does, not for every model.
+    std::optional<ProgramContext> programContextStore;
+    const auto programContext = [&]() -> const ProgramContext& {
+        if (!programContextStore) programContextStore = scanProgramContext(document);
+        return *programContextStore;
+    };
     const auto sharedParameters = collectSharedParameters(document);
     const auto stateKinds = scanStateKinds(document);
     const auto subsystemUpdates = readSubsystemUpdates(document);
@@ -1422,10 +1427,10 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 if (task.programVersion == 2) {
                     task.programOwner = "node " + value(node, "name") + "'s own part";
                     task.programSeed = term.get<std::uint64_t>("implementation.seed", 0);
-                    task.outputUnit = programContext.stateUnits.contains(task.outputStateId) ? programContext.stateUnits.at(task.outputStateId) : "";
-                    task.outputLabel = programContext.stateLabels.contains(task.outputStateId) ? programContext.stateLabels.at(task.outputStateId) : "";
+                    task.outputUnit = programContext().stateUnits.contains(task.outputStateId) ? programContext().stateUnits.at(task.outputStateId) : "";
+                    task.outputLabel = programContext().stateLabels.contains(task.outputStateId) ? programContext().stateLabels.at(task.outputStateId) : "";
                     task.programOwnerKind = 1;
-                    bindProgramUnits(task.bindings, programContext);
+                    bindProgramUnits(task.bindings, programContext());
                     compiledNode.hasVersion2Programs = true;
                 }
             } else {
@@ -1557,12 +1562,12 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
             if (providerTask.programVersion == 2) {
                 providerTask.programOwner = "node " + value(node, "name");
                 providerTask.programSeed = implementation->get<std::uint64_t>("seed", 0);
-                bindProgramUnits(providerTask.bindings, programContext);
+                bindProgramUnits(providerTask.bindings, programContext());
                 // A version 2 program's output into an Update state is a value, read at the update instant; into a Rate state, a rate.
                 for (auto& output : providerTask.outputs) {
                     output.setsValue = output.setsValue || stateKinds.explicitUpdates.contains(output.stateId);
-                    output.unit = programContext.stateUnits.contains(output.stateId) ? programContext.stateUnits.at(output.stateId) : "";
-                    output.label = programContext.stateLabels.contains(output.stateId) ? programContext.stateLabels.at(output.stateId) : "";
+                    output.unit = programContext().stateUnits.contains(output.stateId) ? programContext().stateUnits.at(output.stateId) : "";
+                    output.label = programContext().stateLabels.contains(output.stateId) ? programContext().stateLabels.at(output.stateId) : "";
                 }
                 compiledNode.hasVersion2Programs = true;
             }
@@ -1635,15 +1640,15 @@ ExecutionPlan compileExecutionPlan(const boost::property_tree::ptree& document) 
                 task.programVersion = programVersionOf(edge.get_child("implementation"));
                 if (task.programVersion == 2) {
                     const auto nodeName = [&](const std::string& end) {
-                        const auto found = programContext.nodeNames.find(idValue(edge, end + ".nodeId"));
-                        return found != programContext.nodeNames.end() ? found->second : std::string("?");
+                        const auto found = programContext().nodeNames.find(idValue(edge, end + ".nodeId"));
+                        return found != programContext().nodeNames.end() ? found->second : std::string("?");
                     };
                     task.programOwner = "relationship " + nodeName("source") + " → " + nodeName("target");
                     task.programSeed = edge.get<std::uint64_t>("implementation.seed", 0);
-                    task.outputUnit = programContext.stateUnits.contains(contributionStateId) ? programContext.stateUnits.at(contributionStateId) : "";
-                    task.outputLabel = programContext.stateLabels.contains(contributionStateId) ? programContext.stateLabels.at(contributionStateId) : "";
+                    task.outputUnit = programContext().stateUnits.contains(contributionStateId) ? programContext().stateUnits.at(contributionStateId) : "";
+                    task.outputLabel = programContext().stateLabels.contains(contributionStateId) ? programContext().stateLabels.at(contributionStateId) : "";
                     task.programOwnerKind = 2;
-                    bindProgramUnits(task.bindings, programContext);
+                    bindProgramUnits(task.bindings, programContext());
                     contributionNode.hasVersion2Programs = true;
                 }
             } else {
@@ -2287,6 +2292,34 @@ StateValues integrateVerletNode(const NodeExecutionPlan& node, StateValues local
 
 }
 
+void shareMeasuredTime(const std::vector<std::uint64_t>& weights, const std::vector<bool>& included, std::uint64_t total,
+                       std::vector<std::uint64_t>& shares) {
+    std::size_t entries = 0;
+    double weightSum = 0;
+    for (std::size_t index = 0; index < weights.size(); ++index) {
+        if (!included[index]) continue;
+        ++entries;
+        weightSum += static_cast<double>(weights[index]);
+    }
+    if (entries == 0) return;
+    const bool byWeight = weightSum > 0;
+    const double whole = byWeight ? weightSum : static_cast<double>(entries);
+    // Each share: the time up to the end of this entry, rounded down, less that up to the one before, so the rounding spreads over the
+    // entries rather than piling onto one; what the last rounding leaves (a nanosecond or so) goes to the last.
+    double reachedWeight = 0;
+    std::uint64_t assigned = 0;
+    std::size_t last = 0;
+    for (std::size_t index = 0; index < weights.size(); ++index) {
+        if (!included[index]) continue;
+        reachedWeight += byWeight ? static_cast<double>(weights[index]) : 1.0;
+        const auto reached = std::min(total, static_cast<std::uint64_t>(static_cast<double>(total) * (reachedWeight / whole)));
+        shares[index] = reached > assigned ? reached - assigned : 0;
+        assigned += shares[index];
+        last = index;
+    }
+    shares[last] += total - assigned;
+}
+
 NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     const StateValues& synchronizationSnapshot,
                                     const EntityValues& liveParameterValues,
@@ -2294,11 +2327,17 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
                                     double synchronizationStep,
                                     ProviderEvaluator* providerEvaluator,
                                     const std::vector<ParameterSchedule>& activeSchedules,
-                                    double synchronizationEndTime) {
+                                    double synchronizationEndTime,
+                                    bool timeNode) {
     // The node's Update states are not worked out here: through the step they hold their values from its start, and the
     // update phase (applyUpdates) sets them after it, from the Rate states this leaves (docs/proposals/ratesAndUpdates.md).
     static_cast<void>(synchronizationEndTime);
-    const auto startedAt = std::chrono::steady_clock::now();
+    const auto startedAt = timeNode ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    const auto elapsedSince = [&] {
+        if (!timeNode) return std::uint64_t{0};
+        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
+        return static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed));
+    };
     StateValues localStates(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) {
         localStates[index] = synchronizationSnapshot.at(node.stateIndexes[index]);
@@ -2313,10 +2352,21 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
     if (node.verlet) {
         auto result = integrateVerletNode(node, std::move(localStates), synchronizationSnapshot, liveParameterValues, simulationTime,
             nodeTimeStep, providerEvaluator, activeSchedules, hasSchedules);
-        const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
-        return {std::move(result), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+        return {std::move(result), elapsedSince()};
     }
-    auto parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, simulationTime);
+    // What the substeps work in, kept per thread from one call to the next (a node is often integrated one substep a call), so a
+    // substep allocates nothing once each has grown: the same values in the same order as when each made its own.
+    struct SubstepScratch {
+        NodeParameterValues parameterValues;
+        NodeParameterValues stateParameters;
+        std::vector<EvaluatedContribution> evaluated;
+        std::vector<std::vector<double>> symbolsByTask;
+        std::vector<std::pair<std::size_t, double>> derivatives;
+        std::vector<std::pair<std::size_t, double>> algebraicNodeProviderWrites;
+    };
+    thread_local SubstepScratch scratch;
+    auto& parameterValues = scratch.parameterValues;
+    resolveParameterValuesInto(node.contributions, liveParameterValues, activeSchedules, simulationTime, parameterValues);
     // Semi-implicit: the node's contributions, one group per state it updates, in the node's order.
     std::vector<NodeExecutionPlan> semiImplicitTasks;
     if (node.semiImplicit) {
@@ -2324,12 +2374,17 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
         semiImplicitTasks.resize(node.stateIndexes.size());
         for (const auto& task : node.contributions) semiImplicitTasks.at(task.outputStateIndex).contributions.push_back(task);
     }
+    auto& evaluated = scratch.evaluated;
+    auto& symbolsByTask = scratch.symbolsByTask;
+    auto& derivatives = scratch.derivatives;
+    auto& algebraicNodeProviderWrites = scratch.algebraicNodeProviderWrites;
+    auto& stateParameters = scratch.stateParameters;
     for (std::size_t substep = 0; substep < node.substeps; ++substep) {
         const double substepTime = simulationTime + static_cast<double>(substep) * nodeTimeStep;
         if (hasSchedules && substep > 0) {
-            parameterValues = resolveParameterValues(node.contributions, liveParameterValues, activeSchedules, substepTime);
+            resolveParameterValuesInto(node.contributions, liveParameterValues, activeSchedules, substepTime, parameterValues);
         }
-        std::vector<std::pair<std::size_t, double>> algebraicNodeProviderWrites;
+        algebraicNodeProviderWrites.clear();
         // The provider's parameters at this substep's start, as its other inputs are read then.
         const auto providerParameterValues = node.nodeProvider && !node.nodeProvider->parameters.empty()
             ? resolveNodeProviderParameterValues(*node.nodeProvider, liveParameterValues, activeSchedules, substepTime) : std::vector<double>{};
@@ -2338,31 +2393,33 @@ NodeIntegrationResult integrateNode(const NodeExecutionPlan& node,
             for (std::size_t stateIndex = 0; stateIndex < node.stateIndexes.size(); ++stateIndex) {
                 const auto& stateTasks = semiImplicitTasks[stateIndex];
                 if (stateTasks.contributions.empty()) continue;
-                const auto stateParameters = resolveParameterValues(stateTasks.contributions, liveParameterValues, activeSchedules, substepTime);
-                const auto stateEvaluated = evaluateContributionTasks(stateTasks, localStates, synchronizationSnapshot, stateParameters, substepTime, nodeTimeStep, providerEvaluator);
-                for (const auto& derivative : reduceContributions(stateEvaluated)) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
+                resolveParameterValuesInto(stateTasks.contributions, liveParameterValues, activeSchedules, substepTime, stateParameters);
+                evaluateContributionTasksInto(stateTasks, localStates, synchronizationSnapshot, stateParameters, substepTime, nodeTimeStep, providerEvaluator,
+                    nullptr, nullptr, nullptr, evaluated, symbolsByTask);
+                reduceContributionsInto(evaluated, derivatives);
+                for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
             }
             advanceNodePrograms(node, localStates, synchronizationSnapshot, liveParameterValues, activeSchedules,
                 simulationTime + static_cast<double>(substep + 1) * nodeTimeStep, nodeTimeStep, providerEvaluator);
             continue;
         }
-        const auto evaluated = evaluateContributionTasks(
+        evaluateContributionTasksInto(
             node, localStates, synchronizationSnapshot, parameterValues,
-            substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites, &providerParameterValues);
+            substepTime, nodeTimeStep, providerEvaluator, &algebraicNodeProviderWrites, &providerParameterValues, nullptr,
+            evaluated, symbolsByTask);
         // Same plain-replacement treatment as applyAlgebraicTasks, applied here rather than inside
         // evaluateContributionTasks itself -- see that function's declaration comment. Order versus
         // the Euler integration below never matters: a setsValue nodeProvider output's state index
         // can never also appear in `derivatives` (validated as its state's sole contributor), so the
         // two loops always touch disjoint state indices.
         for (const auto& [stateIndex, algebraicValue] : algebraicNodeProviderWrites) localStates.at(stateIndex) = algebraicValue;
-        const auto derivatives = reduceContributions(evaluated);
+        reduceContributionsInto(evaluated, derivatives);
         for (const auto& derivative : derivatives) localStates.at(derivative.first) += nodeTimeStep * derivative.second;
         // advance() for the node's version 2 programs with memory, once per substep, with its end and size.
         advanceNodePrograms(node, localStates, synchronizationSnapshot, liveParameterValues, activeSchedules,
             simulationTime + static_cast<double>(substep + 1) * nodeTimeStep, nodeTimeStep, providerEvaluator);
     }
-    const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count();
-    return {std::move(localStates), static_cast<std::uint64_t>(std::max<std::int64_t>(0, elapsed))};
+    return {std::move(localStates), elapsedSince()};
 }
 
 namespace {

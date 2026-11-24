@@ -363,9 +363,17 @@ int main(int argc, char** argv) {
         }
         const auto passwordValue = std::getenv("KONJUGATE_PASSWORD");
         const auto project = konjugate::readProject(argv[2], passwordValue ? passwordValue : "");
+        // Boost's own JSON parser run straight over the text, rather than through read_json's istream, which reads it a character at a
+        // time through a stream buffer: the same parse, tree and error positions, in a fraction of the time for a large model. It is
+        // the parser read_json itself calls (boost/property_tree/json_parser/detail/read.hpp), with Boost pinned by vcpkg's baseline.
         boost::property_tree::ptree document;
-        std::istringstream input(project.json);
-        boost::property_tree::read_json(input, document);
+        {
+            using Callbacks = boost::property_tree::json_parser::detail::standard_callbacks<boost::property_tree::ptree>;
+            Callbacks callbacks;
+            boost::property_tree::json_parser::detail::encoding<char> encoding;
+            boost::property_tree::json_parser::detail::read_json_internal(project.json.cbegin(), project.json.cend(), encoding, callbacks, std::string{});
+            document.swap(callbacks.output());
+        }
         const auto result = konjugate::validateModel(document);
         if (command == "validate") {
             konjugate::writeValidationReport(report, result);

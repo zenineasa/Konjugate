@@ -537,33 +537,15 @@ NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeMode
 }
 
 void shareStageTime(std::vector<NodeStageResult>& results, const std::vector<bool>& evaluated, std::uint64_t stageNanoseconds) {
-    std::size_t nodes = 0;
-    std::uint64_t contributions = 0;
+    thread_local std::vector<std::uint64_t> weights, shares;
+    weights.resize(results.size());
+    shares.resize(results.size());
     for (std::size_t index = 0; index < results.size(); ++index) {
-        if (!evaluated[index]) continue;
-        ++nodes;
-        contributions += results[index].evaluatedContributions;
+        weights[index] = results[index].evaluatedContributions;
+        shares[index] = results[index].computeNanoseconds;
     }
-    if (nodes == 0) return;
-    // Each node's share, by contributions (or equally): the stage's time up to the end of this node, rounded down, less that up to the
-    // node before, so the rounding spreads over the nodes rather than piling onto one, and the shares add up to the stage's time.
-    const double total = contributions ? static_cast<double>(contributions) : static_cast<double>(nodes);
-    double cumulativeWeight = 0;
-    std::uint64_t assigned = 0;
-    for (std::size_t index = 0; index < results.size(); ++index) {
-        if (!evaluated[index]) continue;
-        cumulativeWeight += contributions ? static_cast<double>(results[index].evaluatedContributions) : 1.0;
-        const auto reached = std::min(stageNanoseconds,
-            static_cast<std::uint64_t>(static_cast<double>(stageNanoseconds) * (cumulativeWeight / total)));
-        results[index].computeNanoseconds = reached > assigned ? reached - assigned : 0;
-        assigned += results[index].computeNanoseconds;
-    }
-    // Whatever the last rounding left (at most a nanosecond or so) goes to the last node.
-    for (std::size_t index = results.size(); index-- > 0;) {
-        if (!evaluated[index]) continue;
-        results[index].computeNanoseconds += stageNanoseconds - assigned;
-        break;
-    }
+    shareMeasuredTime(weights, evaluated, stageNanoseconds, shares);
+    for (std::size_t index = 0; index < results.size(); ++index) results[index].computeNanoseconds = shares[index];
 }
 
 namespace {

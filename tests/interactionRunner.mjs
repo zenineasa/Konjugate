@@ -70,6 +70,8 @@ async function waitFor(window, expression, message, timeout = 5000) {
         if (await evaluate(window, expression)) return;
         await new Promise((resolve) => setTimeout(resolve, 50));
     }
+    // Looked at once more: a condition met just after the limit was slow (a slow runner, a limit too tight for the work), not stuck.
+    const lateBy = await evaluate(window, expression).then((met) => (met ? ` (It was met just after the ${timeout / 1000} s limit: slow, not stuck.)` : ''), () => '');
     const visibleError = await evaluate(window, `document.querySelector('#assistantError:not([hidden])')?.textContent ?? ''`);
     // The status bar's own line (Validating…, Model valid), and the assistant's progress only while its proposal is showing: hidden,
     // it still holds its first words, which say nothing about the window.
@@ -77,7 +79,7 @@ async function waitFor(window, expression, message, timeout = 5000) {
     // Where a run had got to, when one is showing: one far short of its end was slowed (a runner throttling the app's
     // timers), one stuck at a value had stopped.
     const run = await evaluate(window, `(() => { const mode = document.querySelector('.resultMode small')?.textContent; const progress = document.querySelector('#simulationProgress'); return mode && !document.querySelector('#resultTransport')?.hidden ? \`\${mode}\${progress && getComputedStyle(progress).display !== 'none' ? ', at ' + progress.value : ''}; window \${document.hidden ? 'hidden' : 'visible'}, \${document.hasFocus() ? 'focused' : 'not focused'}\` : ''; })()`).catch(() => '');
-    throw new Error(`${message}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}${run ? ` Run: ${run}` : ''}`);
+    throw new Error(`${message}${lateBy}${visibleError ? ` ${visibleError}` : ''}${assistantStatus ? ` Status: ${assistantStatus}` : ''}${run ? ` Run: ${run}` : ''}`);
 }
 
 // Run opens the Run dialog, and is disabled while the model is being (re)validated, as it is after any edit.
@@ -3531,6 +3533,9 @@ export async function runInteractionTests(driver) {
             };
             const readsWith = async (path, password) => decodeProjectFile(await readFile(path), { password }).then(() => true, () => false);
 
+            // Each save derives its key with scrypt (128 MiB of work), seconds on a busy two-core runner: given time for it (the
+            // file to appear, the save to be reported), where the defaults allow 2.5 s and 5 s.
+            const saveLimitMs = 30_000;
             // Saved encrypted, as a new file: the password twice, then where to save it (and, for a project with owner details, what
             // this copy says about them).
             const encrypted = await driver.captureExport(async () => {
@@ -3544,8 +3549,8 @@ export async function runInteractionTests(driver) {
                     if (/^Encrypted project saved/.test(await evaluate(opened, `document.querySelector('#statusText').textContent`))) break;
                     await new Promise((resolve) => setTimeout(resolve, 100));
                 }
-            }, { fileName: 'locked.kjt' });
-            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent)`, 'The encrypted save was not reported.');
+            }, { fileName: 'locked.kjt', maxAttempts: saveLimitMs / 25 });
+            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent)`, 'The encrypted save was not reported.', saveLimitMs);
             assert.equal(await readsWith(encrypted.path, null), false, 'The saved file must not open without its password.');
             assert.equal(await readsWith(encrypted.path, 'firstPassword1'), true);
 
@@ -3560,7 +3565,7 @@ export async function runInteractionTests(driver) {
             await waitFor(opened, `document.querySelector('#passwordDialog').open && document.querySelector('#passwordError').textContent !== ''`, 'A wrong current password was not refused.');
             await answerPassword('firstPassword1');
             await answerPassword('secondPassword2', { confirm: true });
-            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent) && !document.querySelector('#passwordDialog').open`, 'The new password was not saved.');
+            await waitFor(opened, `/^Encrypted project saved/.test(document.querySelector('#statusText').textContent) && !document.querySelector('#passwordDialog').open`, 'The new password was not saved.', saveLimitMs);
             assert.equal(await readsWith(encrypted.path, 'firstPassword1'), false, 'The old password must no longer open it.');
             assert.equal(await readsWith(encrypted.path, 'secondPassword2'), true);
 
@@ -3577,7 +3582,7 @@ export async function runInteractionTests(driver) {
             await evaluate(opened, `document.querySelector('#saveEncryptedButton').click()`);
             await evaluate(opened, `document.querySelector('#removeEncryptionButton').click()`);
             await answerPassword('secondPassword2');
-            await waitFor(opened, `/^Project saved/.test(document.querySelector('#statusText').textContent)`, 'Removing the encryption did not save the project.');
+            await waitFor(opened, `/^Project saved/.test(document.querySelector('#statusText').textContent)`, 'Removing the encryption did not save the project.', saveLimitMs);
             assert.equal(await readsWith(encrypted.path, null), true, 'With its encryption removed, the file opens without a password.');
         } finally {
             if (!await opened.isDestroyed()) await closeWhenValidated(opened).catch(() => opened.close());
@@ -5900,15 +5905,17 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `(window.__debugTwinWindow.summary()?.moves ?? 0) >= 3`, 'The live twin did not get going.', 30000);
         await evaluate(twin, `document.querySelector('#trySomething').click()`);
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden`, 'The sandbox did not open.', 15000);
-        await setField(twin, '#sandboxInputs input[data-signal="heaterPower"]', '0');
+        // 500 W: the recording's heater is 1000 W or 0 W, so this is a change whenever the sandbox starts (0 W, tried after the
+        // recording had turned the heater off at 2 h, was what it already had, and ran ahead "with nothing changed").
+        await setField(twin, '#sandboxInputs input[data-signal="heaterPower"]', '500');
         await setField(twin, '#sandboxMinutes', '90');
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/^Ran ahead to .* with Heater power 0 W\./.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
+        await waitFor(twin, `/^Ran ahead to .* with Heater power 500 W\./.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 15000);
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn beside the forecast.');
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(opened, `window.__debugParameterTuning.scenarios().length === 1`, 'Going back to live did not keep the scenario.', 15000);
         const scenarios = await evaluate(opened, `window.__debugParameterTuning.scenarios()`);
-        assert.deepEqual(scenarios[0].tried.map(({ signal, value }) => [signal, value]), [['heaterPower', 0]]);
+        assert.deepEqual(scenarios[0].tried.map(({ signal, value }) => [signal, value]), [['heaterPower', 500]]);
         assert.equal(scenarios[0].ranFor, 5400);
         assert.match((await twinEvents(twin))[0], /kept as a draft scenario/);
         await playedThrough('The live twin did not carry on to the end after the sandbox.', 60000);
@@ -6623,9 +6630,16 @@ export async function runInteractionTests(driver) {
         await waitFor(twin, `/^Live · \\d+ move/.test(document.querySelector('#healthTwin').textContent)`, 'The twin did not move.', 60000);
         await waitFor(twin, `Boolean(document.querySelector('#tiles .tile .plot .main-svg'))`, 'The tile was not drawn.', 15000);
         // The plant's °C readings reach the twin in kelvin, as the model keeps them, and are shown in °C again: the same reading.
-        const celsius = Number((await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`)).replace(/ °C$/, ''));
-        await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
-        const kelvin = Number((await evaluate(twin, `document.querySelector('#tiles .tile .value').textContent`)).replace(/ K$/, ''));
+        // Both read in one go, the unit switched between: the twin moves on every half second here (ten minutes of the plant at
+        // 1200×), and a move between two separate reads once gave 34.66 °C (at 1 h) beside 309.66 K (36.51 °C, at 1 h 10 min).
+        const both = await evaluate(twin, `(() => {
+            const value = () => document.querySelector('#tiles .tile .value').textContent;
+            const before = value();
+            document.querySelector('#temperatureUnit').click();
+            return [before, value()];
+        })()`);
+        const celsius = Number(both[0].replace(/ °C$/, ''));
+        const kelvin = Number(both[1].replace(/ K$/, ''));
         assert.ok(Number.isFinite(celsius) && Math.abs(kelvin - celsius - 273.15) < 0.05, `The same reading in both: ${celsius} °C and ${kelvin} K.`);
         await evaluate(twin, `document.querySelector('#temperatureUnit').click()`);
         const kept = await evaluate(opened, `window.__debugTwin.setup()`);
@@ -6683,7 +6697,7 @@ export async function runInteractionTests(driver) {
 
         // A change made in the project window: offered, and applied from the latest move.
         await evaluate(opened, `(() => { const model = window.__debugProject.serialize(); model.edges.flatMap((edge) => edge.parameters ?? []).find((parameter) => parameter.id === 10).value = 30; return window.__debugProject.load(model, 'rig.kjt'); })()`);
-        await waitFor(twin, `!document.querySelector('#modelBanner').hidden`, 'The model\'s change was not offered.');
+        await waitFor(twin, `!document.querySelector('#modelBanner').hidden`, 'The model\'s change was not offered.', 15000);
         assert.match(await evaluate(twin, `document.querySelector('#modelBannerText').textContent`), /Heat loss coefficient .* → 30 W\/K/);
         await evaluate(twin, `document.querySelector('#modelApply').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The model's change was applied to the twin/.test(item.textContent))`, 'The model\'s change was not applied.');
@@ -6693,12 +6707,13 @@ export async function runInteractionTests(driver) {
         await evaluate(twin, `(() => { const field = document.querySelector('#alertAmount'); field.value = '0.05'; field.dispatchEvent(new Event('change')); })()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /The warning set to 0.05 °C a move/.test(item.textContent))`, 'The warning was not set.');
 
-        // Trying something: the heater off for an hour, drawn dotted, and kept as a draft scenario.
+        // Trying something: the heater at half power for an hour, drawn dotted, and kept as a draft scenario. Half: the recording turns
+        // the heater off at 2 h, and a slow runner can open the sandbox after that, when "off" is what it already has (nothing changed).
         await evaluate(twin, `document.querySelector('#trySomething').click()`);
         await waitFor(twin, `!document.querySelector('#sandboxBar').hidden && document.querySelector('#sandboxInputs input') !== null`, 'The sandbox did not open.');
-        await evaluate(twin, `(() => { const field = document.querySelector('#sandboxInputs input'); field.value = '0'; })()`);
+        await evaluate(twin, `(() => { const field = document.querySelector('#sandboxInputs input'); field.value = '500'; })()`);
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/Ran ahead to .* with Heater power 0 W/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000).catch(async (error) => { throw new Error(`${error.message} It said: ${await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`)}`); });
+        await waitFor(twin, `/Ran ahead to .* with Heater power 500 W/.test(document.querySelector('#sandboxStatus').textContent)`, 'The sandbox did not run ahead.', 30000).catch(async (error) => { throw new Error(`${error.message} It said: ${await evaluate(twin, `document.querySelector('#sandboxStatus').textContent`)}`); });
         assert.equal(await evaluate(twin, `document.querySelector('#tiles .tile .plot').data.some((trace) => trace.name === 'Tried')`), true, 'What was tried is drawn on the tile.');
         await evaluate(twin, `document.querySelector('#sandboxBack').click()`);
         await waitFor(twin, `[...document.querySelectorAll('#eventsList li')].some((item) => /kept as a draft scenario/.test(item.textContent)) && document.querySelector('#scenariosToggle').textContent === 'Scenarios (1)'`, 'What was tried was not kept.');
@@ -6739,14 +6754,17 @@ export async function runInteractionTests(driver) {
 
         // How much of the past the plots show: by default four times the twin's window, not the whole log; a fixed span; everything.
         // The time is read on the column's own axis, at its foot, which every strip shares.
-        const axis = () => evaluate(twin, `(() => { const plot = document.querySelector('#timeAxis'); return { range: plot._fullLayout.xaxis.range, title: plot._fullLayout.xaxis.title.text, strip: document.querySelector('#tiles .tile .plot')._fullLayout.xaxis.range }; })()`);
-        const last = (await evaluate(twin, `window.__debugTwinWindow.summary()`)).last;
+        // Read with the move it was drawn for, in one go: the twin keeps moving, and each move is drawn as
+        // it arrives, so a move read apart from the axis can be a later one than the axis shows.
+        const axis = () => evaluate(twin, `(() => { const plot = document.querySelector('#timeAxis'); const { now, anchor } = window.__debugTwinWindow.summary().last; return { range: plot._fullLayout.xaxis.range, title: plot._fullLayout.xaxis.title.text, strip: document.querySelector('#tiles .tile .plot')._fullLayout.xaxis.range, last: { now, anchor } }; })()`);
         const unitOf = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
         let shown = await axis();
+        let { last } = shown;
         assert.deepEqual(shown.strip, shown.range, 'Each strip spans the time the axis shows.');
         assert.ok(Math.abs(shown.range[0] * unitOf[shown.title] - Math.max(0, last.now - 4 * (last.now - last.anchor))) < 1, `Recent starts four windows back (got ${JSON.stringify(shown)}).`);
         await setField(twin, '#timeSpan', '3600');
         shown = await axis();
+        ({ last } = shown);
         // In hours, as the room's words give a time past an hour of data ("Following now · 2.5 h", the events), so the two agree.
         assert.equal(shown.title, 'hours', 'An hour and its forecast, hours into the data, are read in hours.');
         assert.ok(Math.abs(shown.range[0] - (last.now - 3600) / 3600) < 0.001, `The last hour is shown (got ${JSON.stringify(shown)}).`);

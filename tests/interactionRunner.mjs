@@ -9989,7 +9989,7 @@ export async function runInteractionTests(driver) {
             assert.equal(edge.implementation.output.stateId, 6, 'The state it updates carries over.');
             await evaluate(window, writeRelationshipAs('python'));
             edge = (await savedProject()).edges[0];
-            assert.match(edge.implementation.source, /RelationshipProvider/, 'A program starts from a template again.');
+            assert.match(edge.implementation.source, /^class Sense\(Relationship\):$/m, 'A program starts from a template again.');
             await evaluate(window, `document.querySelector('#edgeEditor [data-close-card]').click()`);
 
             // The Mass node's own part on its position, written with the plugin's provider from the state's "{ } plugin".

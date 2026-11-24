@@ -54,13 +54,14 @@ const dataHttps = createServer({ key: readFileSync(join(work, 'k.pem')), cert: r
     if (status === 206) headers['Content-Range'] = `bytes ${start}-${bigSize - 1}/${bigSize}`;
     response.writeHead(status, headers);
     if (request.method === 'HEAD') return response.end();
-    // The first download asked to stop part way has its connection dropped there.
+    // The first download asked to stop part way has its connection dropped there, a second after its last byte: dropped at once, the
+    // browser may not yet have handed the page any of what arrived (seen in Chrome: nothing kept, as nothing had been read).
     const cut = url.searchParams.has('cut') && dataServer.cutsLeft > 0 ? Number(url.searchParams.get('cut')) - start : null;
     if (cut !== null) dataServer.cutsLeft -= 1;
     let at = 0;
     const send = () => {
         if (response.destroyed) return;
-        if (cut !== null && at >= cut) { response.socket.destroy(); return; }
+        if (cut !== null && at >= cut) { setTimeout(() => response.socket.destroy(), 1000); return; }
         if (at >= body.length) return response.end();
         const end = Math.min(body.length, at + 256 * 1024, cut ?? Infinity);
         response.write(body.subarray(at, end));

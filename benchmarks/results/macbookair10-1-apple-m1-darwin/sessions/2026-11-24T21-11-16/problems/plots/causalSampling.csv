@@ -1,0 +1,5 @@
+"equation error, every edge x","equation error, every edge y","equation error, found edges x","equation error, found edges y","own-rate error x","own-rate error y"
+0.1,1,0.1,null,0.1,1
+0.5,0.42275778075294823,0.5,0.42275778075294823,0.5,0.22117829426324642
+1,0.5940357471683806,1,0.5940357471683806,1,0.3786956231090478
+2,0.8090145298618525,2,0.8090145298618525,2,0.5652678289383457

@@ -1,0 +1,10 @@
+problem,name,value,min,max,pass,description
+scaling/graphScalability,backendBitDifferences,0,,0,true,"Sampled values that differ, bit for bit, between the serial backend and the thread-pool or partitioned backend, over every graph, size and method"
+scaling/graphScalability,backendWorkDifferences,0,,0,true,"Runs whose reported work (global steps, node substeps, contributions evaluated) differs from the serial run of the same graph and method"
+scaling/graphScalability,workCountDifferences,0,,0,true,"Work counts that differ from what the model implies: N substeps a global step; each contribution once a substep under Euler, once a stage under Runge–Kutta 4"
+scaling/graphScalability,backendNotAsRequested,0,,0,true,Runs whose effective backend or worker count is not the one requested (so a parallel backend really ran in parallel)
+scaling/graphScalability,eulerExactStepsDifference,1.7373545001833438e-14,,1e-12,true,"explicit Euler: largest difference from the method's exact steps (closed form for the chain and grid, stepped independently for the random network), relative to the largest starting temperature"
+scaling/graphScalability,eulerExactSolutionError,0.010132421665013873,,0.0127,true,"explicit Euler: largest error against the exact solution, K (chain and grid at every size, the random network by the matrix exponential at 100 nodes), h = 0.02 s to t = 1 s"
+scaling/graphScalability,rungeKutta4ExactStepsDifference,1.7476652093832447e-14,,1e-12,true,"Runge–Kutta 4: largest difference from the method's exact steps (closed form for the chain and grid, stepped independently for the random network), relative to the largest starting temperature"
+scaling/graphScalability,rungeKutta4ExactSolutionError,5.044186751484991e-7,,6.3e-7,true,"Runge–Kutta 4: largest error against the exact solution, K (chain and grid at every size, the random network by the matrix exponential at 100 nodes), h = 0.02 s to t = 1 s"
+scaling/graphScalability,randomHeatConservation,3.7619073788120873e-17,,1e-12,true,"Random network: largest drift of the total heat Σ C_i T_i from Konjugate's own states, relative to Σ C_i |T_i(0)|, over every size and method"

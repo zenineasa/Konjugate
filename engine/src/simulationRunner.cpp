@@ -739,13 +739,15 @@ public:
     virtual Communication communication() const { return {}; }
     // One stage of a whole-model step (docs/proposals/integrators.md): every node that takes part in stages evaluated at
     // `stageStates`, each reading the same immutable vector, so the derivatives are the same on every backend. Indexed by node;
-    // a stepped node's entry is empty.
-    virtual std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+    // a stepped node's entry is not to be read. The results stay the executor's, valid until its next evaluateStage, so each node's
+    // derivatives keep their storage from one stage to the next.
+    virtual const std::vector<NodeStageResult>& evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
         ProviderRuntime* providers) = 0;
 
 protected:
     explicit StepExecutor(const ExecutionPlan& plan) : plan_(plan) {}
     const ExecutionPlan& plan_;
+    std::vector<NodeStageResult> stageResults_;
 };
 
 class SerialStepExecutor final : public StepExecutor {
@@ -761,17 +763,28 @@ public:
         return nodeResults;
     }
 
-    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+    const std::vector<NodeStageResult>& evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
         ProviderRuntime* providers) override {
-        std::vector<NodeStageResult> results(plan_.nodes.size());
+        // The nodes are evaluated one after another, so the stage is timed once and its time shared among them (shareStageTime):
+        // timing every node cost about a quarter of a large model's run.
+        const auto startedAt = std::chrono::steady_clock::now();
+        stageResults_.resize(plan_.nodes.size());
+        evaluatedNodes_.assign(plan_.nodes.size(), false);
         for (std::size_t index = 0; index < plan_.nodes.size(); ++index) {
             const auto& wholeNode = request.wholeModel->nodes[index];
             if (wholeNode.stepped) continue;
-            results[index] = evaluateNodeStage(plan_.nodes[index], wholeNode, stageStates, control.parameterValues, control.activeSchedules,
-                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(index), providers, request.latches);
+            evaluateNodeStageInto(plan_.nodes[index], wholeNode, stageStates, control.parameterValues, control.activeSchedules,
+                request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, request.held->at(index), providers, request.latches,
+                stageResults_[index], false);
+            evaluatedNodes_[index] = true;
         }
-        return results;
+        shareStageTime(stageResults_, evaluatedNodes_, static_cast<std::uint64_t>(std::max<std::int64_t>(0,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count())));
+        return stageResults_;
     }
+
+private:
+    std::vector<bool> evaluatedNodes_;
 };
 
 class ThreadPoolStepExecutor final : public StepExecutor {
@@ -796,22 +809,24 @@ public:
         return nodeResults;
     }
 
-    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+    const std::vector<NodeStageResult>& evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
         ProviderRuntime* providers) override {
-        std::vector<NodeStageResult> results(plan_.nodes.size());
-        std::vector<std::future<NodeStageResult>> futures(plan_.nodes.size());
+        stageResults_.resize(plan_.nodes.size());
+        std::vector<std::future<void>> futures(plan_.nodes.size());
         for (const auto index : plan_.taskSubmissionOrder) {
             const auto* wholeNode = &request.wholeModel->nodes[index];
             if (wholeNode->stepped) continue;
             const auto* nodePlan = &plan_.nodes[index];
             auto* held = &request.held->at(index);
-            futures[index] = taskExecutor_.submit([nodePlan, wholeNode, held, &stageStates, &control, &request, providers] {
-                return evaluateNodeStage(*nodePlan, *wholeNode, stageStates, control.parameterValues, control.activeSchedules,
-                    request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, *held, providers, request.latches);
+            // Each task writes its own node's entry only, so the tasks never share one.
+            auto* result = &stageResults_[index];
+            futures[index] = taskExecutor_.submit([nodePlan, wholeNode, held, result, &stageStates, &control, &request, providers] {
+                evaluateNodeStageInto(*nodePlan, *wholeNode, stageStates, control.parameterValues, control.activeSchedules,
+                    request.stageTime, request.stepSize, request.evaluateHeld, request.heldStepSize, *held, providers, request.latches, *result);
             });
         }
-        for (std::size_t index = 0; index < futures.size(); ++index) if (futures[index].valid()) results[index] = futures[index].get();
-        return results;
+        for (auto& future : futures) if (future.valid()) future.get();
+        return stageResults_;
     }
 
 private:
@@ -903,9 +918,11 @@ public:
 
     // As integrate(), a stage at a time: each partition is sent its nodes' and their neighbours' stage values, one boundary message
     // a stage, on a transport of its own so the stages' messages never meet the node-by-node steps'.
-    std::vector<NodeStageResult> evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
+    const std::vector<NodeStageResult>& evaluateStage(const Values& stageStates, const RunControl& control, const StageRequest& request,
         ProviderRuntime* providers) override {
-        std::vector<NodeStageResult> results(plan_.nodes.size());
+        // Fresh every stage, as before: a node no partition reports stays empty rather than keeping a previous stage's values.
+        auto& results = stageResults_;
+        results.assign(plan_.nodes.size(), NodeStageResult{});
         const auto sequence = stageSequence_++;
         for (std::size_t partition = 0; partition < partitionRuntimes_.size(); ++partition) {
             const auto preparationStartedAt = std::chrono::steady_clock::now();
@@ -1333,6 +1350,8 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
                 }, std::move(comparisons));
             }
         }
+        // The stage terms are final now that they read their conditions latched: each node's compiled for the stage loop.
+        compileStageKernels(executionPlan, wholeModel);
         // The stiff methods' Jacobian: each column whose every term is an equation (or a program supplying its derivatives) from the
         // equations' derivatives, compiled here once the stage terms read their conditions latched; the rest by finite differences.
         if (stiffSystem && integration.jacobian != JacobianMethod::finiteDifference) {
@@ -2217,7 +2236,7 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     const auto evaluateAt = [&](bool atStart, double time, const Values& stageStates, Values& derivatives) {
         request.stageTime = time;
         request.evaluateHeld = atStart;
-        const auto results = stepExecutor->evaluateStage(stageStates, runControl, request, providerRuntime.get());
+        const auto& results = stepExecutor->evaluateStage(stageStates, runControl, request, providerRuntime.get());
         for (std::size_t index = 0; index < executionPlan.nodes.size(); ++index) {
             const auto& wholeNode = wholeModel.nodes[index];
             if (wholeNode.stepped) continue;

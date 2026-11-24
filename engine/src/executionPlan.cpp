@@ -730,6 +730,99 @@ std::size_t CompiledExpression::operationCount() const noexcept {
 }
 
 namespace {
+// A term's value as recorded: negated for a two-way relationship's far end, refused when not finite (defined below).
+double finalizeContribution(const ContributionTask& task, double contribution);
+}
+
+std::optional<NodeStageKernel> compileNodeStageKernel(const NodeExecutionPlan& stage, std::size_t stateCount) {
+    if (stage.nodeProvider) return std::nullopt;
+    constexpr auto most = std::numeric_limits<std::uint32_t>::max();
+    NodeStageKernel kernel;
+    kernel.firstInput.reserve(stage.contributions.size());
+    for (const auto& task : stage.contributions) {
+        if (task.implementation != ContributionImplementation::equation || task.program.instructions.empty()) return std::nullopt;
+        const auto symbols = task.bindings.size() + task.latchSlots.size();
+        for (const auto& instruction : task.program.instructions) {
+            if (instruction.code == InstructionCode::symbol && instruction.index >= symbols) return std::nullopt;
+        }
+        if (kernel.inputs.size() + symbols >= most || stage.contributions.size() >= most) return std::nullopt;
+        kernel.firstInput.push_back(static_cast<std::uint32_t>(kernel.inputs.size()));
+        // Every binding is checked as the general path checks it when it gathers the symbols, used or not.
+        for (const auto& binding : task.bindings) {
+            NodeStageKernel::Input input;
+            if (binding.source == BindingSource::parameter) {
+                if (binding.parameterIndex >= task.parameters.size()) return std::nullopt;
+                input = {NodeStageKernel::Source::parameter, static_cast<std::uint32_t>(binding.parameterIndex)};
+                kernel.hasParameters = true;
+            } else if (binding.source == BindingSource::simulationTime) {
+                input = {NodeStageKernel::Source::time, 0};
+            } else {
+                // A node's own state i is the plan's state stateIndexes[i], which is where the general path copies it from.
+                const auto state = binding.source == BindingSource::localState
+                    ? (binding.valueIndex < stage.stateIndexes.size() ? stage.stateIndexes[binding.valueIndex] : stateCount) : binding.valueIndex;
+                if (state >= stateCount || state >= most) return std::nullopt;
+                input = {NodeStageKernel::Source::state, static_cast<std::uint32_t>(state)};
+            }
+            kernel.inputs.push_back(input);
+        }
+        for (const auto slot : task.latchSlots) {
+            if (slot >= most) return std::nullopt;
+            kernel.inputs.push_back({NodeStageKernel::Source::latch, static_cast<std::uint32_t>(slot)});
+            kernel.readsLatches = true;
+        }
+    }
+    // reduceContributions' order: by sequence, stably; each state's first term sets its sum.
+    std::vector<std::uint32_t> order(stage.contributions.size());
+    for (std::size_t term = 0; term < order.size(); ++term) order[term] = static_cast<std::uint32_t>(term);
+    std::stable_sort(order.begin(), order.end(), [&](std::uint32_t left, std::uint32_t right) {
+        return stage.contributions[left].sequence < stage.contributions[right].sequence;
+    });
+    for (const auto term : order) {
+        const auto state = stage.contributions[term].outputStateIndex;
+        const auto found = std::find(kernel.outputStates.begin(), kernel.outputStates.end(), state);
+        const bool first = found == kernel.outputStates.end();
+        if (first) kernel.outputStates.push_back(state);
+        const auto slot = static_cast<std::uint32_t>(first ? kernel.outputStates.size() - 1 : std::distance(kernel.outputStates.begin(), found));
+        kernel.sums.push_back({term, slot, first});
+    }
+    return kernel;
+}
+
+std::size_t evaluateNodeStageKernel(const NodeStageKernel& kernel, const NodeExecutionPlan& stage, const StateValues& stageStates,
+                                    const NodeParameterValues& parameters, double stageTime, const std::vector<double>* latches,
+                                    std::vector<std::pair<std::size_t, double>>& derivatives) {
+    if (kernel.readsLatches && !latches) throw std::runtime_error("A latched condition was evaluated without its latches.");
+    const auto termCount = stage.contributions.size();
+    // Each term's value in task order (so a failing term is the one the general path would meet first), then summed in the
+    // reduction's order.
+    thread_local std::vector<double> values;
+    values.resize(termCount);
+    const auto* states = stageStates.data();
+    for (std::size_t term = 0; term < termCount; ++term) {
+        const auto& task = stage.contributions[term];
+        const auto* inputs = kernel.inputs.data() + kernel.firstInput[term];
+        const auto read = [&](std::size_t index) -> double {
+            const auto& input = inputs[index];
+            switch (input.source) {
+                case NodeStageKernel::Source::state: return states[input.index];
+                case NodeStageKernel::Source::parameter: return parameters[term][input.index];
+                case NodeStageKernel::Source::time: return stageTime;
+                case NodeStageKernel::Source::latch: return latches->at(input.index);
+            }
+            return 0;
+        };
+        values[term] = finalizeContribution(task, runProgram(task.program, read));
+    }
+    derivatives.resize(kernel.outputStates.size());
+    for (const auto& sum : kernel.sums) {
+        auto& derivative = derivatives[sum.slot];
+        if (sum.first) derivative = {kernel.outputStates[sum.slot], values[sum.term]};
+        else derivative.second += values[sum.term];
+    }
+    return termCount;
+}
+
+namespace {
 
 void compileAlgebraicRelationship(ExecutionPlan& plan, const boost::property_tree::ptree& edge, const boost::property_tree::ptree& outputs,
                                   const SharedParameters& sharedParameters,
@@ -1657,6 +1750,26 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     const std::vector<double>* nodeProviderParameterValues,
     const std::vector<double>* latches) {
     std::vector<EvaluatedContribution> evaluated;
+    std::vector<std::vector<double>> symbolsByTask;
+    evaluateContributionTasksInto(node, localStates, synchronizationSnapshot, parameterValues, simulationTime, stepSize, providerEvaluator,
+        algebraicNodeProviderWrites, nodeProviderParameterValues, latches, evaluated, symbolsByTask);
+    return evaluated;
+}
+
+void evaluateContributionTasksInto(
+    const NodeExecutionPlan& node,
+    const StateValues& localStates,
+    const StateValues& synchronizationSnapshot,
+    const NodeParameterValues& parameterValues,
+    double simulationTime,
+    double stepSize,
+    ProviderEvaluator* providerEvaluator,
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites,
+    const std::vector<double>* nodeProviderParameterValues,
+    const std::vector<double>* latches,
+    std::vector<EvaluatedContribution>& evaluated,
+    std::vector<std::vector<double>>& symbolsByTask) {
+    evaluated.clear();
     evaluated.reserve(node.contributions.size());
 
     // Provider tasks are collected by process key rather than evaluated immediately, so every
@@ -1667,7 +1780,8 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     // own precomputed cache, so grouping this way never hashes or copies that (potentially
     // long, since it is derived from the provider's whole inline source) string at all.
     std::vector<std::pair<const std::string*, std::vector<std::size_t>>> providerGroups;
-    std::vector<std::vector<double>> symbolsByTask(node.contributions.size());
+    // Resized, never shrunk: each task's buffer keeps its capacity from one call to the next.
+    if (symbolsByTask.size() < node.contributions.size()) symbolsByTask.resize(node.contributions.size());
 
     for (std::size_t taskIndex = 0; taskIndex < node.contributions.size(); ++taskIndex) {
         const auto& task = node.contributions[taskIndex];
@@ -1761,8 +1875,6 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
             }
         }
     }
-
-    return evaluated;
 }
 
 namespace {
@@ -1877,15 +1989,22 @@ double resolveParameterValue(const CompiledParameter& parameter, const EntityVal
 NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues,
                                             const std::vector<ParameterSchedule>& activeSchedules, double simulationTime) {
     NodeParameterValues resolved;
-    resolved.reserve(tasks.size());
-    for (const auto& task : tasks) {
-        auto& values = resolved.emplace_back();
-        values.reserve(task.parameters.size());
-        for (const auto& parameter : task.parameters) {
-            values.push_back(resolveParameterValue(parameter, liveParameterValues, activeSchedules, simulationTime));
+    resolveParameterValuesInto(tasks, liveParameterValues, activeSchedules, simulationTime, resolved);
+    return resolved;
+}
+
+void resolveParameterValuesInto(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues,
+                                const std::vector<ParameterSchedule>& activeSchedules, double simulationTime, NodeParameterValues& resolved) {
+    // Resized, never shrunk below what it has held: each task's vector keeps its capacity from one call to the next.
+    if (resolved.size() < tasks.size()) resolved.resize(tasks.size());
+    for (std::size_t taskIndex = 0; taskIndex < tasks.size(); ++taskIndex) {
+        const auto& parameters = tasks[taskIndex].parameters;
+        auto& values = resolved[taskIndex];
+        values.resize(parameters.size());
+        for (std::size_t index = 0; index < parameters.size(); ++index) {
+            values[index] = resolveParameterValue(parameters[index], liveParameterValues, activeSchedules, simulationTime);
         }
     }
-    return resolved;
 }
 
 std::vector<double> resolveNodeProviderParameterValues(const NodeProviderTask& task, const EntityValues& liveParameterValues,
@@ -2019,10 +2138,18 @@ void applyProgramUpdates(const ExecutionPlan& plan, const StateValues& readState
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions) {
-    std::stable_sort(contributions.begin(), contributions.end(), [](const auto& left, const auto& right) {
-        return left.sequence < right.sequence;
-    });
     std::vector<std::pair<std::size_t, double>> derivatives;
+    reduceContributionsInto(contributions, derivatives);
+    return derivatives;
+}
+
+void reduceContributionsInto(std::vector<EvaluatedContribution>& contributions, std::vector<std::pair<std::size_t, double>>& derivatives) {
+    const auto bySequence = [](const auto& left, const auto& right) { return left.sequence < right.sequence; };
+    // Usually already in order: then the sort, and the buffer a stable sort may allocate, are skipped. The order is the same either way.
+    if (!std::is_sorted(contributions.begin(), contributions.end(), bySequence)) {
+        std::stable_sort(contributions.begin(), contributions.end(), bySequence);
+    }
+    derivatives.clear();
     for (const auto& contribution : contributions) {
         const auto found = std::find_if(derivatives.begin(), derivatives.end(), [&](const auto& derivative) {
             return derivative.first == contribution.outputStateIndex;
@@ -2033,7 +2160,6 @@ std::vector<std::pair<std::size_t, double>> reduceContributions(
             found->second += contribution.value;
         }
     }
-    return derivatives;
 }
 
 namespace {

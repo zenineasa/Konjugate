@@ -15,6 +15,7 @@
 #include <boost/property_tree/ptree.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -108,6 +109,9 @@ struct WholeModelNode {
     NodeExecutionPlan heldNode;
     // The plan's indexes of the node's states the method integrates (those a stage term adds a rate to).
     std::vector<std::size_t> integratedStates;
+    // The stage terms compiled for the stage loop (NodeStageKernel), when they can be: set by compileStageKernels once the terms are
+    // final, and used while the node holds no program's value.
+    std::optional<NodeStageKernel> kernel;
 };
 
 struct HeldTerm {
@@ -130,6 +134,9 @@ struct WholeModelPlan {
 
 // `providers` says which programs are known to be pure (ProviderEvaluator::declaredPure); with none, no program is.
 WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEvaluator* providers);
+// Each node's stage kernel (WholeModelNode::kernel), for a node with no held program whose stage terms allow one. Called once the
+// stage terms are final: after compileEventPlan, which rewrites their conditions to read latches.
+void compileStageKernels(const ExecutionPlan& plan, WholeModelPlan& whole);
 
 // Under Rodas4, per state of the plan, the states its derivative reads at a stage (docs/proposals/integrators.md, Jacobians for
 // Rodas4): from the model's graph, every state an equation into it uses, and every state a pure program into it binds (a pure node
@@ -160,5 +167,18 @@ NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeMode
                                   double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
                                   std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
                                   const std::vector<double>* latches = nullptr);
+// evaluateNodeStage into `result`, reusing its derivatives' storage: the same values, for the stage loop that calls it for every node
+// at every stage. Without `timeNode` the node is not timed (computeNanoseconds 0): reading the clock twice for every node at every
+// stage cost about a quarter of a large model's run, so a caller evaluating the nodes one after another times the stage once instead
+// (shareStageTime).
+void evaluateNodeStageInto(const NodeExecutionPlan& node, const WholeModelNode& stageNode, const StateValues& stageStates,
+                           const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules,
+                           double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
+                           std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
+                           const std::vector<double>* latches, NodeStageResult& result, bool timeNode = true);
+// A stage's measured time, `stageNanoseconds`, shared among the nodes evaluated in it (`evaluated[index]`) in proportion to the
+// contributions each evaluated, equally when none did, into each one's computeNanoseconds. The shares sum to the stage's time
+// exactly, so the run's total node computation stays a measurement; each node's own figure is an estimate.
+void shareStageTime(std::vector<NodeStageResult>& results, const std::vector<bool>& evaluated, std::uint64_t stageNanoseconds);
 
 }

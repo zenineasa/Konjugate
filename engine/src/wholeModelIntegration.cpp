@@ -428,6 +428,14 @@ WholeModelPlan buildWholeModelPlan(const ExecutionPlan& plan, const ProviderEval
     return whole;
 }
 
+void compileStageKernels(const ExecutionPlan& plan, WholeModelPlan& whole) {
+    for (auto& node : whole.nodes) {
+        node.kernel.reset();
+        if (node.stepped || !node.heldNode.contributions.empty()) continue;
+        node.kernel = compileNodeStageKernel(node.stageNode, plan.initialStates.size());
+    }
+}
+
 namespace {
 
 // The bindings an equation's expression uses, by position: the node editor binds every state of a node to each of its terms, but only
@@ -522,32 +530,104 @@ NodeStageResult evaluateNodeStage(const NodeExecutionPlan& node, const WholeMode
                                   double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
                                   std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
                                   const std::vector<double>* latches) {
-    const auto startedAt = std::chrono::steady_clock::now();
     NodeStageResult result;
-    StateValues localStates(node.stateIndexes.size());
+    evaluateNodeStageInto(node, stageNode, stageStates, liveParameterValues, activeSchedules, stageTime, stepSize, evaluateHeld, heldStepSize,
+        held, providerEvaluator, latches, result);
+    return result;
+}
+
+void shareStageTime(std::vector<NodeStageResult>& results, const std::vector<bool>& evaluated, std::uint64_t stageNanoseconds) {
+    std::size_t nodes = 0;
+    std::uint64_t contributions = 0;
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        if (!evaluated[index]) continue;
+        ++nodes;
+        contributions += results[index].evaluatedContributions;
+    }
+    if (nodes == 0) return;
+    // Each node's share, by contributions (or equally): the stage's time up to the end of this node, rounded down, less that up to the
+    // node before, so the rounding spreads over the nodes rather than piling onto one, and the shares add up to the stage's time.
+    const double total = contributions ? static_cast<double>(contributions) : static_cast<double>(nodes);
+    double cumulativeWeight = 0;
+    std::uint64_t assigned = 0;
+    for (std::size_t index = 0; index < results.size(); ++index) {
+        if (!evaluated[index]) continue;
+        cumulativeWeight += contributions ? static_cast<double>(results[index].evaluatedContributions) : 1.0;
+        const auto reached = std::min(stageNanoseconds,
+            static_cast<std::uint64_t>(static_cast<double>(stageNanoseconds) * (cumulativeWeight / total)));
+        results[index].computeNanoseconds = reached > assigned ? reached - assigned : 0;
+        assigned += results[index].computeNanoseconds;
+    }
+    // Whatever the last rounding left (at most a nanosecond or so) goes to the last node.
+    for (std::size_t index = results.size(); index-- > 0;) {
+        if (!evaluated[index]) continue;
+        results[index].computeNanoseconds += stageNanoseconds - assigned;
+        break;
+    }
+}
+
+namespace {
+// What one stage of one node needs in passing, kept per thread so a stage allocates nothing once each buffer has grown to the
+// largest node's size. Every buffer is overwritten before it is read.
+struct StageScratch {
+    StateValues localStates;
+    NodeParameterValues parameters;
+    std::vector<double> providerParameters;
+    std::vector<EvaluatedContribution> evaluated;
+    std::vector<std::vector<double>> symbolsByTask;
+};
+}
+
+void evaluateNodeStageInto(const NodeExecutionPlan& node, const WholeModelNode& stageNode, const StateValues& stageStates,
+                           const EntityValues& liveParameterValues, const std::vector<ParameterSchedule>& activeSchedules,
+                           double stageTime, double stepSize, bool evaluateHeld, double heldStepSize,
+                           std::vector<EvaluatedContribution>& held, ProviderEvaluator* providerEvaluator,
+                           const std::vector<double>* latches, NodeStageResult& result, bool timeNode) {
+    const auto startedAt = timeNode ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+    thread_local StageScratch scratch;
+    if (evaluateHeld) held.clear();
+    // The compiled kernel, when the node has one and holds nothing: the same derivatives without the bookkeeping.
+    if (stageNode.kernel && held.empty()) {
+        const auto& stage = stageNode.stageNode;
+        if (stageNode.kernel->hasParameters) {
+            resolveParameterValuesInto(stage.contributions, liveParameterValues, activeSchedules, stageTime, scratch.parameters);
+        }
+        result.evaluatedContributions = evaluateNodeStageKernel(*stageNode.kernel, stage, stageStates, scratch.parameters, stageTime, latches,
+            result.derivatives);
+        result.computeNanoseconds = timeNode ? static_cast<std::uint64_t>(std::max<std::int64_t>(0,
+            std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count())) : 0;
+        return;
+    }
+    auto& localStates = scratch.localStates;
+    localStates.resize(node.stateIndexes.size());
     for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) localStates[index] = stageStates[node.stateIndexes[index]];
     if (evaluateHeld) {
         held.clear();
         if (!stageNode.heldNode.contributions.empty()) {
-            const auto parameters = resolveParameterValues(stageNode.heldNode.contributions, liveParameterValues, activeSchedules, stageTime);
-            held = evaluateContributionTasks(stageNode.heldNode, localStates, stageStates, parameters, stageTime, heldStepSize, providerEvaluator);
+            resolveParameterValuesInto(stageNode.heldNode.contributions, liveParameterValues, activeSchedules, stageTime, scratch.parameters);
+            evaluateContributionTasksInto(stageNode.heldNode, localStates, stageStates, scratch.parameters, stageTime, heldStepSize, providerEvaluator,
+                nullptr, nullptr, nullptr, held, scratch.symbolsByTask);
         }
     }
     const auto& stage = stageNode.stageNode;
-    const auto parameters = resolveParameterValues(stage.contributions, liveParameterValues, activeSchedules, stageTime);
-    const auto providerParameters = stage.nodeProvider && !stage.nodeProvider->parameters.empty()
-        ? resolveNodeProviderParameterValues(*stage.nodeProvider, liveParameterValues, activeSchedules, stageTime) : std::vector<double>{};
-    auto evaluated = evaluateContributionTasks(stage, localStates, stageStates, parameters, stageTime, stepSize, providerEvaluator, nullptr,
-        &providerParameters, latches);
+    resolveParameterValuesInto(stage.contributions, liveParameterValues, activeSchedules, stageTime, scratch.parameters);
+    static const std::vector<double> noProviderParameters;
+    const std::vector<double>* providerParameters = &noProviderParameters;
+    if (stage.nodeProvider && !stage.nodeProvider->parameters.empty()) {
+        scratch.providerParameters = resolveNodeProviderParameterValues(*stage.nodeProvider, liveParameterValues, activeSchedules, stageTime);
+        providerParameters = &scratch.providerParameters;
+    }
+    auto& evaluated = scratch.evaluated;
+    evaluateContributionTasksInto(stage, localStates, stageStates, scratch.parameters, stageTime, stepSize, providerEvaluator, nullptr,
+        providerParameters, latches, evaluated, scratch.symbolsByTask);
     // A provider's outputs come after every contribution of the node, as node by node orders them, held contributions included.
     const auto shift = node.contributions.size() - stage.contributions.size();
     for (auto& contribution : evaluated) if (contribution.sequence >= stage.contributions.size()) contribution.sequence += shift;
     result.evaluatedContributions = evaluated.size();
     evaluated.insert(evaluated.end(), held.begin(), held.end());
-    result.derivatives = reduceContributions(std::move(evaluated));
-    result.computeNanoseconds = static_cast<std::uint64_t>(std::max<std::int64_t>(0,
-        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count()));
-    return result;
+    reduceContributionsInto(evaluated, result.derivatives);
+    result.computeNanoseconds = timeNode ? static_cast<std::uint64_t>(std::max<std::int64_t>(0,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - startedAt).count())) : 0;
 }
 
 }

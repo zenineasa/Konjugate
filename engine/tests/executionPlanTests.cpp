@@ -6,7 +6,9 @@
 #include "partitionPlan.hpp"
 #include "partitionRuntime.hpp"
 #include "taskExecutor.hpp"
+#include "wholeModelIntegration.hpp"
 #include <algorithm>
+#include <bit>
 #include <boost/property_tree/json_parser.hpp>
 #include <atomic>
 #include <chrono>
@@ -100,6 +102,139 @@ void deterministicReductionUsesTaskSequence() {
     const auto derivatives = konjugate::reduceContributions(std::move(completedOutOfOrder));
     require(derivatives.size() == 1, "Contributions for one state were not reduced together.");
     require(derivatives.front().second == 1, "Reduction did not preserve declared task order.");
+}
+
+// The buffer-reusing forms the stage loop uses (docs: engine performance) give exactly what the allocating forms give, even when their
+// buffers still hold a larger node's values from an earlier call.
+void reusedBuffersGiveTheSameReductionAndParameters() {
+    std::vector<konjugate::EvaluatedContribution> contributions = {{2, 1, 1}, {0, 1, 1e16}, {1, 1, -1e16}, {3, 0, 0.5}};
+    std::vector<std::pair<std::size_t, double>> derivatives = {{7, 3.0}, {8, 4.0}, {9, 5.0}};
+    auto reused = contributions;
+    konjugate::reduceContributionsInto(reused, derivatives);
+    require(derivatives == konjugate::reduceContributions(contributions), "Reducing into a used buffer must give the allocating form's result.");
+
+    std::vector<konjugate::ContributionTask> tasks(2);
+    konjugate::CompiledParameter first;
+    first.id = 11;
+    first.value = 2.5;
+    konjugate::CompiledParameter second;
+    second.id = 12;
+    second.value = -4;
+    second.live = true;
+    tasks[0].parameters = {first, second};
+    tasks[1].parameters = {second};
+    konjugate::NodeParameterValues resolved = {{9, 9, 9}, {9, 9}, {9}};
+    konjugate::resolveParameterValuesInto(tasks, {{12, 6.0}}, {}, 0, resolved);
+    const auto fresh = konjugate::resolveParameterValues(tasks, {{12, 6.0}}, {}, 0);
+    require(resolved.size() >= tasks.size(), "Resolving into a buffer must leave an entry for every task.");
+    for (std::size_t index = 0; index < tasks.size(); ++index) {
+        require(resolved[index] == fresh[index], "Resolving into a used buffer must give each task's values as the allocating form does.");
+    }
+}
+
+// A node's stage kernel gives the general path's derivatives to the bit: states read through the node's own indexes and from the
+// plan's, a live parameter, the time, a far end's negation, contributions summed in sequence order however the terms are listed (1e16,
+// -1e16 and 1 give 1 only in that order), and a sum that is -0. It is refused for a node it cannot run.
+void stageKernelMatchesTheGeneralPath() {
+    using konjugate::CompiledExpression;
+    using konjugate::ExpressionOperation;
+    const auto operation = [&](ExpressionOperation code, std::vector<CompiledExpression> arguments) {
+        CompiledExpression expression;
+        expression.operation = code;
+        expression.arguments = std::move(arguments);
+        return expression;
+    };
+    konjugate::NodeExecutionPlan node;
+    node.nodeId = 1;
+    node.stateIndexes = {3, 0};
+    const auto term = [&](std::size_t sequence, std::size_t output, CompiledExpression expression) {
+        konjugate::ContributionTask task;
+        task.sequence = sequence;
+        task.outputStateIndex = output;
+        task.bindings = {
+            {"own", konjugate::BindingSource::localState, 0},
+            {"far", konjugate::BindingSource::synchronizationSnapshot, 0},
+            {"gain", konjugate::BindingSource::parameter, 0},
+            {"t", konjugate::BindingSource::simulationTime, 0}
+        };
+        task.bindings[0].valueIndex = 0;
+        task.bindings[1].valueIndex = 4;
+        task.bindings[2].parameterIndex = 0;
+        konjugate::CompiledParameter gain;
+        gain.id = 40;
+        gain.value = 3;
+        gain.live = true;
+        task.parameters = {gain};
+        task.expression = std::move(expression);
+        task.program = konjugate::compileExpressionProgram(task.expression);
+        return task;
+    };
+    node.contributions.push_back(term(2, 0, literal(1)));
+    node.contributions.push_back(term(0, 0, operation(ExpressionOperation::multiply, {literal(1e16), symbol("own", 0)})));
+    node.contributions.push_back(term(1, 0, add({literal(-1e16), symbol("t", 3)})));
+    node.contributions.push_back(term(3, 1, literal(-0.0)));
+    auto farEnd = term(4, 1, operation(ExpressionOperation::multiply, {symbol("gain", 2), literal(0)}));
+    farEnd.negateOutput = true;
+    node.contributions.push_back(farEnd);
+    node.contributions.push_back(term(5, 0, operation(ExpressionOperation::multiply, {symbol("far", 1), symbol("gain", 2)})));
+
+    const konjugate::StateValues stage = {0.25, 9, 9, 1.0, 1e-30};
+    const konjugate::StateValues local = {stage[3], stage[0]};
+    const konjugate::EntityValues overrides = {{40, 7}};
+    const auto parameters = konjugate::resolveParameterValues(node, overrides);
+    const double time = 0;
+    const auto expected = konjugate::reduceContributions(konjugate::evaluateContributionTasks(node, local, stage, parameters, time));
+
+    const auto kernel = konjugate::compileNodeStageKernel(node, stage.size());
+    require(kernel.has_value(), "A node of equations with programs must get a kernel.");
+    std::vector<std::pair<std::size_t, double>> derivatives = {{9, 9.0}, {9, 9.0}, {9, 9.0}};
+    const auto evaluated = konjugate::evaluateNodeStageKernel(*kernel, node, stage, parameters, time, nullptr, derivatives);
+    require(evaluated == node.contributions.size(), "The kernel must count every term it evaluated.");
+    require(derivatives.size() == expected.size(), "The kernel must give one derivative per state, as the reduction does.");
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        require(derivatives[index].first == expected[index].first, "The kernel must list the derivatives in the reduction's order.");
+        require(std::bit_cast<std::uint64_t>(derivatives[index].second) == std::bit_cast<std::uint64_t>(expected[index].second),
+            "The kernel's derivative must equal the general path's to the bit.");
+    }
+    require(expected[0].second == 1 + 7 * 1e-30 || expected[0].second == 1, "The sum must follow the sequence order (a check on the test).");
+    require(std::signbit(expected[1].second), "A sum of -0 terms must stay -0 (a check on the test).");
+
+    auto program = node;
+    program.contributions[0].implementation = konjugate::ContributionImplementation::cppProvider;
+    require(!konjugate::compileNodeStageKernel(program, stage.size()), "A node with a program term must not get a kernel.");
+    auto outOfRange = node;
+    outOfRange.contributions[0].bindings[1].valueIndex = stage.size();
+    require(!konjugate::compileNodeStageKernel(outOfRange, stage.size()), "A binding out of range must leave the node to the general path.");
+}
+
+// A stage timed as a whole is shared among the nodes it evaluated, by their contributions: the shares add up to the stage's time
+// exactly, follow the weights, and a node the stage did not evaluate (a stepped one) gets none.
+void stageTimeIsSharedByContributions() {
+    std::vector<konjugate::NodeStageResult> results(4);
+    results[0].evaluatedContributions = 1;
+    results[1].evaluatedContributions = 99;
+    results[2].evaluatedContributions = 1000;
+    results[3].evaluatedContributions = 2;
+    results[2].computeNanoseconds = 17;
+    const std::vector<bool> evaluated = {true, true, false, true};
+    konjugate::shareStageTime(results, evaluated, 1000003);
+    require(results[2].computeNanoseconds == 17, "A node the stage did not evaluate must keep what it had.");
+    require(results[0].computeNanoseconds + results[1].computeNanoseconds + results[3].computeNanoseconds == 1000003,
+        "The shares must add up to the stage's time exactly.");
+    require(results[1].computeNanoseconds > 90 * results[0].computeNanoseconds, "Shares must follow the contributions evaluated.");
+    require(results[3].computeNanoseconds >= results[0].computeNanoseconds, "Twice the contributions must not get less time.");
+
+    std::vector<konjugate::NodeStageResult> idle(3);
+    konjugate::shareStageTime(idle, {true, true, true}, 10);
+    require(idle[0].computeNanoseconds + idle[1].computeNanoseconds + idle[2].computeNanoseconds == 10 &&
+        idle[0].computeNanoseconds >= 3 && idle[2].computeNanoseconds <= 4, "Nodes that evaluated nothing share the time equally.");
+
+    std::vector<konjugate::NodeStageResult> many(1000);
+    for (auto& result : many) result.evaluatedContributions = 1;
+    konjugate::shareStageTime(many, std::vector<bool>(1000, true), 999);
+    std::uint64_t largest = 0;
+    for (const auto& result : many) largest = std::max(largest, result.computeNanoseconds);
+    require(largest <= 2, "Rounding must spread over the nodes, not pile onto the last one.");
 }
 
 void evaluationSeparatesLocalSnapshotAndLiveParameterInputs() {
@@ -948,6 +1083,9 @@ void recordedPartsAreEachTermsValueAtASample() {
 int main() {
     try {
         deterministicReductionUsesTaskSequence();
+        reusedBuffersGiveTheSameReductionAndParameters();
+        stageTimeIsSharedByContributions();
+        stageKernelMatchesTheGeneralPath();
         conditionalExpressionsPickTheFirstMatchingBranch();
         evaluationSeparatesLocalSnapshotAndLiveParameterInputs();
         timeBindingReadsSubstepStartForDerivativesAndTheEvaluationTimeForAlgebraicStates();

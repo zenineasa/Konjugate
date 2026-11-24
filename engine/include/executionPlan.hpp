@@ -595,6 +595,61 @@ std::vector<EvaluatedContribution> evaluateContributionTasks(
     std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites = nullptr,
     const std::vector<double>* nodeProviderParameterValues = nullptr,
     const std::vector<double>* latches = nullptr);
+// evaluateContributionTasks into `evaluated` (cleared first), with `symbolsByTask` as reusable scratch: for a hot loop that calls it
+// again and again, so neither is allocated afresh each time. The same values in the same order.
+void evaluateContributionTasksInto(
+    const NodeExecutionPlan& node,
+    const StateValues& localStates,
+    const StateValues& synchronizationSnapshot,
+    const NodeParameterValues& parameterValues,
+    double simulationTime,
+    double stepSize,
+    ProviderEvaluator* providerEvaluator,
+    std::vector<std::pair<std::size_t, double>>* algebraicNodeProviderWrites,
+    const std::vector<double>* nodeProviderParameterValues,
+    const std::vector<double>* latches,
+    std::vector<EvaluatedContribution>& evaluated,
+    std::vector<std::vector<double>>& symbolsByTask);
+
+// A node's stage terms compiled for the whole-model stage loop, where the same small terms are evaluated for every node at every stage
+// and the bookkeeping around each (gathering its symbols into a vector, recording its value, sorting and reducing the records) cost
+// more than its arithmetic. Each term's program reads its symbols straight from where they live -- a state from the stage's vector of
+// every state, a parameter from its resolved values, the time, a latch -- and the values are summed per state in the order
+// reduceContributions sums them, the first setting the sum and the rest adding to it, so the derivatives are the same to the bit.
+// Compiled only for a node whose stage terms are all equations with programs (no program terms, no node provider).
+struct NodeStageKernel {
+    enum class Source : std::uint8_t { state, parameter, time, latch };
+    // Where one symbol of a term is read: the plan's index of a state, the term's parameter index, or the latch slot.
+    struct Input {
+        Source source = Source::state;
+        std::uint32_t index = 0;
+    };
+    // Each term, in the node's task order: where its symbols start in `inputs` (one per binding, then one per latch slot).
+    std::vector<std::uint32_t> firstInput;
+    std::vector<Input> inputs;
+    // The sums, in reduceContributions' order (by sequence, stable): the term, the derivative it adds to, and whether it is that
+    // derivative's first term.
+    struct Sum {
+        std::uint32_t term = 0;
+        std::uint32_t slot = 0;
+        bool first = false;
+    };
+    std::vector<Sum> sums;
+    // Each derivative's state (the node's own index), in the order reduceContributions lists them.
+    std::vector<std::size_t> outputStates;
+    bool hasParameters = false;
+    bool readsLatches = false;
+};
+// The kernel of a node's stage terms, or none when one of them is not an equation with a program, a binding or symbol is out of range
+// (the general path then reports it), or the node has a provider. `stateCount` is the number of states in the plan.
+std::optional<NodeStageKernel> compileNodeStageKernel(const NodeExecutionPlan& stage, std::size_t stateCount);
+// The node's derivatives at a stage by its kernel, into `derivatives` (reusing its storage); `parameters` as resolveParameterValues
+// resolves them for the stage's terms (read only when the kernel has parameters), `latches` the switching conditions' latches (only
+// when it reads them). Returns the number of terms evaluated. The same derivatives as evaluateContributionTasks then
+// reduceContributions, and the same error for a term whose value is not finite.
+std::size_t evaluateNodeStageKernel(const NodeStageKernel& kernel, const NodeExecutionPlan& stage, const StateValues& stageStates,
+                                    const NodeParameterValues& parameters, double stageTime, const std::vector<double>* latches,
+                                    std::vector<std::pair<std::size_t, double>>& derivatives);
 
 // An expression as a program (ExpressionProgram), its symbols already bound: as the plan compiles every equation's.
 ExpressionProgram compileExpressionProgram(const CompiledExpression& expression);
@@ -622,6 +677,12 @@ NodeParameterValues resolveParameterValues(const std::vector<ContributionTask>& 
 
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions);
+// reduceContributions into `derivatives`, reusing its storage; `contributions` is sorted in place.
+void reduceContributionsInto(std::vector<EvaluatedContribution>& contributions, std::vector<std::pair<std::size_t, double>>& derivatives);
+// resolveParameterValues into `resolved`, reusing the storage it already has. It may keep more entries than `tasks` has; only the
+// first tasks.size() are meaningful.
+void resolveParameterValuesInto(const std::vector<ContributionTask>& tasks, const EntityValues& liveParameterValues,
+                                const std::vector<ParameterSchedule>& activeSchedules, double simulationTime, NodeParameterValues& resolved);
 
 // A node's own value terms (NodeExecutionPlan::algebraicTasks) worked out from localStates alone, as stability analysis
 // and settleAlgebraicStates use them: sets each state the tasks set to zero, then recomputes each task in the given

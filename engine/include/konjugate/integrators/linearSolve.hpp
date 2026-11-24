@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <set>
+#include <stdexcept>
 #include <vector>
 
 namespace konjugate::integrators {
@@ -145,52 +147,70 @@ inline std::vector<std::size_t> minimumDegreeOrder(const SparsityRows& rows) {
 // too small for that to hold (below 1e-10 of the largest entry of its row), factor says so, and the caller solves densely instead.
 // Without row interchanges elimination can grow the entries and lose digits, so every solve is refined once: the residual of the
 // first solution, worked out from the matrix's own entries, is solved for and added.
+// The factors' structure is held in 32-bit indices, and the vectors a solve works in are kept from one solve to the next: the solves
+// are limited by how fast memory delivers the factors, not by their arithmetic. The arithmetic is unchanged, sum for sum. One object
+// solves one system at a time: solve is const but works in the object's own scratch vectors.
 class SparseLu {
 public:
+    using Index = std::uint32_t;
+
     // Works out the ordering and the factors' pattern from `rows`, which must include every diagonal entry.
     void analyse(const SparsityRows& rows) {
         size_ = rows.size();
-        order_ = minimumDegreeOrder(rows);
-        position_.assign(size_, 0);
-        for (std::size_t index = 0; index < size_; ++index) position_[order_[index]] = index;
+        const auto order = minimumDegreeOrder(rows);
+        std::vector<std::size_t> position(size_, 0);
+        for (std::size_t index = 0; index < size_; ++index) position[order[index]] = index;
         // Where each entry of the original pattern goes: entry e of the flattened rows is (original row, column), placed at row
-        // position_[row] and column position_[column] of the reordered matrix.
-        entryStart_.assign(size_ + 1, 0);
-        for (std::size_t row = 0; row < size_; ++row) entryStart_[row + 1] = entryStart_[row] + rows[row].size();
-        entryColumn_.clear();
-        for (const auto& columns : rows) entryColumn_.insert(entryColumn_.end(), columns.begin(), columns.end());
+        // position[row] and column position[column] of the reordered matrix.
+        std::vector<std::size_t> entryStart(size_ + 1, 0);
+        for (std::size_t row = 0; row < size_; ++row) entryStart[row + 1] = entryStart[row] + rows[row].size();
         // The reordered matrix's pattern, then the factors' (fill included): row i's columns are its own, and the columns after k of
         // every earlier row k that row i reaches, in increasing k (row i reaching k makes it reach k's columns too).
         std::vector<std::set<std::size_t>> pattern(size_);
-        for (std::size_t row = 0; row < size_; ++row) for (const auto column : rows[row]) pattern[position_[row]].insert(position_[column]);
-        rowStart_.assign(size_ + 1, 0);
-        columns_.clear();
-        diagonal_.assign(size_, 0);
+        for (std::size_t row = 0; row < size_; ++row) for (const auto column : rows[row]) pattern[position[row]].insert(position[column]);
+        std::vector<std::size_t> rowStart(size_ + 1, 0), columns, diagonal(size_, 0);
         for (std::size_t row = 0; row < size_; ++row) {
             auto& structure = pattern[row];
             for (auto entry = structure.begin(); entry != structure.end() && *entry < row; ++entry) {
                 const auto earlier = *entry;
-                for (std::size_t index = diagonal_[earlier] + 1; index < rowStart_[earlier + 1]; ++index) structure.insert(columns_[index]);
+                for (std::size_t index = diagonal[earlier] + 1; index < rowStart[earlier + 1]; ++index) structure.insert(columns[index]);
             }
             for (const auto column : structure) {
-                if (column == row) diagonal_[row] = columns_.size();
-                columns_.push_back(column);
+                if (column == row) diagonal[row] = columns.size();
+                columns.push_back(column);
             }
-            rowStart_[row + 1] = columns_.size();
+            rowStart[row + 1] = columns.size();
         }
         // Each original entry's place among the factors' entries.
-        entryPlace_.assign(entryStart_[size_], 0);
+        std::vector<std::size_t> entryPlace(entryStart[size_], 0);
         for (std::size_t row = 0; row < size_; ++row) {
             for (std::size_t index = 0; index < rows[row].size(); ++index) {
-                const auto newRow = position_[row];
-                const auto newColumn = position_[rows[row][index]];
-                const auto first = columns_.begin() + static_cast<std::ptrdiff_t>(rowStart_[newRow]);
-                const auto last = columns_.begin() + static_cast<std::ptrdiff_t>(rowStart_[newRow + 1]);
-                entryPlace_[entryStart_[row] + index] = static_cast<std::size_t>(std::lower_bound(first, last, newColumn) - columns_.begin());
+                const auto newRow = position[row];
+                const auto newColumn = position[rows[row][index]];
+                const auto first = columns.begin() + static_cast<std::ptrdiff_t>(rowStart[newRow]);
+                const auto last = columns.begin() + static_cast<std::ptrdiff_t>(rowStart[newRow + 1]);
+                entryPlace[entryStart[row] + index] = static_cast<std::size_t>(std::lower_bound(first, last, newColumn) - columns.begin());
             }
         }
+        // Every index fits 32 bits for any system a computer here could factorise (2^32 entries of factors would be 32 GiB of values).
+        if (columns.size() >= std::numeric_limits<Index>::max() || entryStart[size_] >= std::numeric_limits<Index>::max()) {
+            throw std::length_error("The sparse LU's factors are too large to index.");
+        }
+        const auto narrow = [](const std::vector<std::size_t>& wide) { return std::vector<Index>(wide.begin(), wide.end()); };
+        position_ = narrow(position);
+        entryStart_ = narrow(entryStart);
+        entryPlace_ = narrow(entryPlace);
+        rowStart_ = narrow(rowStart);
+        columns_ = narrow(columns);
+        diagonal_ = narrow(diagonal);
+        entryColumn_.clear();
+        for (const auto& row : rows) for (const auto column : row) entryColumn_.push_back(static_cast<Index>(column));
         values_.assign(columns_.size(), 0.0);
         work_.assign(size_, 0.0);
+        rowLargest_.assign(size_, 0.0);
+        reordered_.assign(size_, 0.0);
+        right_.assign(size_, 0.0);
+        residual_.assign(size_, 0.0);
     }
 
     // The number of entries the factors hold, fill included.
@@ -201,69 +221,78 @@ public:
     bool factor(const std::vector<double>& entries) {
         entries_ = entries;
         std::fill(values_.begin(), values_.end(), 0.0);
-        std::vector<double> rowLargest(size_, 0.0);
+        std::fill(rowLargest_.begin(), rowLargest_.end(), 0.0);
         for (std::size_t row = 0; row < size_; ++row) {
             for (std::size_t entry = entryStart_[row]; entry < entryStart_[row + 1]; ++entry) {
                 values_[entryPlace_[entry]] = entries[entry];
-                rowLargest[position_[row]] = std::max(rowLargest[position_[row]], std::abs(entries[entry]));
+                rowLargest_[position_[row]] = std::max(rowLargest_[position_[row]], std::abs(entries[entry]));
             }
         }
+        const Index* columns = columns_.data();
+        double* values = values_.data();
+        double* work = work_.data();
         for (std::size_t row = 0; row < size_; ++row) {
-            for (std::size_t index = rowStart_[row]; index < rowStart_[row + 1]; ++index) work_[columns_[index]] = values_[index];
+            for (std::size_t index = rowStart_[row]; index < rowStart_[row + 1]; ++index) work[columns[index]] = values[index];
             for (std::size_t index = rowStart_[row]; index < diagonal_[row]; ++index) {
-                const auto earlier = columns_[index];
-                const double multiplier = work_[earlier] / values_[diagonal_[earlier]];
-                work_[earlier] = multiplier;
+                const auto earlier = columns[index];
+                const double multiplier = work[earlier] / values[diagonal_[earlier]];
+                work[earlier] = multiplier;
                 if (multiplier == 0.0) continue;
-                for (std::size_t other = diagonal_[earlier] + 1; other < rowStart_[earlier + 1]; ++other) {
-                    work_[columns_[other]] -= multiplier * values_[other];
+                const std::size_t end = rowStart_[earlier + 1];
+                for (std::size_t other = diagonal_[earlier] + 1; other < end; ++other) {
+                    work[columns[other]] -= multiplier * values[other];
                 }
             }
             for (std::size_t index = rowStart_[row]; index < rowStart_[row + 1]; ++index) {
-                values_[index] = work_[columns_[index]];
-                work_[columns_[index]] = 0.0;
+                values[index] = work[columns[index]];
+                work[columns[index]] = 0.0;
             }
-            const double pivot = values_[diagonal_[row]];
-            if (!std::isfinite(pivot) || !(std::abs(pivot) > 1.0e-10 * rowLargest[row])) return false;
+            const double pivot = values[diagonal_[row]];
+            if (!std::isfinite(pivot) || !(std::abs(pivot) > 1.0e-10 * rowLargest_[row])) return false;
         }
         return true;
     }
 
     // Solves A x = b with the factors, refined once, `values` holding b and then x.
     void solve(std::vector<double>& values) const {
-        const std::vector<double> right = values;
+        right_.assign(values.begin(), values.end());
         substitute(values);
-        std::vector<double> residual(size_);
         for (std::size_t row = 0; row < size_; ++row) {
-            double sum = right[row];
+            double sum = right_[row];
             for (std::size_t entry = entryStart_[row]; entry < entryStart_[row + 1]; ++entry) sum -= entries_[entry] * values[entryColumn_[entry]];
-            residual[row] = sum;
+            residual_[row] = sum;
         }
-        substitute(residual);
-        for (std::size_t row = 0; row < size_; ++row) values[row] += residual[row];
+        substitute(residual_);
+        for (std::size_t row = 0; row < size_; ++row) values[row] += residual_[row];
     }
 
 private:
     // One solve with the factors: L and U in the reordered rows and columns.
     void substitute(std::vector<double>& values) const {
-        std::vector<double> reordered(size_);
+        double* reordered = reordered_.data();
+        const Index* columns = columns_.data();
+        const double* factors = values_.data();
         for (std::size_t index = 0; index < size_; ++index) reordered[position_[index]] = values[index];
         for (std::size_t row = 0; row < size_; ++row) {
             double sum = reordered[row];
-            for (std::size_t index = rowStart_[row]; index < diagonal_[row]; ++index) sum -= values_[index] * reordered[columns_[index]];
+            const std::size_t end = diagonal_[row];
+            for (std::size_t index = rowStart_[row]; index < end; ++index) sum -= factors[index] * reordered[columns[index]];
             reordered[row] = sum;
         }
         for (std::size_t row = size_; row-- > 0;) {
             double sum = reordered[row];
-            for (std::size_t index = diagonal_[row] + 1; index < rowStart_[row + 1]; ++index) sum -= values_[index] * reordered[columns_[index]];
-            reordered[row] = sum / values_[diagonal_[row]];
+            const std::size_t end = rowStart_[row + 1];
+            for (std::size_t index = diagonal_[row] + 1; index < end; ++index) sum -= factors[index] * reordered[columns[index]];
+            reordered[row] = sum / factors[diagonal_[row]];
         }
         for (std::size_t index = 0; index < size_; ++index) values[index] = reordered[position_[index]];
     }
 
     std::size_t size_ = 0;
-    std::vector<std::size_t> order_, position_, entryStart_, entryColumn_, entryPlace_, rowStart_, columns_, diagonal_;
-    std::vector<double> entries_, values_, work_;
+    std::vector<Index> position_, entryStart_, entryColumn_, entryPlace_, rowStart_, columns_, diagonal_;
+    std::vector<double> entries_, values_, work_, rowLargest_;
+    // A solve's scratch: the reordered values, the right-hand side and the residual.
+    mutable std::vector<double> reordered_, right_, residual_;
 };
 
 }

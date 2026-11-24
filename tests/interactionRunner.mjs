@@ -6538,10 +6538,12 @@ export async function runInteractionTests(driver) {
         await setField(twin, '#sandboxInputs input[data-signal="motorVoltage"]', '0', 'input');
         const ranAt = Date.now();
         await evaluate(twin, `document.querySelector('#sandboxRun').click()`);
-        await waitFor(twin, `/^Ran ahead to /.test(document.querySelector('#sandboxStatus').textContent)`, 'An hour of the motor did not come back.', 60000);
+        await waitFor(twin, `/^Ran ahead to /.test(document.querySelector('#sandboxStatus').textContent)`, 'An hour of the motor did not come back.', 120000);
         const tried = await evaluate(twin, `(() => { const trace = document.querySelector('#tiles .tile .plot').data.find((item) => item.name === 'Tried'); return { points: trace.x.length, last: trace.x.at(-1) }; })()`);
         assert.ok(tried.points <= 2100, `What was tried is drawn from ${tried.points} points, not millions.`);
-        assert.ok(Date.now() - ranAt < 30000, `An hour of the motor ran ahead in ${((Date.now() - ranAt) / 1000).toFixed(1)} s.`);
+        // The limit catches the old freeze (every one of the 3.6 million steps kept, sent to the window and drawn), which took minutes; it
+        // is loose because a slow CI runner takes 30 s for what takes 4 s on a developer's Mac.
+        assert.ok(Date.now() - ranAt < 60000, `An hour of the motor ran ahead in ${((Date.now() - ranAt) / 1000).toFixed(1)} s.`);
         // The voltage tried is on the Voltage strip, dotted, beside the voltage received: the cause of what the speed does.
         const triedVoltage = await evaluate(twin, `(() => { const trace = document.querySelector('#inputRows .inputRow .plot').data.find((item) => item.name === 'Tried'); return trace ? trace.y : null; })()`);
         assert.ok(triedVoltage && triedVoltage.at(-1) === 0, `The voltage tried is drawn on its strip: ${JSON.stringify(triedVoltage)}.`);

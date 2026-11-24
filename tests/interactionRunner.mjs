@@ -1919,6 +1919,93 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
     });
 
+    await run('Run until is the open project\'s own: its run configuration\'s length or a reachable default, never the project before\'s, and never written into the file', async () => {
+        // Each project as a person opens it, the result before put away: the file's run configurations kept to compare with what is saved.
+        const open = async (path, name) => {
+            await putAwayLeftovers();
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning && !window.__debugTour.blockers().hasResult`, 'The result before did not close.', 15000);
+            const content = await decodeProjectFile(await readFile(join(process.cwd(), 'examples', path)));
+            await evaluate(window, `(async () => { await window.__debugProject.load(${content}, ${JSON.stringify(`${name}.kjt`)}); })()`);
+            await waitFor(window, `document.querySelector('.documentTitle')?.textContent === ${JSON.stringify(name)}`, `${name} did not open.`);
+            return JSON.parse(content).runConfigurations;
+        };
+        const runUntilShown = async () => {
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            return evaluate(window, `document.querySelector('#runTargetTime').value`);
+        };
+        const setRunUntil = (value) => evaluate(window, `(() => { const field = document.querySelector('#runTargetTime'); field.value = ${JSON.stringify(value)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        const start = async (what) => {
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult && !document.querySelector('#continueRun').hidden`,
+                `${what} did not run. ${await evaluate(window, `document.querySelector('#runLaunchError').textContent`)}`, 60000);
+        };
+        const savedConfigurations = async () => JSON.parse(await evaluate(window, `JSON.stringify(window.__debugProject.serialize().runConfigurations)`));
+
+        // Tank Calibration steps 600 s and says no length: 1 s cannot run, so Run until opens at 100 steps, and Start runs it.
+        const tankFile = await open('tankCalibration.kjt', 'tankCalibration');
+        assert.equal(tankFile.some((configuration) => 'targetTime' in configuration), false, 'The example says no length.');
+        assert.equal(await runUntilShown(), '60000', 'Run until opens at 100 global steps of 600 s.');
+        await start('Tank Calibration with the dialog as it opened');
+        assert.deepEqual((await savedConfigurations()).map(({ execution, ...rest }) => rest), tankFile.map(({ execution, ...rest }) => rest), 'No length is written into a file that had none.');
+
+        // A run until short of one step is refused naming that alone, with the least it may be; a custom rate of 0, the rate alone.
+        await open('tankCalibration.kjt', 'tankCalibration');
+        await runUntilShown();
+        await setRunUntil('300');
+        await evaluate(window, `document.querySelector('#startRun').click()`);
+        const tooShort = await evaluate(window, `document.querySelector('#runLaunchError').textContent`);
+        assert.match(tooShort, /^Run until must be at least one global timestep \(600 s\) after 0 s: 600 s or later\.$/);
+        assert.doesNotMatch(tooShort, /rate|pacing/i);
+        await setRunUntil('6000');
+        await evaluate(window, `(() => {
+            const box = document.querySelector('#runOnlineMode'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true }));
+            const pacing = document.querySelector('#runPacingMode'); pacing.value = 'limitedRatio'; pacing.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#runPacingRatio').value = '0';
+            document.querySelector('#runLaunchError').textContent = '';
+            document.querySelector('#startRun').click();
+        })()`);
+        // The field itself refuses a rate of 0 (the browser says so beside it), so nothing starts; the dialog's own check, behind it,
+        // names the rate alone.
+        assert.equal(await evaluate(window, `document.querySelector('#runPacingRatio').validity.valid`), false);
+        assert.equal(await evaluate(window, `document.querySelector('#runLaunchDialog').open && !window.__debugTour.blockers().simulationRunning`), true, 'A rate of 0 started nothing.');
+        await evaluate(window, `document.querySelector('#runLaunchDialog form').dispatchEvent(new Event('submit', { cancelable: true }))`);
+        await waitFor(window, `document.querySelector('#runLaunchError').textContent !== ''`, 'The dialog\'s own check said nothing about the rate.');
+        const badRate = await evaluate(window, `document.querySelector('#runLaunchError').textContent`);
+        assert.equal(badRate, 'A custom rate needs a positive number of simulation seconds per wall second.');
+        await evaluate(window, `(() => {
+            const pacing = document.querySelector('#runPacingMode'); pacing.value = 'realTime'; pacing.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#runPacingRatio').value = '1';
+            const box = document.querySelector('#runOnlineMode'); box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#runLaunchCancel').click();
+        })()`);
+        await waitFor(window, `!document.querySelector('#runLaunchDialog').open`, 'Cancel did not close the Run dialog.');
+
+        // The smart house's configuration says one day: Run until opens at it, and Start runs it.
+        const houseFile = await open('dataSources/smartHouse.kjt', 'smartHouse');
+        assert.equal(await runUntilShown(), '86400', 'Run until opens at the configuration\'s own length.');
+        // A shorter run of the same project is the person's choice for this project, kept for its next run and never written.
+        await setRunUntil('3600');
+        await start('The smart house for an hour');
+        // Saved as the file has them (the execution settings aside, which the app has always filled in with their defaults).
+        const withoutExecution = (configurations) => configurations.map(({ execution, ...rest }) => rest);
+        assert.deepEqual(withoutExecution(await savedConfigurations()), withoutExecution(houseFile), 'The run configurations are saved as the file has them.');
+        assert.equal((await savedConfigurations()).find((configuration) => configuration.id === 30)?.targetTime, 86400, 'The file keeps its own length, not the run\'s.');
+        await putAwayLeftovers();
+        await waitFor(window, `!window.__debugTour.blockers().hasResult`, 'The hour\'s result did not close.', 15000);
+        assert.equal(await runUntilShown(), '3600', 'The same project opens the dialog at what its last run was started with.');
+        await evaluate(window, `document.querySelector('#runLaunchCancel').click()`);
+
+        // Another project starts from its own, not the smart house's hour; the smart house opened again, from its own day.
+        await open('thermalManagement.kjt', 'thermalManagement');
+        assert.equal(await runUntilShown(), '1', 'A project that says no length, with a step of 0.01 s, opens at 1 s, not the project before\'s.');
+        await evaluate(window, `document.querySelector('#runLaunchCancel').click()`);
+        await open('dataSources/smartHouse.kjt', 'smartHouse');
+        assert.equal(await runUntilShown(), '86400', 'Opened again, the smart house starts from its own day.');
+        await evaluate(window, `document.querySelector('#runLaunchCancel').click()`);
+        await waitFor(window, `!document.querySelector('#runLaunchDialog').open`, 'Cancel did not close the Run dialog.');
+    });
+
     await run('Run invokes the C++ simulation and displays state results', async () => {
         await freshExample();
         // Run is off while the model is validated again after an edit (the scenario before edits it), so it is waited for.

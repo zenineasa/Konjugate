@@ -513,7 +513,10 @@ function hydrateProjectDocument(document) {
             ...(configuration.method !== undefined ? { method: configuration.method } : {}),
             ...(configuration.stepsPerGlobalStep !== undefined ? { stepsPerGlobalStep: configuration.stepsPerGlobalStep } : {}),
             ...(configuration.tolerance !== undefined ? { tolerance: structuredClone(configuration.tolerance) } : {}),
-            ...(configuration.jacobian !== undefined ? { jacobian: configuration.jacobian } : {})
+            ...(configuration.jacobian !== undefined ? { jacobian: configuration.jacobian } : {}),
+            // How long the configuration runs, kept as the file says it (the command line's run length, and the Run dialog's
+            // "Run until" when the project opens); never written into a configuration that did not have it.
+            ...(configuration.targetTime !== undefined ? { targetTime: configuration.targetTime } : {})
         }))
         : [defaultRunConfiguration()];
     return {
@@ -725,6 +728,8 @@ window.__debugSteering = {
     result: () => (activeResult ? structuredClone({ jobId: activeEngineJobId, running: simulationRunning, lifecycle: activeResult.lifecycle, interventions: activeResult.interventions ?? [], samples: activeResult.samples }) : null)
 };
 steering.load();
+// The Run dialog's "Run until" for the open project, once a run of it has been started (runUntil() below); null for a project just opened.
+let projectRunUntil = null;
 let runLaunchSettings = {
     startPaused: false,
     targetTime: 1,
@@ -7826,7 +7831,7 @@ $('#repeatFromRecord').addEventListener('click', async () => {
         $('#statusText').textContent = 'This run kept no checkpoint at its start, so it cannot be repeated from its record.';
         return;
     }
-    const targetTime = Number(activeResult.targetTime) || runLaunchSettings.targetTime;
+    const targetTime = Number(activeResult.targetTime) || runUntil();
     forkOverrideValues = new Map();
     pendingFork = { parentBranchUuid: activeBranchUuid, forkTime: 0, checkpoint, overrides: [], repeat: commands };
     runLaunchSettings.targetTime = targetTime;
@@ -8197,7 +8202,7 @@ async function exportResultsCsv() {
 async function exportGeneratedProgram(kind, parallelism) {
     try {
         const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
-        document_.exportDefaultTargetTime = runLaunchSettings.targetTime;
+        document_.exportDefaultTargetTime = runUntil();
         if (hasUserDetails(projectOwnership)) document_.ownership = projectOwnership;
         const source = generateStandaloneProgram(document_, kind, { parallelism });
         const extension = kind === 'cpp' ? 'cpp' : 'py';
@@ -8326,7 +8331,7 @@ $('#continueRun').addEventListener('click', () => {
         interventions: structuredClone(activeResult.interventions ?? [])
     };
     const continueSource = fillRunConfigurationFields({ continuing: true });
-    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, checkpoint.time + continueSource.globalTimeStep);
+    runLaunchSettings.targetTime = Math.max(runUntil(), checkpoint.time + continueSource.globalTimeStep);
     $('#runLaunchDescription').textContent = `Continue from ${formatResultTime(checkpoint.time)}.`;
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -8382,7 +8387,7 @@ function openForkLaunchDialog() {
         .map(([parameterId, entry]) => ({ parameterId, entry }));
     pendingRestart = null;
     const forkSource = fillRunConfigurationFields({ continuing: true });
-    runLaunchSettings.targetTime = Math.max(runLaunchSettings.targetTime, pendingFork.checkpoint.time + forkSource.globalTimeStep);
+    runLaunchSettings.targetTime = Math.max(runUntil(), pendingFork.checkpoint.time + forkSource.globalTimeStep);
     $('#runLaunchDescription').textContent = `Fork from ${formatResultTime(pendingFork.checkpoint.time)}${pendingFork.overrides.length ? ' with parameter changes' : ''}.`;
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
@@ -8656,6 +8661,7 @@ function openRunDialog() {
     pendingFork = null;
     fillRunConfigurationFields({ continuing: false });
     $('#runLaunchDescription').textContent = "Run from the model's initial state.";
+    runLaunchSettings.targetTime = runUntil();
     $('#runTargetTime').value = runLaunchSettings.targetTime;
     $('#runOnlineMode').checked = runLaunchSettings.online;
     $('#runPacingMode').value = runLaunchSettings.pacing.mode === 'limitedRatio' ? 'limitedRatio' : 'realTime';
@@ -8696,6 +8702,18 @@ $('#runOnlineMode').addEventListener('change', updateRunModeFields);
 $('#runPacingMode').addEventListener('change', (event) => {
     $('#runPacingRatioField').hidden = !$('#runOnlineMode').checked || event.target.value !== 'limitedRatio';
 });
+// "Run until" belongs to the open project: what the person last started a run of this project with, else the active run
+// configuration's own length, else 1 s. A value less than one global step cannot run (Start would refuse it), so then it is 100
+// global steps: what 1 s is at the default step of 0.01 s, a run long enough to show something whatever the step (an hour-long
+// step gives 100 hours). Opening another project starts from that project's own; it is never written into the file (see
+// projectRunUntil beside runLaunchSettings).
+function runUntil(configuration = activeRunConfiguration()) {
+    const step = Number(configuration?.globalTimeStep) || 0.01;
+    const stored = Number(configuration?.targetTime);
+    const wanted = projectRunUntil ?? (Number.isFinite(stored) && stored > 0 ? stored : 1);
+    return targetTimeIsReachable(wanted, 0, step) ? wanted : Number((100 * step).toPrecision(12));
+}
+
 // The numerics and execution fields of the Run dialog. A fresh run starts from, and saves to, the model's
 // active run configuration. Continuing or forking a result starts from what that result ran with (so a
 // second extension defaults to the timestep the first one chose) and applies to that run only.
@@ -8890,12 +8908,16 @@ $('#runLaunchDialog form').addEventListener('submit', async (event) => {
         $('#runLaunchError').textContent = problem;
         return;
     }
-    if (!targetTimeIsReachable(targetTime, startTime, values.globalTimeStep) ||
-        (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio)))) {
-        $('#runLaunchError').textContent = `Target time must be at least one global timestep after ${formatResultTime(startTime)}; limited pacing requires a positive ratio.`;
+    if (!targetTimeIsReachable(targetTime, startTime, values.globalTimeStep)) {
+        $('#runLaunchError').textContent = `Run until must be at least one global timestep (${formatResultTime(values.globalTimeStep)}) after ${formatResultTime(startTime)}: ${formatResultTime(startTime + values.globalTimeStep)} or later.`;
+        return;
+    }
+    if (pacingMode === 'limitedRatio' && (!(pacingRatio > 0) || !Number.isFinite(pacingRatio))) {
+        $('#runLaunchError').textContent = 'A custom rate needs a positive number of simulation seconds per wall second.';
         return;
     }
     const configurationChanged = !continuing && saveRunConfigurationFields(values);
+    if (!continuing) projectRunUntil = targetTime;
     runLaunchSettings = {
         startPaused: event.submitter?.id === 'startRunPaused' && online,
         targetTime,
@@ -9829,6 +9851,8 @@ async function loadProjectDocument(document, {
     model.requires = nextModel.requires;
     model.runConfigurations = nextModel.runConfigurations;
     model.activeRunConfigurationId = nextModel.activeRunConfigurationId;
+    // Run until is the opened project's own, never the one before's.
+    projectRunUntil = null;
     model.nodes.splice(0, model.nodes.length, ...nextModel.nodes);
     model.relationships.splice(0, model.relationships.length, ...nextModel.relationships);
     model.subsystems.splice(0, model.subsystems.length, ...nextModel.subsystems);
@@ -11142,7 +11166,7 @@ function startParameterTuningObjective() {
     parameterTuningState.vocabulary = objectiveVocabulary(serializeProjectDocument());
     refreshParameterTuningObjectiveButtons();
     const configuration = model.runConfigurations.find((item) => item.id === model.activeRunConfigurationId);
-    $('#parameterTuningRunTime').value = String(runLaunchSettings.targetTime);
+    $('#parameterTuningRunTime').value = String(runUntil(configuration));
     $('#parameterTuningTimeStep').value = String(configuration?.globalTimeStep ?? 1);
     parameterTuningObjective.load('');
     // As an edge builder does: the line under an empty formula says what is wanted, before anything is typed.

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <complex>
 #include <cstdio>
+#include <numbers>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -578,7 +579,7 @@ void assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion() {
 void rodas4StabilityFunctionIsLStableAndFourthOrder() {
     for (const double radius : {0.1, 1.0, 10.0, 1e3, 1e6}) {
         for (int angle = 0; angle <= 180; ++angle) {
-            const double theta = M_PI / 2 + M_PI * angle / 180.0;
+            const double theta = std::numbers::pi / 2 + std::numbers::pi * angle / 180.0;
             const auto z = std::polar(radius, theta);
             require(std::abs(konjugate::rodas4StabilityFunction(z)) <= 1.0 + 1e-12, "Rodas4 must be A-stable.");
         }

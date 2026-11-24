@@ -14,8 +14,16 @@
 //
 // Each import is made exactly as the app makes it (install the archive, bind every parameter and output to a state, run) and compared
 // with FMPy's co-simulation of the same FMU, output by output, on the outputs the import offers: an FMI 3 <Alias> (BouncingBall's h_ft,
-// h in feet) is another name for a variable already compared, and Konjugate does not offer it as a port of its own. The check
-// `importedAsPublished` holds the count of FMUs that import and run as published, so a change in it is noticed.
+// h in feet) is another name for a variable already compared, and Konjugate does not offer it as a port of its own.
+//
+// The FMUs ship binaries for some computers only (aarch64-darwin, aarch64-linux, x86_64-linux, x86_64-windows, x86-windows; no
+// x86_64-darwin). Which of them this computer can run is decided as the app decides it when it installs one (src/fmiBinary.mjs,
+// chooseFmuBinary); an FMU with no binary for this computer is reported as such and not imported. The check `importedAsPublished`
+// requires every FMU that has a binary here to import and run as published (all four on Apple Silicon and on Linux), and
+// `binaryFoundAsShipped` that the app finds a binary exactly for the FMUs whose binaries/<platform>/ directory, FMI 3.0's name for this
+// computer, holds one -- so a change to the importer that stops finding a binary is noticed, not taken for a missing binary.
+// KONJUGATE_BENCHMARK_FMU_PLATFORM=<platform>-<arch> (Node's names: darwin-x64, linux-arm64, win32-ia32) decides as if on that computer
+// instead, to see what the benchmark reports there; the FMUs it can run are still run on this one.
 
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -29,6 +37,38 @@ export const directory = import.meta.dirname;
 export const models = {};
 export const fmuNames = ['Dahlquist', 'VanDerPol', 'BouncingBall', 'Stair'];
 const fmuPath = (name) => join(directory, 'fmus', `${name}.fmu`);
+
+// The computer the FMUs' binaries are chosen for: this one, or the one KONJUGATE_BENCHMARK_FMU_PLATFORM names.
+export function benchmarkMachine(override = process.env.KONJUGATE_BENCHMARK_FMU_PLATFORM) {
+    if (!override) return { platform: process.platform, arch: process.arch };
+    const match = /^(darwin|linux|win32)-(arm64|x64|ia32)$/.exec(override);
+    if (!match) throw new Error(`KONJUGATE_BENCHMARK_FMU_PLATFORM is ${override}; it names a platform and processor as Node does, darwin-x64 say.`);
+    return { platform: match[1], arch: match[2] };
+}
+
+// FMI 3.0's name for a computer's binaries directory, and its shared library's extension, from the standard (not the importer).
+function standardBinary({ platform, arch }) {
+    const architecture = { arm64: 'aarch64', x64: 'x86_64', ia32: 'x86' }[arch] ?? arch;
+    const system = { darwin: ['darwin', '.dylib'], win32: ['windows', '.dll'] }[platform] ?? ['linux', '.so'];
+    return { tuple: `${architecture}-${system[0]}`, extension: system[1] };
+}
+
+// Whether an FMU archive has a binary the given computer runs, decided as the app decides it when it installs the FMU, and whether the
+// FMU ships one under FMI 3.0's directory name for that computer. Returns { runnable, shipped, machine, platforms, reason }.
+export async function binaryAvailability(archive, machine = benchmarkMachine()) {
+    const { inspectFmuArchive } = await import('../../../src/fmuPackage.mjs');
+    const { chooseFmuBinary } = await import('../../../src/fmiBinary.mjs');
+    const { description, files, platforms } = inspectFmuArchive(archive);
+    const chosen = await chooseFmuBinary(description, async (name) => files[name] ?? null, machine);
+    const standard = standardBinary(machine);
+    return {
+        runnable: !chosen.error,
+        shipped: Boolean(files[`binaries/${standard.tuple}/${description.modelIdentifier}${standard.extension}`]),
+        machine: standard.tuple,
+        platforms,
+        reason: chosen.error ?? null
+    };
+}
 
 // Imports one FMU exactly as the app does and runs it at its default experiment. Returns { outcome, reason, samples? }.
 async function importAndRun(name, entry, workDirectory) {
@@ -73,7 +113,13 @@ async function importAndRun(name, entry, workDirectory) {
 }
 
 export async function evaluate({ config }) {
-    const { add, checks } = createChecks(config.thresholds);
+    const machine = benchmarkMachine();
+    const availability = new Map();
+    for (const name of fmuNames) availability.set(name, await binaryAvailability(await readFile(fmuPath(name)), machine));
+    const runnable = fmuNames.filter((name) => availability.get(name).runnable);
+    const machineName = availability.get(fmuNames[0]).machine;
+    // Every FMU with a binary for this computer must import and run as published: the limit is that count, here.
+    const { add, checks } = createChecks({ ...config.thresholds, importedAsPublished: { min: runnable.length, max: runnable.length } });
     const rows = [];
     const plots = [];
     const notes = [];
@@ -95,6 +141,11 @@ export async function evaluate({ config }) {
             if (entry.exact) {
                 const againstExact = errorMetrics(entry.modelExchange.slice(0, shared), entry.exact.slice(0, shared));
                 add(`${name}ModelExchangeAgainstExact`, againstExact.relativeError, `${name}: FMPy's model exchange with CVODE against the closed form, relative to range`);
+            }
+            if (!availability.get(name).runnable) {
+                const { platforms, reason } = availability.get(name);
+                rows.push({ ...resultRow({ caseName: `${name}: Konjugate's import as published`, model: `${name}.fmu`, note: `not imported: no binary for ${machineName} (the FMU ships ${platforms.join(', ')}); ${reason}` }), method: 'import (FMI 3.0)' });
+                continue;
             }
             const attempt = await importAndRun(name, entry, workDirectory);
             if (attempt.outcome === 'ran') {
@@ -123,7 +174,15 @@ export async function evaluate({ config }) {
     } finally {
         await rm(workDirectory, { recursive: true, force: true });
     }
-    add('importedAsPublished', imported, 'Reference FMUs that Konjugate imports and runs as published, of four (held at its current value, so a change to the importer is noticed)');
+    add('importedAsPublished', imported, `Reference FMUs that Konjugate imports and runs as published: every one of the ${runnable.length} (of four) with a binary for ${machineName} must`);
+    add('binaryFoundAsShipped', fmuNames.filter((name) => availability.get(name).runnable !== availability.get(name).shipped).length,
+        `Reference FMUs for which the app's choice of binary for ${machineName} disagrees with whether the FMU ships one under binaries/${machineName}/ (none may)`);
+    const withoutBinary = fmuNames.filter((name) => !availability.get(name).runnable);
+    if (withoutBinary.length) {
+        notes.unshift(runnable.length
+            ? `${withoutBinary.join(', ')}: no binary for ${machineName}, so not imported on this computer; the other ${runnable.length} are.`
+            : `None of the four Reference FMUs ships a binary for ${machineName} (they ship ${availability.get(fmuNames[0]).platforms.join(', ')}), so none is imported on this computer; the imports are checked on the computers they have binaries for.`);
+    }
     const vanDerPol = data.fmus.VanDerPol;
     const bouncing = data.fmus.BouncingBall;
     plots.push(linePlot({

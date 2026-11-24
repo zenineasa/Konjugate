@@ -85,6 +85,16 @@ test('the binary chosen is the first one built for this machine, and the choice 
         files({ 'binaries/x86_64-linux/M.so': elf(62), 'binaries/aarch64-linux/M.so': elf(183) }), { platform: 'linux', arch: 'x64' });
     assert.equal(fmi3.relativePath, 'binaries/x86_64-linux/M.so');
 
+    // The FMI 3.0 Reference FMUs on an Intel Mac: binaries for every other computer, none for x86_64-darwin (nor darwin64).
+    const referenceLayout = files({
+        'binaries/aarch64-darwin/Stair.dylib': machO(arm64), 'binaries/aarch64-linux/Stair.so': elf(183), 'binaries/x86_64-linux/Stair.so': elf(62),
+        'binaries/x86_64-windows/Stair.dll': pe(0x8664), 'binaries/x86-windows/Stair.dll': pe(0x14c)
+    });
+    const intelMac = await chooseFmuBinary({ fmiVersion: '3.0', modelIdentifier: 'Stair' }, referenceLayout, { platform: 'darwin', arch: 'x64' });
+    assert.equal(intelMac.machine, 'x86_64-darwin');
+    assert.equal(describeChosenBinary(intelMac, '3.0'), 'This computer cannot run it: it has no binary this computer (x86_64-darwin) can run.');
+    assert.equal((await chooseFmuBinary({ fmiVersion: '3.0', modelIdentifier: 'Stair' }, referenceLayout, appleSilicon)).relativePath, 'binaries/aarch64-darwin/Stair.dylib');
+
     const none = await chooseFmuBinary({ fmiVersion: '2.0', modelIdentifier: 'M' }, files({ 'binaries/darwin64/M.dylib': machO(x8664) }), appleSilicon);
     assert.equal(describeChosenBinary(none, '2.0'),
         'This computer cannot run it: it has no binary this computer (aarch64-darwin) can run (binaries/darwin64/M.dylib is built for x86_64).');

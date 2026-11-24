@@ -15,9 +15,12 @@ import { pathToFileURL } from 'node:url';
 import { zipSync } from 'fflate';
 import { installFmuArchive } from '../src/fmuPackage.mjs';
 import { describeInstalledFmuPorts, resolveFmiSource, resolveInstalledFmus, FmiResolutionError } from '../src/fmiResolver.mjs';
+import { fmiArchitecture } from '../src/fmiBinary.mjs';
 import { packageKey } from '../src/packageArchive.mjs';
 
-function fakeFmuBytes({ guid = 'guid-1', variables = '' } = {}) {
+const thisPlatformBinary = `binaries/${process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64'}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}`;
+
+function fakeFmuBytes({ guid = 'guid-1', variables = '', binaryPath = thisPlatformBinary } = {}) {
     const xml = `<?xml version="1.0"?>
 <fmiModelDescription fmiVersion="2.0" modelName="Decay" guid="${guid}" generationTool="Test">
     <CoSimulation modelIdentifier="decayModel" canGetAndSetFMUstate="false"/>
@@ -25,8 +28,7 @@ function fakeFmuBytes({ guid = 'guid-1', variables = '' } = {}) {
 </fmiModelDescription>`;
     return zipSync({
         'modelDescription.xml': new TextEncoder().encode(xml),
-        [`binaries/${process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64'}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}`]:
-            new TextEncoder().encode('fake-binary-bytes')
+        [binaryPath]: new TextEncoder().encode('fake-binary-bytes')
     }, { level: 0 });
 }
 
@@ -134,6 +136,21 @@ test('rejects a reference to an FMU that is not installed', async () => {
             (error) => error instanceof FmiResolutionError && error.code === 'FMU_NOT_INSTALLED'
         );
     });
+});
+
+test('an FMU with no binary for this computer installs, and running it is refused naming this computer', async () => {
+    // Only a binary for a computer Konjugate never runs on: no binaries/ directory for this one, under either standard's name.
+    await withInstalledFmu(async (directory, installed) => {
+        const machine = `${fmiArchitecture()}-${process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'darwin' : 'linux'}`;
+        await assert.rejects(
+            resolveFmiSource({
+                kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version,
+                bindings: [{ key: 'k', kind: 'state', stateId: 11 }], outputs: [{ key: 'decayLevel', stateId: 12 }]
+            }, directory),
+            (error) => error instanceof FmiResolutionError && error.code === 'FMU_PLATFORM_MISSING'
+                && error.message.startsWith(`FMU Decay (${installed.guid}) cannot run here: it has no binary this computer (${machine}) can run. `)
+        );
+    }, { binaryPath: 'binaries/riscv64-linux/decayModel.so' });
 });
 
 test('rejects a disabled FMU', async () => {

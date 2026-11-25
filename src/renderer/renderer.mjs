@@ -40,7 +40,7 @@ import { recordAsCommands } from '../interventionSchedules.mjs';
 import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
-import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
+import { documentRequires, fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
@@ -3315,10 +3315,18 @@ function renderNodeProgram(node) {
         const reads = document.createElement('select');
         reads.dataset.field = 'reads';
         reads.setAttribute('aria-label', `What input ${binding.key} reads`);
-        reads.add(new Option('Choose…', ''));
+        // An FMU's input that reads nothing keeps the FMU's own start value (docs/proposals/fmuImportWorkflow.md, stage 2), and
+        // one given a value in the file keeps that; a program's input must read something.
+        reads.add(new Option(isFmu ? 'The FMU\'s own start value' : 'Choose…', ''));
+        if (isFmu && binding.kind === 'value') reads.add(new Option(`The value ${binding.value}`, 'value'));
         candidates.forEach((candidate) => reads.add(new Option(candidate.label, candidate.value)));
-        reads.value = nodeProgramInputValue(binding, definition);
+        reads.value = isFmu && binding.kind === 'value' ? 'value' : nodeProgramInputValue(binding, definition);
         reads.addEventListener('change', () => {
+            if (reads.value === 'value') return;
+            if (isFmu && !reads.value) {
+                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'state', stateId: null }; });
+                return;
+            }
             const candidate = candidates.find((item) => item.value === reads.value);
             if (!candidate) return;
             changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, ...candidate.binding }; });
@@ -3393,7 +3401,21 @@ async function renderNodeProgramFmus(node) {
         select.add(new Option(`${implementation.fmuId} ${implementation.fmuVersion} (not installed here)`, current));
     }
     select.value = current;
-    await showFmuNotes(implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null);
+    const ports = implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null;
+    await showFmuNotes(ports);
+    // An input or parameter the file leaves to the FMU has no binding there (src/nodeProgram.mjs, implementationForFile): it is
+    // given its row here, reading nothing, so the card lists every port. Only in memory: the file leaves it out all the same.
+    const live = node.userData.definition.implementation;
+    if (ports && !ports.error && live?.kind === 'fmi' && live.fmuId === implementation.fmuId) {
+        const bound = new Set((live.bindings ?? []).map((binding) => binding.key));
+        const missing = (ports.inputs ?? []).filter((port) => !bound.has(port.key));
+        if (missing.length) {
+            const order = new Map((ports.inputs ?? []).map((port, index) => [port.key, index]));
+            live.bindings = [...(live.bindings ?? []), ...missing.map((port) => ({ key: port.key, kind: 'state', stateId: null }))]
+                .sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
+            if (selectedNode === node) renderNodeProgram(node);
+        }
+    }
 }
 
 // Which of the FMU's binaries runs here, and what about its ports the person wiring it should know (fmuPortNotes).
@@ -9712,7 +9734,8 @@ function serializeProjectDocument() {
         format: 'konjugate',
         version: 1,
         metadata: { units: model.metadata.units },
-        ...(model.requires?.length ? { requires: [...model.requires] } : {}),
+        // What the model needs of the Konjugate that opens it (docs/projectSchema.md), with an FMU's start values (src/nodeProgram.mjs).
+        ...((requires) => (requires.length ? { requires } : {}))(documentRequires(model.requires, visibleNodes)),
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
         ...serializedSharedParameters(visibleNodeIds),

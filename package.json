@@ -64,6 +64,7 @@
         "test:fmiRoundTrip": "npm run build:engine && node tests/engine/fmiRoundTrip.mjs",
         "test:fmiImportFidelity": "npm run build:engine && node tests/engine/fmiImportFidelity.mjs",
         "test:fmi3ImportFidelity": "npm run build:engine && node tests/engine/fmi3ImportFidelity.mjs",
+        "test:fmiStartValues": "npm run build:engine && node tests/engine/fmiStartValues.mjs",
         "test:fmiExamples": "npm run build:engine && node tests/engine/fmiExamples.mjs",
         "generate:fmi-examples": "npm run build:engine && node scripts/generateFmiExamples.mjs",
         "test:release": "npm run build:engine && node scripts/runReleaseChecks.mjs",

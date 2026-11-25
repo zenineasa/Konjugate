@@ -9,6 +9,16 @@
 
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 
+// A variable's start value as a number, as Konjugate passes it: a Boolean's "true" or "false" (or "1" or "0", as XML writes a
+// boolean) as 1 or 0, any other type's text as written; undefined when there is none or it is not a single number (an array's).
+function startValue(text, type) {
+    if (text === undefined || text === null) return undefined;
+    const trimmed = String(text).trim();
+    if (type === 'Boolean') return trimmed === 'true' || trimmed === '1' ? 1 : trimmed === 'false' || trimmed === '0' ? 0 : undefined;
+    if (!/^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(trimmed)) return undefined;
+    return Number(trimmed);
+}
+
 export class FmiModelDescriptionError extends Error {
     constructor(message) {
         super(message);
@@ -92,7 +102,7 @@ function parseFmi2(root) {
         variables.push({
             name, valueReference, causality, type,
             variability: rawVariable['@_variability'] || 'continuous',
-            start: startText === undefined ? undefined : Number.parseFloat(startText)
+            start: startValue(startText, type)
         });
     }
 
@@ -145,7 +155,7 @@ function parseFmi3(root) {
             variables.push({
                 name, valueReference, causality, type: typeName,
                 variability: rawVariable['@_variability'] || (typeName.startsWith('Float') ? 'continuous' : 'discrete'),
-                start: startText === undefined ? undefined : Number.parseFloat(startText)
+                start: startValue(startText, typeName)
             });
         }
     }

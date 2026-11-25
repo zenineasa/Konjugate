@@ -49,6 +49,13 @@ struct ImportedVariable {
     Role role = Role::input;
 };
 
+// An input or parameter the project gives a value of its own (`kind: "value"`): set once, in initialization mode, and never
+// again. Inputs and parameters neither bound nor given a value are not in the spec at all, so the FMU keeps its start values.
+struct ImportedValue {
+    ImportedVariable variable;
+    double value = 0.0;
+};
+
 struct ImportedFmuSpec {
     std::string providerId;
     std::string modelName;
@@ -57,6 +64,7 @@ struct ImportedFmuSpec {
     // FMI 2.0: the resources directory's file: URI; FMI 3.0: its absolute path ending in a separator.
     std::string resourceLocation;
     std::vector<ImportedVariable> variables;
+    std::vector<ImportedValue> values{};
 };
 
 inline const char* typeName(ValueType type) {
@@ -135,6 +143,7 @@ public:
             if (!started_) {
                 enterInitializationMode(context.simulationTime);
                 for (std::size_t port = 0; port < inputIndexes_.size(); ++port) setInput(port, context.inputs.at(port), context.simulationTime);
+                for (const auto& given : spec_.values) set(given.variable, given.value, context.simulationTime);
                 exitInitializationMode(context.simulationTime);
                 started_ = true;
             } else {

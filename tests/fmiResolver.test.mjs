@@ -85,12 +85,80 @@ test('sanitizes a dotted FMU variable name into a valid lower-camel-case key', a
     });
 });
 
-test('rejects a missing binding for a real FMU input', async () => {
+test('an input or parameter with no binding keeps the FMU\'s start value: it is left out of the table the driver sets', async () => {
     await withInstalledFmu(async (directory, installed) => {
-        await assert.rejects(
-            resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory),
-            (error) => error instanceof FmiResolutionError && error.code === 'FMU_BINDING_MISSING'
-        );
+        const resolved = await resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory);
+        assert.deepEqual(resolved.bindings, []);
+        assert.equal(resolved.source.includes('Role::input'), false, 'k is not set by the driver at all.');
+        assert.ok(resolved.source.includes('{"decayLevel", "Decay.Level", 0u, ValueType::float64, Role::output}'));
+        assert.ok(resolved.source.endsWith('Role::output}\n        }\n    });\n}\n'), 'No given values follow the table.');
+    });
+});
+
+test('a variable with no start value of its own must be bound or given a value', async () => {
+    const variables = `${decayVariables}
+    <ScalarVariable name="gain" valueReference="2" causality="parameter" variability="tunable" initial="exact"><Real/></ScalarVariable>`;
+    await withInstalledFmu(async (directory, installed) => {
+        const reference = { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, outputs: [{ key: 'decayLevel', stateId: 12 }] };
+        await assert.rejects(resolveFmiSource({ ...reference, bindings: [] }, directory),
+            (error) => error instanceof FmiResolutionError && error.code === 'FMU_BINDING_MISSING' && /'gain' has no start value of its own/.test(error.message));
+        const resolved = await resolveFmiSource({ ...reference, bindings: [{ key: 'gain', kind: 'value', value: 2 }] }, directory);
+        assert.ok(resolved.source.includes('{{"gain", "gain", 2u, ValueType::float64, Role::tunableParameter}, 2.0}'));
+    }, { variables });
+});
+
+test('a value given in the file is set once when the run starts, and is not one of the node\'s inputs', async () => {
+    await withInstalledFmu(async (directory, installed) => {
+        const resolved = await resolveFmiSource({
+            kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version,
+            bindings: [{ key: 'k', kind: 'value', value: 0.125 }], outputs: [{ key: 'decayLevel', stateId: 12 }]
+        }, directory);
+        assert.deepEqual(resolved.bindings, [], 'The engine sees no binding for it.');
+        assert.ok(resolved.source.endsWith(`        {
+        {"decayLevel", "Decay.Level", 0u, ValueType::float64, Role::output}
+        },
+        {
+        {{"k", "k", 1u, ValueType::float64, Role::input}, 0.125}
+        }
+    });
+}
+`), 'The given value follows the variable table.');
+        for (const [value, literal] of [[3, '3.0'], [-2.5, '-2.5'], [1e21, '1e+21'], [1e-7, '1e-7']]) {
+            const given = await resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [{ key: 'k', kind: 'value', value }], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory);
+            assert.ok(given.source.includes(`Role::input}, ${literal}}`), `${value} is written as ${literal}.`);
+        }
+        for (const value of [Number.NaN, '1', null]) {
+            await assert.rejects(resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [{ key: 'k', kind: 'value', value }], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory),
+                (error) => error.code === 'FMU_VALUE_INVALID');
+        }
+        await assert.rejects(resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [{ key: 'k', kind: 'value', value: 1 }, { key: 'k', kind: 'state', stateId: 3 }], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory),
+            (error) => error.code === 'FMU_BINDING_DUPLICATE');
+    });
+});
+
+test('a node that binds every input writes the same source as before start values, with no given values', async () => {
+    await withInstalledFmu(async (directory, installed) => {
+        const resolved = await resolveFmiSource({
+            kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version,
+            bindings: [{ key: 'k', kind: 'state', stateId: 11 }], outputs: [{ key: 'decayLevel', stateId: 12 }]
+        }, directory);
+        assert.ok(resolved.source.endsWith(`        {
+        {"k", "k", 1u, ValueType::float64, Role::input},
+        {"decayLevel", "Decay.Level", 0u, ValueType::float64, Role::output}
+        }
+    });
+}
+`));
+    });
+});
+
+test('the host takes the fmuStartValues requirement off the document before the engine sees it, and keeps the others', async () => {
+    await withInstalledFmu(async (directory, installed) => {
+        const node = { id: 1, name: 'Decay', states: [], implementation: { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [], outputs: [{ key: 'decayLevel', stateId: 12 }] } };
+        const alone = JSON.parse(await resolveInstalledFmus({ format: 'konjugate', version: 1, requires: ['fmuStartValues'], nodes: [node], edges: [] }, { fmuDirectory: directory }));
+        assert.equal('requires' in alone, false);
+        const others = JSON.parse(await resolveInstalledFmus({ format: 'konjugate', version: 1, requires: ['somethingNewer', 'fmuStartValues'], nodes: [node], edges: [] }, { fmuDirectory: directory }));
+        assert.deepEqual(others.requires, ['somethingNewer'], 'An entry this host does not apply still reaches the engine, which refuses it by name.');
     });
 });
 
@@ -217,7 +285,7 @@ test('an installed FMU\'s ports are described under the keys a node\'s implement
         const binaryDirectory = process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64';
         assert.deepEqual(ports, {
             name: 'Decay', fmiVersion: '2.0',
-            inputs: [{ key: 'k', name: 'k', causality: 'input', type: 'Real', variability: 'continuous' }],
+            inputs: [{ key: 'k', name: 'k', causality: 'input', type: 'Real', variability: 'continuous', start: 0.3 }],
             outputs: [{ key: 'decayLevel', name: 'Decay.Level', type: 'Real' }],
             notExposed: [],
             binary: `Runs binaries/${binaryDirectory}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}.`

@@ -39,17 +39,20 @@ function nodeName(node) {
 }
 
 // What a binding of `node`'s program reads and the value it starts from: { label, value, unit } or null.
-function bindingStart(binding, node, nodes, sharedParameters) {
-    if (!binding) return null;
+function bindingStart(binding, node, nodes, sharedParameters, port = null) {
+    // Left to the FMU, or given a value in the file (docs/proposals/fmuImportWorkflow.md, stage 2).
+    if (binding?.kind === 'value') return { label: 'a value given in the file', value: Number(binding.value), unit: '' };
+    const ownStart = () => (Number.isFinite(port?.start) ? { label: 'the FMU\'s own start value', value: port.start, unit: '', own: true } : null);
+    if (!binding) return ownStart();
     if (binding.kind === 'parameter') {
         const shared = sharedParameters.find((candidate) => candidate.id === binding.sharedParameterId);
-        if (!shared) return null;
+        if (!shared) return ownStart();
         return { label: `shared ${shared.name ?? shared.symbol}`, value: shared.schedule ? null : Number(shared.value ?? 0), unit: shared.unit ?? '', scheduled: Boolean(shared.schedule) };
     }
     if (binding.kind === 'state') {
         const owner = binding.nodeId === undefined || binding.nodeId === null ? node : nodes.find((candidate) => candidate.id === binding.nodeId);
         const state = owner?.states?.find((candidate) => candidate.id === binding.stateId);
-        if (!state) return null;
+        if (!state) return ownStart();
         return {
             label: owner === node ? `this.${state.symbol}` : `${nodeName(owner)}.${state.symbol}`,
             value: Number(state.initialValue ?? state.value ?? 0), unit: state.unit ?? ''
@@ -60,6 +63,7 @@ function bindingStart(binding, node, nodes, sharedParameters) {
 
 function valueText(start) {
     if (!start) return 'not set';
+    if (start.own) return `${numberText(start.value)} (the FMU's own start value)`;
     if (start.scheduled) return `follows a schedule (${start.label})`;
     return `${numberText(start.value)}${start.unit ? ` ${start.unit}` : ''}`;
 }
@@ -103,16 +107,16 @@ export function describeRunFailure(message, document = {}, fmuPorts = {}) {
         if (node && ports && variable) {
             const port = (ports.inputs ?? []).find((candidate) => candidate.name === variable);
             if (port) {
-                const start = bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters);
-                lines.push(`${variable} was ${valueText(start)} at the start${start ? ` (it reads ${start.label})` : ''}.`);
+                const start = bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters, port);
+                lines.push(`${variable} was ${valueText(start)} at the start${start && !start.own ? ` (it reads ${start.label})` : ''}.`);
             }
         } else if (node && ports) {
             const parameters = (ports.inputs ?? []).filter((port) => port.causality === 'parameter');
             if (parameters.length) {
-                const values = parameters.slice(0, maximumListed).map((port) => `${port.name} = ${valueText(bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters))}`);
+                const values = parameters.slice(0, maximumListed).map((port) => `${port.name} = ${valueText(bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters, port))}`);
                 const more = parameters.length > maximumListed ? `, and ${parameters.length - maximumListed} more` : '';
                 lines.push(`Its parameters at the start: ${values.join(', ')}${more}.`);
-                const zeros = parameters.filter((port) => bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters)?.value === 0);
+                const zeros = parameters.filter((port) => bindingStart(bindings.find((binding) => binding.key === port.key), node, nodes, sharedParameters, port)?.value === 0);
                 if (zeros.length) lines.push(`A parameter at 0 is a common cause: check ${listOf(zeros.map((port) => port.name))}.`);
             }
         }

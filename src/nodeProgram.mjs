@@ -44,11 +44,17 @@ export function nodeProgramErrors(implementation, node, nodes, sharedParameters)
         return [];
     };
     const inputKeys = new Set();
+    const isFmu = implementation.kind === 'fmi';
     for (const binding of implementation.bindings ?? []) {
         const errors = keyErrors(binding.key, inputKeys, 'input');
         const value = nodeProgramInputValue(binding, node);
-        if (!value) errors.push('Choose what this input reads.');
-        else if (!known.has(value)) errors.push('What this input read is gone; choose again.');
+        // An FMU's input or parameter that reads nothing keeps the FMU's own start value; one given a value keeps that.
+        if (isFmu && binding?.kind === 'value') {
+            if (!Number.isFinite(binding.value)) errors.push('Give this input a number.');
+        } else if (!value) {
+            if (!isFmu) errors.push('Choose what this input reads.');
+        }
+        if (value && !known.has(value)) errors.push('What this input read is gone; choose again.');
         result.inputs.push(errors);
     }
     const outputKeys = new Set();
@@ -114,4 +120,42 @@ export function fmuPortNotes(ports) {
     const notExposed = (ports.notExposed ?? []).map((variable) => `${variable.name} (${variable.type})`);
     if (notExposed.length) notes.push(`Not wired, so the FMU keeps its own value: ${listOf(notExposed)}.`);
     return notes;
+}
+
+// ---- An FMU's start values (docs/proposals/fmuImportWorkflow.md, stage 2) -------------------------------------------------
+// An FMU's input or parameter with no binding keeps the FMU's own start value, and one bound as `{ key, kind: "value", value }`
+// is set to that value once, when the run starts (src/fmiResolver.mjs). A file that relies on either says so with this entry in
+// its `requires`, so a Konjugate from before refuses it by name rather than running it differently.
+export const fmuStartValuesRequirement = 'fmuStartValues';
+
+// Whether a binding of an FMU node reads something: a state, a shared parameter or a value of its own.
+function fmuBindingTargeted(binding) {
+    if (binding?.kind === 'value') return true;
+    if (binding?.kind === 'parameter') return binding.sharedParameterId !== undefined && binding.sharedParameterId !== null;
+    if (binding?.kind === 'state') return binding.stateId !== undefined && binding.stateId !== null;
+    return false;
+}
+
+// Whether a node's FMU takes any start value of its own or any value given in the file.
+export function fmuUsesStartValues(implementation) {
+    if (implementation?.kind !== 'fmi') return false;
+    return (implementation.bindings ?? []).some((binding) => binding?.kind === 'value' || !fmuBindingTargeted(binding));
+}
+
+// An implementation as the file keeps it: an FMU's inputs that read nothing are left out (they keep the FMU's start value).
+export function implementationForFile(implementation) {
+    if (implementation?.kind !== 'fmi' || !Array.isArray(implementation.bindings)) return implementation;
+    if (implementation.bindings.every(fmuBindingTargeted)) return implementation;
+    return { ...implementation, bindings: implementation.bindings.filter(fmuBindingTargeted) };
+}
+
+// The document's `requires`, from what it required when it was opened (`previous`) and its nodes now: `fmuStartValues` while
+// a node's FMU takes a start value or a given value. A file opened with it keeps it while it still has an FMU node, since a
+// binding it left out is not known here without the FMU's ports.
+export function documentRequires(previous, nodes) {
+    const others = (previous ?? []).filter((entry) => entry !== fmuStartValuesRequirement);
+    const fmuNodes = (nodes ?? []).filter((node) => node?.implementation?.kind === 'fmi');
+    const needed = fmuNodes.some((node) => fmuUsesStartValues(node.implementation))
+        || ((previous ?? []).includes(fmuStartValuesRequirement) && fmuNodes.length > 0);
+    return needed ? [...others, fmuStartValuesRequirement] : others;
 }

@@ -17,6 +17,7 @@
 //   sourceTermExpressionModel(definition, term), relationshipEquationModel(definition)   the editor's normalisers
 
 import { withProgramVersion } from './providerTemplate.mjs';
+import { implementationForFile } from './nodeProgram.mjs';
 
 // A field this module does not know is kept, and written back as it was, so a document from a newer Konjugate loses
 // nothing by passing through an older one, and a field added to the schema survives load, undo, paste and save before
@@ -136,7 +137,7 @@ export function nodeToDocument(definition, context) {
             parameters: term.parameters ?? [],
             ...(!term.implementation ? { expressionModel: context.sourceTermExpressionModel(definition, term) } : {})
         })),
-        ...(definition.implementation ? { implementation: structuredClone(withProgramVersion(definition.implementation)) } : {}),
+        ...(definition.implementation ? { implementation: structuredClone(implementationForFile(withProgramVersion(definition.implementation))) } : {}),
         appearance: {
             ...(definition.importedGeometry
                 ? {

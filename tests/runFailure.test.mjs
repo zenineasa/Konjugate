@@ -96,3 +96,13 @@ test('a failure of the model\'s own equations is said as the engine says it, wit
     assert.deepEqual(describeRunFailure('').lines, []);
     assert.equal(describeRunFailure('').title, 'The run stopped, and the engine gave no reason.');
 });
+
+test('a parameter left to the FMU is given as its own start value, and one given in the file as that value', () => {
+    const ports = { name: 'Spring', inputs: [{ key: 'mass', name: 'mass', causality: 'parameter', start: 0 }, { key: 'k', name: 'k', causality: 'parameter', start: 4 }], outputs: [] };
+    const document = { nodes: [{ id: 1, name: 'Spring', states: [], implementation: { kind: 'fmi', bindings: [{ key: 'k', kind: 'value', value: 2.5 }], outputs: [] } }] };
+    const failure = describeRunFailure('The FMU \'Spring\' refused fmi3DoStep (a step of 0.01) at t = 0: it gave no reason.', document, { 1: ports });
+    assert.deepEqual(failure.lines, [
+        'Its parameters at the start: mass = 0 (the FMU\'s own start value), k = 2.5.',
+        'A parameter at 0 is a common cause: check mass.'
+    ]);
+});

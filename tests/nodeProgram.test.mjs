@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../src/nodeProgram.mjs';
+import {
+    documentRequires, fmiImplementation, fmuPortNotes, fmuUsesStartValues, freeKey, implementationForFile, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+} from '../src/nodeProgram.mjs';
 import { defaultNodeProviderSource, olderNodeProviderSource } from '../src/providerTemplate.mjs';
 
 const tank = { id: 1, title: 'Tank', states: [{ id: 2, symbol: 'level' }, { id: 3, symbol: 'effort' }] };
@@ -31,6 +33,39 @@ test('every mistake in a program\'s wiring is named on its row', () => {
     assert.match(errors.outputs[1][0], /this node's states/);
     assert.match(nodeProgramErrors({ kind: 'cpp', bindings: [], outputs: [] }, tank, [tank], []).errors[0], /Add an output/);
     assert.match(nodeProgramErrors({ kind: 'fmi', fmuId: '', bindings: [], outputs: [{ key: 'y', stateId: 2 }] }, tank, [tank], []).errors[0], /Choose an installed FMU/);
+});
+
+test('an FMU input that reads nothing keeps the FMU\'s start value, so it is not a mistake; a value given must be a number', () => {
+    const implementation = {
+        kind: 'fmi', fmuId: 'guid', fmuVersion: '1.0',
+        bindings: [{ key: 'u', kind: 'state', stateId: null }, { key: 'gain', kind: 'value', value: 2 }, { key: 'offset', kind: 'value', value: Number.NaN }],
+        outputs: [{ key: 'y', stateId: 2, setsValue: true }]
+    };
+    const errors = nodeProgramErrors(implementation, tank, [tank], []);
+    assert.deepEqual(errors.inputs, [[], [], ['Give this input a number.']]);
+    assert.deepEqual(nodeProgramErrors({ kind: 'cpp', bindings: [{ key: 'u', kind: 'state', stateId: null }], outputs: [{ key: 'y', stateId: 2 }] }, tank, [tank], []).inputs, [['Choose what this input reads.']],
+        'A program\'s input still has to read something.');
+});
+
+test('a file keeps an FMU\'s targeted bindings only, and requires fmuStartValues exactly while one is left to the FMU or given a value', () => {
+    const wired = { kind: 'fmi', fmuId: 'guid', fmuVersion: '1.0', bindings: [{ key: 'u', kind: 'state', stateId: 3 }, { key: 'g', kind: 'parameter', sharedParameterId: 7 }], outputs: [] };
+    assert.equal(implementationForFile(wired), wired, 'A fully bound FMU is written as it was.');
+    assert.equal(fmuUsesStartValues(wired), false);
+    const loose = { ...wired, bindings: [...wired.bindings, { key: 'k', kind: 'state', stateId: null }, { key: 'm', kind: 'parameter' }] };
+    assert.deepEqual(implementationForFile(loose).bindings, wired.bindings);
+    assert.equal(fmuUsesStartValues(loose), true);
+    const given = { ...wired, bindings: [...wired.bindings, { key: 'k', kind: 'value', value: 1.5 }] };
+    assert.deepEqual(implementationForFile(given).bindings, given.bindings, 'A value given is kept.');
+    assert.equal(fmuUsesStartValues(given), true);
+    const program = { kind: 'cpp', bindings: [{ key: 'u', kind: 'state', stateId: null }], outputs: [] };
+    assert.equal(implementationForFile(program), program, 'Only FMUs leave unbound inputs out.');
+    const node = (implementation) => ({ id: 1, implementation });
+    assert.deepEqual(documentRequires([], [node(wired)]), []);
+    assert.deepEqual(documentRequires(undefined, [node(loose)]), ['fmuStartValues']);
+    assert.deepEqual(documentRequires(['other'], [node(given), node(program)]), ['other', 'fmuStartValues']);
+    assert.deepEqual(documentRequires(['fmuStartValues', 'other'], [node(wired)]), ['other', 'fmuStartValues'],
+        'A file opened with it keeps it while it has an FMU: a binding it left out is not known without the FMU\'s ports.');
+    assert.deepEqual(documentRequires(['fmuStartValues'], [node(program)]), [], 'With no FMU left, it is dropped.');
 });
 
 test('an FMU is wired under its own keys, keeping what earlier wiring read and wrote', () => {

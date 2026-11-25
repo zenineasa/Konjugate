@@ -182,3 +182,24 @@ test('FMI3: rejects an FMU missing an instantiationToken', () => {
     const xml = fmi3Xml({ instantiationToken: '' });
     assert.throws(() => parseModelDescription(xml), /instantiationToken/);
 });
+
+// An FMU's start values are what an input or parameter left unbound keeps (docs/proposals/fmuImportWorkflow.md, stage 2).
+test('start values are numbers: a Boolean\'s true or false as 1 or 0, and none where the text is not one number', () => {
+    const fmi2 = parseModelDescription(`<?xml version="1.0"?>
+<fmiModelDescription fmiVersion="2.0" modelName="M" guid="g"><CoSimulation modelIdentifier="m"/><ModelVariables>
+    <ScalarVariable name="on" valueReference="1" causality="input"><Boolean start="true"/></ScalarVariable>
+    <ScalarVariable name="off" valueReference="2" causality="input"><Boolean start="0"/></ScalarVariable>
+    <ScalarVariable name="gain" valueReference="3" causality="parameter" variability="tunable"><Real start="-2.5e-3"/></ScalarVariable>
+    <ScalarVariable name="count" valueReference="4" causality="input"><Integer start="7"/></ScalarVariable>
+    <ScalarVariable name="free" valueReference="5" causality="input"><Real/></ScalarVariable>
+</ModelVariables></fmiModelDescription>`);
+    assert.deepEqual(fmi2.variables.map((variable) => [variable.name, variable.start]), [['on', 1], ['off', 0], ['gain', -0.0025], ['count', 7], ['free', undefined]]);
+    const fmi3 = parseModelDescription(`<?xml version="1.0"?>
+<fmiModelDescription fmiVersion="3.0" modelName="M" instantiationToken="g"><CoSimulation modelIdentifier="m"/><ModelVariables>
+    <Boolean name="flag" valueReference="1" causality="input" start="false"/>
+    <Float64 name="x" valueReference="2" causality="parameter" variability="fixed" start="1"/>
+    <Float64 name="bad" valueReference="3" causality="input" start="1.5abc"/>
+</ModelVariables></fmiModelDescription>`);
+    // FMI 3.0 variables come grouped by their element's type.
+    assert.deepEqual(Object.fromEntries(fmi3.variables.map((variable) => [variable.name, variable.start])), { flag: 0, x: 1, bad: undefined });
+});

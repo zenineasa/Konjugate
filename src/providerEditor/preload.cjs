@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('providerEditorWindow', Object.freeze({
     test: (source, kind, request) => ipcRenderer.invoke('providerEditorTest', { source, kind, request }),
     describe: (source, kind, inputs) => ipcRenderer.invoke('providerEditorDescribe', { source, kind, inputs }),
     request: (action, target, payload) => ipcRenderer.invoke('providerEditorRequest', { action, target, payload }),
+    // A link out (hover's "Writing a program ›"): the app opens only links on its own allowed list.
+    openExternal: (url) => ipcRenderer.invoke('applicationOpenExternal', url),
     setDirty: (dirty) => ipcRenderer.send('providerEditorDirty', Boolean(dirty)),
     reportStatus: (status) => ipcRenderer.send('providerEditorStatus', status),
     onCloseRequest: (callback) => ipcRenderer.on('providerEditorCloseRequest', (_event, requestId) => callback(requestId)),

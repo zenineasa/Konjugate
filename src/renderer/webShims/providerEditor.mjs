@@ -151,6 +151,7 @@ function ensureEditor() {
                 validate,
                 test,
                 describe,
+                openExternal: (url) => { window.open(url, '_blank', 'noopener'); },
                 bind: async (key, value, target) => (requestHandler
                     ? requestHandler({ action: 'bind', target, payload: { key, value } })
                     : { applied: false, error: 'The project is not listening.' }),

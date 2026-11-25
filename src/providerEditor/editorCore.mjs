@@ -17,15 +17,18 @@
 //                                    clock with their lines), or { available: false, reason } where it cannot be read
 //   bind(key, value, target)      → optional: binds the input `key` to the candidate `value` (null: to nothing) in the project, and
 //                                    answers { applied, error?, ports, checkInputs } with the program's bindings as they are now
+//   openExternal(url)             → optional: opens a link (hover's "Writing a program ›") outside the editor
 //   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
 //                                    checkPassed }, for the card's status line
 //
 // It touches no Electron global, so it runs the same in the window and in the web page.
 
 import { EditorView, basicSetup } from 'codemirror';
+import { hoverTooltip } from '@codemirror/view';
+import { snippetCompletion } from '@codemirror/autocomplete';
 import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
-import { cpp } from '@codemirror/lang-cpp';
-import { python } from '@codemirror/lang-python';
+import { cpp, cppLanguage } from '@codemirror/lang-cpp';
+import { python, pythonLanguage } from '@codemirror/lang-python';
 import { forceLinting, linter, lintGutter } from '@codemirror/lint';
 import {
     buildThemeExtensions, customThemeFields, customTokenFields, defaultThemeId, themeFromCustomColors, themePresets
@@ -34,7 +37,8 @@ import { convertProgramToVersion2, olderFormatNotice } from '../programConversio
 import { programSourceVersion } from '../providerTemplate.mjs';
 import { formatPortValue, portsTable } from './portsTable.mjs';
 import { portBindingChoices } from '../programBinding.mjs';
-import { sourcePorts } from './sourcePorts.mjs';
+import { sourceMemory, sourcePorts } from './sourcePorts.mjs';
+import { programCompletions, programHover } from './completions.mjs';
 import { formatCell, nudgedValue, outputsUnmoved, plotPath, tableText, testInputs, testSummary, traceTable } from './testTable.mjs';
 import { lintHash } from '../lintScheduler.mjs';
 import {
@@ -847,6 +851,63 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         runTest(Number.isFinite(steps) && steps >= 1 ? Math.min(steps, 10000) : 10);
     });
 
+    // ---- Writing aids: completion, hover and snippets (docs/proposals/codeEditor.md, "Writing aids") -------------------------------------
+    // What the code declares now (its ports and memory by the names it uses), and what the model binds each port to.
+    function declaredNow(source) {
+        const ports = sourcePorts(kind, source);
+        return { inputs: ports.inputs, outputs: ports.outputs, memory: sourceMemory(kind, source) };
+    }
+    function bindingsByKey() {
+        return Object.fromEntries((portContext.bindings ?? []).map((binding) => [binding.key, { label: binding.label, value: binding.value }]));
+    }
+    function programCompletionSource(completion) {
+        if (!context.program) return null;
+        const line = completion.state.doc.lineAt(completion.pos);
+        const before = line.text.slice(0, completion.pos - line.from);
+        const answer = programCompletions({ kind, before, declared: declaredNow(completion.state.doc.toString()), bindings: bindingsByKey(), explicit: completion.explicit });
+        if (!answer) return null;
+        return {
+            from: line.from + answer.from,
+            // The program's own ports in the order it declares them (a boost each, or CodeMirror sorts them by name); snippets last.
+            options: answer.options.map((option, index) => (option.snippet
+                ? snippetCompletion(option.snippet, { label: option.label, detail: option.detail, type: 'text', boost: -50 })
+                : { label: option.label, type: option.type, detail: option.detail, info: option.info,
+                    boost: option.type === 'property' || option.type === 'variable' ? Math.max(-49, 49 - index) : 0 })),
+            validFor: /^\w*$/
+        };
+    }
+    const programHoverTooltip = hoverTooltip((hoverView, position) => {
+        if (!context.program) return null;
+        const line = hoverView.state.doc.lineAt(position);
+        const offset = position - line.from;
+        let start = offset;
+        let end = offset;
+        while (start > 0 && /\w/.test(line.text[start - 1])) start -= 1;
+        while (end < line.text.length && /\w/.test(line.text[end])) end += 1;
+        if (start === end) return null;
+        const hover = programHover({ kind, name: line.text.slice(start, end), before: line.text.slice(0, start),
+            declared: declaredNow(hoverView.state.doc.toString()), bindings: bindingsByKey() });
+        if (!hover) return null;
+        return {
+            pos: line.from + start, end: line.from + end, above: true,
+            create() {
+                const dom = document.createElement('div');
+                dom.className = 'programHover';
+                dom.append(Object.assign(document.createElement('strong'), { textContent: hover.title }),
+                    Object.assign(document.createElement('p'), { textContent: hover.text }));
+                if (hover.link) {
+                    const link = Object.assign(document.createElement('a'), { href: hover.link, textContent: hover.linkText, className: 'programHoverLink' });
+                    link.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        host.openExternal?.(hover.link);
+                    });
+                    dom.append(link);
+                }
+                return { dom };
+            }
+        };
+    }, { hoverTime: 350 });
+
     // ---- Opening -------------------------------------------------------------------------------------------------------------------
     function createView(source) {
         view?.destroy();
@@ -855,6 +916,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
             extensions: [
                 basicSetup,
                 kind === 'python' ? python() : cpp(),
+                (kind === 'python' ? pythonLanguage : cppLanguage).data.of({ autocomplete: programCompletionSource }),
+                programHoverTooltip,
                 themeCompartment.of(buildThemeExtensions(activeTheme())),
                 lintGutter(),
                 // C++ waits longer for a pause than Python: its check starts a compiler.

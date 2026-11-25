@@ -2867,6 +2867,69 @@ export async function runInteractionTests(driver) {
         await evaluate(window, writeRelationshipAs('equation'));
     });
 
+    await run('the code editor completes the program\'s own ports after x[ and x., offers snippets, and explains an SDK name on hover', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('cpp'));
+        const editor = await openProgramEditor();
+        // Typing, as a person does, so completion opens by itself.
+        const type = (text, at) => evaluate(editor, `(() => {
+            const view = window.__providerEditorView;
+            const position = ${at === undefined ? 'view.state.doc.length' : at};
+            view.dispatch({ changes: { from: position, insert: ${JSON.stringify(text)} }, selection: { anchor: position + ${text.length} }, userEvent: 'input.type' });
+            view.focus();
+        })()`);
+        const offered = () => evaluate(editor, `[...document.querySelectorAll('.cm-tooltip-autocomplete li .cm-completionLabel')].map((label) => label.textContent)`);
+        await setEditorSource(editor, await readFile(join(process.cwd(), 'examples', 'providers', 'pidController.cpp'), 'utf8'));
+        const evaluateLine = await evaluate(editor, `window.__providerEditorView.state.doc.toString().split('\\n').findIndex((line) => line.includes('y[power] = x[held];')) + 1`);
+        const atLineEnd = `window.__providerEditorView.state.doc.line(${evaluateLine}).to`;
+        await type('\n        const extra = x[', atLineEnd);
+        await waitFor(editor, `document.querySelectorAll('.cm-tooltip-autocomplete li').length > 0`, 'x[ offered nothing.');
+        const ports = await offered();
+        assert.deepEqual(ports.slice(0, 7), ['measurement', 'setpoint', 'kp', 'ki', 'kd', 'maxPower', 'sensorNoise'], `x[ did not offer the ports: ${ports.join(', ')}`);
+        assert.ok(ports.includes('integral') && !ports.includes('noise'), 'Memory is read through x, a random stream is not.');
+        assert.match(await evaluate(editor, `[...document.querySelectorAll('.cm-tooltip-autocomplete li')].find((item) => item.querySelector('.cm-completionLabel').textContent === 'measurement').querySelector('.cm-completionDetail').textContent`), /^K · /);
+        // A snippet is offered by completion, and nothing is inserted until it is chosen.
+        const before = await evaluate(editor, `window.__providerEditorView.state.doc.toString()`);
+        await evaluate(editor, `document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`);
+        await type('\n    clo', `window.__providerEditorView.state.doc.line(${evaluateLine + 1}).to`);
+        await waitFor(editor, `[...document.querySelectorAll('.cm-tooltip-autocomplete li .cm-completionLabel')].some((label) => label.textContent === 'clock')`, 'The clock snippet was not offered.');
+        assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), before.replace('const extra = x[', 'const extra = x[\n    clo'), 'A snippet was inserted on its own.');
+        // Hover on k::Input: its one line, and where Writing a program explains it.
+        const point = await evaluate(editor, `(() => {
+            const view = window.__providerEditorView;
+            const position = view.state.doc.toString().indexOf('k::Input') + 4;
+            view.dispatch({ effects: [] });
+            const box = view.coordsAtPos(position);
+            return { x: Math.round((box.left + box.right) / 2) + 2, y: Math.round((box.top + box.bottom) / 2) };
+        })()`);
+        await editor.mouseMove(point);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        await editor.mouseMove({ x: point.x + 1, y: point.y });
+        await waitFor(editor, `Boolean(document.querySelector('.programHover'))`, 'Hovering k::Input showed nothing.');
+        assert.equal(await evaluate(editor, `document.querySelector('.programHover strong').textContent`), 'k::Input');
+        assert.match(await evaluate(editor, `document.querySelector('.programHoverLink').getAttribute('href')`), /docs\/programs\.md#ports-defaults-and-units$/);
+
+        // Python: x. offers the attributes the program declares.
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('python'));
+        const pythonEditor = await openProgramEditor();
+        await evaluate(pythonEditor, `(() => {
+            const view = window.__providerEditorView;
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(['from konjugate.v2 import Input, Output, Relationship', '', '', 'class Gain(Relationship):', '    level_now = Input("m")', '    output = Output()', '', '    def evaluate(self, t, x):', '        return ', ''].join('\n'))} } });
+        })()`);
+        await evaluate(pythonEditor, `(() => {
+            const view = window.__providerEditorView;
+            const position = view.state.doc.line(9).to;
+            view.dispatch({ changes: { from: position, insert: 'x.' }, selection: { anchor: position + 2 }, userEvent: 'input.type' });
+            view.focus();
+        })()`);
+        await waitFor(pythonEditor, `[...document.querySelectorAll('.cm-tooltip-autocomplete li .cm-completionLabel')].some((label) => label.textContent === 'level_now')`, 'x. did not offer the Python program\'s port.');
+        await evaluate(pythonEditor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(pythonEditor);
+        await evaluate(window, writeRelationshipAs('equation'));
+    });
+
     await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));

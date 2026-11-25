@@ -146,3 +146,10 @@
 .programEditor .problemCount.warning:hover { text-decoration: underline; }
 .programEditor .testHints { margin: 0 0 6px; padding: 0; color: #d9c58a; list-style: none; }
 .programEditor .testHints li.pending { color: #778d98; }
+
+/* Hover: an SDK name's one line and where it is explained, or a port's unit, binding and value now. */
+.programEditor .programHover { max-width: 360px; padding: 6px 8px; color: #c7d4d9; font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-size: 11px; line-height: 1.45; }
+.programEditor .programHover strong { display: block; color: #edf5f6; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+.programEditor .programHover p { margin: 3px 0 0; }
+.programEditor .programHoverLink { display: inline-block; margin-top: 4px; color: #6ce0d5; text-decoration: none; }
+.programEditor .programHoverLink:hover { text-decoration: underline; }

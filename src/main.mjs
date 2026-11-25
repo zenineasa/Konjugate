@@ -2570,10 +2570,10 @@ ipcMain.handle('projectExportGeneratedProgram', async (event, { suggestedFilenam
     return { path, fileName: basename(path) };
 });
 
-ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName, fmiVersion = '2.0' }) => {
+ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName, fmiVersion = '2.0', stopTime = null }) => {
     const targetWindow = getWindowFromEvent(event);
     const buffer = await generateFmuPackage(document, {
-        modelName, fmiVersion,
+        modelName, fmiVersion, stopTime,
         engineOptions: { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged }
     });
     const result = await dialog.showSaveDialog(targetWindow, {
@@ -2586,6 +2586,16 @@ ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, 
     if (!path.toLowerCase().endsWith('.fmu')) path += '.fmu';
     await writeFile(path, buffer);
     return { path, fileName: basename(path) };
+});
+
+// Try it as a node (docs/proposals/fmuImportWorkflow.md, stage 7): a new project window that places the FMU just exported at `path`
+// as a node, and keeps `original` (the exporting model's run, by output name) to compare its run with. The window asks for it as
+// it starts (projectPendingOpen), as a window opened on a file does.
+ipcMain.handle('fmuTryAsNode', async (event, { path, original = null }) => {
+    if (!senderIsProjectWindow(event)) return false;
+    if (typeof path !== 'string' || !path.toLowerCase().endsWith('.fmu')) return false;
+    createProjectWindow(Promise.resolve({ tryFmu: { path, original } }));
+    return true;
 });
 
 ipcMain.handle('projectMergeFmus', async (event) => {

@@ -68,7 +68,10 @@ function assignValueReferences(model, document) {
         for (const state of plan.node.states) {
             stateVariables.push({
                 valueReference: nextValueReference, causality: 'output', variability: 'continuous',
-                name: `${plan.node.name}.${state.name}`, unit: state.unit ?? '', start: state.initialValue ?? 0
+                name: `${plan.node.name}.${state.name}`, unit: state.unit ?? '', start: state.initialValue ?? 0,
+                // Which state of the model it is, so a run of the model can be compared with the FMU's outputs by name (the export
+                // dialog's Try it as a node, docs/proposals/fmuImportWorkflow.md stage 7); not written into the FMU.
+                nodeId: plan.node.id, stateId: state.id
             });
             nextValueReference += 1;
         }

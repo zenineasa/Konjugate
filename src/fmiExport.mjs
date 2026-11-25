@@ -79,7 +79,17 @@ function deterministicGuid(modelIdentifier, source) {
     return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
 }
 
-export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership = null }) {
+// The run a host starts with (FMI 2.0 section 2.2.5, FMI 3.0.2 section 2.4.5): from 0, to the run's end when the export knows it,
+// in communication steps of the model's output interval (a whole number of its global step, so every step is one the FMU takes
+// as the engine does, and a host's samples are Konjugate's). docs/proposals/fmuImportWorkflow.md, stage 7.
+function defaultExperimentXml(defaultExperiment) {
+    if (!defaultExperiment) return '';
+    const attributes = [['startTime', defaultExperiment.startTime], ['stopTime', defaultExperiment.stopTime], ['stepSize', defaultExperiment.stepSize]]
+        .filter(([, value]) => Number.isFinite(value)).map(([name, value]) => ` ${name}="${value}"`).join('');
+    return `    <DefaultExperiment${attributes}/>\n`;
+}
+
+export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership = null, defaultExperiment = null }) {
     const rollback = supportsStateCapture ? 'true' : 'false';
     // The project's author, copyright and license (docs/proposals/modelOwnership.md), as the attributes FMI has for exactly these.
     const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
@@ -87,7 +97,7 @@ export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVar
 <fmiModelDescription fmiVersion="2.0" modelName="${escapeXml(modelName)}" guid="${guid}"${rights} generationTool="Konjugate">
     <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true"
         canGetAndSetFMUstate="${rollback}" canSerializeFMUstate="${rollback}" providesDirectionalDerivative="false"/>
-    <ModelVariables>
+${defaultExperimentXml(defaultExperiment)}    <ModelVariables>
 ${scalarVariablesXml([...stateVariables, ...parameterVariables])}
     </ModelVariables>
     <ModelStructure>
@@ -114,7 +124,8 @@ function float64VariablesXml(variables) {
 }
 
 export function modelDescription3Xml({
-    modelName, instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep, timeValueReference, ownership = null
+    modelName, instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep, timeValueReference, ownership = null,
+    defaultExperiment = null
 }) {
     const rollback = supportsStateCapture ? 'true' : 'false';
     const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
@@ -136,7 +147,7 @@ ${units.map((unit) => `        <Unit name="${escapeXml(unit)}"/>`).join('\n')}
     <LogCategories>
         <Category name="logStatusError" description="A call the FMU refuses, and why."/>
     </LogCategories>
-    <ModelVariables>
+${defaultExperimentXml(defaultExperiment)}    <ModelVariables>
         <Float64 name="time" valueReference="${timeValueReference}" causality="independent" variability="continuous" unit="s" description="Simulation time"/>
 ${float64VariablesXml(variables)}
     </ModelVariables>
@@ -164,9 +175,13 @@ function fmi3IdentitySource({ instantiationToken, timeValueReference, outputCoun
 // The model's C++ source, its modelIdentifier and its modelDescription.xml, as an export writes them: pure JS, no compiler, so a
 // test can check an FMU made earlier against what the exporter writes now (tests/fmiExamples.test.mjs).
 // fmiVersion is '2.0' (the default) or '3.0'; the model and its value references are the same for both.
-export function describeFmu(document, modelName, { fmiVersion = '2.0' } = {}) {
+export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime = null } = {}) {
     checkedFmiVersion(fmiVersion);
     const { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep } = generateFmiModel(document);
+    // The output interval the model's active run configuration records at, else its global step; and the run's end when known.
+    const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
+    const stepSize = Number.isFinite(runConfiguration?.outputInterval) && runConfiguration.outputInterval > 0 ? runConfiguration.outputInterval : globalTimeStep;
+    const defaultExperiment = { startTime: 0, stopTime: Number.isFinite(stopTime) && stopTime > 0 ? stopTime : undefined, stepSize };
     const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
     if (fmiVersion === '3.0') {
         const timeValueReference = stateVariables.length + parameterVariables.length;
@@ -175,12 +190,13 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0' } = {}) {
         const fmi3Source = `${source}${fmi3IdentitySource({ ...identity, instantiationToken })}`;
         const xml = modelDescription3Xml({
             modelName: modelName || 'model', instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture,
-            globalTimeStep, timeValueReference, ownership: document.ownership
+            globalTimeStep, timeValueReference, ownership: document.ownership, defaultExperiment
         });
         return { source: fmi3Source, modelIdentifier, xml, fmiVersion };
     }
     const xml = modelDescriptionXml({
-        modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership
+        modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership,
+        defaultExperiment
     });
     return { source, modelIdentifier, xml, fmiVersion };
 }
@@ -189,11 +205,11 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0' } = {}) {
 // every other codeExport.mjs/fmiCodeGen.mjs entry point. engineOptions is the same
 // {applicationPath, resourcesPath, packaged} shape resolveEnginePath()/cppProviderSdkPath() take
 // elsewhere. fmiVersion is '2.0' (the default) or '3.0'. Returns a Buffer -- the finished .fmu file's bytes.
-export async function generateFmuPackage(document, { modelName, engineOptions, fmiVersion = '2.0' }) {
+export async function generateFmuPackage(document, { modelName, engineOptions, fmiVersion = '2.0', stopTime = null }) {
     const executable = await resolveEnginePath(engineOptions);
     if (!executable) throw new Error('The Konjugate engine binary could not be found -- FMU export needs it to compile the generated model.');
 
-    const { source, modelIdentifier, xml } = describeFmu(document, modelName, { fmiVersion });
+    const { source, modelIdentifier, xml } = describeFmu(document, modelName, { fmiVersion, stopTime });
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuExport-'));
     try {
         const sourcePath = join(directory, 'model.cpp');

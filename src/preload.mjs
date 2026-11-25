@@ -98,7 +98,9 @@ contextBridge.exposeInMainWorld('projectFiles', {
     save: (path, content, suggestedFilename, password, resultBranches) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password, resultBranches }),
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),
     exportGeneratedProgram: (suggestedFilename, source, kind) => ipcRenderer.invoke('projectExportGeneratedProgram', { suggestedFilename, source, kind }),
-    exportFmu: (suggestedFilename, document, modelName, fmiVersion) => ipcRenderer.invoke('projectExportFmu', { suggestedFilename, document, modelName, fmiVersion }),
+    exportFmu: (suggestedFilename, document, modelName, fmiVersion, stopTime = null) => ipcRenderer.invoke('projectExportFmu', { suggestedFilename, document, modelName, fmiVersion, stopTime }),
+    // A new window with the FMU just exported placed as a node, and the run to compare it with (stage 7 of docs/proposals/fmuImportWorkflow.md).
+    tryFmuAsNode: (path, original = null) => ipcRenderer.invoke('fmuTryAsNode', { path, original }),
     mergeFmus: () => ipcRenderer.invoke('projectMergeFmus'),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });

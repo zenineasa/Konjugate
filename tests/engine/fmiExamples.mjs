@@ -80,7 +80,7 @@ try {
         // 2. Today's exporter makes the same FMU.
         const committedPath = join(folder, `${example.name}.fmu`);
         const committed = unzipSync(new Uint8Array(await readFile(committedPath)));
-        const fresh = await generateFmuPackage(await exportDocument(example), { modelName: example.name, engineOptions, fmiVersion });
+        const fresh = await generateFmuPackage(await exportDocument(example), { modelName: example.name, engineOptions, fmiVersion, stopTime: example.stopTime });
         const freshPath = join(directory, `${example.name}-${fmiVersion}.fmu`);
         await writeFile(freshPath, fresh);
         assert.equal(Buffer.from(unzipSync(new Uint8Array(fresh))['modelDescription.xml']).toString('utf8'), Buffer.from(committed['modelDescription.xml']).toString('utf8'),

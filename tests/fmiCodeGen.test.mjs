@@ -48,7 +48,9 @@ test('a state becomes an output valueReference and a live parameter becomes an i
         }]
     });
     const { source, stateVariables, parameterVariables } = generateFmiModel(document);
-    assert.deepEqual(stateVariables, [{ valueReference: 0, causality: 'output', variability: 'continuous', name: 'Tank.Pressure', unit: 'Pa', start: 100 }]);
+    // Each output also says which state of the model it is, so a run of the model can be compared with the FMU's (stage 7 of
+    // docs/proposals/fmuImportWorkflow.md); that is not written into the FMU.
+    assert.deepEqual(stateVariables, [{ valueReference: 0, causality: 'output', variability: 'continuous', name: 'Tank.Pressure', unit: 'Pa', start: 100, nodeId, stateId }]);
     assert.deepEqual(parameterVariables, [{ valueReference: 1, causality: 'input', variability: 'continuous', name: 'k', unit: '', start: 0.5 }]);
     // 0.5 legitimately appears once, as parameterValue_1's own default member value (used before
     // any fmi2SetReal call) -- the point of this assertion is that the *contribution expression*

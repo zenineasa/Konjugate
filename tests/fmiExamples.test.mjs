@@ -53,7 +53,7 @@ for (const fmiVersion of fmiVersions) for (const example of fmiExamples) {
         const variableNames = [...committedXml.matchAll(/<(?:ScalarVariable|Float64) name="([^"]*)"/g)].map((match) => match[1]);
         for (const name of names.slice(1)) assert.ok(variableNames.includes(name), `${name} is not a variable of ${example.name}.fmu.`);
 
-        const { modelIdentifier, xml } = describeFmu(await exportDocument(example), example.name, { fmiVersion });
+        const { modelIdentifier, xml } = describeFmu(await exportDocument(example), example.name, { fmiVersion, stopTime: example.stopTime });
         assert.equal(committedXml, xml,
             `${example.name}.fmu was not made by today's exporter (its modelDescription.xml differs): regenerate the examples with node scripts/generateFmiExamples.mjs.`);
         const binaries = Object.keys(fmu).filter((path) => path.startsWith('binaries/'));

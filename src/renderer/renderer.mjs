@@ -45,6 +45,7 @@ import {
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
+import { generateFmiModel } from '../fmiCodeGen.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
 import {
@@ -740,6 +741,12 @@ window.__debugSteering = {
 steering.load();
 // The Run dialog's "Run until" for the open project, once a run of it has been started (runUntil() below); null for a project just opened.
 let projectRunUntil = null;
+// After an FMU export (docs/proposals/fmuImportWorkflow.md, stage 7): results kept to compare with (Keep them to compare), the FMU just
+// exported with the run to compare it with, and, in a window opened by Try it as a node, the original run by the FMU's output names.
+let keptComparisonSamples = null;
+let keptComparisonSamplesJustNow = false;
+let lastExportedFmu = null;
+let originalComparison = null;
 let runLaunchSettings = {
     startPaused: false,
     targetTime: 1,
@@ -4116,10 +4123,13 @@ async function renderNodeResults(node) {
     const otherBranchUuids = [...comparisonBranchUuids].filter((uuid) => uuid !== activeBranchUuid && branches.has(uuid));
     const comparing = otherBranchUuids.length > 0;
     const activeLabel = activeBranchRecord?.label ?? 'Active';
-    let series = await branchNodeSeries({ result: activeResult, jobId: activeEngineJobId }, node, comparing ? activeLabel : undefined);
+    // An FMU tried as a node: the original model's run of its outputs beside this run's (stage 7).
+    const original = comparing ? [] : originalSeriesFor(node.userData.definition);
+    let series = await branchNodeSeries({ result: activeResult, jobId: activeEngineJobId }, node, comparing ? activeLabel : original.length ? 'This run' : undefined);
     for (const uuid of otherBranchUuids) {
         series = series.concat(await branchNodeSeries(branches.get(uuid), node, branches.get(uuid).label));
     }
+    if (original.length && series.length) series = series.concat(original);
     panel.classList.toggle('hasResults', Boolean(series.length));
     if (!series.length) {
         nodeResultPlot.clear();
@@ -4128,7 +4138,7 @@ async function renderNodeResults(node) {
     const branchColorMap = comparing ? new Map([
         [activeLabel, activeBranchRecord?.color ?? branchColors[0]],
         ...otherBranchUuids.map((uuid) => [branches.get(uuid).label, branches.get(uuid).color])
-    ]) : undefined;
+    ]) : original.length ? new Map([['This run', branchColors[0]], ['Original', branchColors[1]]]) : undefined;
     await nodeResultPlot.render(series, activeResult.samples[activeResultSampleIndex]?.time ?? 0, { branchColors: branchColorMap });
 }
 
@@ -8388,9 +8398,17 @@ async function exportFmu(fmiVersion = '2.0') {
         // Unlike exportGeneratedProgram, the document itself (not a pre-rendered source string) is
         // sent over IPC: generateFmuPackage runs in the main process, since it needs to spawn the
         // engine binary to actually compile the model into a shared library (see src/fmiExport.mjs).
-        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName, fmiVersion);
+        // The run's end, when this model has been run, as the FMU's default experiment's stop time.
+        const stopTime = Number.isFinite(projectRunUntil) && projectRunUntil > 0 ? projectRunUntil : null;
+        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName, fmiVersion, stopTime);
         $('#exportCodeDialog').close();
         if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
+        if (outcome) {
+            let original = null;
+            try { original = exportComparison(document_, activeResult?.samples ?? keptComparisonSamples); } catch { original = null; }
+            lastExportedFmu = { path: outcome.path, original };
+            showExportFmuNotice(outcome, original);
+        }
         if (outcome && tour.active) tutorialExportedKinds.add('fmu');
     } catch (error) {
         console.error('The simulation could not be exported as an FMU.', error);
@@ -8406,19 +8424,29 @@ function requestCloseResultsConfirmation() {
         ? 'Closing the results panel will remove these results from the current session. You can load them again by reopening the saved project.'
         : 'If you want to load these results again later, save the project with simulation results before closing. Once the results panel is closed, the results will be removed from this session and cannot be reopened unless they were saved.';
     return new Promise((resolve) => {
+        const keep = $('#keepCloseResults');
         const finish = (confirmed) => {
             form.removeEventListener('submit', onSubmit);
             dialog.removeEventListener('cancel', onCancel);
             cancel.removeEventListener('click', onCancelClick);
+            keep.removeEventListener('click', onKeep);
             dialog.close();
             resolve(confirmed);
         };
         const onSubmit = (event) => { event.preventDefault(); finish(true); };
         const onCancel = (event) => { event.preventDefault(); finish(false); };
         const onCancelClick = () => finish(false);
+        // Closed, and kept in this window for an exported FMU's run to be compared with (stage 7 of
+        // docs/proposals/fmuImportWorkflow.md); a later run's results, or another project, replace them.
+        const onKeep = () => {
+            keptComparisonSamples = activeResult?.samples ? structuredClone(activeResult.samples) : null;
+            keptComparisonSamplesJustNow = true;
+            finish(true);
+        };
         form.addEventListener('submit', onSubmit);
         dialog.addEventListener('cancel', onCancel);
         cancel.addEventListener('click', onCancelClick);
+        keep.addEventListener('click', onKeep);
         dialog.showModal();
     });
 }
@@ -8426,8 +8454,10 @@ function requestCloseResultsConfirmation() {
 // `confirm: false` is a tutorial's "Skip this step", which closes the results the person was asked to close.
 async function closeResultPlayback({ confirm = true } = {}) {
     if (!activeResult || simulationRunning || (confirm && !await requestCloseResultsConfirmation())) return;
+    const kept = keptComparisonSamples !== null && keptComparisonSamplesJustNow;
+    keptComparisonSamplesJustNow = false;
     await discardResultPlayback({ markProjectChanged: activeResultPersistedInProject });
-    $('#statusText').textContent = 'Results removed · model editing enabled';
+    $('#statusText').textContent = kept ? 'Results kept to compare with an exported FMU · model editing enabled' : 'Results removed · model editing enabled';
 }
 
 $('#resultTimeline').addEventListener('input', (event) => {
@@ -8585,6 +8615,134 @@ function updateExportCodeFields() {
     if (isFmu && parallelismField.value === 'mpi') parallelismField.value = 'serial';
     parallelismField.closest('label').hidden = isFmu;
     $('#mergeFmuButton').hidden = !isFmu;
+    // An FMU is spoken of as one, with what a host gets from it (docs/proposals/fmuImportWorkflow.md, stage 7); it is always C++.
+    $('#exportCodeLanguageField').hidden = isFmu;
+    $('#exportCodeTitle').textContent = isFmu ? 'Export as an FMU' : 'Export simulation code';
+    $('#exportCodeDescription').textContent = isFmu
+        ? 'One run of this model as a Functional Mock-up Unit other tools can run (Simulink, Dymola, OpenModelica, FMPy, or Konjugate itself), its numbers Konjugate\'s own.'
+        : 'Generate a standalone program that reproduces one run of this model, with no runtime dependency on Konjugate itself.';
+    $('#exportFmuSummary').hidden = !isFmu;
+    if (isFmu) $('#exportFmuSummary').replaceChildren(...exportFmuSummaryLines().map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+}
+
+// What a host gets from the FMU of this model: its outputs, parameters and inputs, the steps it takes, and where it runs.
+function exportFmuSummaryLines() {
+    try {
+        const { stateVariables, parameterVariables, globalTimeStep } = generateFmiModel(stripEdgeGroups(executionProjectDocument(serializeProjectDocument())));
+        const count = (items, one, many) => `${items.length} ${items.length === 1 ? one : many}`;
+        const parameters = parameterVariables.filter((variable) => variable.causality === 'parameter');
+        const inputs = parameterVariables.filter((variable) => variable.causality === 'input');
+        return [
+            `Outputs: ${count(stateVariables, 'state', 'states')}, each named by its node (${stateVariables.slice(0, 2).map((variable) => variable.name).join(', ')}${stateVariables.length > 2 ? ', …' : ''}).`,
+            `Parameters: ${count(parameters, 'constant parameter', 'constant parameters')}, tunable by the host. Inputs: ${count(inputs, 'live parameter', 'live parameters')}.`,
+            `Steps: whole multiples of ${globalTimeStep} s, the model's global step; a host's other steps are refused.`,
+            'Runs on: this computer\'s system only. Export it on each other system, then Merge platform FMUs… joins them into one.'
+        ];
+    } catch (error) {
+        return [`This model cannot be exported as an FMU: ${error.message}`];
+    }
+}
+
+// ---- After an FMU export: Try it as a node, and Compare with original (stage 7) -------------------------------------------------
+// The run to compare an exported FMU with: the results open now, or the ones kept when they were closed (Keep them to compare).
+// keptComparisonSamples, lastExportedFmu and originalComparison are declared at the top, with projectRunUntil.
+
+// The original's run by the exported FMU's output names (generateFmiModel names each state as the export does).
+function exportComparison(document_, samples) {
+    if (!samples?.length) return null;
+    const { stateVariables } = generateFmiModel(document_);
+    const outputs = {};
+    for (const variable of stateVariables) {
+        const values = samples.map((sample) => sample.states.find((state) => state.stateId === variable.stateId)?.value);
+        if (values.every((value) => Number.isFinite(value))) outputs[variable.name] = values;
+    }
+    return Object.keys(outputs).length ? { modelName: filenameStem(currentProjectFilename), times: samples.map((sample) => sample.time), outputs } : null;
+}
+
+function showExportFmuNotice(outcome, original) {
+    $('#exportFmuNoticeTitle').textContent = `Exported ${outcome.fileName}.`;
+    $('#exportFmuNoticeLines').replaceChildren(...[
+        'Try it as a node opens a new project with the FMU placed in it, ready to run.',
+        original
+            ? `Its run there is compared with this model's run (${original.times.length} samples), output by output.`
+            : 'Run this model first, or keep its results when you close them, to compare its run with the FMU\'s.'
+    ].map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+    $('#exportFmuNotice').hidden = false;
+}
+$('#closeExportFmuNotice').addEventListener('click', () => { $('#exportFmuNotice').hidden = true; });
+$('#exportFmuTry').addEventListener('click', async () => {
+    if (!lastExportedFmu) return;
+    $('#exportFmuNotice').hidden = true;
+    await window.projectFiles.tryFmuAsNode?.(lastExportedFmu.path, lastExportedFmu.original);
+});
+
+// A window opened by Try it as a node: the FMU placed, and its run to be compared with the original.
+async function startTryFmu({ path, original }) {
+    originalComparison = original ?? null;
+    const node = await addFmuToModel({ path });
+    if (!node) return;
+    $('#statusText').textContent = originalComparison
+        ? `Added ${node.userData.definition.title}: run it to compare with the original`
+        : `Added ${node.userData.definition.title}`;
+}
+
+// Each FMU node's outputs in the last run against the original's by name: the largest difference, output by output.
+function updateOriginalComparison() {
+    $('#compareOriginalPanel').hidden = true;
+    if (!originalComparison || !activeResult?.samples?.length) return;
+    const original = originalComparison;
+    const byTime = new Map(original.times.map((time, index) => [Number(time).toPrecision(12), index]));
+    const lines = [];
+    let largest = 0;
+    let compared = 0;
+    let where = '';
+    for (const node of model.nodes.filter((candidate) => !candidate.deleted && candidate.implementation?.kind === 'fmi')) {
+        const ports = fmuPortsFor(node.implementation);
+        for (const output of node.implementation.outputs ?? []) {
+            const name = ports?.outputs?.find((port) => port.key === output.key)?.name ?? output.key;
+            const reference = original.outputs[name];
+            if (!reference) continue;
+            let difference = 0;
+            let samples = 0;
+            for (const sample of activeResult.samples) {
+                const index = byTime.get(Number(sample.time).toPrecision(12));
+                const value = sample.states.find((state) => state.stateId === output.stateId)?.value;
+                if (index === undefined || !Number.isFinite(value)) continue;
+                const gap = Math.abs(value - reference[index]);
+                if (gap > difference) difference = gap;
+                if (gap > largest) { largest = gap; where = `${name} at t = ${sample.time} s`; }
+                samples += 1;
+            }
+            if (!samples) continue;
+            compared += samples;
+            lines.push(`${name}: ${samples} samples, largest difference ${difference === 0 ? '0 (identical)' : difference.toPrecision(3)}.`);
+        }
+    }
+    if (!lines.length) {
+        lines.push('No output of the FMU matched one of the original run, by name and time: compare the samples the two runs share, or run both to the same times.');
+    }
+    $('#compareOriginalTitle').textContent = !compared ? `Not compared with ${original.modelName}'s run.`
+        : largest === 0 ? `Identical to ${original.modelName}'s run: largest difference 0 over ${compared} values.`
+            : `Largest difference from ${original.modelName}'s run: ${largest.toPrecision(3)} (${where}).`;
+    $('#compareOriginalLines').replaceChildren(...lines.map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+    $('#compareOriginalPanel').hidden = false;
+}
+$('#closeCompareOriginal').addEventListener('click', () => { $('#compareOriginalPanel').hidden = true; });
+
+// The original's series for an FMU node's outputs, beside the run's own on the node's plot.
+function originalSeriesFor(definition) {
+    if (!originalComparison || definition?.implementation?.kind !== 'fmi') return [];
+    const ports = fmuPortsFor(definition.implementation);
+    return (definition.implementation.outputs ?? []).map((output) => {
+        const name = ports?.outputs?.find((port) => port.key === output.key)?.name ?? output.key;
+        const values = originalComparison.outputs[name];
+        const state = definition.states.find((candidate) => candidate.id === output.stateId);
+        if (!values || !state) return null;
+        return {
+            nodeId: definition.id, stateId: state.id, name: state.label, symbol: state.symbol, unit: state.unit ?? '',
+            samples: values.map((value, index) => ({ time: Number(originalComparison.times[index]), value })), branchLabel: 'Original'
+        };
+    }).filter(Boolean);
 }
 $('#exportCodeButton').addEventListener('click', () => {
     $('#exportCodeFormat').value = 'source';
@@ -9207,6 +9365,7 @@ window.engine.onComplete(({ jobId, result }) => {
     selectSuggestedPlaybackRate();
     updateLiveResultControls();
     $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
+    updateOriginalComparison();
     releaseRunWaiters();
 });
 // ---- Why a run stopped, on screen (src/runFailure.mjs) -------------------------------------------------------------------
@@ -10139,6 +10298,8 @@ async function loadProjectDocument(document, {
     hideAssistantPanel();
     hideRestoredNotice();
     hideRunFailure();
+    keptComparisonSamples = null;
+    $('#exportFmuNotice').hidden = true;
     demonstrationProject = false;
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
@@ -16704,6 +16865,10 @@ async function checkPendingProjectOpen() {
     const pending = await window.projectFiles.pendingOpen();
     if (!pending) return;
     launchFileRequested = true;
+    if (pending.tryFmu) {
+        await startTryFmu(pending.tryFmu);
+        return;
+    }
     if (pending.error) {
         $('#statusText').textContent = `Load failed · ${pending.error}`;
         return;

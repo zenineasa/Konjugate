@@ -91,7 +91,7 @@ What an importing tool should know about them:
 
 - They hold a binary for macOS on Apple Silicon only (`binaries/darwin64/`, arm64, in the FMI 2.0 FMUs; `binaries/aarch64-darwin/` in the FMI 3.0 ones). Konjugate does not cross-compile and does not export source code FMUs; an FMU for another platform is made by exporting the same project on that platform, and single-platform FMUs of the same project can be combined with "Merge platform FMUs…" in the export dialog.
 - The communication step must be a whole multiple of the FMU's internal step (0.1 s, 0.01 s and 0.005 s); any other step is refused with `fmi2Error` (`fmi3Error`). The `_ref.opt` step sizes are. An FMI 3.0 FMU states its internal step as `fixedInternalStepSize`.
-- `modelDescription.xml` declares no `DefaultExperiment`; the `_ref.opt` files give the experiment. The FMI 2.0 FMUs declare no units; the FMI 3.0 ones do.
+- `modelDescription.xml` declares the experiment its `_ref.opt` gives as its `<DefaultExperiment>` (start time, stop time and step); the `_ref.opt` files give it as well. The FMI 2.0 FMUs declare no units; the FMI 3.0 ones do.
 - The examples are exported with the Konjugate source after 2.0.2: Konjugate 2.0.2 itself gives two parameters with the same symbol the same name (in SpringMassDamper, `mass` twice), which `validate_fmu` reports.
 
 ### Regenerating and checking the examples

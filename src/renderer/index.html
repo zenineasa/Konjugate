@@ -94,11 +94,13 @@
     <dialog id="exportCodeDialog" class="passwordDialog">
         <form method="dialog">
             <span class="contextKicker">Export</span>
-            <strong>Export simulation code</strong>
-            <p>Generate a standalone program that reproduces one run of this model, with no
+            <strong id="exportCodeTitle">Export simulation code</strong>
+            <p id="exportCodeDescription">Generate a standalone program that reproduces one run of this model, with no
                 runtime dependency on Konjugate itself.</p>
             <label><span>Format</span><select id="exportCodeFormat"><option value="source">Standalone program</option><option value="fmu">FMU (FMI 2.0 Co-Simulation)</option><option value="fmu3">FMU (FMI 3.0 Co-Simulation)</option></select></label>
-            <label><span>Language</span><select id="exportCodeLanguage"><option value="cpp">C++</option><option id="exportCodeLanguagePython" value="python">Python</option></select></label>
+            <!-- What a host gets from the FMU (docs/proposals/fmuImportWorkflow.md, stage 7). -->
+            <ul id="exportFmuSummary" class="exportFmuSummary" hidden></ul>
+            <label id="exportCodeLanguageField"><span>Language</span><select id="exportCodeLanguage"><option value="cpp">C++</option><option id="exportCodeLanguagePython" value="python">Python</option></select></label>
             <label><span>Execution</span><select id="exportCodeParallelism"><option value="serial">Serial</option><option id="exportCodeParallelismOpenmp" value="openmp">OpenMP</option><option id="exportCodeParallelismStdThread" value="stdThread">std::thread</option><option id="exportCodeParallelismMpi" value="mpi">MPI</option></select></label>
             <div class="passwordError" id="exportCodeError" role="alert"></div>
             <footer><button id="mergeFmuButton" class="footerLeftButton" type="button" hidden>Merge platform FMUs…</button><button id="exportCodeCancel" type="button">Cancel</button><button id="exportCodeSubmit" class="doneButton" type="submit">Export…</button></footer>
@@ -198,7 +200,7 @@
             <span class="contextKicker">Simulation results</span>
             <strong>Close and remove results?</strong>
             <p id="closeResultsMessage">If you want to load these results again later, save the project with simulation results before closing. Once the results panel is closed, the results will be removed from this session and cannot be reopened unless they were saved.</p>
-            <footer><button id="closeResultsCancel" type="button">Cancel</button><button id="confirmCloseResults" class="doneButton" type="submit">Close and remove results</button></footer>
+            <footer><button id="closeResultsCancel" type="button">Cancel</button><button id="keepCloseResults" type="button" title="Close them, and keep them in this window to compare with an exported FMU's run">Keep them to compare</button><button id="confirmCloseResults" class="doneButton" type="submit">Close and remove results</button></footer>
         </form>
     </dialog>
 
@@ -958,6 +960,17 @@
             <header><div><span class="contextKicker">FMU</span><strong id="fmuNoticeTitle"></strong></div><button id="closeFmuNotice" type="button" aria-label="Close">×</button></header>
             <ul id="fmuNoticeLines" class="runFailureLines"></ul>
             <div class="runFailureActions"><a id="fmuNoticeDownload" href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" rel="noopener" hidden>Download the free desktop app ›</a></div>
+        </aside>
+        <!-- An FMU just exported, and the way on: Try it as a node (stage 7 of docs/proposals/fmuImportWorkflow.md). -->
+        <aside id="exportFmuNotice" class="validationPanel exportFmuNotice" role="status" aria-label="FMU exported" hidden>
+            <header><div><span class="contextKicker">FMU exported</span><strong id="exportFmuNoticeTitle"></strong></div><button id="closeExportFmuNotice" type="button" aria-label="Close">×</button></header>
+            <ul id="exportFmuNoticeLines" class="runFailureLines"></ul>
+            <div class="runFailureActions"><button id="exportFmuTry" type="button">Try it as a node</button></div>
+        </aside>
+        <!-- An FMU's run against the run of the model it was exported from (stage 7). -->
+        <aside id="compareOriginalPanel" class="validationPanel compareOriginalPanel" role="status" aria-label="Compared with the original" hidden>
+            <header><div><span class="contextKicker">Compare with original</span><strong id="compareOriginalTitle"></strong></div><button id="closeCompareOriginal" type="button" aria-label="Close">×</button></header>
+            <ul id="compareOriginalLines" class="runFailureLines"></ul>
         </aside>
         <!-- Why the last run stopped, in words (src/runFailure.mjs): shown when a run fails, until it is closed or the next run starts. -->
         <aside id="runFailurePanel" class="validationPanel runFailurePanel" role="alert" aria-label="Why the run stopped" hidden>

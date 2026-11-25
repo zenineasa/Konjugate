@@ -138,3 +138,23 @@ test('mergeFmuPackages merges FMI 3.0 exports by their instantiationToken, and n
     const fmi2 = fmuBytes('fmiVersion="2.0" guid="{t-1}"', { 'binaries/linux64/model.so': 'linux' });
     assert.throws(() => mergeFmuPackages([{ name: 'mac.fmu', data: mac }, { name: 'fmi2.fmu', data: fmi2 }]), /same model/);
 });
+
+// The run a host starts with (docs/proposals/fmuImportWorkflow.md, stage 7): <DefaultExperiment> from 0, to the run's end when the
+// export knows it, in steps of the model's output interval; where each FMI version's schema puts it, and nothing else changed.
+test('both FMI versions say the run a host starts with, from 0 in steps of the output interval, to the run\'s end when known', () => {
+    const configured = { ...fixtureDocument, runConfigurations: [{ id: 1, globalTimeStep: 0.01, outputInterval: 0.05 }], activeRunConfigurationId: 1 };
+    for (const fmiVersion of fmiVersions) {
+        const known = describeFmu(configured, 'fixture', { fmiVersion, stopTime: 12.5 }).xml;
+        const unknown = describeFmu(configured, 'fixture', { fmiVersion }).xml;
+        assert.ok(known.includes('    <DefaultExperiment startTime="0" stopTime="12.5" stepSize="0.05"/>\n    <ModelVariables>'), `FMI ${fmiVersion}: just before the variables.`);
+        assert.ok(unknown.includes('    <DefaultExperiment startTime="0" stepSize="0.05"/>\n'), `FMI ${fmiVersion}: no stop time when the run's end is not known.`);
+        assert.ok(describeFmu(fixtureDocument, 'fixture', { fmiVersion }).xml.includes('    <DefaultExperiment startTime="0" stepSize="0.01"/>\n'), 'With no run configuration, the global step it is exported with.');
+        const without = (xml) => xml.split('\n').filter((line) => !line.includes('<DefaultExperiment')).join('\n');
+        assert.equal(without(known), without(unknown), 'Only that line differs.');
+        if (fmiVersion === '3.0') assert.ok(known.includes('    </LogCategories>\n    <DefaultExperiment'), 'FMI 3.0 puts it after the log categories.');
+        else assert.ok(/providesDirectionalDerivative="false"\/>\n    <DefaultExperiment/.test(known), 'FMI 2.0 puts it after <CoSimulation>.');
+        // The identity is a hash of the source, not of the description: the same either way.
+        const identity = (xml) => /(?:guid|instantiationToken)="([^"]+)"/.exec(xml)[1];
+        assert.equal(identity(known), identity(unknown));
+    }
+});

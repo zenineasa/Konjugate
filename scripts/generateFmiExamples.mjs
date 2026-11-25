@@ -35,7 +35,7 @@ try {
         for (const fmiVersion of versions) {
             const folder = join(examplesDirectory, exampleFolder(example, fmiVersion));
             await mkdir(folder, { recursive: true });
-            const fmu = await generateFmuPackage(await exportDocument(example), { modelName: example.name, engineOptions, fmiVersion });
+            const fmu = await generateFmuPackage(await exportDocument(example), { modelName: example.name, engineOptions, fmiVersion, stopTime: example.stopTime });
             const platforms = fmuPlatforms(unzipSync(new Uint8Array(fmu)));
             await writeFile(join(folder, `${example.name}.fmu`), fmu);
             await writeFile(join(folder, `${example.name}_ref.csv`), referenceCsv(reference));

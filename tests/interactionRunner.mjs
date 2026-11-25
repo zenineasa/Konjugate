@@ -11143,6 +11143,83 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
 
+    // The round trip (docs/proposals/fmuImportWorkflow.md, stage 7): the Spring mass damper example run, its results kept to compare,
+    // exported as an FMI 3.0 FMU (the dialog speaking of an FMU and of what a host gets, the FMU saying its run), tried as a node in a
+    // new window, run there as the FMU suggests, and compared with the original: identical, and both on the node's plot.
+    await run('an exported FMU is tried as a node in a new window and compared with the original run: identical', async () => {
+        const projectPath = join(import.meta.dirname, '..', 'examples', 'springMassDamper.kjt');
+        let tried = null;
+        try {
+            await driver.answerDialogs({ open: projectPath }, async () => {
+                await evaluate(window, `document.querySelector('#loadButton').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes.length === 2`, 'The example did not open.', 15000);
+            });
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const field = document.querySelector('#runTargetTime'); field.value = '10'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The example did not run.', 120000);
+            const original = await evaluate(window, `window.__debugSteering.result().samples.length`);
+            // Kept to compare, as the results are closed.
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing did not ask.');
+            await evaluate(window, `document.querySelector('#keepCloseResults').click()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+            assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Results kept to compare with an exported FMU · model editing enabled');
+
+            // The export dialog speaks of an FMU and says what a host gets.
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'The export dialog did not open.');
+            await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = 'fmu3'; format.dispatchEvent(new Event('change')); })()`);
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeTitle').textContent`), 'Export as an FMU');
+            assert.equal(await evaluate(window, `document.querySelector('#exportCodeLanguageField').hidden`), true, 'An FMU is always C++: no Language to choose.');
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#exportFmuSummary li')].map((item) => item.textContent)`), [
+                'Outputs: 4 states, each named by its node (Suspended mass.Displacement, Suspended mass.Velocity, …).',
+                'Parameters: 4 constant parameters, tunable by the host. Inputs: 0 live parameters.',
+                'Steps: whole multiples of 0.01 s, the model\'s global step; a host\'s other steps are refused.',
+                'Runs on: this computer\'s system only. Export it on each other system, then Merge platform FMUs… joins them into one.'
+            ]);
+            const { path, bytes } = await driver.captureExport(async () => {
+                await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+                await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, 'The FMU was not written.', 120000);
+            }, { fileName: 'springMassDamper.fmu', maxAttempts: 400 });
+            const description = new TextDecoder().decode(unzipSync(new Uint8Array(bytes))['modelDescription.xml']);
+            assert.match(description, /<DefaultExperiment startTime="0" stopTime="10" stepSize="0\.1"\/>/, 'The FMU says the run it was exported from.');
+            await waitFor(window, `!document.querySelector('#exportFmuNotice').hidden`, 'The export did not lead on.');
+            assert.equal(await evaluate(window, `document.querySelector('#exportFmuNoticeTitle').textContent`), 'Exported springMassDamper.fmu.');
+            assert.match(await evaluate(window, `document.querySelector('#exportFmuNoticeLines').textContent`), new RegExp(`compared with this model's run \\(${original} samples\\)`));
+
+            // Try it as a node: a new window, the FMU placed.
+            const before = await driver.allHandles();
+            await evaluate(window, `document.querySelector('#exportFmuTry').click()`);
+            tried = await driver.waitForNewHandle(before, {}, 20000);
+            await waitFor(tried, `window.__debugProject?.serialize().nodes[0]?.implementation?.kind === 'fmi'`, 'The FMU was not placed in the new window.', 30000);
+            assert.equal(await evaluate(tried, `document.querySelector('#statusText').textContent`), 'Added springMassDamper: run it to compare with the original');
+            assert.equal(path.endsWith('springMassDamper.fmu'), true);
+            // Run as the FMU suggests (to 10 s in steps of 0.1 s).
+            await openRunDialog(tried);
+            await waitFor(tried, `!document.querySelector('#runFmuSuggestion').hidden`, 'The FMU\'s run was not suggested.', 10000);
+            assert.equal(await evaluate(tried, `document.querySelector('#runFmuSuggestionText').textContent`), '\'springMassDamper\' suggests running to 10 s in steps of 0.1 s.');
+            await evaluate(tried, `document.querySelector('#runFmuSuggestionUse').click()`);
+            await evaluate(tried, `document.querySelector('#startRun').click()`);
+            await waitFor(tried, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU did not run.', 180000);
+            await waitFor(tried, `!document.querySelector('#compareOriginalPanel').hidden`, 'The run was not compared with the original.', 10000);
+            assert.equal(await evaluate(tried, `document.querySelector('#compareOriginalTitle').textContent`), `Identical to springMassDamper's run: largest difference 0 over ${4 * original} values.`);
+            assert.match(await evaluate(tried, `document.querySelector('#compareOriginalLines').textContent`), /Suspended mass\.Displacement: 101 samples, largest difference 0 \(identical\)\./);
+            // Both runs on the node's plot.
+            await evaluate(tried, `document.querySelector('.objectLabel').click()`);
+            await waitFor(tried, `document.querySelector('.nodeResultsPanel').classList.contains('hasResults') && document.querySelector('#nodeResultPlot').data?.length > 0`, 'The FMU node\'s result was not plotted.', 10000);
+            assert.ok(await evaluate(tried, `JSON.stringify(document.querySelector('#nodeResultPlot').data.map((trace) => trace.name ?? trace.legendgroup ?? '')).includes('Original')`), 'The original run is on the plot.');
+        } finally {
+            if (tried && !tried.isDestroyed()) {
+                await evaluate(tried, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Empty.kjt')`).catch(() => {});
+                await tried.close();
+            }
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await evaluate(window, `document.querySelector('#closeExportFmuNotice').click()`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is in the desktop app only' });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {

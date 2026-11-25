@@ -20,6 +20,8 @@
 //   openExternal(url)             → optional: opens a link (hover's "Writing a program ›") outside the editor
 // The payload may carry programKind ('relationship' or 'node': which examples fit), blankTemplates ([{ id, label, description,
 // source }], written by the project from the program's bindings) and showTemplates (Write program: open with Template ▾ showing).
+//   testObjective(source, target) → optional: a tuning objective run once on one trial, { available, ok, value, reports, message, line,
+//                                    reason? } (purpose 'objective': its keys in Ports from payload.objectivePorts, and this as Test)
 //   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
 //                                    checkPassed }, for the card's status line
 //
@@ -100,19 +102,26 @@ const markup = `
                 <div id="programEditorPortsList" class="portsList" role="list"></div>
             </div>
             <div id="programEditorTestPanel" class="testPanel" data-side-panel="test" hidden>
-                <div class="testHead"><span>Inputs</span><small>from the model now, editable</small><button id="programEditorTestReset" class="linkButton" type="button" title="The model's values again">Reset</button></div>
-                <div id="programEditorTestInputs" class="testInputs"></div>
-                <div class="testControls">
+                <div id="programEditorObjectiveTest" class="objectiveTest" hidden>
+                    <p class="testHold">Test runs the objective once, on one trial: the model at its current values, for the tuning card's run length and step.</p>
+                    <button id="programEditorRunObjective" class="secondaryButton" type="button">Run once</button>
+                    <p id="programEditorObjectiveSummary" class="testSummary" role="status"></p>
+                    <ul id="programEditorObjectiveProblems" class="testProblems"></ul>
+                    <table id="programEditorObjectiveReports" class="objectiveReports" hidden></table>
+                </div>
+                <div class="testHead" data-test-part="program"><span>Inputs</span><small>from the model now, editable</small><button id="programEditorTestReset" class="linkButton" type="button" title="The model's values again">Reset</button></div>
+                <div id="programEditorTestInputs" class="testInputs" data-test-part="program"></div>
+                <div class="testControls" data-test-part="program">
                     <button id="programEditorRunOnce" class="secondaryButton" type="button">Run once</button>
                     <button id="programEditorStep" class="secondaryButton" type="button">Step</button>
                     <input id="programEditorSteps" class="testSteps" type="number" min="1" max="10000" step="1" value="10" aria-label="Steps">
                     <label class="testStepSize"><span>Δt</span><input id="programEditorStepSize" type="number" min="0" step="any" aria-label="Step size in seconds"><span>s</span></label>
                 </div>
-                <p id="programEditorTestHold" class="testHold"></p>
-                <p id="programEditorTestSummary" class="testSummary" role="status"></p>
-                <ul id="programEditorTestChecks" class="testChecks"></ul>
-                <ul id="programEditorTestProblems" class="testProblems"></ul>
-                <ul id="programEditorTestHints" class="testHints"></ul>
+                <p id="programEditorTestHold" class="testHold" data-test-part="program"></p>
+                <p id="programEditorTestSummary" class="testSummary" role="status" data-test-part="program"></p>
+                <ul id="programEditorTestChecks" class="testChecks" data-test-part="program"></ul>
+                <ul id="programEditorTestProblems" class="testProblems" data-test-part="program"></ul>
+                <ul id="programEditorTestHints" class="testHints" data-test-part="program"></ul>
                 <div id="programEditorTestResults" class="testResults" hidden>
                     <div class="testHead"><span>Results</span><button id="programEditorTestCopy" class="linkButton" type="button" title="Copy the table at full precision">Copy</button></div>
                     <div class="testTableWrap"><table id="programEditorTestTable"></table></div>
@@ -272,9 +281,10 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         handle.addEventListener('pointermove', move);
         handle.addEventListener('pointerup', end);
     });
-    const sideShown = () => context.program;
+    const sideShown = () => context.program || context.objective;
 
     function renderPorts() {
+        if (context.objective) { renderObjectivePorts(); return; }
         const shown = description ?? (portsStale ? lastGoodDescription ?? sourcePorts(kind, session.source) : null);
         const { rows } = portsTable(shown, portContext);
         // A port's problem in the model (a unit that does not convert, nothing bound and no default), underlined where it is declared.
@@ -614,16 +624,44 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         view.focus();
     }
 
+    // ---- A tuning objective (docs/proposals/codeEditor.md, "Tuning objectives"): its keys and what the tuning card binds them to -------
+    function renderObjectivePorts() {
+        const note = $('#programEditorPortsNote');
+        note.hidden = false;
+        note.textContent = 'Its keys, bound in the tuning card: a state or measured column is read as run.series(key), a tuned parameter as run.value(key).';
+        $('#programEditorPortsList').classList.remove('stale');
+        $('#programEditorPortsList').replaceChildren(...context.objectivePorts.map((port) => {
+            const item = document.createElement('div');
+            item.className = `portRow objective ${port.bound ? 'ok' : 'problem'}`;
+            item.dataset.port = port.key;
+            const head = document.createElement('div');
+            head.className = 'portHead';
+            head.append(Object.assign(document.createElement('span'), { className: 'portTag', textContent: 'KEY' }),
+                Object.assign(document.createElement('span'), { className: 'portKey', textContent: port.key }),
+                Object.assign(document.createElement('span'), { className: 'portUnit', textContent: port.kindWord }));
+            const detail = document.createElement('div');
+            detail.className = 'portDetail';
+            detail.append(Object.assign(document.createElement('span'), { className: 'portBound', textContent: port.bound ?? 'not bound' }),
+                Object.assign(document.createElement('span'), { className: 'portValue', textContent: `${port.reads}("${port.key}")` }));
+            item.append(head, detail);
+            if (!port.bound) item.append(Object.assign(document.createElement('div'), { className: 'portNote', textContent: 'Bind it in the tuning card.' }));
+            return item;
+        }));
+        if (!context.objectivePorts.length) $('#programEditorPortsList').append(Object.assign(document.createElement('p'), { className: 'portsEmpty', textContent: 'No keys yet: add them in the tuning card.' }));
+    }
+
     // ---- The program's format, and Convert -----------------------------------------------------------------------------------------
     function refreshFormat() {
         const source = session.source;
         const version = context.program ? programSourceVersion(kind, source) : 2;
         const older = context.program && version === 1;
-        $('#programEditorFormat').textContent = formatLabel(kind, version, context.program);
+        $('#programEditorFormat').textContent = context.objective ? `${formatLabel(kind, 2, false)} · objective` : formatLabel(kind, version, context.program);
         $('#programEditorConvert').hidden = !older;
         $('#programEditorFormatNotice').hidden = !older;
         $('#programEditorFormatNoticeText').textContent = older ? olderFormatNotice : '';
-        const testable = context.program && !older && Boolean(host.test);
+        const testable = context.objective ? Boolean(host.testObjective) : context.program && !older && Boolean(host.test);
+        for (const part of root.querySelectorAll('[data-test-part="program"]')) part.hidden = Boolean(context.objective);
+        $('#programEditorObjectiveTest').hidden = !context.objective;
         $('#programEditorTest').hidden = !testable;
         root.querySelector('[data-side-tab="test"]').hidden = !testable;
         if (!testable && activeSideTab === 'test') showSideTab('ports');
@@ -820,7 +858,66 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         event.preventDefault();
     });
 
+    // An objective's Test: its value on one trial, the numbers it reports, or the error with its line.
+    async function runObjectiveTest() {
+        if (!view || !host.testObjective) return;
+        if (sideFolded) { sideFolded = false; write('konjugate.providerEditor.sideFolded', '0'); }
+        showSide(true);
+        showSideTab('test');
+        const source = view.state.doc.toString();
+        const summary = $('#programEditorObjectiveSummary');
+        const buttons = [$('#programEditorTest'), $('#programEditorRunObjective')];
+        buttons.forEach((button) => { button.disabled = true; });
+        summary.className = 'testSummary';
+        summary.textContent = kind === 'cpp' ? 'Compiling the objective and running one trial…' : 'Running one trial…';
+        $('#programEditorObjectiveProblems').replaceChildren();
+        $('#programEditorObjectiveReports').hidden = true;
+        let answer;
+        try { answer = await host.testObjective(source, target); } catch (error) { answer = { available: false, reason: `Test could not run: ${error?.message ?? error}` }; }
+        finally { buttons.forEach((button) => { button.disabled = false; }); }
+        if (!answer?.available) {
+            summary.className = 'testSummary failed';
+            summary.textContent = answer?.reason ?? 'The objective cannot be tested here.';
+            return;
+        }
+        if (!answer.ok) {
+            summary.className = 'testSummary failed';
+            summary.textContent = 'The objective failed on the trial.';
+            const item = document.createElement('li');
+            item.append(document.createTextNode(`✗ ${answer.message || 'It gave no number.'}`));
+            if (answer.line) {
+                const link = Object.assign(document.createElement('button'), { type: 'button', className: 'linkButton testLineLink', textContent: `line ${answer.line} ›` });
+                link.dataset.line = String(answer.line);
+                item.append(document.createTextNode(' '), link);
+            }
+            $('#programEditorObjectiveProblems').replaceChildren(item);
+            testResult = { source, ok: false, problems: [{ line: answer.line ?? null, message: answer.message ?? '' }] };
+            testDiagnostics = answer.line ? [{ line: answer.line, message: answer.message ?? '' }] : [];
+            if (view) forceLinting(view);
+            return;
+        }
+        summary.className = 'testSummary passed';
+        summary.textContent = `Objective: ${formatCell(answer.value)}`;
+        const reports = answer.reports ?? [];
+        const table = $('#programEditorObjectiveReports');
+        table.hidden = !reports.length;
+        table.replaceChildren(...reports.map((report) => {
+            const row = document.createElement('tr');
+            row.append(Object.assign(document.createElement('th'), { textContent: report.key }), Object.assign(document.createElement('td'), { textContent: formatCell(report.value) }));
+            return row;
+        }));
+        testResult = { source, ok: true, problems: [] };
+        testDiagnostics = [];
+        if (view) forceLinting(view);
+    }
+    $('#programEditorRunObjective').addEventListener('click', () => runObjectiveTest());
+    $('#programEditorObjectiveProblems').addEventListener('click', (event) => {
+        const link = event.target.closest('[data-line]');
+        if (link) goToLine(Number(link.dataset.line));
+    });
+
     async function runTest(steps) {
+        if (context.objective) { runObjectiveTest(); return; }
         if (!view || !host.test) return;
         showSide(true);
         if (sideFolded) { sideFolded = false; write('konjugate.providerEditor.sideFolded', '0'); showSide(sideShown()); }
@@ -1002,7 +1099,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         kind = payload.kind === 'python' ? 'python' : 'cpp';
         title = payload.title ?? '';
         target = payload.target ?? null;
-        context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {}, modelStep: Number(payload.modelStep) > 0 ? Number(payload.modelStep) : null };
+        context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {}, modelStep: Number(payload.modelStep) > 0 ? Number(payload.modelStep) : null,
+            objective: payload.purpose === 'objective', objectivePorts: Array.isArray(payload.objectivePorts) ? payload.objectivePorts : [] };
         portContext = { bindings: payload.ports?.bindings ?? [], outputs: payload.ports?.outputs ?? [], candidates: payload.ports?.candidates };
         pickerPort = null;
         bindingNote = '';
@@ -1028,6 +1126,9 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         lastTrace = null;
         testDiagnostics = [];
         $('#programEditorTestResults').hidden = true;
+        $('#programEditorObjectiveSummary').textContent = '';
+        $('#programEditorObjectiveProblems').replaceChildren();
+        $('#programEditorObjectiveReports').hidden = true;
         $('#programEditorTestSummary').textContent = '';
         $('#programEditorTestChecks').replaceChildren();
         $('#programEditorTestProblems').replaceChildren();

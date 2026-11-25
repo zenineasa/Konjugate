@@ -255,6 +255,8 @@ contextBridge.exposeInMainWorld('engine', {
     stopFit: () => ipcRenderer.invoke('engineFitStop'),
     // Whether a tuning objective is usable and, if not, why, in the engine's words.
     checkObjective: (objective) => ipcRenderer.invoke('engineCheckObjective', objective),
+    // The code editor's Test for an objective written as a program: run once on the trial given ({ times, series, values }).
+    testObjective: (payload) => ipcRenderer.invoke('engineTestObjective', payload),
     discardFit: () => ipcRenderer.invoke('engineFitDiscard'),
     // An objective written as a program can be built and run (desktop only).
     programObjectives: true,

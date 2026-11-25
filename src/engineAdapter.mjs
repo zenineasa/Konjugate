@@ -327,7 +327,7 @@ export function cppProviderSdkPath({ applicationPath, resourcesPath, packaged })
     return join(packaged ? resourcesPath : applicationPath, 'engine');
 }
 
-function pythonProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
+export function pythonProviderSdkPath({ applicationPath, resourcesPath, packaged }) {
     // Put on the provider process's PYTHONPATH; must be the directory containing the
     // konjugate/ package, not the package directory itself.
     return join(packaged ? resourcesPath : applicationPath, 'engine', 'sdk', 'python');

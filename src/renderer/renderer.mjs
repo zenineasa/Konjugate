@@ -16,6 +16,7 @@ import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection, ProgramSummaryView } from './programSourceSection.mjs';
 import { programStatusKey } from './programSummary.mjs';
 import { bindPort, referenceToProviderBinding, sourceTermReferenceToBinding } from '../programBinding.mjs';
+import { measuredAt, objectivePorts } from '../objectiveTest.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
@@ -12168,7 +12169,11 @@ $('#parameterTuningProgramSource').addEventListener('input', () => refreshParame
 $('#parameterTuningProgramEditor').addEventListener('click', () => {
     if (!parameterTuningProgram.language) return;
     providerEditTarget = { type: 'objective' };
-    window.providerEditor.openWindow({ target: providerEditTarget, source: $('#parameterTuningProgramSource').value, kind: parameterTuningProgram.language, title: 'Tuning objective' });
+    window.providerEditor.openWindow({
+        target: providerEditTarget, source: $('#parameterTuningProgramSource').value, kind: parameterTuningProgram.language, title: 'Tuning objective',
+        // The editor for an objective (docs/proposals/codeEditor.md, "Tuning objectives"): its keys in Ports, and Test on one trial.
+        purpose: 'objective', objectivePorts: objectivePorts(parameterTuningProgram.bindings, parameterTuningProgramTargets())
+    });
 });
 
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
@@ -14404,9 +14409,44 @@ function bindProgramPort(target, { key, value }) {
     const checkInputs = programEditorContext(now.implementation, now.parameters).checkInputs;
     return { applied: true, checkInputs, ports: programPortContext(target, now, checkInputs) };
 }
+// The trial an objective's Test runs on, as a tuning's first trial: the model at its current values for the card's run length and step,
+// each key given what it is bound to (a state's series, a measured column's at the run's times, a tuned parameter's value now).
+async function objectiveTrial() {
+    if (!parameterTuningState?.vocabulary || !parameterTuningProgram.language) return { error: 'Open Parameter tuning on an objective written as a program first.' };
+    const targetTime = Number($('#parameterTuningRunTime').value);
+    const timeStep = Number($('#parameterTuningTimeStep').value);
+    const problem = runSettingsError(targetTime, timeStep);
+    if (problem) return { error: problem };
+    const unbound = parameterTuningProgram.bindings.find((binding) => !binding.key || (binding.kind === 'measured' ? !binding.column : binding.id === null || binding.id === undefined));
+    if (unbound) return { error: `The key "${unbound.key}" is not bound to anything in the tuning card.` };
+    const run = await window.engine.run(JSON.stringify(serializeProjectDocument()), { globalTimeStep: timeStep, outputInterval: timeStep, targetTime });
+    if (!run?.available) return { error: 'The simulation engine is not available.' };
+    const times = (run.result?.samples ?? []).map((sample) => Number(sample.time));
+    const stateSeries = resultSeriesForStateIds(run.result, parameterTuningProgram.bindings.filter((binding) => binding.kind === 'state').map((binding) => binding.id));
+    const measured = parameterTuningState.csvContent ? parseCsv(parameterTuningState.csvContent) : null;
+    const series = {};
+    const values = {};
+    for (const binding of parameterTuningProgram.bindings) {
+        if (binding.kind === 'state') series[binding.key] = (stateSeries.get(binding.id) ?? []).map((sample) => sample.value);
+        else if (binding.kind === 'parameter') values[binding.key] = parameterTuningState.vocabulary.variables.find((variable) => variable.kind === 'parameter' && variable.id === binding.id)?.value ?? 0;
+        else {
+            const column = measured?.columnNames.indexOf(binding.column) ?? -1;
+            if (column < 0) return { error: `The measured column "${binding.column}" is not in the data.` };
+            series[binding.key] = measuredAt(times, measured.rows.map((row) => row.time), measured.rows.map((row) => row.values[column]));
+        }
+    }
+    return { run: { times, series, values } };
+}
+
 // What the code editor asks of the project besides Apply.
-window.providerEditor.onRequest?.(({ action, target, payload }) => {
+window.providerEditor.onRequest?.(async ({ action, target, payload }) => {
     if (action === 'bind') return bindProgramPort(target, payload ?? {});
+    if (action === 'objectiveTest') {
+        if (!window.engine.programObjectives) return { available: false, reason: 'An objective written as a program is tested in the desktop app.' };
+        const trial = await objectiveTrial();
+        if (trial.error) return { available: false, reason: trial.error };
+        return window.engine.testObjective({ language: parameterTuningProgram.language, source: payload?.source ?? '', run: trial.run });
+    }
     return { applied: false, error: `Unknown request: ${action}` };
 });
 

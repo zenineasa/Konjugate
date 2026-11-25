@@ -31,6 +31,8 @@ export default {
     onFitProgress: () => {},
     stopFit: async () => false,
     checkObjective: async () => ({ available: false }),
+    // An objective written as a program runs in a process of its own: a desktop feature.
+    testObjective: async () => ({ available: false, reason: 'An objective written as a program is tested in the desktop app.' }),
     // Check program, from the code editor (docs/programs.md, "Testing a program"): the same engine code the desktop runs, in WebAssembly.
     // The code editor's Test: the program's standard checks and a trace of its steps, the same engine code the desktop runs.
     testProgram: ({ kind, source, inputs, time, steps, stepSize }) => testProgramWithWebEngine(engineModuleUrl, { kind, source, inputs: inputs ?? {}, time: time ?? 0, steps: steps ?? 0, stepSize: stepSize ?? 0 }),

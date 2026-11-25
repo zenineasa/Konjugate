@@ -6,12 +6,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { access, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { release as osRelease, tmpdir, totalmem } from 'node:os';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { createLintScheduler, lintHash } from './lintScheduler.mjs';
 import { pythonProgramLintScript } from './pythonProgramLint.mjs';
-import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { decodeObjectiveRunResult, encodeObjectiveRunRequest, frame, objectiveErrorLine } from './objectiveTest.mjs';
+import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, pythonProviderSdkPath, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -3549,6 +3550,86 @@ ipcMain.handle('engineFit', async (event, content, csvContent, config) => {
     }
 });
 ipcMain.handle('engineCheckObjective', async (event, objective) => checkObjectiveWithEngine(objective, await engineOptions()));
+
+// The code editor's Test for a tuning objective written as a program (src/objectiveTest.mjs): the program run once on the trial the
+// project window gives, as a tuning runs it, in the objective SDK's own process (a Python one as `python -m konjugate.objective`, a C++
+// one built against include/konjugate/objectiveProgram.hpp with src/objectiveProgramMain.cpp, as the engine builds it). Answers
+// { available, ok, value, reports, message, line }.
+async function testObjectiveProgram({ language, source, run }) {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateObjectiveTest-'));
+    const paths = { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged };
+    try {
+        let command;
+        let args;
+        let environment = process.env;
+        const fileName = language === 'python' ? 'objective.py' : 'objective.cpp';
+        const sourcePath = join(directory, fileName);
+        await writeFile(sourcePath, source ?? '', 'utf8');
+        if (language === 'python') {
+            command = await resolvePythonInterpreter();
+            args = ['-m', 'konjugate.objective', sourcePath];
+            const sdk = pythonProviderSdkPath(paths);
+            environment = { ...process.env, PYTHONPATH: process.env.PYTHONPATH ? `${sdk}${delimiter}${process.env.PYTHONPATH}` : sdk };
+        } else {
+            const sdk = cppProviderSdkPath(paths);
+            const { compiler, flavor, flags } = await cppLintSetup();
+            const artifact = join(directory, process.platform === 'win32' ? 'objective.exe' : 'objective');
+            const glue = join(sdk, 'src', 'objectiveProgramMain.cpp');
+            const buildArgs = flavor === 'msvc'
+                ? ['/std:c++20', '/O1', '/EHsc', '/nologo', ...flags.filter((flag) => flag.startsWith('/I')), sourcePath, glue, `/Fe${artifact}`]
+                : ['-std=c++20', '-O1', ...flags.filter((flag) => flag !== '-fsyntax-only' && flag !== '-std=c++20'), sourcePath, glue, '-o', artifact];
+            const built = await runProcess(compiler, buildArgs);
+            if (built.code !== 0) {
+                const output = `${built.stderr}\n${built.stdout}`.trim();
+                const first = parseCompilerDiagnostics(output, sourcePath).find((diagnostic) => diagnostic.severity === 'error');
+                return { available: true, ok: false, message: first?.message ?? (output || 'The objective program did not compile.'), line: first?.line ?? null };
+            }
+            command = artifact;
+            args = [];
+        }
+        const answer = await new Promise((resolve) => {
+            let child;
+            try { child = spawn(command, args, { env: environment, cwd: directory }); } catch (error) { resolve({ failed: error.message }); return; }
+            let received = Buffer.alloc(0);
+            let stderr = '';
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
+                try { child.stdin.end(); } catch { /* gone */ }
+                setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 1000);
+                resolve(value);
+            };
+            const timer = setTimeout(() => finish({ failed: 'The objective program did not answer within 30 s.', stderr }), 30000);
+            child.stdout.on('data', (chunk) => {
+                received = Buffer.concat([received, chunk]);
+                if (received.length >= 4) {
+                    const size = received.readUInt32BE(0);
+                    if (received.length >= 4 + size) finish({ bytes: new Uint8Array(received.subarray(4, 4 + size)), stderr });
+                }
+            });
+            child.stderr.on('data', (chunk) => { stderr += chunk; });
+            child.on('error', (error) => finish({ failed: error.message, stderr }));
+            child.on('close', (code) => finish({ failed: `The objective program stopped (exit code ${code}) without an answer.`, stderr }));
+            child.stdin.on('error', () => { /* it stopped before reading: said on close */ });
+            child.stdin.write(Buffer.from(frame(encodeObjectiveRunRequest(run ?? {}))));
+        });
+        if (answer.bytes) {
+            const result = decodeObjectiveRunResult(answer.bytes);
+            return { available: true, ok: result.ok, value: result.value, reports: result.reports, message: result.message,
+                line: result.ok ? null : objectiveErrorLine(`${answer.stderr}\n${result.message}`, fileName) };
+        }
+        const said = String(answer.stderr ?? '').trim().split('\n').filter(Boolean);
+        return { available: true, ok: false, message: said.at(-1) || answer.failed, line: objectiveErrorLine(answer.stderr, fileName) };
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+}
+ipcMain.handle('engineTestObjective', (event, payload) => {
+    requireProjectWindow(event);
+    return testObjectiveProgram(payload ?? {});
+});
 
 ipcMain.handle('engineFitStop', async (event) => {
     const active = [...activeFittingOperations].find((operation) => operation.owner === event.sender);

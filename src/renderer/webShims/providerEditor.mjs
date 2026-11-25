@@ -152,6 +152,9 @@ function ensureEditor() {
                 test,
                 describe,
                 openExternal: (url) => { window.open(url, '_blank', 'noopener'); },
+                testObjective: async (source, target) => (requestHandler
+                    ? requestHandler({ action: 'objectiveTest', target, payload: { source } })
+                    : { available: false, reason: 'The project is not listening.' }),
                 bind: async (key, value, target) => (requestHandler
                     ? requestHandler({ action: 'bind', target, payload: { key, value } })
                     : { applied: false, error: 'The project is not listening.' }),

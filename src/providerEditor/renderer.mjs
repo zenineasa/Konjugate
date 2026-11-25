@@ -22,6 +22,7 @@ const editor = createProgramEditor({
         test: (source, kind, request) => bridge.test(source, kind, request),
         describe: (source, kind, inputs) => bridge.describe(source, kind, inputs),
         bind: (key, value, target) => bridge.request('bind', target, { key, value }),
+        testObjective: (source, target) => bridge.request('objectiveTest', target, { source }),
         openExternal: (url) => bridge.openExternal(url),
         apply: (source, target) => bridge.apply(source, target),
         close: () => window.windowControls.close(),

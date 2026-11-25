@@ -6514,6 +6514,31 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(opened, `${limitRow}.querySelector('[data-field="limitKind"]').hidden`), true, 'Without a program, a limit is a formula.');
         await evaluate(opened, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="python"]').click()`);
 
+        // In the code editor: its keys in Ports, and Test on one trial gives its value and what it reports; a broken one, its line.
+        const beforeEditor = driver.allHandles();
+        await evaluate(opened, `document.querySelector('#parameterTuningProgramEditor').click()`);
+        const objectiveEditor = await driver.waitForNewHandle(beforeEditor, { titleIncludes: 'Tuning objective' });
+        await waitFor(objectiveEditor, `document.querySelector('.cm-editor') !== null`, 'The objective did not open in the code editor.');
+        assert.equal(await evaluate(objectiveEditor, `document.querySelector('#programEditorFormat').textContent`), 'Python · objective');
+        assert.equal(await evaluate(objectiveEditor, `document.querySelector('#programEditorConvert').hidden && document.querySelector('#programEditorTemplates').hidden`), true, 'An objective has no older format and no program templates here.');
+        assert.deepEqual(await evaluate(objectiveEditor, `[...document.querySelectorAll('#programEditorPortsList .portRow')].map((row) => [row.dataset.port, row.querySelector('.portUnit').textContent, row.querySelector('.portBound').textContent])`),
+            [['simulated', 'state', 'Water tank · Water temperature'], ['measured', 'measured column', 'tankTemperature']]);
+        await evaluate(objectiveEditor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(objectiveEditor, `/passed|failed/.test(document.querySelector('#programEditorObjectiveSummary').className)`, 'The objective\'s Test did not answer.', 60000);
+        assert.match(await evaluate(objectiveEditor, `document.querySelector('#programEditorObjectiveSummary').textContent`), /^Objective: \d/,
+            `The objective's Test did not give its value: ${await evaluate(objectiveEditor, `document.querySelector('#programEditorObjectiveTest').textContent`)}`);
+        assert.deepEqual(await evaluate(objectiveEditor, `[...document.querySelectorAll('#programEditorObjectiveReports th')].map((cell) => cell.textContent)`), ['final'], 'What it reports is shown.');
+        const objectiveSource = await evaluate(objectiveEditor, `window.__providerEditorView.state.doc.toString()`);
+        const brokenLine = objectiveSource.split('\n').findIndex((line) => line.includes('    return sum(')) + 1;
+        await setEditorSource(objectiveEditor, objectiveSource.replace('    return sum(', '    return 1 / 0 + sum('));
+        await evaluate(objectiveEditor, `document.querySelector('#programEditorRunObjective').click()`);
+        await waitFor(objectiveEditor, `document.querySelector('#programEditorObjectiveSummary').classList.contains('failed')`, 'A broken objective did not fail its Test.', 60000);
+        assert.match(await evaluate(objectiveEditor, `document.querySelector('#programEditorObjectiveProblems').textContent`), /ZeroDivisionError/);
+        assert.equal(await evaluate(objectiveEditor, `Number(document.querySelector('#programEditorObjectiveProblems .testLineLink')?.dataset.line)`), brokenLine, 'The error does not point at its line.');
+        await evaluate(objectiveEditor, `document.querySelector('#programEditorCancel').click()`);
+        const closedBy = Date.now() + 5000;
+        while (driver.allHandles().includes(objectiveEditor) && Date.now() < closedBy) await new Promise((resolve) => setTimeout(resolve, 100));
+
         await evaluate(opened, `(() => { document.querySelector('#parameterTuningMaxSimulations').value = '150'; document.querySelector('#runParameterTuning').click(); })()`);
         await waitFor(opened, `!document.querySelector('#parameterTuningReviewSection').hidden`, 'The program objective did not reach its review.', 120000);
         const report = await evaluate(opened, `window.__debugParameterTuning.report()`);
@@ -6525,9 +6550,51 @@ export async function runInteractionTests(driver) {
         assert.equal(setup.objective.program.language, 'python', 'The program is kept with the project, to run again.');
         assert.deepEqual(setup.objective.program.bindings, [{ key: 'simulated', kind: 'state', id: 2 }, { key: 'measured', kind: 'measured', column: 'tankTemperature' }]);
         assert.deepEqual(setup.objective.constraints, [{ report: 'final', relation: '<=', limit: 400 }], 'The reported limit is kept with the project.');
+        // The same objective in C++: compiled as a tuning compiles it, and run once.
+        await evaluate(opened, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="cpp"]').click()`);
+        await evaluate(opened, `(() => { window.__confirm = window.confirm; window.confirm = () => true; [...document.querySelectorAll('#parameterTuningProgramTemplates button')].find((button) => button.textContent === 'Squared error against measured data').click(); window.confirm = window.__confirm; })()`);
+        assert.match(await evaluate(opened, `document.querySelector('#parameterTuningProgramSource').value`), /#include <konjugate\/objectiveProgram\.hpp>/);
+        const beforeCppEditor = driver.allHandles();
+        await evaluate(opened, `document.querySelector('#parameterTuningProgramEditor').click()`);
+        const cppEditor = await driver.waitForNewHandle(beforeCppEditor, { titleIncludes: 'Tuning objective' });
+        await waitFor(cppEditor, `document.querySelector('#programEditorFormat')?.textContent === 'C++ · objective'`, 'The C++ objective did not open in the code editor.');
+        await evaluate(cppEditor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(cppEditor, `/passed|failed/.test(document.querySelector('#programEditorObjectiveSummary').className)`, 'The C++ objective\'s Test did not answer.', 120000);
+        assert.match(await evaluate(cppEditor, `document.querySelector('#programEditorObjectiveSummary').textContent`), /^Objective: \d/,
+            `The C++ objective's Test did not give its value: ${await evaluate(cppEditor, `document.querySelector('#programEditorObjectiveTest').textContent`)}`);
+        await evaluate(cppEditor, `document.querySelector('#programEditorCancel').click()`);
+        const cppClosedBy = Date.now() + 5000;
+        while (driver.allHandles().includes(cppEditor) && Date.now() < cppClosedBy) await new Promise((resolve) => setTimeout(resolve, 100));
         await evaluate(opened, `window.confirm = () => true; undefined`);
         await closeWhenValidated(opened);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
+
+    await run('in the web edition a tuning objective written as a program opens in the same editor, its keys in Ports, and Test says where it runs', async () => {
+        const content = await decodeProjectFile(await readFile(join(process.cwd(), 'examples', 'tankCalibration.kjt')));
+        const measured = await readFile(join(process.cwd(), 'examples', 'tankCalibrationMeasured.csv'), 'utf8');
+        await evaluate(window, `(async () => {
+            document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'));
+            await window.__debugProject.load(${content}, 'tankCalibration.kjt');
+        })()`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The tank model did not load.');
+        await evaluate(window, `document.querySelector('#parameterTuningButton').click()`);
+        await waitFor(window, `!document.querySelector('#parameterTuning').classList.contains('hidden')`, 'The tuning card did not open.');
+        await evaluate(window, `document.querySelector('#parameterTuningGoalObjective').click()`);
+        await evaluate(window, `window.__debugParameterTuning.loadCsv(${JSON.stringify(measured)}, 'tankCalibrationMeasured.csv')`);
+        await waitFor(window, `/Added 1 measured column/.test(document.querySelector('#parameterTuningStatus').textContent)`, 'The measured data was not added.');
+        await evaluate(window, `document.querySelector('#parameterTuningObjectiveKind [data-objective-kind="python"]').click()`);
+        await evaluate(window, `[...document.querySelectorAll('#parameterTuningProgramTemplates button')].find((button) => button.textContent === 'Squared error against measured data').click()`);
+        await evaluate(window, `document.querySelector('#parameterTuningProgramEditor').click()`);
+        await waitFor(window, programEditorShown, 'The objective did not open in the code editor panel.', 30000);
+        assert.equal(await evaluate(window, `document.querySelector('#programEditorFormat').textContent`), 'Python · objective');
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#programEditorPortsList .portRow')].map((row) => row.dataset.port)`), ['simulated', 'measured']);
+        await evaluate(window, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(window, `document.querySelector('#programEditorObjectiveSummary').classList.contains('failed')`, 'Test did not answer.');
+        assert.equal(await evaluate(window, `document.querySelector('#programEditorObjectiveSummary').textContent`), 'An objective written as a program is tested in the desktop app.');
+        await evaluate(window, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(window);
+        await evaluate(window, `document.querySelector('#parameterTuning [data-close-card]')?.click()`);
+    }, { skip: driver.capabilities.multiWindow && 'the desktop runs an objective program\'s Test, in the tuning objective test above' });
 
     await run('the invented lab trial in the card: another logger\'s file read, calibrated on a stretch, checked on another, run live', async () => {
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-lab-'));

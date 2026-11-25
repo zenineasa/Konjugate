@@ -118,6 +118,13 @@ async function check(source, kind, inputs) {
     return window.engine.checkProgram({ kind, source, inputs: inputs ?? {}, time: 0 });
 }
 
+// The program's ports as the web engine reads them. A version 2 C++ program cannot run in the web engine, so it is read on the desktop.
+async function describe(source, kind, inputs) {
+    if (kind === 'cpp') return { available: false, reason: 'The ports of a C++ program are read in the desktop app: here, its bindings only.' };
+    if (!window.engine?.describeProgram) return { available: false, reason: 'The ports are read in the desktop app: here, its bindings only.' };
+    return window.engine.describeProgram({ kind, source, inputs: inputs ?? {} });
+}
+
 // The project's answer to an apply comes back through reportApplied, as on the desktop.
 function apply(source, target) {
     pendingApply?.({ applied: false, error: 'Superseded by a newer apply.' });
@@ -142,6 +149,7 @@ function ensureEditor() {
             host: {
                 validate,
                 check,
+                describe,
                 apply,
                 close: () => { panel.hidden = true; },
                 setTitle: (text) => { titleElement.textContent = text; panel.setAttribute('aria-label', text); },

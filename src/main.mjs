@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { createLintScheduler, lintHash } from './lintScheduler.mjs';
-import { checkObjectiveWithEngine, checkProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkObjectiveWithEngine, checkProgramWithEngine, describeProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -2892,6 +2892,28 @@ ipcMain.handle('providerEditorValidate', async (event, { source, kind }) => {
 ipcMain.handle('providerEditorCheck', async (_event, { source, kind, inputs }) => (
     checkProgramWithEngine({ kind, source, inputs: inputs ?? {} }, await engineOptions())
 ));
+
+// The code editor's Ports: the engine's description of a version 2 program (describeProgram). One at a time for each editor window, the
+// one a newer request supersedes stopped, kept by source and starting values (src/lintScheduler.mjs).
+function createProviderEditorDescribe() {
+    return createLintScheduler({
+        timeoutMs: 60000,
+        key: (request) => `${request.kind}|${lintHash(request.source)}|${lintHash(JSON.stringify(request.inputs))}`,
+        run: async (request, signal) => describeProgramWithEngine({ kind: request.kind, source: request.source, inputs: request.inputs },
+            { ...await engineOptions(), signal })
+    });
+}
+const sharedProviderEditorDescribe = createProviderEditorDescribe();
+ipcMain.handle('providerEditorDescribe', async (event, { source, kind, inputs }) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (state && !state.providerEditorDescribe) state.providerEditorDescribe = createProviderEditorDescribe();
+    const describe = state?.providerEditorDescribe ?? sharedProviderEditorDescribe;
+    const answer = await describe.schedule({ kind: kind === 'python' ? 'python' : 'cpp', source: source ?? '', inputs: inputs ?? {} });
+    if (answer?.superseded) return { available: true, superseded: true };
+    if (answer?.timedOut) return { available: false, reason: 'Reading the program’s ports took too long; they will be read again when you pause.' };
+    return answer;
+});
 
 ipcMain.handle('providerEditorApply', (event, { source, target }) => {
     // This call comes from the provider-editor window itself, not a project window -- find

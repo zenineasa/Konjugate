@@ -12,6 +12,8 @@
 //   close()                       → closes the window or hides the panel (the editor has already decided it may)
 //   setTitle(text)                → "Heater · Program"
 //   dirtyChanged(dirty)           → optional: told whenever there come to be, or stop being, unsaved changes
+//   describe(source, kind, inputs) → optional: the engine's description of a version 2 program (describeProgram: its ports, memory and
+//                                    clock with their lines), or { available: false, reason } where it cannot be read
 //   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
 //                                    checkPassed }, for the card's status line
 //
@@ -27,6 +29,8 @@ import {
 } from './themes.mjs';
 import { convertProgramToVersion2, olderFormatNotice } from '../programConversion.mjs';
 import { programSourceVersion } from '../providerTemplate.mjs';
+import { formatPortValue, portsTable } from './portsTable.mjs';
+import { lintHash } from '../lintScheduler.mjs';
 import {
     confirmLeave, createEditorSession, formatLabel, leaveQuestion, portDeclarationLine, problemCountText, programEditorTitle, sameTarget
 } from './editorSession.mjs';
@@ -72,7 +76,22 @@ const markup = `
         <ul id="programEditorCheckProblems" class="checkProblems"></ul>
         <p id="programEditorCheckDetails" class="checkDetails"></p>
     </div>
-    <div id="programEditorHost" class="programEditorHost"></div>
+    <div class="programEditorBody">
+        <div id="programEditorHost" class="programEditorHost"></div>
+        <aside id="programEditorSide" class="programEditorSide" hidden>
+            <div id="programEditorSideResize" class="sideResize" title="Drag to resize"></div>
+            <div class="sideTabs">
+                <button class="sideTab active" type="button" data-side-tab="ports">Ports</button>
+                <span class="toolbarSpacer"></span>
+                <button id="programEditorFold" class="foldButton" type="button" title="Fold the panel away" aria-label="Fold the panel away">›</button>
+            </div>
+            <div id="programEditorPorts" class="portsPanel" data-side-panel="ports">
+                <p id="programEditorPortsNote" class="portsNote" hidden></p>
+                <div id="programEditorPortsList" class="portsList" role="list"></div>
+            </div>
+        </aside>
+        <button id="programEditorUnfold" class="unfoldButton" type="button" hidden title="Show the Ports panel">‹ Ports</button>
+    </div>
     <div id="programEditorLeave" class="programEditorLeave" hidden>
         <div class="leaveCard" role="alertdialog" aria-modal="true" aria-labelledby="programEditorLeaveQuestion">
             <p id="programEditorLeaveQuestion"></p>
@@ -171,6 +190,157 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     root.addEventListener('pointerdown', (event) => {
         if (!$('#programEditorMenu').hidden && !event.target.closest('#programEditorMenu, #programEditorMore')) toggleMenu(false);
     });
+
+    // ---- The side panel: Ports (docs/proposals/codeEditor.md, "Ports: the program in its model") -----------------------------------
+    // What the project says of the program's bindings ({ bindings, outputs }, portsTable.mjs), the engine's description of the source,
+    // the last one that loaded (shown greyed while the source does not), and the port asked for.
+    let portContext = { bindings: [], outputs: [] };
+    let description = null;
+    let lastGoodDescription = null;
+    let portsNote = '';
+    let portsStale = false;
+    let selectedPort = null;
+    let revealPortOnDescription = false;
+    let describeSequence = 0;
+    let describeTimer = null;
+    const describeCache = new Map();
+    const side = $('#programEditorSide');
+    let sideFolded = read('konjugate.providerEditor.sideFolded') === '1';
+    const storedWidth = Number(read('konjugate.providerEditor.sideWidth'));
+    let sideWidth = Number.isFinite(storedWidth) && storedWidth >= 200 ? storedWidth : 300;
+
+    function showSide(shown) {
+        side.hidden = !shown || sideFolded;
+        $('#programEditorUnfold').hidden = !shown || !sideFolded;
+        side.style.width = `${sideWidth}px`;
+    }
+    $('#programEditorFold').addEventListener('click', () => { sideFolded = true; write('konjugate.providerEditor.sideFolded', '1'); showSide(sideShown()); });
+    $('#programEditorUnfold').addEventListener('click', () => { sideFolded = false; write('konjugate.providerEditor.sideFolded', '0'); showSide(sideShown()); });
+    $('#programEditorSideResize').addEventListener('pointerdown', (event) => {
+        const handle = event.currentTarget;
+        handle.setPointerCapture(event.pointerId);
+        const startX = event.clientX;
+        const startWidth = side.getBoundingClientRect().width;
+        const move = (moveEvent) => {
+            const limit = Math.max(200, root.getBoundingClientRect().width - 240);
+            sideWidth = Math.round(Math.min(limit, Math.max(200, startWidth + startX - moveEvent.clientX)));
+            side.style.width = `${sideWidth}px`;
+        };
+        const end = () => {
+            handle.removeEventListener('pointermove', move);
+            handle.removeEventListener('pointerup', end);
+            write('konjugate.providerEditor.sideWidth', String(sideWidth));
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', end);
+    });
+    const sideShown = () => context.program;
+
+    function renderPorts() {
+        const shown = description ?? (portsStale ? lastGoodDescription : null);
+        const { rows } = portsTable(shown, portContext);
+        const note = $('#programEditorPortsNote');
+        note.hidden = !portsNote;
+        note.textContent = portsNote;
+        const list = $('#programEditorPortsList');
+        list.classList.toggle('stale', Boolean(portsStale && shown));
+        list.replaceChildren(...rows.map((row) => {
+            const item = document.createElement('div');
+            item.className = `portRow ${row.group} ${row.state}${row.key === selectedPort ? ' selected' : ''}`;
+            item.setAttribute('role', 'listitem');
+            item.dataset.port = row.key;
+            item.dataset.group = row.group;
+            if (row.line) {
+                item.dataset.line = String(row.line);
+                item.title = `Line ${row.line}`;
+            }
+            const head = document.createElement('div');
+            head.className = 'portHead';
+            head.append(
+                Object.assign(document.createElement('span'), { className: 'portTag', textContent: row.tag }),
+                Object.assign(document.createElement('span'), { className: 'portKey', textContent: row.key }),
+                Object.assign(document.createElement('span'), { className: 'portUnit', textContent: row.unit }));
+            item.append(head);
+            const boundText = row.group === 'output' ? (row.bound ? `→ ${row.bound}${row.part ? ` · ${row.part}` : ''}` : '') : (row.bound ?? '');
+            const value = formatPortValue(row.value);
+            if (boundText || value) {
+                const detail = document.createElement('div');
+                detail.className = 'portDetail';
+                detail.append(Object.assign(document.createElement('span'), { className: 'portBound', textContent: boundText }),
+                    Object.assign(document.createElement('span'), { className: 'portValue', textContent: value }));
+                item.append(detail);
+            }
+            if (row.note) item.append(Object.assign(document.createElement('div'), { className: 'portNote', textContent: row.note }));
+            return item;
+        }));
+        if (!rows.length && !portsNote) list.append(Object.assign(document.createElement('p'), { className: 'portsEmpty', textContent: 'The program declares no ports yet.' }));
+        list.querySelector('.portRow.selected')?.scrollIntoView({ block: 'nearest' });
+    }
+    // A click on a port goes to the line that declares it.
+    $('#programEditorPortsList').addEventListener('click', (event) => {
+        const row = event.target.closest('.portRow');
+        if (!row) return;
+        selectedPort = row.dataset.port;
+        for (const other of $('#programEditorPortsList').querySelectorAll('.portRow')) other.classList.toggle('selected', other === row);
+        if (row.dataset.line) goToLine(Number(row.dataset.line));
+    });
+
+    // The engine reads the program after a pause in typing, once per source (its answers kept by the source and the values it starts
+    // from); an answer for a source since changed is dropped.
+    function scheduleDescribe(delay = 900) {
+        clearTimeout(describeTimer);
+        if (!context.program) return;
+        const source = session.source;
+        if (programSourceVersion(kind, source) === 1 || !host.describe) {
+            description = null;
+            portsStale = false;
+            portsNote = programSourceVersion(kind, source) === 1
+                ? 'Older program format: its bindings only. Convert to version 2 to see its ports with their units, its memory and its clock.'
+                : '';
+            renderPorts();
+            return;
+        }
+        describeTimer = setTimeout(() => describe(source), delay);
+    }
+    async function describe(source) {
+        const sequence = ++describeSequence;
+        const inputs = context.checkInputs ?? {};
+        const cacheKey = `${kind}|${lintHash(source)}|${lintHash(JSON.stringify(inputs))}`;
+        let answer = describeCache.get(cacheKey);
+        if (!answer) {
+            if (!lastGoodDescription) { portsNote = 'Reading the program’s ports…'; renderPorts(); }
+            try { answer = await host.describe(source, kind, inputs); } catch (error) { answer = { available: false, reason: `The ports could not be read: ${error?.message ?? error}` }; }
+            if (answer?.available && (answer.ok || answer.problems?.length)) {
+                describeCache.set(cacheKey, answer);
+                while (describeCache.size > 16) describeCache.delete(describeCache.keys().next().value);
+            }
+        }
+        if (answer?.superseded || sequence !== describeSequence || source !== session.source) return;
+        if (!answer?.available) {
+            description = null;
+            portsStale = false;
+            portsNote = answer?.reason ?? 'The ports are read by the simulation engine, which is not available here: its bindings only.';
+        } else if (answer.ok) {
+            description = answer;
+            lastGoodDescription = answer;
+            portsStale = false;
+            portsNote = '';
+        } else {
+            description = null;
+            portsStale = true;
+            const first = answer.problems?.[0];
+            const problem = first ? `${first.message}${first.line ? ` (line ${first.line})` : ''}` : 'it does not load';
+            portsNote = lastGoodDescription
+                ? `The program does not load as it is, so these are its ports as they last were. ${problem}`
+                : `The program does not load as it is: ${problem}`;
+        }
+        renderPorts();
+        if (revealPortOnDescription && description) {
+            revealPortOnDescription = false;
+            const row = [...(description.inputs ?? []), ...(description.outputs ?? [])].find((port) => port.key === selectedPort);
+            if (row?.line) goToLine(row.line);
+        }
+    }
 
     // ---- Apply state -------------------------------------------------------------------------------------------------------------
     function refreshApplyState() {
@@ -413,6 +583,7 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
                     session.edit(update.state.doc.toString());
                     refreshApplyState();
                     refreshFormat();
+                    scheduleDescribe();
                 })
             ]
         });
@@ -425,6 +596,14 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         title = payload.title ?? '';
         target = payload.target ?? null;
         context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {} };
+        portContext = { bindings: payload.ports?.bindings ?? [], outputs: payload.ports?.outputs ?? [] };
+        description = null;
+        lastGoodDescription = null;
+        portsStale = false;
+        portsNote = '';
+        selectedPort = payload.port ?? null;
+        revealPortOnDescription = Boolean(payload.port) && !payload.line;
+        showSide(sideShown());
         session.load(payload.source ?? '');
         templateSource = payload.templateSource ?? '';
         $('#programEditorTemplate').hidden = !templateSource;
@@ -443,10 +622,18 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         // Write program: a new program starts from its template, unsaved until applied (undo leaves it empty again).
         if (payload.startWith && !session.source.trim()) view.dispatch({ changes: { from: 0, insert: payload.startWith } });
         if (payload.convert && context.program && programSourceVersion(kind, session.source) === 1) showConversion();
+        renderPorts();
+        scheduleDescribe(0);
     }
 
     function revealLineOrPort(payload) {
         const line = payload.line ?? portDeclarationLine(session.source, payload.port);
+        if (payload.port) {
+            selectedPort = payload.port;
+            // A port the source does not name as written (Python's level_rate is the key levelRate) waits for the engine's line.
+            revealPortOnDescription = !line;
+            renderPorts();
+        }
         if (line) goToLine(line, payload.column ?? 1);
         else view?.focus();
     }

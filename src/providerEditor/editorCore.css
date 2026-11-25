@@ -57,7 +57,39 @@
 .programEditor .checkProblems:empty { display: none; }
 .programEditor .checkDetails { margin-top: 4px !important; color: #778d98; }
 
-.programEditorHost { flex: 1; min-height: 0; overflow: hidden; user-select: text; }
+.programEditorBody { position: relative; display: flex; flex: 1; min-height: 0; }
+.programEditorHost { flex: 1; min-width: 0; min-height: 0; overflow: hidden; user-select: text; }
+
+/* The side panel: Ports (and, later, Test), beside the code; folded away, a tab at the edge brings it back. */
+.programEditorSide { position: relative; display: flex; flex: none; flex-direction: column; min-width: 200px; max-width: 70%; background: #0a151d; border-left: 1px solid #253944; }
+.programEditor .sideResize { position: absolute; z-index: 2; top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; }
+.programEditor .sideTabs { display: flex; flex: none; align-items: center; gap: 4px; padding: 6px 8px 0; border-bottom: 1px solid #253944; }
+.programEditor .sideTab { padding: 5px 8px; color: #778d98; background: none; border: 0; border-bottom: 2px solid transparent; font-size: 10px; font-weight: 600; }
+.programEditor .sideTab.active { color: #edf5f6; border-bottom-color: #42c9bc; }
+.programEditor .foldButton { width: 22px; height: 22px; padding: 0; color: #8499a3; background: none; border: 0; font-size: 13px; }
+.programEditor .foldButton:hover { color: #edf5f6; }
+.programEditor .unfoldButton { position: absolute; z-index: 3; top: 8px; right: 0; padding: 5px 8px; color: #9eb0b9; background: #0d1a22; border: 1px solid #2f4855; border-right: 0; border-radius: 5px 0 0 5px; font-size: 9px; font-weight: 600; }
+.programEditor .unfoldButton:hover { color: #edf5f6; }
+.programEditor .portsPanel { flex: 1; min-height: 0; padding: 8px 10px; overflow: auto; font-size: 10px; user-select: text; }
+.programEditor .portsNote { margin: 0 0 8px; color: #d9c58a; font-size: 9px; line-height: 1.45; }
+.programEditor .portsList { display: flex; flex-direction: column; gap: 2px; }
+.programEditor .portsList.stale { opacity: .55; }
+.programEditor .portsEmpty { margin: 0; color: #778d98; }
+.programEditor .portRow { padding: 5px 6px; border: 1px solid transparent; border-radius: 4px; cursor: default; }
+.programEditor .portRow[data-line] { cursor: pointer; }
+.programEditor .portRow:hover { background: rgb(66 201 188 / 5%); }
+.programEditor .portRow.selected { background: rgb(66 201 188 / 9%); border-color: #31525a; }
+.programEditor .portHead { display: flex; align-items: baseline; gap: 6px; }
+.programEditor .portTag { flex: none; width: 36px; color: #5b7285; font-size: 8px; font-weight: 700; letter-spacing: .04em; }
+.programEditor .portKey { flex: 1; min-width: 0; overflow: hidden; color: #dce8ec; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+.programEditor .portUnit { flex: none; color: #83d7cf; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.programEditor .portDetail { display: flex; justify-content: space-between; gap: 8px; padding-left: 42px; color: #9eb0b9; }
+.programEditor .portBound { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.programEditor .portValue { flex: none; color: #c7d4d9; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.programEditor .portNote { padding-left: 42px; color: #778d98; font-size: 9px; }
+.programEditor .portRow.problem .portNote { color: #e0838a; }
+.programEditor .portRow.stale .portNote { color: #d9c58a; }
+.programEditor .portRow.stale .portKey { text-decoration: line-through; color: #9eb0b9; }
 .programEditorHost * { user-select: text; }
 .programEditorHost .cm-editor { height: 100%; }
 .programEditorHost .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; }

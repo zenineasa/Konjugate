@@ -10193,6 +10193,57 @@ export async function runInteractionTests(driver) {
         assert.equal(await program(), undefined);
     });
 
+    await run('the code editor\'s Ports list a node program\'s ports with what they are bound to, their units, values and conversions', async () => {
+        const project = JSON.parse(await readFile(join(process.cwd(), 'examples', 'providers', 'piControlledTank.json'), 'utf8'));
+        // The level in centimetres, so its port (in metres) converts, as a run does.
+        project.nodes[0].states[0].unit = 'cm';
+        project.nodes[0].states[0].initialValue = 120;
+        await evaluate(window, `(async () => {
+            document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'));
+            await window.__debugProject.load(${JSON.stringify(project)}, 'piControlledTank.kjt');
+        })()`);
+        await openNode('Tank');
+        await waitFor(window, `!document.querySelector('#nodeProgramFields').hidden`, 'The node\'s program section did not show.');
+        let editor = await openProgramEditor('#editNodeProgramOpenEditor');
+        const row = (key) => `document.querySelector('#programEditorPortsList .portRow[data-port="${key}"]')`;
+        // The engine's description arrives after the bindings alone: its clock is there only then.
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorPortsList .portRow.clock'))`, 'The Ports panel did not list the program\'s ports.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), false);
+        assert.equal(await evaluate(editor, `${row('level')}.querySelector('.portUnit').textContent`), 'm');
+        // In the names the node's own Program section uses: its own state as this.level.
+        assert.equal(await evaluate(editor, `${row('level')}.querySelector('.portBound').textContent`), 'this.level');
+        assert.equal(await evaluate(editor, `${row('level')}.querySelector('.portValue').textContent`), '120');
+        assert.equal(await evaluate(editor, `${row('level')}.querySelector('.portNote').textContent`), 'cm → m at the port');
+        assert.match(await evaluate(editor, `${row('levelRate')}.querySelector('.portBound').textContent`), /^→ Tank · .+ · a rate$/);
+        assert.equal(await evaluate(editor, `${row('levelRate')}.querySelector('.portNote').textContent`), 'm/s → cm/s at the port');
+        assert.equal(await evaluate(editor, `${row('samplePeriod')}.querySelector('.portNote').textContent`), 'not bound: its default');
+        assert.ok(await evaluate(editor, `document.querySelectorAll('#programEditorPortsList .portRow.memory').length`) >= 1, 'Its memory is listed.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorPortsList .portRow.clock .portKey').textContent`), 'every 0.05 s');
+        // A click on a port goes to its declaration.
+        const declared = await evaluate(editor, `Number(${row('levelRate')}.dataset.line)`);
+        await evaluate(editor, `${row('levelRate')}.click()`);
+        assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number`), declared);
+        assert.match(await evaluate(editor, `window.__providerEditorView.state.doc.line(${declared}).text`), /level_rate = Output/);
+        // Folded away and back.
+        await evaluate(editor, `document.querySelector('#programEditorFold').click()`);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), true);
+        await evaluate(editor, `document.querySelector('#programEditorUnfold').click()`);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), false);
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+
+        // "set by program ›" opens it with that output's port selected, at its declaration (Python's level_rate is the key levelRate).
+        await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .partChip.program, #nodeEditorStates .setByProgram'))`, 'The level shows no part of the program.');
+        editor = await openProgramEditor('#nodeEditorStates .partChip.program, #nodeEditorStates .setByProgram');
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorPortsList .portRow.selected'))`, 'No port was selected.', 90000);
+        const selected = await evaluate(editor, `document.querySelector('#programEditorPortsList .portRow.selected').dataset.port`);
+        assert.ok(['levelRate', 'effortRateSquared'].includes(selected), `The selected port was ${selected}.`);
+        await waitFor(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number === Number(document.querySelector('#programEditorPortsList .portRow.selected').dataset.line)`,
+            'The editor did not open at the selected port\'s declaration.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+    });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {

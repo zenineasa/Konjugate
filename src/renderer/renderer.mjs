@@ -14365,6 +14365,67 @@ function programOfTarget(target) {
     return null;
 }
 
+// What the code editor's Ports panel is told of a program's bindings (src/providerEditor/portsTable.mjs): each input binding in the
+// model's names with the unit of what it reads and its value now, and each output's state with its unit and whether it is a Rate state.
+function programPortContext(target, found, checkInputs = {}) {
+    const implementation = found.implementation;
+    const kinds = stateEquationContext().kinds;
+    const stateOf = (stateId) => {
+        for (const node of model.nodes) {
+            if (node.deleted) continue;
+            const state = node.states?.find((candidate) => candidate.id === stateId);
+            if (state) return state;
+        }
+        return null;
+    };
+    const parameterUnit = (binding, parameters) => {
+        if (binding.sharedParameterId !== undefined && binding.sharedParameterId !== null) {
+            return model.sharedParameters?.find((parameter) => parameter.id === binding.sharedParameterId)?.unit ?? '';
+        }
+        const own = (parameters ?? []).find((parameter) => parameter.id === binding.parameterId);
+        if (own?.sharedParameterId !== undefined && own?.sharedParameterId !== null) {
+            return model.sharedParameters?.find((parameter) => parameter.id === own.sharedParameterId)?.unit ?? own.unit ?? '';
+        }
+        return own?.unit ?? '';
+    };
+    const bindingUnit = (binding) => {
+        if (binding.kind === 'time') return 's';
+        if (binding.kind === 'parameter') return parameterUnit(binding, found.parameters);
+        return stateOf(binding.stateId)?.unit ?? '';
+    };
+    const output = (key, stateId) => ({
+        key: key ?? '', label: stateId === null || stateId === undefined ? '' : modelStateName(stateId),
+        unit: stateOf(stateId)?.unit ?? '', rate: kinds.get(stateId)?.kind !== 'update'
+    });
+    let reads = [];
+    let outputs = [];
+    if (target.type === 'editor') {
+        const relationship = model.relationships.find((candidate) => candidate.id === target.relationshipId);
+        reads = edgeProgramBindingsSummary(relationship).reads;
+        if (implementation.outputs?.length) {
+            outputs = implementation.outputs.map((entry) => output(entry.key, entry.stateId));
+        } else {
+            let stateId = implementation.output?.stateId;
+            if (stateId === undefined || stateId === null) {
+                try { stateId = relationshipEquationContext(relationship).main?.stateId; } catch { stateId = null; }
+            }
+            outputs = [output(implementation.output?.key ?? 'output', stateId)];
+        }
+    } else if (target.type === 'sourceTerm') {
+        const node = nodeObjects.get(target.nodeId);
+        const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === target.termId);
+        reads = sourceTermProgramBindingsSummary(node, term).reads;
+        outputs = [output(implementation.output?.key ?? 'output', implementation.output?.stateId)];
+    } else if (target.type === 'node') {
+        reads = nodeProgramBindingsSummary(nodeObjects.get(target.nodeId)).reads;
+        outputs = (implementation.outputs ?? []).map((entry) => output(entry.key, entry.stateId));
+    }
+    const bindings = (implementation.bindings ?? []).map((binding, index) => ({
+        key: binding.key ?? '', label: reads[index]?.label ?? '', unit: bindingUnit(binding), value: checkInputs[binding.key] ?? null
+    }));
+    return { bindings, outputs };
+}
+
 // Opens a program in the code editor, from any entry point: Edit program, a preview line (`line`), "set by program ›" or a program chip
 // (`port`), the card's status or the Run dialog (`convert`), or Write program (`write`, starting from its template).
 function openProgramEditor(target, { line, port, convert = false, write = false } = {}) {
@@ -14373,12 +14434,14 @@ function openProgramEditor(target, { line, port, convert = false, write = false 
     providerEditTarget = target;
     const source = found.implementation.source ?? '';
     const template = found.template();
+    const programContext = found.program ? programEditorContext(found.implementation, found.parameters) : {};
     window.providerEditor.openWindow({
         target,
         source,
         kind: found.implementation.kind,
         title: found.title,
-        ...(found.program ? programEditorContext(found.implementation, found.parameters) : {}),
+        ...programContext,
+        ...(found.program ? { ports: programPortContext(target, found, programContext.checkInputs) } : {}),
         templateSource: template,
         ...(write && !source.trim() ? { startWith: template } : {}),
         ...(line ? { line } : {}),

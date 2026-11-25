@@ -20,6 +20,7 @@ const editor = createProgramEditor({
             return answer;
         },
         check: (source, kind, inputs) => bridge.check(source, kind, inputs),
+        describe: (source, kind, inputs) => bridge.describe(source, kind, inputs),
         apply: (source, target) => bridge.apply(source, target),
         close: () => window.windowControls.close(),
         setTitle: (text) => { $('#editorTitle').textContent = text; document.title = text; },

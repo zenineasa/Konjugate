@@ -2444,6 +2444,13 @@ export async function runInteractionTests(driver) {
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(source)} } });
     })()`);
     const leaveQuestionShown = `!document.querySelector('#programEditorLeave').hidden`;
+    // Template ▾, then one of its choices; a program with code first shows the two side by side, and the choice is used from there.
+    const chooseTemplate = async (editor, id) => {
+        if (await evaluate(editor, `document.querySelector('#programEditorTemplateMenu').hidden`)) await evaluate(editor, `document.querySelector('#programEditorTemplates').click()`);
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorTemplateMenu [data-template-id="${id}"]'))`, `Template ▾ did not offer ${id}.`);
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="${id}"]').click()`);
+        if (!await evaluate(editor, `document.querySelector('#programEditorConvertPanel').hidden`)) await evaluate(editor, `document.querySelector('#programEditorConvertAccept').click()`);
+    };
 
     const edgeCardSource = `window.__debugProgramCards.edge()`;
 
@@ -2481,12 +2488,12 @@ export async function runInteractionTests(driver) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editProviderOutputKey').value`), 'gradient');
 
-        // Reset template, in the editor: the program written again from its bindings and output as they are now.
+        // Template ▾ › A relationship: the program written again from its bindings and output as they are now.
         editor = await openProgramEditor();
-        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTemplate').hidden`), false);
-        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTemplates').hidden`), false);
+        await chooseTemplate(editor, 'blankRelationship');
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
-        await waitFor(window, `${edgeCardSource} !== ${JSON.stringify(source)}`, 'Reset template did not reach the card.');
+        await waitFor(window, `${edgeCardSource} !== ${JSON.stringify(source)}`, 'The blank template did not reach the card.');
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         const regeneratedSource = await evaluate(window, edgeCardSource);
@@ -2622,6 +2629,42 @@ export async function runInteractionTests(driver) {
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
+    });
+
+    await run('No program yet: Write program opens the templates, the PID controller example is one click, and it passes Test', async () => {
+        const project = JSON.parse(await readFile(join(process.cwd(), 'examples', 'providers', 'piControlledTank.json'), 'utf8'));
+        project.nodes[0].implementation.source = '';
+        await evaluate(window, `(async () => {
+            document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'));
+            await window.__debugProject.load(${JSON.stringify(project)}, 'emptyProgram.kjt');
+        })()`);
+        const tankLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Tank'))`;
+        await waitFor(window, `Boolean(${tankLabel})`, 'The tank was not on the canvas.');
+        await evaluate(window, `${tankLabel}.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && !document.querySelector('#nodeProgramFields').hidden`, 'The tank\'s program section did not show.');
+        assert.equal(await isRenderedVisible(window, '#nodeProgramSummary .programEmpty'), true, 'No program yet is not said.');
+        assert.equal(await evaluate(window, `document.querySelector('#editNodeProgramOpenEditor').textContent`), 'Write program');
+        const editor = await openProgramEditor('#editNodeProgramOpenEditor');
+        await waitFor(editor, `!document.querySelector('#programEditorTemplateMenu').hidden`, 'Write program did not open with the templates showing.');
+        const offered = await evaluate(editor, `[...document.querySelectorAll('#programEditorTemplateMenu .templateChoiceLabel')].map((label) => label.textContent)`);
+        assert.deepEqual(offered, ['A node', 'A node with memory and a clock', 'PID controller'], 'A node is offered the node templates and the node example.');
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="pidController"]').click()`);
+        assert.match(await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), /class PidController\(Node\):/, 'One click did not give the example.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorConvertPanel').hidden`), true, 'An empty program takes the example without asking.');
+        await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(editor, `/passed|failed/.test(document.querySelector('#programEditorTestSummary').className)`, 'Test did not answer.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTestSummary').textContent`), 'PidController: passed.',
+            `The example did not pass Test: ${await evaluate(editor, `document.querySelector('#programEditorTestPanel').textContent`)}`);
+        // Another choice over code shows the two side by side, and Keep it as it is changes nothing.
+        await evaluate(editor, `document.querySelector('#programEditorTemplates').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="blankSampledNode"]').click()`);
+        await waitFor(editor, `!document.querySelector('#programEditorConvertPanel').hidden`, 'A template over code did not show the two side by side.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorConvertAfterHeading').textContent`), 'A node with memory and a clock');
+        const before = await evaluate(editor, `window.__providerEditorView.state.doc.toString()`);
+        await evaluate(editor, `document.querySelector('#programEditorConvertCancel').click()`);
+        assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), before);
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
     });
 
     await run('Test steps a controller with editable inputs, as a table and a plot, and a program giving NaN shows its line', async () => {
@@ -3098,7 +3141,10 @@ export async function runInteractionTests(driver) {
 
         // Write program: the editor on its template, naming its output; an input declared, applied, and bound in Ports.
         const editor = await openProgramEditor('#termOpenProviderEditor');
-        await waitFor(editor, `window.__providerEditorView.state.doc.toString().includes('heatRate')`, 'Write program did not start from the template.');
+        // Write program opens with Template ▾ showing; the blank relationship names its output.
+        await waitFor(editor, `!document.querySelector('#programEditorTemplateMenu').hidden`, 'Write program did not open with the templates showing.');
+        await chooseTemplate(editor, 'blankRelationship');
+        await waitFor(editor, `window.__providerEditorView.state.doc.toString().includes('heatRate')`, 'The blank template did not name its output.');
         await evaluate(editor, `(() => {
             const view = window.__providerEditorView;
             const text = view.state.doc.toString();
@@ -10395,7 +10441,7 @@ export async function runInteractionTests(driver) {
         // In the code editor: the template written again from the inputs and outputs, then the source edited, each applied: one undo
         // step each.
         const editor = await openProgramEditor('#editNodeProgramOpenEditor');
-        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        await chooseTemplate(editor, 'blankNode');
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'The template was not applied.');
         implementation = await program();

@@ -4,6 +4,8 @@ Programs in the current format, written against the program SDK (`konjugate/sdk/
 
 - [conduction.py](conduction.py) and [conduction.cpp](conduction.cpp): a relationship, the heat conducted from a hot body to a cold one, giving to the bit the numbers of the equation it replaces.
 - [pidController.py](pidController.py) and [pidController.cpp](pidController.cpp): a node, a digital PID controller sampled every 10 ms, with memory and a clock.
+- [lookupTable.py](lookupTable.py) and [lookupTable.cpp](lookupTable.cpp): a relationship, a valve's flow by its opening from a table of measured points, interpolated linearly, refusing an opening outside the table with `OutOfDomain`.
+- [csvReplay.py](csvReplay.py) and [csvReplay.cpp](csvReplay.cpp): a relationship, a recorded signal replayed in time, read from a CSV file in `initialize()` (or, with no file named, from the readings written in it), interpolated linearly and held past either end.
 - [accumulator.py](accumulator.py): a node, the running total of its input, kept in memory: the smallest node program with memory.
 - [piController.py](piController.py) and the project [piControlledTank.json](piControlledTank.json) that uses it: a node, a PI controller filling a tank, sampled on a clock, its integral and its effort kept in memory.
 

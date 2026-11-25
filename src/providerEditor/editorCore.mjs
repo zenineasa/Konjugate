@@ -18,6 +18,8 @@
 //   bind(key, value, target)      → optional: binds the input `key` to the candidate `value` (null: to nothing) in the project, and
 //                                    answers { applied, error?, ports, checkInputs } with the program's bindings as they are now
 //   openExternal(url)             → optional: opens a link (hover's "Writing a program ›") outside the editor
+// The payload may carry programKind ('relationship' or 'node': which examples fit), blankTemplates ([{ id, label, description,
+// source }], written by the project from the program's bindings) and showTemplates (Write program: open with Template ▾ showing).
 //   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
 //                                    checkPassed }, for the card's status line
 //
@@ -39,6 +41,7 @@ import { formatPortValue, portsTable } from './portsTable.mjs';
 import { portBindingChoices } from '../programBinding.mjs';
 import { sourceMemory, sourcePorts } from './sourcePorts.mjs';
 import { programCompletions, programHover } from './completions.mjs';
+import { programExamples } from '../programExamples.mjs';
 import { formatCell, nudgedValue, outputsUnmoved, plotPath, tableText, testInputs, testSummary, traceTable } from './testTable.mjs';
 import { lintHash } from '../lintScheduler.mjs';
 import {
@@ -54,7 +57,8 @@ const markup = `
         <button id="programEditorConvert" class="linkButton" type="button" hidden>Convert to version 2 ›</button>
         <button id="programEditorProblems" class="problemCount" type="button" role="status">Checking…</button>
         <span class="toolbarSpacer"></span>
-        <button id="programEditorTemplate" class="secondaryButton" type="button" hidden title="Write the template again from the program's bindings (undo brings it back)">Reset template</button>
+        <button id="programEditorTemplates" class="secondaryButton" type="button" hidden aria-haspopup="true" aria-expanded="false" title="Start from a blank template or a worked example (undo takes it back)">Template ▾</button>
+        <div id="programEditorTemplateMenu" class="programEditorMenu templateMenu" hidden role="menu"></div>
         <button id="programEditorTest" class="secondaryButton" type="button" hidden title="Runs the program once at the model's values, with its standard checks: its ports, its outputs, purity and its memory">Test</button>
         <button id="programEditorCancel" class="secondaryButton" type="button" title="Close without applying">Cancel</button>
         <button id="programEditorApply" class="applyButton" type="button" title="Apply to the model (Ctrl+S)">Apply</button>
@@ -74,11 +78,11 @@ const markup = `
         <ul id="programEditorConvertNotes" class="convertNotes"></ul>
         <div class="convertColumns">
             <div><h3>As it is</h3><pre id="programEditorConvertBefore"></pre></div>
-            <div><h3>Converted</h3><pre id="programEditorConvertAfter"></pre></div>
+            <div><h3 id="programEditorConvertAfterHeading">Converted</h3><pre id="programEditorConvertAfter"></pre></div>
         </div>
         <div class="convertActions">
             <button id="programEditorConvertCancel" class="secondaryButton" type="button">Keep it as it is</button>
-            <button id="programEditorConvertAccept" class="applyButton" type="button">Use the converted program</button>
+            <button id="programEditorConvertAccept" class="applyButton" type="button">Use it</button>
         </div>
     </div>
     <div class="programEditorBody">
@@ -146,8 +150,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     let diagnostics = [];
     let validationSequence = 0;
     let lastDirty = false;
-    let pendingConversion = null;
-    let templateSource = '';
+    let blankTemplates = [];
+    let programKind = 'relationship';
     // What lint and Check last found, each for the source it looked at; reported to the card together.
     let lintResult = { source: null, problems: [] };
     // What Test last found, for the source it ran: whether it passed, and its problems with their lines.
@@ -624,35 +628,94 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         root.querySelector('[data-side-tab="test"]').hidden = !testable;
         if (!testable && activeSideTab === 'test') showSideTab('ports');
     }
+    // A program in place of the one in the editor, shown before anything changes: Convert's version 2 program, or a template or example.
+    // Using it replaces the source in one edit, which undo takes back in one step.
+    let pendingReplacement = null;
+    function showReplacement({ source, summary, notes = [], afterHeading, acceptLabel }) {
+        if (!view) return;
+        pendingReplacement = source;
+        $('#programEditorConvertBefore').textContent = view.state.doc.toString();
+        $('#programEditorConvertAfter').textContent = source;
+        $('#programEditorConvertSummary').textContent = summary;
+        $('#programEditorConvertNotes').replaceChildren(...notes.map((note) => Object.assign(document.createElement('li'), { textContent: note })));
+        $('#programEditorConvertAfterHeading').textContent = afterHeading;
+        $('#programEditorConvertAccept').textContent = acceptLabel;
+        $('#programEditorConvertPanel').hidden = false;
+    }
     function showConversion() {
         if (!view) return;
-        const before = view.state.doc.toString();
-        pendingConversion = convertProgramToVersion2(kind, before);
-        $('#programEditorConvertBefore').textContent = before;
-        $('#programEditorConvertAfter').textContent = pendingConversion.source;
-        $('#programEditorConvertSummary').textContent = pendingConversion.complete
-            ? 'The converted program is complete: it takes part in every stage of every method. Use it, then Apply to save it in the model.'
-            : 'Converted as far as its ports. It is not finished: each place that needs a decision is marked in the code. Until it compiles, the model cannot run.';
-        $('#programEditorConvertNotes').replaceChildren(...pendingConversion.notes.map((note) => Object.assign(document.createElement('li'), { textContent: note })));
-        $('#programEditorConvertPanel').hidden = false;
+        const converted = convertProgramToVersion2(kind, view.state.doc.toString());
+        showReplacement({
+            source: converted.source,
+            summary: converted.complete
+                ? 'The converted program is complete: it takes part in every stage of every method. Use it, then Apply to save it in the model.'
+                : 'Converted as far as its ports. It is not finished: each place that needs a decision is marked in the code. Until it compiles, the model cannot run.',
+            notes: converted.notes, afterHeading: 'Converted', acceptLabel: 'Use the converted program'
+        });
     }
     $('#programEditorConvert').addEventListener('click', showConversion);
     $('#programEditorNoticeConvert').addEventListener('click', showConversion);
-    $('#programEditorConvertCancel').addEventListener('click', () => { $('#programEditorConvertPanel').hidden = true; pendingConversion = null; });
+    $('#programEditorConvertCancel').addEventListener('click', () => { $('#programEditorConvertPanel').hidden = true; pendingReplacement = null; });
     $('#programEditorConvertAccept').addEventListener('click', () => {
-        if (!view || !pendingConversion) return;
-        // One edit, which undo takes back in one step.
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: pendingConversion.source } });
+        if (!view || pendingReplacement === null) return;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: pendingReplacement } });
         $('#programEditorConvertPanel').hidden = true;
-        pendingConversion = null;
+        pendingReplacement = null;
         view.focus();
     });
 
-    // ---- Reset template: the program written again from its bindings, in one edit undo takes back ------------------------------------
-    $('#programEditorTemplate').addEventListener('click', () => {
-        if (!view || !templateSource) return;
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: templateSource } });
-        view.focus();
+    // ---- Template ▾: a blank template from the program's bindings, or a worked example (docs/proposals/codeEditor.md, "Starting a
+    // program") ------------------------------------------------------------------------------------------------------------------------
+    function templateChoices() {
+        const language = kind === 'python' ? 'python' : 'cpp';
+        return [
+            ...blankTemplates.map((template) => ({ ...template, group: 'Blank' })),
+            ...programExamples.filter((example) => example.kind === programKind && example.sources[language])
+                .map((example) => ({ id: example.id, label: example.label, description: example.description, source: example.sources[language], group: 'Examples' }))
+        ];
+    }
+    function renderTemplateMenu() {
+        const menu = $('#programEditorTemplateMenu');
+        const choices = templateChoices();
+        menu.replaceChildren(...['Blank', 'Examples'].flatMap((group) => {
+            const items = choices.filter((choice) => choice.group === group);
+            if (!items.length) return [];
+            return [Object.assign(document.createElement('h4'), { textContent: group }), ...items.map((choice) => {
+                const item = Object.assign(document.createElement('button'), { type: 'button', className: 'templateChoice' });
+                item.dataset.templateId = choice.id;
+                item.setAttribute('role', 'menuitem');
+                item.append(Object.assign(document.createElement('span'), { className: 'templateChoiceLabel', textContent: choice.label }),
+                    Object.assign(document.createElement('span'), { className: 'templateChoiceNote', textContent: choice.description ?? '' }));
+                return item;
+            })];
+        }));
+    }
+    function showTemplateMenu(open) {
+        if (open) renderTemplateMenu();
+        $('#programEditorTemplateMenu').hidden = !open;
+        $('#programEditorTemplates').setAttribute('aria-expanded', String(open));
+    }
+    $('#programEditorTemplates').addEventListener('click', () => showTemplateMenu($('#programEditorTemplateMenu').hidden));
+    root.addEventListener('pointerdown', (event) => {
+        if (!$('#programEditorTemplateMenu').hidden && !event.target.closest('#programEditorTemplateMenu, #programEditorTemplates')) showTemplateMenu(false);
+    });
+    $('#programEditorTemplateMenu').addEventListener('click', (event) => {
+        const item = event.target.closest('[data-template-id]');
+        if (!item || !view) return;
+        const choice = templateChoices().find((candidate) => candidate.id === item.dataset.templateId);
+        showTemplateMenu(false);
+        if (!choice) return;
+        // An empty program takes it at once; one with code shows the two side by side first.
+        if (!view.state.doc.toString().trim()) {
+            view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: choice.source } });
+            view.focus();
+            return;
+        }
+        showReplacement({
+            source: choice.source,
+            summary: `${choice.label}${choice.group === 'Examples' ? ', a worked example' : ''} in place of the program as it is. Undo takes it back; Apply saves it in the model.`,
+            afterHeading: choice.label, acceptLabel: `Use ${choice.group === 'Examples' ? 'the example' : 'the template'}`
+        });
     });
 
     // ---- Test (docs/proposals/codeEditor.md, "Test: run it where you write it") --------------------------------------------------------
@@ -952,8 +1015,11 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         revealPortOnDescription = Boolean(payload.port) && !payload.line;
         showSide(sideShown());
         session.load(payload.source ?? '');
-        templateSource = payload.templateSource ?? '';
-        $('#programEditorTemplate').hidden = !templateSource;
+        programKind = payload.programKind === 'node' ? 'node' : 'relationship';
+        blankTemplates = Array.isArray(payload.blankTemplates) ? payload.blankTemplates
+            : payload.templateSource ? [{ id: 'blank', label: 'Blank', description: 'From the program\'s bindings', source: payload.templateSource }] : [];
+        $('#programEditorTemplates').hidden = !context.program && !blankTemplates.length;
+        showTemplateMenu(false);
         lintResult = { source: null, problems: [] };
         testResult = { source: null, ok: false, problems: [] };
         testValues = {};
@@ -971,11 +1037,13 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         createView(session.source);
         refreshApplyState();
         $('#programEditorConvertPanel').hidden = true;
-        pendingConversion = null;
+        pendingReplacement = null;
         refreshFormat();
         applyActiveTheme();
         // Write program: a new program starts from its template, unsaved until applied (undo leaves it empty again).
         if (payload.startWith && !session.source.trim()) view.dispatch({ changes: { from: 0, insert: payload.startWith } });
+        // Write program: an empty program opens with the choices showing, so the first click gives a working program.
+        if (payload.showTemplates && !session.source.trim()) showTemplateMenu(true);
         if (payload.convert && context.program && programSourceVersion(kind, session.source) === 1) showConversion();
         renderPorts();
         scheduleDescribe(0);

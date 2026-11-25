@@ -71,7 +71,7 @@ import {
     parseProviderReference,
     providerReferenceValue, parseProgramBindingValue, programBindingValue } from '../selectValues.mjs';
 import { validateProjectPassword } from './passwordValidation.mjs';
-import { defaultNodeProviderSource, defaultProviderSource, programSourceVersion, replayProviderSource } from '../providerTemplate.mjs';
+import { defaultNodeProviderSource, defaultProviderSource, programSourceVersion, replayProviderSource, sampledControllerSource } from '../providerTemplate.mjs';
 import { programCheckInputs } from '../programConversion.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
@@ -14419,6 +14419,13 @@ function openProgramEditor(target, { line, port, convert = false, write = false,
     const source = found.implementation.source ?? '';
     const template = found.template();
     const programContext = found.program ? programEditorContext(found.implementation, found.parameters) : {};
+    // Template ▾'s blank templates, written from the program's bindings: a relationship's, or a node's and a node's with memory and a clock.
+    const node = target.type === 'node';
+    const blankTemplates = node
+        ? [{ id: 'blankNode', label: 'A node', description: 'Its inputs and outputs from its bindings', source: template },
+            { id: 'blankSampledNode', label: 'A node with memory and a clock', description: 'A sampled controller: memory, advance() and a clock',
+                source: sampledControllerSource(found.implementation.kind, found.implementation.bindings ?? [], found.implementation.outputs ?? [], found.title) }]
+        : [{ id: 'blankRelationship', label: 'A relationship', description: 'Its inputs and output from its bindings', source: template }];
     window.providerEditor.openWindow({
         target,
         source,
@@ -14428,8 +14435,9 @@ function openProgramEditor(target, { line, port, convert = false, write = false,
         ...(found.program ? { ports: programPortContext(target, found, programContext.checkInputs) } : {}),
         // Test steps a program with no clock at the model's step.
         modelStep: Number(activeRunConfiguration()?.globalTimeStep) || 0.01,
-        templateSource: template,
-        ...(write && !source.trim() ? { startWith: template } : {}),
+        programKind: node ? 'node' : 'relationship',
+        blankTemplates,
+        ...(write && !source.trim() ? { showTemplates: true } : {}),
         ...(line ? { line } : {}),
         ...(port ? { port } : {}),
         ...(showPorts ? { showPorts: true } : {}),

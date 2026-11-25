@@ -153,3 +153,10 @@
 .programEditor .programHover p { margin: 3px 0 0; }
 .programEditor .programHoverLink { display: inline-block; margin-top: 4px; color: #6ce0d5; text-decoration: none; }
 .programEditor .programHoverLink:hover { text-decoration: underline; }
+
+/* Template ▾: blank templates and worked examples, each with a line saying what it is. */
+.programEditor .templateMenu { right: auto; left: 140px; min-width: 300px; max-height: 70vh; overflow: auto; gap: 2px; }
+.programEditor .templateMenu h4 { margin: 6px 0 2px; color: #778d98; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.programEditor .templateChoice { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 5px 7px; color: #dce8ec; background: none; border: 0; border-radius: 4px; font-size: 10px; text-align: left; }
+.programEditor .templateChoice:hover, .programEditor .templateChoice:focus-visible { background: rgb(66 201 188 / 10%); outline: 0; }
+.programEditor .templateChoiceNote { color: #778d98; font-size: 9px; }

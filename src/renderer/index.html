@@ -705,6 +705,8 @@
             <strong>Start run</strong>
             <p id="runLaunchDescription">Run from the model's initial state.</p>
             <label><span>Run until simulation time (s)</span><input id="runTargetTime" type="number" min="0" step="any" value="1" required></label>
+            <!-- The run a model's FMU suggests, its default experiment (docs/proposals/fmuImportWorkflow.md, stage 6). -->
+            <p id="runFmuSuggestion" class="runConfigurationScope runFmuNote" hidden><span id="runFmuSuggestionText"></span> <button id="runFmuSuggestionUse" type="button">Use</button></p>
             <section class="executionConfiguration">
                 <span class="configurationSectionTitle">Numerics</span>
                 <!-- The integration method (docs/proposals/integrators.md); names and descriptions from src/integrationMethods.mjs. -->
@@ -725,6 +727,8 @@
                 <label id="runRelativeToleranceField" hidden><span>Relative tolerance</span><input id="runRelativeTolerance" type="number" min="0" max="1" step="any" value="0.000001" required></label>
                 <label id="runAbsoluteToleranceField" hidden><span>Absolute tolerance</span><input id="runAbsoluteTolerance" type="number" min="0" step="any" value="1e-9" required></label>
                 <p id="runGlobalStepMeaning" class="runConfigurationScope"></p>
+                <!-- An FMU's step that is not a whole number of its own, with the global step that fixes it (stage 6). -->
+                <p id="runFmuSteps" class="runConfigurationScope runFmuNote runFmuWarning" hidden><span id="runFmuStepsText"></span> <button id="runFmuStepsFix" type="button" hidden></button></p>
                 <label><span>Output interval (s)</span><input id="runOutputInterval" type="number" min="0" step="any" required></label>
                 <p id="runMethodParticipation" class="runConfigurationScope" hidden></p>
                 <p id="runConfigurationScope" class="runConfigurationScope"></p>

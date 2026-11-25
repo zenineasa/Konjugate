@@ -44,6 +44,7 @@ import {
     documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
+import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
 import {
@@ -8917,8 +8918,79 @@ function fillRunConfigurationFields({ continuing }) {
         : 'Saved with the model, and used by the command line and code export.';
     $('#saveRunConfiguration').hidden = continuing;
     $('#startRun').disabled = !continuing && !currentValidation.valid;
+    updateRunFmuSteps();
     return source;
 }
+
+// ---- An FMU's steps, before the run (docs/proposals/fmuImportWorkflow.md, stage 6; src/fmuSteps.mjs) -------------------------
+// Each FMU node with what its FMU says of its steps (from the ports the card reads, fetched here when not yet known).
+function fmuNodesForSteps() {
+    return model.nodes.filter((node) => !node.deleted && node.enabled !== false && node.implementation?.kind === 'fmi').map((node) => {
+        const ports = fmuPortsFor(node.implementation);
+        return {
+            name: node.title ?? node.name, fmuName: ports?.name ?? node.title, substeps: node.substepsPerGlobalStep ?? 1,
+            internalStep: ports?.about?.coSimulation?.fixedInternalStepSize, defaultExperiment: ports?.about?.defaultExperiment, known: Boolean(ports)
+        };
+    });
+}
+
+function setRunField(selector, value) {
+    const field = $(selector);
+    field.value = String(value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+let runFmuFix = null;
+let runFmuSuggested = null;
+function updateRunFmuSteps() {
+    const nodes = fmuNodesForSteps();
+    // The FMUs' ports are read once, then this is said again.
+    const unknown = model.nodes.filter((node) => !node.deleted && node.implementation?.kind === 'fmi' && node.implementation.fmuId && !fmuPortsCache.has(fmuPortsKey(node.implementation)));
+    if (unknown.length) {
+        Promise.all(unknown.map(async (node) => {
+            const ports = await window.extensions.fmuPorts?.(node.implementation.fmuId, node.implementation.fmuVersion).catch(() => null);
+            fmuPortsCache.set(fmuPortsKey(node.implementation), ports ?? { error: 'unknown' });
+        })).then(() => { if ($('#runLaunchDialog').open) updateRunFmuSteps(); });
+    }
+    const check = fmuStepCheck({ globalTimeStep: Number($('#runGlobalTimeStep').value), outputInterval: Number($('#runOutputInterval').value) }, nodes);
+    const sentences = fmuStepSentences(check);
+    runFmuFix = check.fix;
+    $('#runFmuSteps').hidden = !sentences.length;
+    $('#runFmuStepsText').textContent = sentences.join(' ');
+    $('#runFmuStepsFix').hidden = !check.fix;
+    $('#runFmuStepsFix').textContent = check.fix ? `Use ${check.fix.globalTimeStep} s` : '';
+    const suggestion = fmuRunSuggestion(nodes);
+    const target = Number($('#runTargetTime').value);
+    const step = Number($('#runGlobalTimeStep').value);
+    const differs = suggestion && ((suggestion.stopTime !== null && suggestion.stopTime !== target) || (suggestion.stepSize !== null && suggestion.stepSize !== step));
+    runFmuSuggested = differs ? suggestion : null;
+    $('#runFmuSuggestion').hidden = !differs;
+    if (differs) {
+        const parts = [suggestion.stopTime !== null && `to ${suggestion.stopTime} s`, suggestion.stepSize !== null && `in steps of ${suggestion.stepSize} s`].filter(Boolean);
+        $('#runFmuSuggestionText').textContent = `'${suggestion.name}' suggests running ${parts.join(' ')}.`;
+    }
+}
+// Taken before the fields change: setting one says everything again, which recomputes them.
+$('#runFmuStepsFix').addEventListener('click', () => {
+    const fix = runFmuFix;
+    if (!fix) return;
+    setRunField('#runGlobalTimeStep', fix.globalTimeStep);
+    setRunField('#runOutputInterval', fix.outputInterval);
+    updateRunFmuSteps();
+});
+$('#runFmuSuggestionUse').addEventListener('click', () => {
+    const suggestion = runFmuSuggested;
+    if (!suggestion) return;
+    if (suggestion.stopTime !== null) setRunField('#runTargetTime', suggestion.stopTime);
+    if (suggestion.stepSize !== null) {
+        setRunField('#runGlobalTimeStep', suggestion.stepSize);
+        const output = Number($('#runOutputInterval').value);
+        if (!wholeNumberOf(output, suggestion.stepSize)) setRunField('#runOutputInterval', suggestion.stepSize);
+    }
+    updateRunFmuSteps();
+});
+for (const selector of ['#runGlobalTimeStep', '#runOutputInterval', '#runTargetTime', '#runStepsPerGlobalStep']) $(selector).addEventListener('input', () => updateRunFmuSteps());
 
 // The Run dialog's Method (docs/proposals/integrators.md): its line under the choice, Steps per global step for Runge–Kutta 4,
 // what the global step means for it, and, under a whole-model method, what will be stepped on its own or held, by name.

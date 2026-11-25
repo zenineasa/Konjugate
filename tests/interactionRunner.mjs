@@ -11093,6 +11093,56 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
 
+    // An FMU's steps, before the run (docs/proposals/fmuImportWorkflow.md, stage 6): the Reference FMU Dahlquist steps by 0.1 s inside,
+    // so a run stepping it by 0.05 s is said, with Use 0.1 s; its default experiment is suggested, and Use fills it in; nothing is
+    // changed until asked.
+    await run('the Run dialog says when an FMU\'s step is not a whole number of its own, fixes it, and suggests the FMU\'s own run', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Dahlquist.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
+        const field = (id, value) => evaluate(window, `(() => { const element = document.querySelector('${id}'); element.value = '${value}'; element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Steps.kjt')`);
+            await driver.answerDialogs({ open: fmuPath }, async () => {
+                await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('#addFmuFromFile').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes[0]?.implementation?.kind === 'fmi'`, 'The FMU was not added.', 20000);
+            });
+            await openRunDialog(window);
+            // The suggestion, before anything is changed.
+            await waitFor(window, `!document.querySelector('#runFmuSuggestion').hidden`, 'The FMU\'s own run was not suggested.', 10000);
+            assert.equal(await evaluate(window, `document.querySelector('#runFmuSuggestionText').textContent`), '\'Dahlquist\' suggests running to 10 s in steps of 0.1 s.');
+            await field('#runGlobalTimeStep', '0.05');
+            await field('#runOutputInterval', '0.05');
+            await waitFor(window, `!document.querySelector('#runFmuSteps').hidden`, 'A step that is not a whole number of the FMU\'s was not said.');
+            assert.equal(await evaluate(window, `document.querySelector('#runFmuStepsText').textContent`),
+                '\'Dahlquist\' steps by 0.1 s inside; this run steps it by 0.05 s, which is not a whole number of its steps. Some FMUs refuse that (Konjugate\'s own exports do); others approximate.');
+            assert.equal(await evaluate(window, `document.querySelector('#runFmuStepsFix').textContent`), 'Use 0.1 s');
+            assert.equal(await evaluate(window, `document.querySelector('#runGlobalTimeStep').value`), '0.05', 'Nothing is changed until asked.');
+            await evaluate(window, `document.querySelector('#runFmuStepsFix').click()`);
+            assert.deepEqual(await evaluate(window, `[document.querySelector('#runGlobalTimeStep').value, document.querySelector('#runOutputInterval').value]`), ['0.1', '0.1']);
+            await waitFor(window, `document.querySelector('#runFmuSteps').hidden`, 'The fixed step was still said to be wrong.');
+            // Use fills in the FMU's own run.
+            await field('#runTargetTime', '1');
+            await waitFor(window, `!document.querySelector('#runFmuSuggestion').hidden`, 'The suggestion did not come back for a different stop time.');
+            await evaluate(window, `document.querySelector('#runFmuSuggestionUse').click()`);
+            assert.deepEqual(await evaluate(window, `[document.querySelector('#runTargetTime').value, document.querySelector('#runGlobalTimeStep').value]`), ['10', '0.1']);
+            await waitFor(window, `document.querySelector('#runFmuSuggestion').hidden`, 'The suggestion stayed once used.');
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The run did not complete.', 180000);
+            assert.equal((await evaluate(window, `window.__debugSteering.result().samples`)).length, 101);
+            await evaluate(window, `(() => {
+                document.querySelector('#closeResults').click();
+                document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click();
+            })()`);
+        } finally {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Empty.kjt')`).catch(() => {});
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {

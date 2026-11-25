@@ -1,8 +1,8 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // Browser-side counterpart to src/engineAdapter.mjs's one-shot engine operations (capabilities,
-// validate, run, infer, fit, checkSubstepConvergence, checkProgram, describeProgram) -- see docs/proposals/webEdition.md, phase
-// 2. Talks directly to the WASM engine module (out/engineWeb/konjugateEngine.js) instead of
+// validate, run, infer, fit, checkSubstepConvergence, checkProgram, testProgram, describeProgram) -- see
+// docs/proposals/webEdition.md, phase 2. Talks directly to the WASM engine module (out/engineWeb/konjugateEngine.js) instead of
 // spawning a real OS subprocess and exchanging real temp files: writes inputs into the module's
 // own virtual filesystem, invokes main() with an argv array via callMain(), and reads outputs
 // back out the same way -- the exact pattern phase 1 verified byte-for-byte identical to the
@@ -286,8 +286,8 @@ export async function runWithWebEngine(engineModuleUrl, content, configuration) 
     return { available: true, result };
 }
 
-// A version 2 program's command (checkProgram, describeProgram) in the web engine: the same engine code the desktop's runs, through the
-// same command and configuration, so the JSON is the desktop's. A Python program is served by the Pyodide bridge, as a run's is. A C++
+// A version 2 program's command (checkProgram, testProgram, describeProgram) in the web engine: the same engine code the desktop's runs,
+// through the same command and configuration, so the JSON is the desktop's. A Python program is served by the Pyodide bridge, as a run's is. A C++
 // program cannot be loaded in the web engine yet, and the engine says so as a problem. { available: true, ok: false, problems: [why] }
 // when the engine stops without an answer, as the desktop does.
 async function programCommand(engineModuleUrl, command, { kind, source, ...configuration }) {
@@ -317,6 +317,12 @@ async function programCommand(engineModuleUrl, command, { kind, source, ...confi
 // outputs, memory }, as src/engineAdapter.mjs's checkProgramWithEngine() answers.
 export async function checkProgramWithWebEngine(engineModuleUrl, { kind, source, inputs = {}, time = 0 }) {
     return programCommand(engineModuleUrl, 'checkProgram', { kind, source, inputs, time });
+}
+
+// Test (the code editor's Test), the web engine's answer: Check program's answer with checks, problemDetails and trace, as
+// src/engineAdapter.mjs's testProgramWithEngine() answers.
+export async function testProgramWithWebEngine(engineModuleUrl, { kind, source, inputs = {}, time = 0, steps = 0, stepSize = 0 }) {
+    return programCommand(engineModuleUrl, 'testProgram', { kind, source, inputs, time, steps, stepSize });
 }
 
 // Describe program (the code editor's Ports), the web engine's answer: { available: true, ok, language, program, kind, inputs, outputs,

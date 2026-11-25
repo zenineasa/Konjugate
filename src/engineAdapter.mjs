@@ -112,8 +112,8 @@ export async function checkObjectiveWithEngine(objective, options) {
     }
 }
 
-// A version 2 program's command (checkProgram, describeProgram): the source and a configuration file the engine reads, its answer the JSON
-// report it writes. { available: false } when there is no engine; { available: true, ok: false, problems: [why] } when it stops without
+// A version 2 program's command (checkProgram, testProgram, describeProgram): the source and a configuration file the engine reads, its
+// answer the JSON report it writes. { available: false } when there is no engine; { available: true, ok: false, problems: [why] } when it stops without
 // an answer.
 async function programCommand(command, { kind, source, ...configuration }, options) {
     const executable = await resolveEnginePath(options);
@@ -140,6 +140,14 @@ async function programCommand(command, { kind, source, ...configuration }, optio
 // there is no engine; otherwise the engine's answer, { ok, program, kind, inputs, problems, outputs, memory }.
 export async function checkProgramWithEngine({ kind, source, inputs = {}, time = 0 }, options) {
     return programCommand('checkProgram', { kind, source, inputs, time }, options);
+}
+
+// Test (the code editor's Test; docs/engineCli.md, testProgram): Check program's standard checks, and a trace of `steps` steps of
+// `stepSize` seconds (0: the clock's period, else 0.01 s) with the inputs held, through the backend and transport a run uses.
+// { available: false } when there is no engine; otherwise Check program's answer and { checks: [{ name, passed }], problemDetails:
+// [{ message, line, check, step, time }], trace: { stepSize, clocked, rows: [{ step, time, outputs, memory }] } }.
+export async function testProgramWithEngine({ kind, source, inputs = {}, time = 0, steps = 0, stepSize = 0 }, options) {
+    return programCommand('testProgram', { kind, source, inputs, time, steps, stepSize }, options);
 }
 
 // Describe program (the code editor's Ports; docs/engineCli.md, describeProgram): a version 2 program's ports, memory and clock, each with

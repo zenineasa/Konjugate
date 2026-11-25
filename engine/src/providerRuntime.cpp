@@ -3137,19 +3137,80 @@ const std::string identityConversion = "{\"scale\":1,\"offset\":0,\"identity\":t
 
 }
 
-std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
-                         const std::unordered_map<std::string, double>& givenInputs, double time) {
-    std::vector<std::string> problems;
+namespace {
+
+// A program's memory as JSON, field by field by name: a real, an integer or a flag as one number, an array or a stream as several.
+std::string memoryJsonOf(const ProgramMemoryState& state) {
+    std::string json = "{";
+    for (std::size_t index = 0; index < state.fields.size(); ++index) {
+        const auto& field = state.fields[index];
+        json += std::string(index ? "," : "") + jsonString(field.name) + ":[";
+        for (std::size_t word = 0; word < field.words.size(); ++word) {
+            const double shown = field.type == 0 || field.type == 3 ? std::bit_cast<double>(field.words[word])
+                : field.type == 1 ? static_cast<double>(std::bit_cast<std::int64_t>(field.words[word])) : static_cast<double>(field.words[word]);
+            json += std::string(word ? "," : "") + jsonNumber(shown);
+        }
+        json += "]";
+    }
+    return json + "}";
+}
+
+// Check program, and with `test` Test: the standard checks, and a trace of `test->steps` steps on an instance of its own.
+std::string runProgramCheck(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                            const std::unordered_map<std::string, double>& givenInputs, double time, const ProgramTestRequest* test) {
+    // Each problem with the check it failed ("" for none: the program could not be loaded, or a step of the trace), and for the trace its
+    // step and time.
+    struct Problem {
+        std::string message;
+        std::string check;
+        int step = -1;
+        double time = 0;
+    };
+    std::vector<Problem> problems;
+    const auto fail = [&](std::string check, std::string message) { problems.push_back({std::move(message), std::move(check)}); };
+    // Which checks ran: ports, outputs, purity, memory, jacobian, in that order; null for one that did not run.
+    std::vector<std::pair<std::string, int>> checks{{"ports", -1}, {"outputs", -1}, {"purity", -1}, {"memory", -1}, {"jacobian", -1}};
+    const auto ran = [&](const std::string& check) {
+        for (auto& [name, state] : checks) if (name == check) state = 1;
+    };
     std::string name;
     std::string programKind;
     std::string described = "[]";
     std::string outputsJson = "{}";
     std::string memoryJson = "{}";
+    std::string traceJson = "null";
+    const ProgramDescription* loaded = nullptr;
+    // A problem's line: the one it names, else the declaration of the first port it names (‘warming’), C++ found in the source.
+    const auto lineOfProblem = [&](const std::string& message) -> std::size_t {
+        if (const auto said = problemLine(message)) return said;
+        if (!loaded) return 0;
+        const auto lines = kind == "cpp" ? codeLines(source) : std::vector<std::string>{};
+        const auto declared = [&](std::size_t line, const std::string& key) { return line ? line : kind == "cpp" ? cppDeclarationLine(lines, key) : 0; };
+        for (const auto& port : loaded->outputs) if (message.find("‘" + port.key + "’") != std::string::npos) return declared(port.line, port.key);
+        for (const auto& port : loaded->inputs) if (message.find("‘" + port.key + "’") != std::string::npos) return declared(port.line, port.key);
+        return 0;
+    };
     const auto finish = [&] {
         std::string json = "{\"ok\":" + std::string(problems.empty() ? "true" : "false") + ",\"program\":" + jsonString(name) + ",\"kind\":" +
             jsonString(programKind) + ",\"inputs\":" + described + ",\"problems\":[";
-        for (std::size_t index = 0; index < problems.size(); ++index) json += (index ? "," : "") + jsonString(problems[index]);
-        return json + "],\"outputs\":" + outputsJson + ",\"memory\":" + memoryJson + "}";
+        for (std::size_t index = 0; index < problems.size(); ++index) json += (index ? "," : "") + jsonString(problems[index].message);
+        json += "],\"outputs\":" + outputsJson + ",\"memory\":" + memoryJson;
+        if (!test) return json + "}";
+        json += ",\"checks\":[";
+        for (std::size_t index = 0; index < checks.size(); ++index) {
+            const auto& [check, state] = checks[index];
+            const bool failed = std::any_of(problems.begin(), problems.end(), [&](const Problem& problem) { return problem.check == check; });
+            json += std::string(index ? "," : "") + "{\"name\":" + jsonString(check) + ",\"passed\":" +
+                (failed ? "false" : state > 0 ? "true" : "null") + "}";
+        }
+        json += "],\"problemDetails\":[";
+        for (std::size_t index = 0; index < problems.size(); ++index) {
+            const auto& problem = problems[index];
+            json += std::string(index ? "," : "") + "{\"message\":" + jsonString(problem.message) + ",\"line\":" + jsonLine(lineOfProblem(problem.message)) +
+                ",\"check\":" + (problem.check.empty() ? std::string("null") : jsonString(problem.check)) + ",\"step\":" +
+                (problem.step < 0 ? std::string("null") : std::to_string(problem.step)) + ",\"time\":" + (problem.step < 0 ? std::string("null") : jsonNumber(problem.time)) + "}";
+        }
+        return json + "],\"trace\":" + traceJson + "}";
     };
     const auto implementation = kind == "cpp" ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
     std::unique_ptr<ProgramBackend> backend;
@@ -3157,10 +3218,11 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
         refuseCppProgramOnWeb(kind);
         backend = createProgramBackend((kind == "cpp" ? "cpp2:" : "py2:") + source, implementation, source, configuration);
     } catch (const std::exception& error) {
-        problems.emplace_back(error.what());
+        fail("", error.what());
         return finish();
     }
     const auto& description = backend->description();
+    loaded = &description;
     name = description.name;
     programKind = description.node ? "node" : "relationship";
     // Every port declared once, with a key a file can bind.
@@ -3173,17 +3235,18 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
             (port.hasDefault ? ",\"default\":" + jsonNumber(port.defaultValue) : "") + "}";
     }
     described += "]";
+    ran("ports");
     for (const auto& key : [&] {
              std::vector<std::string> all;
              for (const auto& port : description.inputs) all.push_back(port.key);
              for (const auto& port : description.outputs) all.push_back(port.key);
              return all;
          }()) {
-        if (!std::regex_match(key, identifier)) problems.push_back("The port '" + key + "' is not a valid key: it must start with a small letter and hold only letters and digits.");
-        if (!keys.insert(key).second) problems.push_back("The port '" + key + "' is declared twice.");
+        if (!std::regex_match(key, identifier)) fail("ports", "The port '" + key + "' is not a valid key: it must start with a small letter and hold only letters and digits.");
+        if (!keys.insert(key).second) fail("ports", "The port '" + key + "' is declared twice.");
     }
     if (!problems.empty()) return finish();
-    // Two instances of the program, every input bound, read from what was given, the default, or 0.
+    // Two instances of the program, every input bound, read from what was given, the default, or 0; Test's trace runs on a third.
     std::vector<CompiledBinding> bindings;
     std::vector<double> values;
     for (const auto& port : description.inputs) {
@@ -3193,7 +3256,8 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
         const auto given = givenInputs.find(port.key);
         values.push_back(given != givenInputs.end() ? given->second : port.hasDefault ? port.defaultValue : 0.0);
     }
-    for (std::uint64_t instance = 1; instance <= 2; ++instance) {
+    const std::uint64_t traced = 3;
+    for (std::uint64_t instance = 1; instance <= (test ? traced : 2); ++instance) {
         ProgramInstanceSpec spec;
         spec.instanceId = instance;
         spec.ownerId = 1;
@@ -3207,6 +3271,8 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
     try {
         backend->sendInitialization();
         // The first evaluation is made twice and compared by the backend itself: purity.
+        ran("outputs");
+        ran("purity");
         const auto evaluated = backend->evaluateNode(1, time, 0, values);
         outputsJson = "{";
         for (std::size_t index = 0; index < evaluated.size(); ++index) {
@@ -3215,12 +3281,18 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
         }
         outputsJson += "}";
     } catch (const std::exception& error) {
-        problems.emplace_back(error.what());
+        const std::string message = error.what();
+        const bool impure = message.find("when called twice") != std::string::npos;
+        // An evaluation that failed outright was never compared with a second one.
+        if (!impure) for (auto& [check, state] : checks) if (check == "purity") state = -1;
+        fail(impure ? "purity" : "outputs", message);
         return finish();
     }
     // The memory round trip: memory copied into a fresh instance, then both advanced and evaluated alike.
+    std::string current = "memory";
     try {
         if (backend->hasMemory()) {
+            ran("memory");
             // Both as a run continued from a checkpoint: the same memory, and neither at its first advance().
             const auto saved = backend->memoryState(1);
             backend->restoreMemory(1, saved, nullptr);
@@ -3237,7 +3309,7 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
                 bool same = one.fields.size() == two.fields.size();
                 for (std::size_t field = 0; same && field < one.fields.size(); ++field) same = one.fields[field].words == two.fields[field].words;
                 if (!same) {
-                    problems.emplace_back("Memory restored into a fresh instance did not advance as the original did: something the program remembers is not declared as memory.");
+                    fail("memory", "Memory restored into a fresh instance did not advance as the original did: something the program remembers is not declared as memory.");
                     break;
                 }
                 const auto a = backend->evaluateNode(1, at, 0, values);
@@ -3245,26 +3317,16 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
                 bool equal = a.size() == b.size();
                 for (std::size_t index = 0; equal && index < a.size(); ++index) equal = std::bit_cast<std::uint64_t>(a[index].second) == std::bit_cast<std::uint64_t>(b[index].second);
                 if (!equal) {
-                    problems.emplace_back("A fresh instance with the same memory gave different outputs: the program keeps something outside its declared memory.");
+                    fail("memory", "A fresh instance with the same memory gave different outputs: the program keeps something outside its declared memory.");
                     break;
                 }
             }
-            memoryJson = "{";
-            const auto state = backend->memoryState(1);
-            for (std::size_t index = 0; index < state.fields.size(); ++index) {
-                const auto& field = state.fields[index];
-                memoryJson += std::string(index ? "," : "") + jsonString(field.name) + ":[";
-                for (std::size_t word = 0; word < field.words.size(); ++word) {
-                    const double shown = field.type == 0 || field.type == 3 ? std::bit_cast<double>(field.words[word])
-                        : field.type == 1 ? static_cast<double>(std::bit_cast<std::int64_t>(field.words[word])) : static_cast<double>(field.words[word]);
-                    memoryJson += std::string(word ? "," : "") + jsonNumber(shown);
-                }
-                memoryJson += "]";
-            }
-            memoryJson += "}";
+            memoryJson = memoryJsonOf(backend->memoryState(1));
         }
         // A Jacobian, if given, against central differences.
+        current = "jacobian";
         if (const auto entries = backend->jacobian(1, time, values)) {
+            ran("jacobian");
             const auto width = description.inputs.size();
             for (std::size_t column = 0; column < width; ++column) {
                 const double step = 1e-6 * std::max(1.0, std::abs(values[column]));
@@ -3281,17 +3343,58 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
                         std::ostringstream message;
                         message << "The Jacobian's entry for '" << description.outputs[row].key << "' by '" << description.inputs[column].key << "' is "
                                 << given << ", but differences give " << differenced << ".";
-                        problems.push_back(message.str());
+                        fail("jacobian", message.str());
                     }
                 }
             }
         }
     } catch (const std::exception& error) {
-        problems.emplace_back(error.what());
+        fail(current, error.what());
     }
+    if (!test) return finish();
+    // Test's trace, on its own instance with the inputs held: evaluate() at `time` after initialize(); then each step advance() and evaluate()
+    // again. A clock ticks at the start of each step (advance() at time, time + h, ...); without one, advance() ends a step of h (at
+    // time + h, time + 2h, ...). h is the step size asked for, else the clock's period, else 0.01 s. It stops at the first failure.
+    const double clockPeriod = backend->clockPeriod(traced);
+    const bool clocked = clockPeriod > 0;
+    const double stepSize = test->stepSize > 0 ? test->stepSize : clocked ? clockPeriod : 0.01;
+    std::string rows;
+    const auto row = [&](int step, double at) {
+        const auto evaluated = backend->evaluateNode(traced, at, 0, values);
+        std::string json = std::string(rows.empty() ? "" : ",") + "{\"step\":" + std::to_string(step) + ",\"time\":" + jsonNumber(at) + ",\"outputs\":{";
+        for (std::size_t index = 0; index < evaluated.size(); ++index) {
+            json += std::string(index ? "," : "") + jsonString(evaluated[index].first) + ":" + jsonNumber(evaluated[index].second);
+        }
+        rows += json + "},\"memory\":" + memoryJsonOf(backend->memoryState(traced)) + "}";
+    };
+    int step = 0;
+    double at = time;
+    try {
+        row(0, time);
+        for (step = 1; step <= test->steps; ++step) {
+            at = clocked ? time + stepSize * (step - 1) : time + stepSize * step;
+            const std::vector<std::pair<std::uint64_t, std::span<const double>>> call{{traced, values}};
+            backend->advance(call, at, stepSize);
+            row(step, at);
+        }
+    } catch (const std::exception& error) {
+        problems.push_back({error.what(), "", step, at});
+    }
+    traceJson = "{\"stepSize\":" + jsonNumber(stepSize) + ",\"clocked\":" + (clocked ? "true" : "false") + ",\"rows\":[" + rows + "]}";
     return finish();
 }
 
+}
+
+std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                         const std::unordered_map<std::string, double>& givenInputs, double time) {
+    return runProgramCheck(kind, source, configuration, givenInputs, time, nullptr);
+}
+
+std::string testProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                        const std::unordered_map<std::string, double>& givenInputs, double time, const ProgramTestRequest& test) {
+    return runProgramCheck(kind, source, configuration, givenInputs, time, &test);
+}
 
 std::string describeProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration, const ProgramPortUnits& ports,
                             const std::unordered_map<std::string, double>& givenInputs) {

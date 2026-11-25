@@ -298,12 +298,13 @@ int main(int argc, char** argv) {
         std::_Exit(0);
     }
     // Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run through the transport a run
-    // uses. --configuration holds { kind, providers, inputs, time }; the answer is written to --report as JSON.
-    if (argc >= 3 && std::string(argv[1]) == "checkProgram") {
+    // uses. --configuration holds { kind, providers, inputs, time }; the answer is written to --report as JSON. testProgram is the code
+    // editor's Test: the same checks and a trace, its configuration also holding { steps, stepSize }.
+    if (argc >= 3 && (std::string(argv[1]) == "checkProgram" || std::string(argv[1]) == "testProgram")) {
         const auto configurationOption = optionPath(argc, argv, "--configuration").string();
         const auto reportOption = optionPath(argc, argv, "--report").string();
         if (configurationOption.empty() || reportOption.empty()) {
-            std::cerr << "checkProgram requires --configuration and --report.\n";
+            std::cerr << argv[1] << " requires --configuration and --report.\n";
             std::_Exit(64);
         }
         boost::property_tree::ptree check;
@@ -316,8 +317,12 @@ int main(int argc, char** argv) {
         providerConfig.buildDirectory = check.get<std::string>("providers.buildDirectory", "");
         std::unordered_map<std::string, double> inputs;
         if (const auto given = check.get_child_optional("inputs")) for (const auto& [key, value] : *given) inputs[key] = value.get_value<double>();
-        const auto answer = konjugate::checkProgram(check.get<std::string>("kind", "python"), readTextFile(argv[2]), providerConfig, inputs,
-            check.get<double>("time", 0));
+        const auto kind = check.get<std::string>("kind", "python");
+        const auto source = readTextFile(argv[2]);
+        const auto time = check.get<double>("time", 0);
+        const auto answer = std::string(argv[1]) == "checkProgram" ? konjugate::checkProgram(kind, source, providerConfig, inputs, time)
+            : konjugate::testProgram(kind, source, providerConfig, inputs, time,
+                  konjugate::ProgramTestRequest{std::clamp(check.get<int>("steps", 0), 0, 100000), check.get<double>("stepSize", 0)});
         std::ofstream reportStream(reportOption, std::ios::trunc);
         reportStream << answer << '\n';
         reportStream.close();

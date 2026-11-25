@@ -128,6 +128,17 @@ bool planRequiresProviders(const ExecutionPlan& plan);
 std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
                          const std::unordered_map<std::string, double>& inputs, double time);
 
+// Test (the code editor's Test, docs/engineCli.md): Check program's standard checks, and a trace of `steps` steps of `stepSize` (0: the
+// clock's period, else 0.01 s) on an instance of its own with the inputs held. The answer is Check program's JSON with three more keys:
+// checks (each standard check passed, failed or not run), problemDetails (each problem with its line, check, and step and time for one
+// in the trace) and trace ({ stepSize, clocked, rows: [{ step, time, outputs, memory }] }).
+struct ProgramTestRequest {
+    int steps = 0;
+    double stepSize = 0;
+};
+std::string testProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
+                        const std::unordered_map<std::string, double>& inputs, double time, const ProgramTestRequest& test);
+
 // What the ports are bound to, for describeProgram's conversions: an input's bound unit by key; an output's state by key (its unit, and
 // whether it is a Rate state, which takes the unit per second).
 struct ProgramPortUnits {

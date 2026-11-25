@@ -72,10 +72,13 @@ test('only the site\'s own plain GETs are handled, never a range request or the 
     assert.equal(api.shouldHandle(request('https://elsewhere.example/x.js')), false);
     assert.equal(api.shouldHandle(request('engine/e.wasm', { headers: { range: 'bytes=0-9' } })), false);
     assert.equal(api.shouldHandle(request('sw.js')), false);
-    // The benchmark reports published beside the app are not the app's: never kept offline, never answered with its start page.
+    // The benchmark reports and the FMI page published beside the app are not the app's: never kept offline, never answered with its start page.
     assert.equal(api.shouldHandle(request('benchmarks/index.html')), false);
     assert.equal(api.shouldHandle(request('benchmarks/macbookair10-1-apple-m1-darwin/report.html', { method: 'HEAD' })), false);
     assert.equal(api.shouldHandle(request('renderer/benchmarks/x.js')), true);
+    assert.equal(api.shouldHandle(request('fmi/')), false);
+    assert.equal(api.shouldHandle(request('fmi/HeatedRoom/HeatedRoom.fmu')), false);
+    assert.equal(api.shouldHandle(request('examples/fmiLike.kjt')), true);
 });
 
 test('a stored file is served without the network', async () => {

@@ -242,9 +242,10 @@ await cp(join(rootDirectory, 'assets'), join(outputDirectory, 'assets'), { recur
 
 // Examples: copy the raw files, then generate the directory listing a browser can't produce
 // itself -- mirrors src/main.mjs's projectListExamples handler, for the bundled case (shares its
-// label/description logic via src/exampleCatalog.mjs rather than re-deriving it).
+// label/description logic via src/exampleCatalog.mjs rather than re-deriving it). Not examples/fmi/: the web edition has no FMUs, and that
+// folder is published beside the app as web.konjugate.com/fmi/ (scripts/fmiPage.mjs, webEdition.yml).
 const examplesDirectory = join(rootDirectory, 'examples');
-await cp(examplesDirectory, join(outputDirectory, 'examples'), { recursive: true });
+await cp(examplesDirectory, join(outputDirectory, 'examples'), { recursive: true, filter: (source) => source !== join(examplesDirectory, 'fmi') });
 const exampleFiles = (await readdir(examplesDirectory)).filter((name) => name.endsWith('.kjt'));
 const examplesManifest = new Map(JSON.parse(await readFile(join(examplesDirectory, 'manifest.json'), 'utf8'))
     .examples.map((entry) => [entry.id, entry]));

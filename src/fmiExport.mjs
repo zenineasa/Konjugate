@@ -84,6 +84,17 @@ ${stateVariables.map((_variable, index) => `            <Unknown index="${index 
 `;
 }
 
+// The model's C++ source, its modelIdentifier and its modelDescription.xml, as an export writes them: pure JS, no compiler, so a
+// test can check an FMU made earlier against what the exporter writes now (tests/fmiExamples.test.mjs).
+export function describeFmu(document, modelName) {
+    const { source, stateVariables, parameterVariables, supportsStateCapture } = generateFmiModel(document);
+    const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
+    const xml = modelDescriptionXml({
+        modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership
+    });
+    return { source, modelIdentifier, xml };
+}
+
 // document must already be flattened (stripEdgeGroups(executionProjectDocument(...))), matching
 // every other codeExport.mjs/fmiCodeGen.mjs entry point. engineOptions is the same
 // {applicationPath, resourcesPath, packaged} shape resolveEnginePath()/cppProviderSdkPath() take
@@ -92,8 +103,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
     const executable = await resolveEnginePath(engineOptions);
     if (!executable) throw new Error('The Konjugate engine binary could not be found -- FMU export needs it to compile the generated model.');
 
-    const { source, stateVariables, parameterVariables, supportsStateCapture } = generateFmiModel(document);
-    const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
+    const { source, modelIdentifier, xml } = describeFmu(document, modelName);
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuExport-'));
     try {
         const sourcePath = join(directory, 'model.cpp');
@@ -108,9 +118,6 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
         if (execution.code !== 0) throw new Error(execution.diagnostics || `The engine exited with code ${execution.code} while building the FMU.`);
 
         const libraryBytes = new Uint8Array(await readFile(artifactPath));
-        const xml = modelDescriptionXml({
-            modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership
-        });
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),
             [`binaries/${platformDirectory()}/${modelIdentifier}${libraryExtension()}`]: libraryBytes

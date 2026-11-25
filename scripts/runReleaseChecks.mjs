@@ -108,6 +108,7 @@ const checks = [
     { name: 'Code export fidelity (C++ serial, openmp, stdThread, mpi; Python)', script: 'tests/engine/codeExportFidelity.mjs', args: [engine] },
     { name: 'FMU export fidelity (FMPy)', script: 'tests/engine/fmiExportFidelity.mjs', args: [engine] },
     { name: 'FMU round trip', script: 'tests/engine/fmiRoundTrip.mjs', args: [engine] },
+    { name: 'FMI example FMUs (examples/fmi)', script: 'tests/engine/fmiExamples.mjs', args: [engine] },
     { name: 'Accuracy benchmarks', script: 'benchmarks/run.mjs', args: ['--accuracy', '--engine', engine] }
 ];
 

@@ -1,1 +1,3 @@
 benchmarks/results/** linguist-generated
+# The FMI example FMUs and their reference files are checked out exactly as written (the FMI CSV rules, tests/fmiExamples.test.mjs).
+examples/fmi/*/* -text

@@ -259,3 +259,33 @@ test('FMU export writes a Verlet node as code export does', async () => {
     assert.match(source, /const double halfStep = 0\.5 \* nodeTimeStep;/);
     assert.match(source, /const double stepTime = startTime \+ halfStep;/);
 });
+
+test('two parameters with the same symbol are named by their relationships, so every FMI variable name is unique', () => {
+    const document = baseDocument();
+    const support = id(); const supportPosition = id(); const mass = id(); const position = id(); const velocity = id();
+    document.nodes.push(
+        { id: support, name: 'Support', states: [{ id: supportPosition, name: 'Position', symbol: 'x', initialValue: 0, unit: 'm' }], sourceTerms: [] },
+        { id: mass, name: 'Mass', states: [{ id: position, name: 'Position', symbol: 'x', initialValue: 0.1, unit: 'm' }, { id: velocity, name: 'Velocity', symbol: 'v', initialValue: 0, unit: 'm/s' }], sourceTerms: [] }
+    );
+    const force = (name, coefficient, symbol, value) => {
+        const coefficientId = id(); const massId = id();
+        document.edges.push({
+            id: id(), name, source: { nodeId: support, stateId: supportPosition }, target: { nodeId: mass, stateId: velocity }, directionality: 'directed',
+            equationModel: {
+                output: { role: 'target', stateId: velocity }, mathJson: ['Divide', ['Multiply', symbol, ['Add', 'xs', ['Negate', 'xt']]], 'm'],
+                bindings: [
+                    { kind: 'state', role: 'source', nodeId: support, stateId: supportPosition, symbol: 'xs' },
+                    { kind: 'state', role: 'target', nodeId: mass, stateId: position, symbol: 'xt' },
+                    { kind: 'parameter', parameterId: coefficientId, symbol }, { kind: 'parameter', parameterId: massId, symbol: 'm' }
+                ]
+            },
+            parameters: [{ id: coefficientId, name: coefficient, symbol, value, mode: 'constant' }, { id: massId, name: 'Mass', symbol: 'mass', value: 1, mode: 'constant' }]
+        });
+    };
+    force('Spring force', 'Stiffness', 'stiffness', 4);
+    force('Damper force', 'Damping', 'damping', 0.4);
+    // The two edges' "m" binding symbols resolve to two different parameters whose own symbol is "mass".
+    document.edges.forEach((edge) => { edge.equationModel.bindings[3].symbol = 'm'; });
+    const { parameterVariables } = generateFmiModel(document);
+    assert.deepEqual(parameterVariables.map((variable) => variable.name).sort(), ['Damper force.mass', 'Spring force.mass', 'damping', 'stiffness']);
+});

@@ -16,7 +16,7 @@ const escapeXml = (text) => String(text).replace(/[&<>"]/g, (character) => ({ '&
 export const siteUrl = 'https://web.konjugate.com/benchmarks/';
 export const socialCard = { source: 'benchmarks/site/socialCard.png', path: 'socialCard.png', width: 1200, height: 1200, alt: 'Konjugate benchmarks: physical systems are networks, simulated that way' };
 export const tagline = 'Physical systems are networks. Simulate them that way.';
-const links = {
+export const links = {
     home: 'https://www.konjugate.com/',
     web: 'https://web.konjugate.com/',
     // konjugate.com has no download page of its own (it installs from a dialog), so the latest release, as the README links it.
@@ -26,38 +26,44 @@ const links = {
     issues: 'https://github.com/zenineasa/Konjugate/issues'
 };
 
-// The app's icon, its ids prefixed so they cannot clash with a page's own, and hidden from screen readers: the link's text names it.
-function logo() {
+// The app's icon, its ids prefixed so they cannot clash with a page's own (a page showing it twice gives each its own prefix), and hidden
+// from screen readers: the text beside it names it.
+export function logo({ size = 24, prefix = 'brand' } = {}) {
     const svg = readFileSync(join(repositoryRoot, 'assets', 'icon.svg'), 'utf8')
         .replace(/<!--[\s\S]*?-->\s*/g, '').replace(/<title[\s\S]*?<\/title>\s*|<desc[\s\S]*?<\/desc>\s*/g, '')
-        .replace(/\bid="([^"]+)"/g, 'id="brand-$1"').replace(/url\(#([^)]+)\)/g, 'url(#brand-$1)')
-        .replace(/<svg[^>]*>/, '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="24" height="24" aria-hidden="true" focusable="false">');
+        .replace(/\bid="([^"]+)"/g, `id="${prefix}-$1"`).replace(/url\(#([^)]+)\)/g, `url(#${prefix}-$1)`)
+        .replace(/<svg[^>]*>/, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="${size}" height="${size}" aria-hidden="true" focusable="false">`);
     return svg.replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
 }
 
 const favicon = () => `data:image/png;base64,${readFileSync(join(repositoryRoot, 'benchmarks', 'site', 'favicon32.png')).toString('base64')}`;
 
-// The head's tags: tab icon, description and link preview. `url` is the page's own published address.
-export function brandHead({ title, description, url }) {
-    const image = new URL(socialCard.path, siteUrl).href;
-    return [
+// The head's tags: tab icon, description and link preview. `url` is the page's own published address. The preview image is the benchmarks'
+// card; a page it does not describe passes `image: null`, and its preview is then the title and description alone.
+export function brandHead({ title, description, url, image: card = socialCard }) {
+    const tags = [
         `<link rel="icon" type="image/png" sizes="32x32" href="${favicon()}">`,
         `<meta name="description" content="${escapeXml(description)}">`,
         '<meta property="og:type" content="website">',
         '<meta property="og:site_name" content="Konjugate">',
         `<meta property="og:title" content="${escapeXml(title)}">`,
         `<meta property="og:description" content="${escapeXml(description)}">`,
-        `<meta property="og:url" content="${escapeXml(url)}">`,
+        `<meta property="og:url" content="${escapeXml(url)}">`
+    ];
+    if (!card) return [...tags, '<meta name="twitter:card" content="summary">', `<meta name="twitter:title" content="${escapeXml(title)}">`, `<meta name="twitter:description" content="${escapeXml(description)}">`].join('\n');
+    const image = new URL(card.path, siteUrl).href;
+    return [
+        ...tags,
         `<meta property="og:image" content="${escapeXml(image)}">`,
-        `<meta property="og:image:width" content="${socialCard.width}">`,
-        `<meta property="og:image:height" content="${socialCard.height}">`,
+        `<meta property="og:image:width" content="${card.width}">`,
+        `<meta property="og:image:height" content="${card.height}">`,
         '<meta property="og:image:type" content="image/png">',
-        `<meta property="og:image:alt" content="${escapeXml(socialCard.alt)}">`,
+        `<meta property="og:image:alt" content="${escapeXml(card.alt)}">`,
         '<meta name="twitter:card" content="summary_large_image">',
         `<meta name="twitter:title" content="${escapeXml(title)}">`,
         `<meta name="twitter:description" content="${escapeXml(description)}">`,
         `<meta name="twitter:image" content="${escapeXml(image)}">`,
-        `<meta name="twitter:image:alt" content="${escapeXml(socialCard.alt)}">`
+        `<meta name="twitter:image:alt" content="${escapeXml(card.alt)}">`
     ].join('\n');
 }
 
@@ -74,15 +80,21 @@ export const brandStyles = `
 .about h2 { font-size: 15px; margin: 0 0 4px; padding: 0; border: 0; } .about p { margin: 4px 0; }
 `;
 
-export const brandBar = () => `<header class="brand"><div class="inner">
+// `homeLink` also names the home page in the links on the right, for a page whose readers may not know the logo leads there.
+export const brandBar = ({ homeLink = false } = {}) => `<header class="brand"><div class="inner">
 <a class="home" href="${links.home}" aria-label="Konjugate home page">${logo()}<span>Konjugate</span></a>
-<nav aria-label="Konjugate"><a href="${links.web}">Try it in your browser</a><a href="${links.download}">Download</a><a href="${links.source}">Source on GitHub</a></nav>
+<nav aria-label="Konjugate">${homeLink ? `<a href="${links.home}">Home page</a>` : ''}<a href="${links.web}">Try it in your browser</a><a href="${links.download}">Download</a><a href="${links.source}">Source on GitHub</a></nav>
 </div></header>`;
 
 export const taglineHtml = `<p class="tagline">${escapeXml(tagline)}</p>`;
 
-export const aboutBox = `<footer class="about"><div>
+const aboutKonjugate = 'Konjugate is an open-source, graph-native simulation engine: draw a system as components connected by relationships, write each one\'s equations, and it assembles and runs the whole system.';
+
+// The About box with a page's own closing paragraphs (HTML) after the sentence describing Konjugate.
+export const aboutFooter = (closing) => `<footer class="about"><div>
 <h2>About Konjugate</h2>
-<p>Konjugate is an open-source, graph-native simulation engine: draw a system as components connected by relationships, write each one's equations, and it assembles and runs the whole system. These results can be reproduced from a clone of the repository: <a href="${links.reproduce}">Reproduce these results</a>.</p>
-<p>Found a result you don't believe? <a href="${links.issues}">Open an issue</a>.</p>
+<p>${aboutKonjugate} ${closing}</p>
 </div></footer>`;
+
+export const aboutBox = aboutFooter(`These results can be reproduced from a clone of the repository: <a href="${links.reproduce}">Reproduce these results</a>.</p>
+<p>Found a result you don't believe? <a href="${links.issues}">Open an issue</a>.`);

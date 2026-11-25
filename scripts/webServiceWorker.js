@@ -168,11 +168,12 @@ async function deleteOldCaches() {
 
 // Only the site's own plain GETs, and the HEADs that ask about them (MathLive sends one for its own script, to find its fonts): a range
 // request (a video, say) cannot be answered from a whole stored response, and the worker's own file is never served from the cache it
-// is there to manage. benchmarks/ is not the app's: the published benchmark reports (benchmarks/pages.mjs), put beside the build when it is
-// deployed, are left to the network, never kept for offline use nor answered with the app's start page.
+// is there to manage. benchmarks/ and fmi/ are not the app's: the published benchmark reports (benchmarks/pages.mjs) and the FMI
+// compatibility page (scripts/fmiPage.mjs), put beside the build when it is deployed, are left to the network, never kept for offline use
+// nor answered with the app's start page.
 function shouldHandle(request) {
     return (request.method === 'GET' || request.method === 'HEAD') && request.url.startsWith(base()) && !request.headers.has('range') && !request.url.startsWith(`${base()}sw.js`)
-        && !request.url.startsWith(`${base()}benchmarks/`);
+        && !request.url.startsWith(`${base()}benchmarks/`) && !request.url.startsWith(`${base()}fmi/`);
 }
 
 async function respond(request) {

@@ -37,7 +37,30 @@ const symbolOwners = (plan) => [...plan.algebraic, ...plan.contributions, ...(pl
 // exactly the runtime control stream a live parameter needs, and there's no reason a constant
 // parameter can't also be exposed for a host to tune -- it just defaults to never being touched,
 // reproducing the same constant behavior as today unless a host deliberately changes it.
-function assignValueReferences(model) {
+//
+// FMI requires every variable's name to be unique. A parameter is named by its symbol, and two relationships can each have
+// their own parameter with the same symbol (a spring's "mass" and a damper's "mass"): those, and only those, are named by
+// their relationship or node as well ("Spring force.mass"), as a state is ("Node.State"). Any name still used twice (two nodes
+// of the same name, say) gets its value reference after it. The generated source never names a variable, so this changes
+// modelDescription.xml alone.
+function uniqueVariableNames(document, stateVariables, parameterVariables, parameterIds) {
+    const ownerNames = new Map();
+    for (const owner of [...(document.edges ?? []), ...(document.nodes ?? [])]) {
+        const terms = [owner, ...(owner.sourceTerms ?? [])];
+        for (const term of terms) for (const parameter of term.parameters ?? []) ownerNames.set(parameter.id, owner.name);
+    }
+    const count = (variables) => variables.reduce((counts, variable) => counts.set(variable.name, (counts.get(variable.name) ?? 0) + 1), new Map());
+    const symbols = count(parameterVariables);
+    parameterVariables.forEach((variable, index) => {
+        const owner = ownerNames.get(parameterIds[index]);
+        if (symbols.get(variable.name) > 1 && owner) variable.name = `${owner}.${variable.name}`;
+    });
+    const all = [...stateVariables, ...parameterVariables];
+    const names = count(all);
+    for (const variable of all) if (names.get(variable.name) > 1) variable.name = `${variable.name} [${variable.valueReference}]`;
+}
+
+function assignValueReferences(model, document) {
     const stateVariables = [];
     let nextValueReference = 0;
     for (const plan of model.nodePlans) {
@@ -68,6 +91,7 @@ function assignValueReferences(model) {
         }
     };
     for (const plan of model.nodePlans) for (const contribution of symbolOwners(plan)) visitSymbols(contribution.symbols);
+    uniqueVariableNames(document, stateVariables, parameterVariables, [...parameterValueReferences.keys()]);
 
     return { stateVariables, parameterVariables, parameterValueReferences };
 }
@@ -157,7 +181,7 @@ export function generateFmiModel(document) {
         if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which FMU export cannot write under ${integrationMethod(method).name} yet.`);
     }
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
-    const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model);
+    const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model, document);
     rewriteParameterSymbols(model, parameterValueReferences);
     // A program in the older format can carry arbitrary internal state across evaluate() calls with no generic way to serialize it, so
     // a model with one does not support rollback (fmi2Get/SetFMUstate; konjugate/simulationModel.hpp's supportsStateCapture()). A program

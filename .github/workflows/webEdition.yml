@@ -69,6 +69,10 @@ jobs:
             # and the service worker (scripts/webServiceWorker.js) leaves benchmarks/ to the network. No npm packages needed.
             - name: Add the benchmark reports under benchmarks/
               run: node benchmarks/pages.mjs out/webShell/benchmarks
+            # The FMI compatibility page (scripts/fmiPage.mjs), at web.konjugate.com/fmi/: examples/fmi/README.md as a web page, with the example
+            # FMUs and their reference results to download. Added after the build like the reports, for the same reasons; no npm packages needed.
+            - name: Add the FMI compatibility page under fmi/
+              run: node scripts/fmiPage.mjs out/webShell/fmi
             - name: Upload the built shell for inspection
               uses: actions/upload-artifact@v4
               with:

@@ -946,6 +946,13 @@
             <header><div><span class="contextKicker">Model validation</span><strong id="validationPanelTitle">No issues</strong></div><button id="closeValidationPanel" type="button" aria-label="Close issues">×</button></header>
             <div id="validationIssues"></div>
         </aside>
+        <!-- Why the last run stopped, in words (src/runFailure.mjs): shown when a run fails, until it is closed or the next run starts. -->
+        <aside id="runFailurePanel" class="validationPanel runFailurePanel" role="alert" aria-label="Why the run stopped" hidden>
+            <header><div><span class="contextKicker">Run stopped</span><strong id="runFailureTitle"></strong></div><button id="closeRunFailurePanel" type="button" aria-label="Close">×</button></header>
+            <ul id="runFailureLines" class="runFailureLines"></ul>
+            <div class="runFailureActions"><button id="runFailureOpenNode" type="button" hidden>Open the node</button></div>
+            <details class="runFailureMessage"><summary>The engine's message</summary><code id="runFailureMessage"></code></details>
+        </aside>
 
         <template id="relationshipBundleTemplate">
             <div class="bundleLabel" tabindex="0">

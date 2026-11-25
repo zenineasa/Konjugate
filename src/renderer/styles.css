@@ -1102,6 +1102,16 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .validationPanel header { position: sticky; z-index: 1; top: 0; display: flex; align-items: center; justify-content: space-between; padding: 12px 13px; background: rgb(13 24 32 / 98%); border-bottom: 1px solid #293a45; }
 .validationPanel header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 11px; }
 .validationPanel header button { color: #60747f; background: transparent; border: 0; font-size: 16px; }
+/* Why the last run stopped (#runFailurePanel): the validation panel's place and look, its lines selectable to copy. */
+.runFailurePanel { border-color: #6b3b42; }
+.runFailurePanel header strong { line-height: 1.45; user-select: text; }
+.runFailureLines { margin: 0; padding: 10px 13px 4px 26px; color: #aebfc7; font-size: 9px; line-height: 1.5; user-select: text; }
+.runFailureLines li { margin-bottom: 6px; }
+.runFailureActions { padding: 0 13px 8px; }
+.runFailureActions button { padding: 4px 10px; color: #7cd9cc; background: #17262f; border: 1px solid #2f5850; border-radius: 4px; cursor: pointer; font-size: 9px; }
+.runFailureActions button:hover { background: #1e313b; }
+.runFailureMessage { padding: 0 13px 12px; color: #60747f; font-size: 8px; }
+.runFailureMessage code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; user-select: text; }
 .validationIssue { display: grid; width: 100%; grid-template-columns: 8px 1fr; gap: 8px; padding: 10px 12px; color: #91a3ad; background: transparent; border: 0; border-bottom: 1px solid #23343e; text-align: left; }
 .validationIssue:hover { background: #182832; }
 .validationIssue i { width: 7px; height: 7px; margin-top: 2px; background: var(--orange); border-radius: 50%; }

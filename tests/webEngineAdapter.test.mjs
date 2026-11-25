@@ -67,6 +67,9 @@ test('validation writes the project as a project file and reads the report back,
     answer(() => 3);
     await assert.rejects(validateWithWebEngine(engineModuleUrl, content), /The engine exited with code 3/);
     assert.deepEqual(scratchDirectories(), [], 'Not even after a failure.');
+    // What the engine said on stderr is the error, as the desktop's diagnostics are.
+    answer((Module) => { Module.options.printErr('ENGINE_FAILURE: The model is broken.'); return 3; });
+    await assert.rejects(validateWithWebEngine(engineModuleUrl, content), /^Error: ENGINE_FAILURE: The model is broken\.$/);
 });
 
 test('inference passes only the options that were set, and reads its report back', async () => {

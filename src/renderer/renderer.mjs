@@ -41,6 +41,7 @@ import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import { fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
+import { describeRunFailure } from '../runFailure.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
 import {
@@ -8495,6 +8496,7 @@ async function startSimulation() {
     }
     $('#runButton').disabled = true;
     $('#runButton').title = 'Simulation is running';
+    hideRunFailure();
     $('#statusText').textContent = pendingFork ? 'Starting fork…' : 'Running simulation…';
     const previousResultSessionId = activeEngineJobId;
     const forkingFromSessionId = pendingFork ? previousResultSessionId : null;
@@ -8571,6 +8573,7 @@ async function startSimulation() {
         if (tutorialRunModel && tutorialRunModel.jobId === null) tutorialRunModel = tutorialRunBefore;
         $('#statusText').textContent = 'Simulation failed';
         $('#runButton').title = error.message;
+        showRunFailure(error.message);
         simulationRunning = false;
         pendingFork = null;
         $('#runButton').disabled = runButtonDisabled();
@@ -8902,6 +8905,56 @@ window.engine.onComplete(({ jobId, result }) => {
     $('#statusText').textContent = result.lifecycle === 'stopped' ? 'Simulation stopped · partial results retained' : 'Simulation complete';
     releaseRunWaiters();
 });
+// ---- Why a run stopped, on screen (src/runFailure.mjs) -------------------------------------------------------------------
+// The engine's message used to reach only the Run button's tooltip. It is said in words under the status chip, naming
+// the node of an FMU and the values its parameters started from, until it is closed or the next run starts.
+// Which failure is being shown is counted on the panel itself, not in a module variable: a project can be loaded (which hides
+// the panel) before this part of the module has run.
+function nextRunFailure() {
+    const panel = $('#runFailurePanel');
+    panel.dataset.shown = String(Number(panel.dataset.shown || 0) + 1);
+    return panel.dataset.shown;
+}
+async function showRunFailure(message) {
+    const shown = nextRunFailure();
+    const project = serializeProjectDocument();
+    const fmuPorts = {};
+    for (const node of project.nodes ?? []) {
+        const implementation = node.implementation;
+        if (implementation?.kind !== 'fmi' || !implementation.fmuId) continue;
+        try {
+            const ports = await window.extensions?.fmuPorts?.(implementation.fmuId, implementation.fmuVersion);
+            if (ports && !ports.error) fmuPorts[node.id] = ports;
+        } catch { /* named by its model instead */ }
+    }
+    if (shown !== $('#runFailurePanel').dataset.shown) return;
+    const failure = describeRunFailure(message, project, fmuPorts);
+    $('#runFailureTitle').textContent = failure.title;
+    $('#runFailureLines').replaceChildren(...failure.lines.map((line) => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        return item;
+    }));
+    $('#runFailureMessage').textContent = failure.message || String(message ?? '');
+    const open = $('#runFailureOpenNode');
+    open.hidden = failure.nodeIds.length !== 1;
+    open.dataset.nodeId = failure.nodeIds.length === 1 ? String(failure.nodeIds[0]) : '';
+    $('#validationPanel').hidden = true;
+    $('#runFailurePanel').hidden = false;
+}
+function hideRunFailure() {
+    nextRunFailure();
+    $('#runFailurePanel').hidden = true;
+}
+$('#closeRunFailurePanel').addEventListener('click', hideRunFailure);
+$('#runFailureOpenNode').addEventListener('click', (event) => {
+    const definition = model.nodes.find((node) => String(node.id) === event.currentTarget.dataset.nodeId && !node.deleted);
+    const object = definition ? nodeObjects.get(definition.id) : null;
+    if (!object) return;
+    selectNode(object);
+    openNodeEditor(definition);
+});
+
 window.engine.onError(({ jobId, message }) => {
     if (jobId !== activeEngineJobId) return;
     console.error(`[Simulation Error] Job ${jobId} failed:`, message);
@@ -8910,6 +8963,7 @@ window.engine.onError(({ jobId, message }) => {
     releaseRunWaiters();
     $('#statusText').textContent = 'Simulation failed';
     $('#runButton').title = message;
+    showRunFailure(message);
     if (!activeResult) {
         activeEngineJobId = null;
         $('#runButton').disabled = runButtonDisabled();
@@ -9779,6 +9833,7 @@ async function loadProjectDocument(document, {
     discardAssistantProposal();
     hideAssistantPanel();
     hideRestoredNotice();
+    hideRunFailure();
     demonstrationProject = false;
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
@@ -16131,7 +16186,7 @@ function closeLeftoversForTutorial() {
     if (!$('#parameterTuning').classList.contains('hidden')) $('#cancelParameterTuning').click();
     if (!$('#causalInference').classList.contains('hidden')) $('#cancelCausalInference').click();
     hideCards(null);
-    for (const [panel, close] of [['#componentLibraryPanel', '#closeComponentLibraryPanel'], ['#controlHistoryPanel', '#closeControlHistoryPanel'], ['#validationPanel', '#closeValidationPanel'],
+    for (const [panel, close] of [['#componentLibraryPanel', '#closeComponentLibraryPanel'], ['#controlHistoryPanel', '#closeControlHistoryPanel'], ['#validationPanel', '#closeValidationPanel'], ['#runFailurePanel', '#closeRunFailurePanel'],
         ['#liveParameterPanel', '#closeLiveParameterPanel'], ['#branchesPanel', '#closeBranchesPanel'], ['#parametersPanel', '#closeParametersPanel']]) {
         if (!$(panel).hidden) $(close).click();
     }

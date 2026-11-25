@@ -10665,6 +10665,88 @@ export async function runInteractionTests(driver) {
         await programEditorClosed(editor);
     });
 
+    // A run that stops says why on screen, not only in the Run button's tooltip (src/runFailure.mjs,
+    // docs/proposals/fmuImportWorkflow.md stage 1): here a model's own equation, dx/dt = 1/x from x = 0.
+    await run('a run that stops says why on screen, and the next project clears it', async () => {
+        const reciprocal = (initialValue) => ({
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
+            nodes: [{
+                id: 1, name: 'Reciprocal', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                states: [{ id: 2, name: 'X', symbol: 'x', initialValue, unit: '' }],
+                sourceTerms: [{
+                    id: 3, state: 'x', expression: '1/x', parameters: [],
+                    expressionModel: { latex: '\\frac{1}{x}', bindings: [{ kind: 'state', stateId: 2, symbol: 'x' }], output: { stateId: 2 }, mathJson: ['Divide', 1, 'x'] }
+                }]
+            }]
+        });
+        const runTo = async (seconds) => {
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const field = document.querySelector('#runTargetTime'); field.value = '${seconds}'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(reciprocal(0))}, 'Reciprocal.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The model did not load.');
+        assert.equal(await evaluate(window, `document.querySelector('#runFailurePanel').hidden`), true, 'Nothing is shown before a run.');
+        await runTo(1);
+        await waitFor(window, `!document.querySelector('#runFailurePanel').hidden`, 'The reason the run stopped was not shown.', 60000);
+        assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Simulation failed');
+        assert.equal(await evaluate(window, `document.querySelector('#runFailureTitle').textContent`), 'The run stopped: A contribution task produced a non-finite derivative.');
+        assert.match(await evaluate(window, `document.querySelector('#runFailureLines').textContent`), /division by zero/);
+        assert.equal(await evaluate(window, `document.querySelector('#runFailureOpenNode').hidden`), true, 'No one node is named, so none is offered.');
+        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#runFailurePanel')).display !== 'none' && document.querySelector('#runFailurePanel').getBoundingClientRect().height > 0`), true, 'The panel is on screen.');
+        // Fixed (x starts at 1), the project loaded again clears the panel, and the run completes.
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(reciprocal(1))}, 'Reciprocal.kjt')`);
+        await waitFor(window, `document.querySelector('#runFailurePanel').hidden`, 'Loading a project did not clear the panel.');
+        await runTo(1);
+        await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The fixed model did not run.', 60000);
+        assert.equal(await evaluate(window, `document.querySelector('#runFailurePanel').hidden`), true);
+    });
+
+    // An imported FMU that refuses a value is named by its node, with the value the input started from: the Reference FMU
+    // Feedthrough refuses 0 for its enumeration input (its own start is 1), the failure the FMU round-trip walk met.
+    await run('an FMU that refuses a value says which node, which input and the value it started from', async () => {
+        const { referenceFmuArchive, referenceHostDocument } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Feedthrough.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Feedthrough'));
+        let guid = null;
+        let version = null;
+        try {
+            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
+            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-tab="fmu"]').click()`);
+            const asked = await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
+                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                await waitFor(window, `window.extensions.list().then((entries) => entries.some((entry) => entry.packageType === 'fmu' && entry.name === 'Feedthrough'))`, 'The FMU was not installed.', 15000);
+            });
+            assert.equal(asked.length, 2, 'Installing asks for the file and to confirm.');
+            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            ({ guid, version } = await evaluate(window, `window.extensions.list().then((entries) => { const entry = entries.find((item) => item.packageType === 'fmu' && item.name === 'Feedthrough'); return { guid: entry.packageId, version: entry.version }; })`));
+            const ports = await evaluate(window, `window.extensions.fmuPorts(${JSON.stringify(guid)}, ${JSON.stringify(version)})`);
+            // Every input at 0, as a new state starts.
+            const project = referenceHostDocument({ guid, version, ports, values: {}, stepSize: 0.1 });
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Feedthrough.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The FMU project did not load.');
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const field = document.querySelector('#runTargetTime'); field.value = '1'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `!document.querySelector('#runFailurePanel').hidden && document.querySelector('#runFailureLines').children.length > 0`, 'The FMU\'s refusal was not shown.', 180000);
+            assert.equal(await evaluate(window, `document.querySelector('#runFailureTitle').textContent`), 'The run stopped at t = 0 s: the FMU in \'Feedthrough\' refused the value given to Enumeration_input.');
+            const lines = await evaluate(window, `[...document.querySelectorAll('#runFailureLines li')].map((item) => item.textContent)`);
+            assert.equal(lines[0], 'It said: 0 is not a legal value for Enumeration_input.');
+            assert.match(lines[1], /^Enumeration_input was 0 at the start \(it reads this\.i\d+\)\.$/);
+            assert.match(await evaluate(window, `document.querySelector('#runFailureMessage').textContent`), /^The FMU 'Feedthrough' refused fmi3SetInt64 \(setting 'Enumeration_input'\) at t = 0/);
+            // The node is one click away.
+            await evaluate(window, `document.querySelector('#runFailureOpenNode').click()`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Feedthrough'`, 'Open the node did not open the FMU\'s node.');
+            await evaluate(window, `document.querySelector('#closeRunFailurePanel').click()`);
+            assert.equal(await evaluate(window, `document.querySelector('#runFailurePanel').hidden`), true, 'Close hides the panel.');
+        } finally {
+            if (guid) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {

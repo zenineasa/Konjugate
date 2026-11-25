@@ -58,9 +58,12 @@ self.onmessage = async (startEvent) => {
     let Module;
     try {
         const stdoutBuffer = [];
+        const stderrBuffer = [];
         Module = await startEngineModule(engineModuleUrl, {
             print: (text) => stdoutBuffer.push(text),
-            printErr: (text) => console.error('[Engine stderr]', text)
+            // Kept as well as logged: the engine says why a run stopped on stderr (ENGINE_FAILURE: …), and the error
+            // below carries it, as the desktop's does (src/engineAdapter.mjs), for the run failure panel (src/runFailure.mjs).
+            printErr: (text) => { stderrBuffer.push(text); console.error('[Engine stderr]', text); }
         });
         Module.FS.mkdir('/live');
         await ensurePythonProvidersReady(Module, content);
@@ -137,7 +140,7 @@ self.onmessage = async (startEvent) => {
             '--control-stream', 'protobuf', '--event-stream', 'protobuf'
         ]);
         if (exitCode !== 0) {
-            throw new Error(stdoutBuffer.join('').trim() || `The engine exited with code ${exitCode}.`);
+            throw new Error(stderrBuffer.join('\n').trim() || stdoutBuffer.join('').trim() || `The engine exited with code ${exitCode}.`);
         }
         const finalBytes = Module.FS.readFile(outputPath);
         const finalSnapshot = decodeResultFile(finalBytes);

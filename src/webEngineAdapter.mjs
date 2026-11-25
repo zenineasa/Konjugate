@@ -153,16 +153,17 @@ function removeScratchDirectory(Module, path) {
 // acceptedExitCodes mirrors each operation's own exit-code tolerance in engineAdapter.mjs (e.g.
 // validate's 0 or 2, fit's 0 or 1) -- a nonzero code outside that set throws, matching
 // runEngine()'s own diagnostics-in-the-error convention as closely as this environment allows
-// (stderr is kept only for checkProgramWithWebEngine below, which answers with it as the desktop does; the exit code is
-// what's available).
+// (stderr is kept, and a failure's error is the engine's own words on it, as runEngine()'s is; the exit code only when it
+// said nothing).
 async function runOneShot(engineModuleUrl, { setup, argv, readOutput, acceptedExitCodes = [0] }) {
     const Module = await loadModule(engineModuleUrl);
     const directory = scratchDirectory(Module);
     try {
         const paths = await setup(Module, directory);
+        stderrBuffer = [];
         const exitCode = Module.callMain(argv(paths));
         if (!acceptedExitCodes.includes(exitCode)) {
-            throw new Error(`The engine exited with code ${exitCode}.`);
+            throw new Error(stderrBuffer.join('\n').trim() || `The engine exited with code ${exitCode}.`);
         }
         // Explicitly awaited, not just returned: readOutput is async (validate/infer/fit's own
         // readOutput lazily imports reportProtocol.mjs first -- see this module's own header

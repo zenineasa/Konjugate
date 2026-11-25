@@ -253,6 +253,14 @@ test('the live-run Worker reports an engine that fails, in its own words where i
     assert.deepEqual(posted, [{ type: 'error', message: 'The model has no states.' }]);
 });
 
+// The engine says why a run stopped on stderr, as the desktop engine does: the run failure panel (src/runFailure.mjs) reads it.
+test('the live-run Worker reports what the engine said on stderr before what it printed', async () => {
+    posted.length = 0;
+    engine.callMain = (Module) => { Module.options.print('partial'); Module.options.printErr('ENGINE_FAILURE: A contribution task produced a non-finite derivative.'); return 5; };
+    await liveRunWorker({ data: { engineModuleUrl, content, configuration: {}, stdinRing: createStdinRingBuffer() } });
+    assert.deepEqual(posted, [{ type: 'error', message: 'ENGINE_FAILURE: A contribution task produced a non-finite derivative.' }]);
+});
+
 test('the batch Worker answers each run by its request id, whether it finished or failed', async () => {
     posted.length = 0;
     engine.callMain = (Module, argv) => { Module.FS.writeFile(argv[5], resultFile({ stateIds: [2], batches: [[0, 1]], values: (time) => [20 + time] })); return 0; };

@@ -1,0 +1,68 @@
+{
+    "format": "konjugate",
+    "version": 1,
+    "ownership": {
+        "title": "PI-controlled tank",
+        "owner": "Zenin Easa Panthakkalakath",
+        "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
+        "license": {
+            "id": "0BSD"
+        },
+        "contact": "info@konjugate.com"
+    },
+    "name": "PI-controlled tank",
+    "nodes": [
+        {
+            "id": 1,
+            "name": "Tank",
+            "type": "generic",
+            "position": [
+                0,
+                0,
+                0
+            ],
+            "states": [
+                {
+                    "id": 11,
+                    "name": "Level",
+                    "symbol": "level",
+                    "initialValue": 0
+                },
+                {
+                    "id": 12,
+                    "name": "Cumulative control effort squared",
+                    "symbol": "cumulativeControlEffortSquared",
+                    "initialValue": 0
+                }
+            ],
+            "sourceTerms": [],
+            "numerics": {
+                "substepsPerGlobalStep": 1
+            },
+            "appearance": {},
+            "implementation": {
+                "kind": "python",
+                "providerApiVersion": 2,
+                "source": "# Copyright © 2026 Zenin Easa Panthakkalakath\n\n\"\"\"A PI-controlled tank: a node program with memory (docs/programs.md).\n\nThe controller fills the tank toward a level of 10 m. It is sampled every samplePeriod (50 ms unless bound): at each sample, advance()\nreads the level, adds the error times the period to the integral and works out the control effort, which is held until the next sample.\nThe integral and the effort are memory, which the engine saves and restores with checkpoints, so pausing, resuming or forking a run\ncarries on exactly. evaluate() gives the effort as the level's rate of change, and its square as the rate of the cumulative squared\neffort.\n\nThe version 2 rewrite of piControllerNode.py, which integrates in evaluate() at every step: run at a global step equal to the sample\nperiod under Euler, the two give the same numbers to the bit (tests/engine/programRewrites.mjs). See piControlledTank.json for a model\nthat uses it.\n\"\"\"\n\nfrom konjugate.v2 import Clock, Constant, Input, Memory, Node, Output\n\n\nclass PIController(Node):\n    \"\"\"A PI controller filling a tank toward a level of 10 m.\"\"\"\n\n    level = Input(\"m\")\n    sample_period = Constant(\"s\", default=0.05)\n    level_rate = Output(\"m/s\")               # into the Rate state \"level\"\n    effort_rate_squared = Output()           # into the Rate state \"cumulativeControlEffortSquared\"\n\n    clock = Clock(sample_period)             # advance() at the start and every sample period: a whole number of the run's steps\n\n    integral = Memory(0.0, unit=\"m*s\")\n    effort = Memory(0.0, unit=\"m/s\")\n\n    def evaluate(self, t, x):\n        return self.outputs(level_rate=x.effort, effort_rate_squared=x.effort * x.effort)\n\n    def advance(self, step, x, m):\n        setpoint = 10.0\n        error = setpoint - x.level\n        integral = x.integral + error * step.size\n        m.integral = integral\n        m.effort = 0.6 * error + 0.05 * integral\n",
+                "bindings": [
+                    {
+                        "key": "level",
+                        "kind": "state",
+                        "stateId": 11
+                    }
+                ],
+                "outputs": [
+                    {
+                        "key": "levelRate",
+                        "stateId": 11
+                    },
+                    {
+                        "key": "effortRateSquared",
+                        "stateId": 12
+                    }
+                ]
+            }
+        }
+    ],
+    "edges": []
+}

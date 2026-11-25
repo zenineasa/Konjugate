@@ -6,7 +6,8 @@
 //   - each version 2 example in examples/providers, found by its source, so an example added there is checked without a change here;
 //   - each older (version 1) program the app ships (examples/providers, the component library, the example projects), once Convert has
 //     brought it to version 2, as the code editor offers Test only after Convert; a conversion the converter calls incomplete (state kept
-//     by hand, a step size read in evaluate()) is left for the person to finish, and must say what is left in its notes;
+//     by hand, a step size read in evaluate()) is left for the person to finish, must say what is left in its notes, and must have a
+//     version 2 rewrite beside it;
 //   - a Python one also in the WebAssembly engine (src/webEngineAdapter.mjs, with the Pyodide in node_modules), with the desktop's answer.
 // Each is checked with every input that has no default at 1 (0 would divide by zero in Conduction), through the inputs Describe
 // program reads.
@@ -142,6 +143,16 @@ try {
         }
     }
     assert.deepEqual(failures, [], 'Every template and example passes Check program.');
+    // Each older program Convert cannot finish has a version 2 rewrite beside it, checked above and held to its numbers by
+    // tests/engine/programRewrites.mjs.
+    const rewrites = {
+        'examples/providers/accumulatorNode.py': 'examples/providers/accumulator.py',
+        'examples/providers/piControllerNode.py': 'examples/providers/piController.py',
+        'examples/providers/piControlledTankProject.json.nodes.0.implementation': 'examples/providers/piControlledTank.json.nodes.0.implementation'
+    };
+    for (const where of unfinished) {
+        assert.ok(rewrites[where] && programs.some(([checked]) => checked === rewrites[where]), `${where} is left unfinished by Convert and has no version 2 rewrite.`);
+    }
     console.log(`Every template and example passes Check program (${programs.length} programs), alike on the desktop and the web.` +
         (unfinished.length ? ` Left to the person after Convert: ${unfinished.join(', ')}.` : ''));
 } finally {

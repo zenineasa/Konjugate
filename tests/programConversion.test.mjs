@@ -71,8 +71,9 @@ test('a program that keeps memory is converted as far as its ports, every place 
     assert.match(converted.source, /^    level_rate = Output\("m\/s"\)$/m);
 });
 
-test('the library\'s PID, which integrates in evaluate(), is not called finished', async () => {
-    const library = JSON.parse(await readFile(join(root, 'assets', 'componentLibrary', 'pidParallel.json'), 'utf8'));
+test('the library\'s older PID, which integrates in evaluate(), is not called finished', async () => {
+    // The library's parallel PID as it was in the older format (the library now carries its version 2 rewrite).
+    const library = JSON.parse(await readFile(join(root, 'tests', 'fixtures', 'pidParallelV1.json'), 'utf8'));
     const find = (value) => (value && typeof value === 'object' ? value.implementation?.source ?? Object.values(value).map(find).find(Boolean) : null);
     const converted = convertProgramToVersion2('cpp', find(library));
     assert.equal(converted.complete, false);

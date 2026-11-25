@@ -397,8 +397,11 @@ std::unique_ptr<k::Program> createProgram() { return std::make_unique<${classNam
 `;
 }
 
-function nodeTemplateV2(kind, inputKeys, outputKeys, title) {
+function nodeTemplateV2(kind, inputKeys, boundOutputKeys, title) {
     const { className, name } = providerIdentity(title || 'Node');
+    // A program declares at least one output, or it cannot run or pass Check program: with none bound yet, one named "output", to be
+    // renamed to the key of the state it sets.
+    const outputKeys = boundOutputKeys.length ? boundOutputKeys : ['output'];
     if (kind === 'python') {
         const ports = inputKeys.map((key) => pythonPort(key, 'Input()'));
         const outs = outputKeys.map((key) => pythonPort(key, 'Output()'));

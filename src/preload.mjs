@@ -96,7 +96,7 @@ contextBridge.exposeInMainWorld('projectFiles', {
     save: (path, content, suggestedFilename, password, resultBranches) => ipcRenderer.invoke('projectSave', { path, content, suggestedFilename, password, resultBranches }),
     exportResultsCsv: (suggestedFilename, csv) => ipcRenderer.invoke('projectExportResultsCsv', { suggestedFilename, csv }),
     exportGeneratedProgram: (suggestedFilename, source, kind) => ipcRenderer.invoke('projectExportGeneratedProgram', { suggestedFilename, source, kind }),
-    exportFmu: (suggestedFilename, document, modelName) => ipcRenderer.invoke('projectExportFmu', { suggestedFilename, document, modelName }),
+    exportFmu: (suggestedFilename, document, modelName, fmiVersion) => ipcRenderer.invoke('projectExportFmu', { suggestedFilename, document, modelName, fmiVersion }),
     mergeFmus: () => ipcRenderer.invoke('projectMergeFmus'),
     confirmDiscard: () => ipcRenderer.invoke('projectConfirmDiscard')
 });

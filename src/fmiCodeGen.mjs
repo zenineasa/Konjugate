@@ -3,7 +3,8 @@
 // Generates the C++ model source for an FMU export: a class implementing
 // konjugate/simulationModel.hpp's SimulationModel contract (engine/include/konjugate/
 // simulationModel.hpp), compiled and linked against engine/src/fmiGlue.cpp (the FMI 2.0
-// Co-Simulation C API implementation) by the engine's `buildSharedLibrary` command. See
+// Co-Simulation C API implementation) or engine/src/fmi3Glue.cpp (FMI 3.0, the same source with
+// its identity constants appended by src/fmiExport.mjs) by the engine's `buildSharedLibrary` command. See
 // docs/codeExport.md for the FMU export's scope and src/fmiExport.mjs for the orchestration
 // (modelDescription.xml generation, invoking the engine build, zipping the result).
 //
@@ -385,5 +386,5 @@ export function generateFmiModel(document) {
         ''
     ].join('\n');
 
-    return { source, stateVariables, parameterVariables, supportsStateCapture };
+    return { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep };
 }

@@ -8,12 +8,12 @@
    reproduced here (BSD-2-Clause) for the same reason as engine/include/fmi2/fmi2Functions.h: it
    lets a real, spec-compliant fmi3* shared library (an imported third-party FMU, or a
    hand-authored test fixture standing in for one) be declared against the real ABI, catching a
-   signature mismatch at compile time rather than exporting a subtly wrong one. Konjugate does not
-   export FMI 3.0 FMUs (export stays FMI 2.0 only, see docs/codeExport.md) -- this header exists
-   for the IMPORT side (src/fmiResolver.mjs's generated glue dlopen()s a real vendor FMU and
-   resolves these symbols by name) and for engine/tests fixtures standing in for one. Only the
-   subset this codebase actually drives is declared -- no Model Exchange, no Scheduled Execution,
-   no clocks, no binary/string get-set. */
+   signature mismatch at compile time rather than exporting a subtly wrong one. It serves the
+   IMPORT side (src/fmiResolver.mjs's generated glue dlopen()s a real vendor FMU and resolves these
+   symbols by name), engine/tests fixtures standing in for one, and the FMI 3.0 EXPORT
+   (engine/src/fmi3Glue.cpp, which declares the standard's remaining functions itself, since an
+   exported FMU must offer them all). Only the subset this codebase actually drives is declared
+   here -- no Model Exchange, no Scheduled Execution, no clocks, no binary/string get-set. */
 
 #if defined(_WIN32)
 #define FMI3_Export __declspec(dllexport)

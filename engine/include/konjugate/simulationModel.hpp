@@ -11,8 +11,8 @@ namespace konjugate::sdk::v1 {
 // The contract a generated FMU model source implements (src/fmiCodeGen.mjs, mirroring the same
 // contribution-graph/expression-transpiling code src/codeExport.mjs's C++ export already uses and
 // is fidelity-tested against the real engine). fmiGlue.cpp drives this interface behind the FMI
-// 2.0 Co-Simulation C API -- see docs/codeExport.md for exactly what a model exported this way
-// does and does not reproduce.
+// 2.0 Co-Simulation C API, and fmi3Glue.cpp behind FMI 3.0's -- see docs/codeExport.md for exactly
+// what a model exported this way does and does not reproduce.
 class SimulationModel {
 public:
     virtual ~SimulationModel() = default;

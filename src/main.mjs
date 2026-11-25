@@ -2524,14 +2524,14 @@ ipcMain.handle('projectExportGeneratedProgram', async (event, { suggestedFilenam
     return { path, fileName: basename(path) };
 });
 
-ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName }) => {
+ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName, fmiVersion = '2.0' }) => {
     const targetWindow = getWindowFromEvent(event);
     const buffer = await generateFmuPackage(document, {
-        modelName,
+        modelName, fmiVersion,
         engineOptions: { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged }
     });
     const result = await dialog.showSaveDialog(targetWindow, {
-        title: 'Export as FMU',
+        title: `Export as FMU (FMI ${fmiVersion})`,
         defaultPath: suggestedFilename || 'model.fmu',
         filters: [{ name: 'FMU', extensions: ['fmu'] }]
     });

@@ -8144,7 +8144,8 @@ async function exportGeneratedProgram(kind, parallelism) {
     }
 }
 
-async function exportFmu() {
+// fmiVersion is '2.0' or '3.0', from the Format chosen: the same model either way (src/fmiExport.mjs).
+async function exportFmu(fmiVersion = '2.0') {
     try {
         const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
         const modelName = filenameStem(currentProjectFilename);
@@ -8152,7 +8153,7 @@ async function exportFmu() {
         // Unlike exportGeneratedProgram, the document itself (not a pre-rendered source string) is
         // sent over IPC: generateFmuPackage runs in the main process, since it needs to spawn the
         // engine binary to actually compile the model into a shared library (see src/fmiExport.mjs).
-        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName);
+        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName, fmiVersion);
         $('#exportCodeDialog').close();
         if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
         if (outcome && tour.active) tutorialExportedKinds.add('fmu');
@@ -8336,7 +8337,7 @@ $('#exportCsvButton').addEventListener('click', () => exportResultsCsv());
 // FMU is a compiled binary loaded as a single shared library by one host process, so it is C++
 // only (no Python option) and has no MPI mode either (see src/fmiCodeGen.mjs/docs/codeExport.md).
 function updateExportCodeFields() {
-    const isFmu = $('#exportCodeFormat').value === 'fmu';
+    const isFmu = $('#exportCodeFormat').value === 'fmu' || $('#exportCodeFormat').value === 'fmu3';
     const languageField = $('#exportCodeLanguage');
     const parallelismField = $('#exportCodeParallelism');
     $('#exportCodeLanguagePython').disabled = isFmu;
@@ -8373,7 +8374,8 @@ $('#exportCodeLanguage').addEventListener('change', updateExportCodeFields);
 $('#exportCodeCancel').addEventListener('click', () => $('#exportCodeDialog').close());
 $('#exportCodeDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
-    if ($('#exportCodeFormat').value === 'fmu') exportFmu();
+    if ($('#exportCodeFormat').value === 'fmu') exportFmu('2.0');
+    else if ($('#exportCodeFormat').value === 'fmu3') exportFmu('3.0');
     else exportGeneratedProgram($('#exportCodeLanguage').value, $('#exportCodeParallelism').value);
 });
 window.addons.onRequest('timeline.seek', (time) => {

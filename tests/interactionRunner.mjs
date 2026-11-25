@@ -657,6 +657,28 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#exportCodeDialog').open`), false, 'Export dialog should close after a successful export.');
     }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
+    await run('export simulation code as an FMI 3.0 FMU produces a real FMI 3.0 Co-Simulation package', async () => {
+        await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+        await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'Export code dialog did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeFormat option[value="fmu3"]').textContent`), 'FMU (FMI 3.0 Co-Simulation)');
+        await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = 'fmu3'; format.dispatchEvent(new Event('change')); })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeLanguagePython').disabled`), true, 'Python should be unavailable for an FMI 3.0 FMU too.');
+        assert.equal(await evaluate(window, `document.querySelector('#exportCodeParallelism').closest('label').hidden`), true, 'The Execution row should be hidden for an FMI 3.0 FMU.');
+        assert.equal(await evaluate(window, `document.querySelector('#mergeFmuButton').hidden`), false, 'Merging platform FMUs is offered for FMI 3.0 too.');
+        const { bytes } = await driver.captureExport(async () => {
+            await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+            await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, 'Export dialog should close after the FMU is written.', 60000);
+        }, { extension: 'fmu', maxAttempts: 400 });
+        assert.ok(bytes, 'FMI 3.0 FMU export did not write a file.');
+        const entries = unzipSync(bytes);
+        const xml = Buffer.from(entries['modelDescription.xml']).toString('utf8');
+        assert.match(xml, /fmiVersion="3\.0"/);
+        assert.match(xml, /instantiationToken="\{[0-9a-f-]+\}"/);
+        assert.match(xml, /<Float64 name="time" [^>]*causality="independent"/);
+        assert.ok(Object.keys(entries).some((name) => /^binaries\/[a-z0-9_]+-(darwin|linux|windows)\/[^/]+\.(dylib|so|dll)$/.test(name)),
+            'An FMI 3.0 FMU keeps its binary under the platform tuple (binaries/aarch64-darwin/, ...).');
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
+
     await run('a second project window opens independently and does not affect the first', async () => {
         const before = driver.allHandles();
         await evaluate(window, `document.querySelector('#newWindowButton').click()`);

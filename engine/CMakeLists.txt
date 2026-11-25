@@ -208,9 +208,10 @@ install(TARGETS konjugateEngine RUNTIME DESTINATION .)
 # PYTHONPATH. See cppProviderSdkPath()/pythonProviderSdkPath() in engineAdapter.mjs, which
 # expect exactly this layout under the packaged resources directory.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION include)
-# fmi2/ (the vendored FMI 2.0 headers) and fmiGlue.cpp are this same convention's FMU-export
-# sibling: buildSharedLibrary (main.cpp) compiles a generated model's source against
-# include/konjugate/simulationModel.hpp and links it against src/fmiGlue.cpp, exactly how
+# fmi2/ and fmi3/ (the vendored FMI headers) and fmiGlue.cpp/fmi3Glue.cpp are this same convention's
+# FMU-export sibling: buildSharedLibrary (main.cpp) compiles a generated model's source against
+# include/konjugate/simulationModel.hpp and links it against src/fmiGlue.cpp (FMI 2.0) or
+# src/fmi3Glue.cpp (FMI 3.0), exactly how
 # buildCppProvider() already compiles/links relationship providers against this same include dir.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi2" DESTINATION include)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi3" DESTINATION include)
@@ -220,6 +221,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessNodeShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessProgramShim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/fmiGlue.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/fmi3Glue.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/objectiveProgramMain.cpp"
     DESTINATION src
 )
@@ -450,6 +452,19 @@ if(BUILD_TESTING)
     )
     target_include_directories(fmiGlueTests PRIVATE include)
     add_test(NAME fmiGlueTests COMMAND fmiGlueTests)
+
+    add_executable(fmi3GlueTests
+        tests/fmi3GlueTests.cpp
+        src/fmi3Glue.cpp
+    )
+    set_target_properties(fmi3GlueTests PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}"
+        RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}"
+    )
+    target_include_directories(fmi3GlueTests PRIVATE include)
+    add_test(NAME fmi3GlueTests COMMAND fmi3GlueTests)
 
     add_executable(causalInferenceTests
         tests/causalInferenceTests.cpp

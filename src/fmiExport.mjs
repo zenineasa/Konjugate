@@ -1,10 +1,10 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// Orchestrates a Konjugate model's export as a real, compiled FMI 2.0 Co-Simulation FMU: generates
-// the model's C++ source and modelDescription.xml (src/fmiCodeGen.mjs plus the XML builder below),
-// asks the engine binary to compile it into a shared library (its generic `buildSharedLibrary`
-// command -- see engine/src/main.cpp -- linked against engine/src/fmiGlue.cpp, the FMI C API
-// implementation), and zips the result into one .fmu (fflate's zipSync, the same library already
+// Orchestrates a Konjugate model's export as a real, compiled FMI 2.0 or FMI 3.0 Co-Simulation FMU:
+// generates the model's C++ source and modelDescription.xml (src/fmiCodeGen.mjs plus the XML
+// builders below), asks the engine binary to compile it into a shared library (its generic
+// `buildSharedLibrary` command -- see engine/src/main.cpp -- linked against engine/src/fmiGlue.cpp
+// or engine/src/fmi3Glue.cpp, the FMI C API implementations), and zips the result into one .fmu (fflate's zipSync, the same library already
 // used for .kja/.kjp packages in src/packageArchive.mjs). See docs/codeExport.md.
 
 import { createHash } from 'node:crypto';
@@ -12,6 +12,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync, unzipSync } from 'fflate';
+import { binaryDirectoryCandidates } from './fmiBinary.mjs';
 import { generateFmiModel } from './fmiCodeGen.mjs';
 import { fmiAttributes } from './ownership.mjs';
 import { cppProviderSdkPath, resolveEnginePath, runEngine } from './engineAdapter.mjs';
@@ -36,10 +37,21 @@ function scalarVariablesXml(variables) {
     )).join('\n');
 }
 
-// Platform directory naming follows the FMI standard's own convention (win32/win64/linux32/
-// linux64/darwin32/darwin64) -- predates Apple Silicon, so arm64 is folded into the 64-bit bucket
-// like most real-world FMU exporters do, rather than inventing a nonstandard directory name.
-export function platformDirectory() {
+// The FMI versions an export can be made for; FMI 2.0 is the default, as the export dialog offers it first.
+export const fmiVersions = ['2.0', '3.0'];
+
+function checkedFmiVersion(fmiVersion) {
+    if (!fmiVersions.includes(fmiVersion)) throw new Error(`Konjugate exports FMI 2.0 or FMI 3.0 FMUs, not FMI ${fmiVersion}.`);
+    return fmiVersion;
+}
+
+// Platform directory naming follows each FMI standard's own convention. FMI 2.0's (win32/win64/
+// linux32/linux64/darwin32/darwin64) predates Apple Silicon, so arm64 is folded into the 64-bit
+// bucket like most real-world FMU exporters do, rather than inventing a nonstandard directory name.
+// FMI 3.0 names a platform tuple, architecture then operating system (aarch64-darwin, x86_64-linux,
+// x86_64-windows, ...; FMI 3.0 section 2.5.1.4), as src/fmiBinary.mjs reads it on import.
+export function platformDirectory(fmiVersion = '2.0') {
+    if (fmiVersion === '3.0') return binaryDirectoryCandidates('3.0')[0];
     const bitness = process.arch === 'x86' || process.arch === 'ia32' ? '32' : '64';
     if (process.platform === 'win32') return `win${bitness}`;
     if (process.platform === 'darwin') return `darwin${bitness}`;
@@ -59,6 +71,9 @@ export function libraryExtension() {
 // the same model before combining their binaries into one multi-platform .fmu. Formatted to look
 // like the RFC4122 GUIDs FMI tooling expects, but derived from a SHA-256 of the model's own
 // identity rather than randomUUID().
+// An FMI 3.0 export's instantiationToken is made the same way from its own source (which differs from
+// the FMI 2.0 one by the constants appended below), so the two exports of a model never share an
+// identity: Konjugate's own FMU installs are keyed by it.
 function deterministicGuid(modelIdentifier, source) {
     const digest = createHash('sha256').update(modelIdentifier).update('\n').update(source).digest('hex');
     return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-${digest.slice(12, 16)}-${digest.slice(16, 20)}-${digest.slice(20, 32)}`;
@@ -84,31 +99,106 @@ ${stateVariables.map((_variable, index) => `            <Unknown index="${index 
 `;
 }
 
+// FMI 3.0 (FMI 3.0 section 2.4): the variables are typed elements (<Float64>) rather than FMI 2.0's
+// <ScalarVariable><Real/>, with the same causality, variability, initial and start as the FMI 2.0
+// export writes, and the same value references. FMI 3.0 also asks for exactly one independent
+// variable (section 2.4.7.4), "time", which takes the value reference after the model's last one so
+// every other value reference stays the FMI 2.0 export's. Units are declared: FMI 3.0's <Unit> needs
+// only a name (its <BaseUnit> SI decomposition is optional, section 2.4.3), so each of the model's
+// unit strings is declared as written, and the variables refer to it.
+function float64VariablesXml(variables) {
+    return variables.map((variable) => (
+        `        <Float64 name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="${variable.variability}"`
+        + `${variable.causality === 'output' ? ' initial="exact"' : ''}${variable.unit ? ` unit="${escapeXml(variable.unit)}"` : ''} start="${variable.start}"/>`
+    )).join('\n');
+}
+
+export function modelDescription3Xml({
+    modelName, instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep, timeValueReference, ownership = null
+}) {
+    const rollback = supportsStateCapture ? 'true' : 'false';
+    const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
+    const variables = [...stateVariables, ...parameterVariables];
+    const units = [...new Set(['s', ...variables.map((variable) => variable.unit).filter(Boolean)])];
+    // No Event Mode, no early return, no intermediate update: fmi3DoStep (engine/src/fmi3Glue.cpp)
+    // always takes the whole communication step (FMI 3.0 section 4.2). fixedInternalStepSize is the
+    // model's global step, of which a communication step must be a whole number. The outputs are the
+    // states, each with initial="exact" as in the FMI 2.0 export, so none is an <InitialUnknown>
+    // (FMI 3.0 section 2.4.8: those are the outputs with initial "approx" or "calculated").
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<fmiModelDescription fmiVersion="3.0" modelName="${escapeXml(modelName)}" instantiationToken="${instantiationToken}"${rights} generationTool="Konjugate">
+    <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true" fixedInternalStepSize="${globalTimeStep}"
+        canGetAndSetFMUState="${rollback}" canSerializeFMUState="${rollback}" providesDirectionalDerivatives="false" providesAdjointDerivatives="false"
+        hasEventMode="false" mightReturnEarlyFromDoStep="false" canReturnEarlyAfterIntermediateUpdate="false" providesIntermediateUpdate="false"/>
+    <UnitDefinitions>
+${units.map((unit) => `        <Unit name="${escapeXml(unit)}"/>`).join('\n')}
+    </UnitDefinitions>
+    <LogCategories>
+        <Category name="logStatusError" description="A call the FMU refuses, and why."/>
+    </LogCategories>
+    <ModelVariables>
+        <Float64 name="time" valueReference="${timeValueReference}" causality="independent" variability="continuous" unit="s" description="Simulation time"/>
+${float64VariablesXml(variables)}
+    </ModelVariables>
+    <ModelStructure>
+${stateVariables.map((variable) => `        <Output valueReference="${variable.valueReference}"/>`).join('\n')}
+    </ModelStructure>
+</fmiModelDescription>
+`;
+}
+
+// What an FMI 3.0 export adds to the model's source: the constants engine/src/fmi3Glue.cpp reads.
+function fmi3IdentitySource({ instantiationToken, timeValueReference, outputCount }) {
+    return [
+        '',
+        '// FMI 3.0 identity, read by engine/src/fmi3Glue.cpp.',
+        'namespace konjugate::sdk::v1 {',
+        `extern const char* const fmi3InstantiationToken = "${instantiationToken}";`,
+        `extern const unsigned int fmi3TimeValueReference = ${timeValueReference};`,
+        `extern const unsigned int fmi3OutputCount = ${outputCount};`,
+        '}',
+        ''
+    ].join('\n');
+}
+
 // The model's C++ source, its modelIdentifier and its modelDescription.xml, as an export writes them: pure JS, no compiler, so a
 // test can check an FMU made earlier against what the exporter writes now (tests/fmiExamples.test.mjs).
-export function describeFmu(document, modelName) {
-    const { source, stateVariables, parameterVariables, supportsStateCapture } = generateFmiModel(document);
+// fmiVersion is '2.0' (the default) or '3.0'; the model and its value references are the same for both.
+export function describeFmu(document, modelName, { fmiVersion = '2.0' } = {}) {
+    checkedFmiVersion(fmiVersion);
+    const { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep } = generateFmiModel(document);
     const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
+    if (fmiVersion === '3.0') {
+        const timeValueReference = stateVariables.length + parameterVariables.length;
+        const identity = { timeValueReference, outputCount: stateVariables.length };
+        const instantiationToken = `{${deterministicGuid(modelIdentifier, `${source}${fmi3IdentitySource({ ...identity, instantiationToken: '' })}`)}}`;
+        const fmi3Source = `${source}${fmi3IdentitySource({ ...identity, instantiationToken })}`;
+        const xml = modelDescription3Xml({
+            modelName: modelName || 'model', instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture,
+            globalTimeStep, timeValueReference, ownership: document.ownership
+        });
+        return { source: fmi3Source, modelIdentifier, xml, fmiVersion };
+    }
     const xml = modelDescriptionXml({
         modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership
     });
-    return { source, modelIdentifier, xml };
+    return { source, modelIdentifier, xml, fmiVersion };
 }
 
 // document must already be flattened (stripEdgeGroups(executionProjectDocument(...))), matching
 // every other codeExport.mjs/fmiCodeGen.mjs entry point. engineOptions is the same
 // {applicationPath, resourcesPath, packaged} shape resolveEnginePath()/cppProviderSdkPath() take
-// elsewhere. Returns a Buffer -- the finished .fmu file's bytes.
-export async function generateFmuPackage(document, { modelName, engineOptions }) {
+// elsewhere. fmiVersion is '2.0' (the default) or '3.0'. Returns a Buffer -- the finished .fmu file's bytes.
+export async function generateFmuPackage(document, { modelName, engineOptions, fmiVersion = '2.0' }) {
     const executable = await resolveEnginePath(engineOptions);
     if (!executable) throw new Error('The Konjugate engine binary could not be found -- FMU export needs it to compile the generated model.');
 
-    const { source, modelIdentifier, xml } = describeFmu(document, modelName);
+    const { source, modelIdentifier, xml } = describeFmu(document, modelName, { fmiVersion });
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuExport-'));
     try {
         const sourcePath = join(directory, 'model.cpp');
         await writeFile(sourcePath, source, 'utf8');
-        const gluePath = join(cppProviderSdkPath(engineOptions), 'src', 'fmiGlue.cpp');
+        const gluePath = join(cppProviderSdkPath(engineOptions), 'src', fmiVersion === '3.0' ? 'fmi3Glue.cpp' : 'fmiGlue.cpp');
         const artifactPath = join(directory, `${modelIdentifier}${libraryExtension()}`);
         const execution = await runEngine(executable, [
             'buildSharedLibrary', sourcePath, gluePath,
@@ -120,7 +210,7 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
         const libraryBytes = new Uint8Array(await readFile(artifactPath));
         const archive = zipSync({
             'modelDescription.xml': new TextEncoder().encode(xml),
-            [`binaries/${platformDirectory()}/${modelIdentifier}${libraryExtension()}`]: libraryBytes
+            [`binaries/${platformDirectory(fmiVersion)}/${modelIdentifier}${libraryExtension()}`]: libraryBytes
         }, { level: 6 });
         return Buffer.from(archive);
     } finally {
@@ -128,8 +218,13 @@ export async function generateFmuPackage(document, { modelName, engineOptions })
     }
 }
 
+// An FMU's identity: FMI 2.0's guid, or FMI 3.0's instantiationToken (prefixed, so an FMI 2.0 and an
+// FMI 3.0 file never match each other).
 function guidOf(name, xmlBytes) {
-    const match = /guid="([^"]*)"/.exec(new TextDecoder().decode(xmlBytes));
+    const text = new TextDecoder().decode(xmlBytes);
+    const token = /\binstantiationToken="([^"]*)"/.exec(text);
+    if (token) return `3.0 ${token[1]}`;
+    const match = /guid="([^"]*)"/.exec(text);
     if (!match) throw new Error(`'${name}' has no modelDescription.xml guid -- it doesn't look like a Konjugate-exported FMU.`);
     return match[1];
 }
@@ -156,7 +251,7 @@ export function mergeFmuPackages(files) {
     const { guid: expectedGuid } = archives[0];
     for (const archive of archives) {
         if (archive.guid !== expectedGuid) {
-            throw new Error(`'${archive.name}' is not an export of the same model as '${archives[0].name}' -- their modelDescription.xml guids differ. Re-export every platform from the identical project before merging.`);
+            throw new Error(`'${archive.name}' is not an export of the same model as '${archives[0].name}' -- their modelDescription.xml guids (or FMI versions) differ. Re-export every platform from the identical project before merging.`);
         }
     }
 

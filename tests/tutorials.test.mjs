@@ -551,3 +551,14 @@ test('the record of changes is read once the run has ended, though it opens by i
     assert.equal(changes.done({ ui: { changesShown: true, simulationRunning: false, repeated: false } }), true);
     assert.match(changes.status({ simulationRunning: true }), /still going/);
 });
+
+// The FMU round trip (docs/proposals/fmuImportWorkflow.md, stage 9) puts two of the FMI standard's example FMUs in the library.
+test('the FMUs a tutorial puts in the library are shipped beside the examples, with their license, and only they are handed out', async () => {
+    const { tutorialFmuFiles } = await import('../src/tutorials/index.mjs');
+    assert.deepEqual([...tutorialFmuFiles].sort(), ['tutorialFmus/Dahlquist.fmu', 'tutorialFmus/Feedthrough.fmu']);
+    for (const fileName of tutorialFmuFiles) assert.ok(existsSync(join(root, 'examples', fileName)), `${fileName} is shipped`);
+    assert.ok(existsSync(join(root, 'examples', 'tutorialFmus', 'LICENSE.txt')), 'The Reference FMUs\' license is beside them.');
+    const round = tutorialById('fmuRoundTrip');
+    assert.deepEqual(round.editions, ['desktop'], 'The web edition runs no FMU.');
+    assert.deepEqual(round.steps.map((step) => step.id), ['welcome', 'run', 'keep', 'export', 'try', 'compare', 'library', 'connect', 'runConnected', 'finish']);
+});

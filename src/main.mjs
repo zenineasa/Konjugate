@@ -44,7 +44,7 @@ import { createLatestThrottle, createRequestWatchdog, maximumRequestSeconds } fr
 import { fetchWelcomeFeed, highlightById, parseWelcomeFeed, selectHighlight, welcomeFeedUrl, welcomeImageUrl } from './welcomeFeed.mjs';
 import { suggestedTutorials, welcomeLinks, whatsNewFor } from './welcomeModel.mjs';
 import { createWelcomeStateStore, withEpisodeOpened, withHighlightShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
-import { groupTutorials, tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
+import { groupTutorials, tutorialById, tutorialDataFiles, tutorialFmuFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
 import { launchGreeting } from './firstLaunchTour.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
@@ -1786,6 +1786,13 @@ ipcMain.handle('projectDownloadTutorialData', async (event, fileName) => {
         }
     }
     throw new Error('The Downloads folder has too many copies of that file already.');
+});
+// Where an FMU a tutorial puts in the library is (examples/tutorialFmus/; only those the shipped tutorials list), for Add › FMU's own
+// path to install it as any FMU is installed (packageAddFmu).
+ipcMain.handle('tutorialFmuPath', async (event, fileName) => {
+    requireProjectWindow(event, 'Only a project window can add a tutorial\'s FMU.');
+    if (!tutorialFmuFiles.includes(fileName)) throw new Error('That FMU is not part of a tutorial.');
+    return join(examplesDir, fileName);
 });
 ipcMain.handle('projectLoadTutorialData', async (event, fileName) => {
     requireProjectWindow(event, 'Only a project window can read a tutorial\'s data.');

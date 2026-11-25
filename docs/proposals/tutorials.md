@@ -11,7 +11,7 @@ implementation: complete
 
 # Tutorials
 
-**Status: built**, in the desktop and web editions, with twenty-five tutorials, in three waves and two since, between them covering every feature of the app (see [What the tutorials cover](#what-the-tutorials-cover)). Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
+**Status: built**, in the desktop and web editions, with twenty-six tutorials, in three waves and three since, between them covering every feature of the app (see [What the tutorials cover](#what-the-tutorials-cover)). Written down before any code, like [A guided first-model tour](guidedTour.md), so the entry point, the shape of a tutorial and the first few could be reviewed first; the decisions at the end were settled as recommended, and what changed while building it is said in place.
 
 ## The decision this rests on
 
@@ -123,6 +123,7 @@ The third wave is thirteen, so that every feature is taught somewhere:
 | Drive with two joysticks | *Excavator* | Control | Connects two joysticks (or one gamepad's two sticks), the card saying live what Konjugate sees and waiting for four axes in all, binds their four axes in Settings › Controllers to the excavator's swing, boom, stick and bucket commands in the usual operator layout (one press of Bind, then each command in turn, the card naming the control to move for each), starts a real-time online run, opens the Pose Visualizer add-on on it to watch the machine in 3D as it is driven (a step to read and go on from, which says whether the add-on is installed, recent enough or waiting for a restart, and offers "Open it for me"; without the add-on, Next carries on), and digs: the bucket's tip down to the ground and up above 3 m. Skipping the first step binds four pairs of keys instead, for anyone without joysticks, and skipping the dig has the excavator do it by itself. Desktop |
 | Keep and share your work | *Thermal Management* | Results | Reads the project's properties, runs it and (desktop) extends the run, exports the results as CSV and saves the project with its results (answering whose details the copy carries); on the web, where a project is saved without its results, saves the model |
 | Take a model elsewhere | *Spring Mass Damper* | Results | Exports the model as a standalone Python program and (desktop) as an FMI 2.0 FMU |
+| Take a model out as an FMU and back | *Spring Mass Damper* | Results | Desktop: runs the model and keeps its results, exports it as an FMI 3.0 FMU, tries it as a node beside the model it came from and compares the two runs (identical), then adds two of the FMI standard's Reference FMUs (shipped in `examples/tutorialFmus/`), connects Dahlquist to Feedthrough and runs them ([The FMU round trip](fmuImportWorkflow.md)) |
 | Extend Konjugate | *Thermal Management* | Results | Opens Extensions › Discover, reads Results Analysis, installs it, restarts Konjugate to activate it (the tutorial carries on after the restart), runs the model and opens the add-on on its results. Desktop |
 | Replay a lab's data log | The lab vessel's model (`examples/dataSources/labVessel.kjt`) | Data | Downloads the lab's own log (semicolons, decimal commas, German column names), describes its columns and time zone, reads it, replays the first guesses, calibrates on the first 3.5 hours (finding 501,600 J/K and 15 W/K) and checks on the next 1.5 |
 | Match your signals to the model | An empty canvas | Data | In the twin's window, chooses "A plant's names", reviews the suggested matches and unit conversions, uses them and opens the control room. Desktop |
@@ -152,7 +153,7 @@ Every feature is taught by at least one tutorial, as a step the person does (or 
 | Online runs, real-time pacing, live controls, schedules and waveforms, the Changes record, repeating from it | Schedule changes during a run; Steer a model by hand |
 | Branches: forking, fork parameters, comparing | Ask what if, with branches |
 | Project properties, saving with results, extending a run, exporting results as CSV | Keep and share your work |
-| Exporting code and FMUs | Take a model elsewhere |
+| Exporting code and FMUs | Take a model elsewhere; Take a model out as an FMU and back |
 | Extensions: Discover, installing, add-ons on results | Extend Konjugate |
 | Parameter tuning to measured data | Calibrate a model against measured data |
 | Parameter tuning to an objective, with limits | Optimise towards a goal |

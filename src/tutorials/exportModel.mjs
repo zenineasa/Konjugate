@@ -47,7 +47,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'You have taken a model elsewhere',
-        text: 'An exported program reproduces the engine\'s results closely, and says so where it cannot (a program inside a relationship, say). The way in works too: an FMU from another tool can compute a node of a Konjugate model, once installed as a plugin from Extensions. Exports carry the project\'s owner, copyright and licence.',
+        text: 'An exported program reproduces the engine\'s results closely, and says so where it cannot (a program inside a relationship, say). The way in works too: an FMU from another tool, or this one, becomes a node from Add › FMU… (the tutorial "Take a model out as an FMU and back" goes there and back). Exports carry the project\'s owner, copyright and licence.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

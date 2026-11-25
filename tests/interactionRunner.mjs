@@ -12388,7 +12388,7 @@ export async function runInteractionTests(driver) {
         };
         // KONJUGATE_INTERACTION_TUTORIALS=refitTwin,liveTwin skips through only those, to check one tutorial without the rest.
         const onlyTutorials = process.env.KONJUGATE_INTERACTION_TUTORIALS?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? null;
-        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'reuseComponent', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel', 'extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])].filter((entry) => !onlyTutorials || onlyTutorials.includes(entry))) {
+        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'reuseComponent', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel'] : []), ...(driver.capabilities.fmuExport ? ['fmuRoundTrip'] : []), ...(driver.capabilities.multiWindow ? ['extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])].filter((entry) => !onlyTutorials || onlyTutorials.includes(entry))) {
             await clean();
             // The assistant's model is the person's to set up; here, the fake Ollama's, in use (as an earlier test may have left it).
             if (id === 'askAssistant') {
@@ -12419,7 +12419,7 @@ export async function runInteractionTests(driver) {
                 // waits for the run to end, up to three minutes), with this step's buttons off until it has finished.
                 await waitFor(window, `!document.querySelector('.tourFloating .tourSkipStep').hidden && !document.querySelector('.tourFloating .tourSkipStep').disabled`, `${id}/${step} offered no Skip this step.`, 180000);
                 // Exporting and saving ask where, through the system's save dialog: answered with a file of the test's own.
-                const savesAFile = { keepAndShare: { export: 'results.csv', save: 'Thermal management.kjt' }, exportModel: { program: 'springMassDamper.py', fmu: 'springMassDamper.fmu' } }[id]?.[step];
+                const savesAFile = { keepAndShare: { export: 'results.csv', save: 'Thermal management.kjt' }, exportModel: { program: 'springMassDamper.py', fmu: 'springMassDamper.fmu' }, fmuRoundTrip: { export: 'springMassDamper.fmu' } }[id]?.[step];
                 if (savesAFile) await driver.captureExport(() => press('.tourFloating .tourSkipStep'), { fileName: savesAFile, maxAttempts: 1200 });
                 else await press('.tourFloating .tourSkipStep');
                 // Skipping a restart loads the window again, and the tutorial carries on a moment after: until then there is no step, which
@@ -12496,6 +12496,15 @@ export async function runInteractionTests(driver) {
                 assert.ok(await evaluate(window, `Boolean(document.querySelector('#addonRailButtons .addonTool[data-addon-id="konjugate.resultPlotViewer"]'))`));
             } else if (id === 'exportModel') {
                 assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /Exported|Tutorial/);
+            } else if (id === 'fmuRoundTrip') {
+                // The FMU tried beside its model, compared identical; Dahlquist feeding Feedthrough.
+                const names = saved.nodes.map((node) => node.name);
+                for (const name of ['Suspended mass', 'Fixed support', 'springMassDamper', 'Dahlquist', 'Feedthrough']) assert.ok(names.includes(name), `${name} is in the model.`);
+                assert.match(await evaluate(window, `document.querySelector('#compareOriginalTitle').textContent`), /^Identical to springMassDamper's run: largest difference 0/);
+                const dahlquist = saved.nodes.find((node) => node.name === 'Dahlquist');
+                assert.deepEqual(saved.nodes.find((node) => node.name === 'Feedthrough').implementation.bindings.find((binding) => binding.key === 'float64ContinuousInput'),
+                    { key: 'float64ContinuousInput', kind: 'state', nodeId: dahlquist.id, stateId: dahlquist.states.find((state) => state.symbol === 'x').id });
+                assert.ok(await evaluate(window, `[...document.querySelectorAll('.programReadLabel')].some((label) => label.textContent === '→ Float64_continuous_input')`), 'The connection is drawn.');
             } else if (id === 'tuneController') {
                 assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
             }
@@ -12507,6 +12516,12 @@ export async function runInteractionTests(driver) {
                 await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The run did not stop.', 15000).catch(() => {});
             }
             if (['liveTwin', 'matchSignals', 'refitTwin'].includes(id)) await closeTutorialTwin();
+            // The FMUs the round trip put in the library are taken out again, for the tests after.
+            if (id === 'fmuRoundTrip') {
+                await evaluate(window, `document.querySelector('#closeCompareOriginal')?.click()`);
+                const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`);
+                for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            }
         }
     });
 

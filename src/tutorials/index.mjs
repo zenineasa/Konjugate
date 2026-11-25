@@ -12,6 +12,7 @@ import { driveWithJoysticks } from './driveWithJoysticks.mjs';
 import { equationsThatDoMore } from './equationsThatDoMore.mjs';
 import { exportModel } from './exportModel.mjs';
 import { extendKonjugate } from './extendKonjugate.mjs';
+import { fmuRoundTrip } from './fmuRoundTrip.mjs';
 import { firstModel } from './firstModel.mjs';
 import { keepAndShare } from './keepAndShare.mjs';
 import { layoutModel } from './layoutModel.mjs';
@@ -30,7 +31,7 @@ import { steerByHand } from './steerByHand.mjs';
 import { tuneController } from './tuneController.mjs';
 import { whatIfBranches } from './whatIfBranches.mjs';
 
-export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, reuseComponent, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, driveWithJoysticks, scheduleChanges, whatIfBranches, keepAndShare, exportModel, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
+export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, reuseComponent, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, driveWithJoysticks, scheduleChanges, whatIfBranches, keepAndShare, exportModel, fmuRoundTrip, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
 
 // The groups of the list, in order, with the heading each shows. A tutorial's `area` is one of these ids.
 export const tutorialAreas = Object.freeze([
@@ -49,6 +50,8 @@ export const tutorialsForExample = (exampleId) => tutorials.filter((tutorial) =>
 
 // The files beside the examples that a tutorial reads (a tutorial's measurements): the only ones a window may ask the main process for.
 export const tutorialDataFiles = Object.freeze([...new Set(tutorials.flatMap((tutorial) => tutorial.data ?? []))]);
+// The FMUs a tutorial puts in the library, beside the examples (examples/tutorialFmus/); the main process hands out these alone.
+export const tutorialFmuFiles = Object.freeze([...new Set(tutorials.flatMap((tutorial) => tutorial.fmus ?? []))]);
 
 // The models beside the examples a tutorial starts from (examples/dataSources/labVessel.kjt, say): opened as examples are, and only these.
 export const tutorialModelFiles = Object.freeze([...new Set(tutorials.filter((tutorial) => tutorial.start.from === 'example' && tutorial.start.example.includes('/')).map((tutorial) => tutorial.start.example))]);

@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('tutorials', {
     recordCompleted: (id) => ipcRenderer.invoke('tutorialRecordCompleted', id),
     downloadData: (fileName) => ipcRenderer.invoke('projectDownloadTutorialData', fileName),
     loadData: (fileName) => ipcRenderer.invoke('projectLoadTutorialData', fileName),
+    // Where an FMU a tutorial puts in the library is, to add it as Add › FMU… does.
+    fmuPath: (fileName) => ipcRenderer.invoke('tutorialFmuPath', fileName),
     onStart: (callback) => ipcRenderer.on('tutorialStart', (_event, id) => callback(id)),
     // The Welcome window's "See all tutorials": main asks this window to show its Tutorials list.
     onOpenList: (callback) => ipcRenderer.on('tutorialsOpenList', () => callback())

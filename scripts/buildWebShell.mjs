@@ -245,7 +245,8 @@ await cp(join(rootDirectory, 'assets'), join(outputDirectory, 'assets'), { recur
 // label/description logic via src/exampleCatalog.mjs rather than re-deriving it). Not examples/fmi/: the web edition has no FMUs, and that
 // folder is published beside the app as web.konjugate.com/fmi/ (scripts/fmiPage.mjs, webEdition.yml).
 const examplesDirectory = join(rootDirectory, 'examples');
-await cp(examplesDirectory, join(outputDirectory, 'examples'), { recursive: true, filter: (source) => source !== join(examplesDirectory, 'fmi') });
+// Nor examples/tutorialFmus/, the FMUs the desktop's FMU round-trip tutorial puts in the library.
+await cp(examplesDirectory, join(outputDirectory, 'examples'), { recursive: true, filter: (source) => source !== join(examplesDirectory, 'fmi') && source !== join(examplesDirectory, 'tutorialFmus') });
 const exampleFiles = (await readdir(examplesDirectory)).filter((name) => name.endsWith('.kjt'));
 const examplesManifest = new Map(JSON.parse(await readFile(join(examplesDirectory, 'manifest.json'), 'utf8'))
     .examples.map((entry) => [entry.id, entry]));

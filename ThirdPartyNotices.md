@@ -98,3 +98,19 @@ Copyright (C) 1995-2026 Jean-loup Gailly and Mark Adler
 Used for project file compression. Licensed under the zlib License,
 reproduced in `thirdPartyLicenses/zlib.txt`.
 
+
+## Reference FMUs 0.0.42 (Dahlquist and Feedthrough)
+
+The tutorial "Take a model out as an FMU and back" puts two of the FMI
+standard's own example FMUs, Dahlquist and Feedthrough (FMI 3.0), in the
+person's library to connect them. They are shipped in
+`examples/tutorialFmus/`.
+
+Copyright 2026, Modelica Association Project "FMI".
+
+The Reference FMUs are licensed under the 2-Clause BSD license, reproduced in
+`thirdPartyLicenses/referenceFmus.txt` and beside the FMUs.
+
+Konjugate does not modify their sources or binaries; the archives it ships
+leave out the binaries for platforms Konjugate does not run on (WebAssembly
+and 32-bit Windows).

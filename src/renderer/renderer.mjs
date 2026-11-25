@@ -29,6 +29,7 @@ import { createLocalModelsSection } from './localModelsSection.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
+import { fmuRoundTripValues } from '../tutorials/fmuRoundTrip.mjs';
 import { groupTutorials, searchTutorials, tutorialById, tutorialStartLabel } from '../tutorials/index.mjs';
 import { stepText } from '../tutorials/steps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
@@ -8462,6 +8463,7 @@ async function exportFmu(fmiVersion = '2.0') {
             showExportFmuNotice(outcome, original);
         }
         if (outcome && tour.active) tutorialExportedKinds.add('fmu');
+        if (outcome && tour.active && fmiVersion === '3.0') tutorialExportedKinds.add('fmu3');
     } catch (error) {
         console.error('The simulation could not be exported as an FMU.', error);
         $('#exportCodeError').textContent = error.message || 'FMU export failed.';
@@ -8725,8 +8727,15 @@ $('#closeExportFmuNotice').addEventListener('click', () => { $('#exportFmuNotice
 $('#exportFmuTry').addEventListener('click', async () => {
     if (!lastExportedFmu) return;
     $('#exportFmuNotice').hidden = true;
-    await window.projectFiles.tryFmuAsNode?.(lastExportedFmu.path, lastExportedFmu.original);
+    // A tutorial lives in this window, so the FMU joins this model there, beside the model it came from (src/tutorials/fmuRoundTrip.mjs).
+    if (tour.active) await tryExportedFmuHere();
+    else await window.projectFiles.tryFmuAsNode?.(lastExportedFmu.path, lastExportedFmu.original);
 });
+async function tryExportedFmuHere() {
+    if (!lastExportedFmu) return null;
+    originalComparison = lastExportedFmu.original ?? null;
+    return addFmuToModel({ path: lastExportedFmu.path });
+}
 
 // A window opened by Try it as a node: the FMU placed, and its run to be compared with the original.
 async function startTryFmu({ path, original }) {
@@ -8778,6 +8787,7 @@ function updateOriginalComparison() {
             : `Largest difference from ${original.modelName}'s run: ${largest.toPrecision(3)} (${where}).`;
     $('#compareOriginalLines').replaceChildren(...lines.map((line) => Object.assign(document.createElement('li'), { textContent: line })));
     $('#compareOriginalPanel').hidden = false;
+    if (tour.active && compared) tutorialComparedWithOriginal = true;
 }
 $('#closeCompareOriginal').addEventListener('click', () => { $('#compareOriginalPanel').hidden = true; });
 
@@ -15500,6 +15510,8 @@ const tutorialWaveformRuns = new Set();
 let tutorialChangesShown = false;
 // Keeping work while a tutorial ran: the project's properties seen, results exported, and the project saved with its results.
 let tutorialPropertiesSeen = false;
+// Whether this play of the FMU round trip has compared an FMU's run with the original (src/tutorials/fmuRoundTrip.mjs).
+let tutorialComparedWithOriginal = false;
 let tutorialExported = false;
 let tutorialSavedWithResults = false;
 // What has been exported while a tutorial ran: 'cpp', 'python' or 'fmu'.
@@ -15839,6 +15851,12 @@ const tour = createTour({
                 // The project's properties (owner, copyright and license), opened from the toolbar.
                 ownershipDialogOpen: $('#ownershipDialog').open,
                 exportDialogOpen: $('#exportCodeDialog').open,
+                // The FMU round trip (src/tutorials/fmuRoundTrip.mjs).
+                keptForComparison: keptComparisonSamples !== null,
+                resultsOpen: Boolean(activeResult),
+                closeResultsAsking: $('#closeResultsDialog').open,
+                exportNoticeOpen: !$('#exportFmuNotice').hidden,
+                comparedWithOriginal: tutorialComparedWithOriginal,
                 extensionsOpen: $('#extensionsDialog').open,
                 assistantOpen: !$('#assistantPanel').hidden,
                 assistantReady: !$('#assistantPanel').classList.contains('needsModel') && Boolean($('#assistantConfiguration').value),
@@ -16534,6 +16552,61 @@ const tour = createTour({
             $('#exportCodeSubmit').click();
             await waitUntil(() => tutorialExportedKinds.has('fmu'), 180000);
         },
+        // The FMU round trip (src/tutorials/fmuRoundTrip.mjs).
+        keepResults: async () => {
+            await waitUntil(() => !simulationRunning, 60000);
+            if (!activeResult) return;
+            if (!$('#closeResultsDialog').open) $('#closeResults').click();
+            await waitUntil(() => $('#closeResultsDialog').open, 5000);
+            $('#keepCloseResults').click();
+            await waitUntil(() => !activeResult, 10000);
+        },
+        exportFmu3: async () => {
+            if (!$('#exportCodeDialog').open) $('#exportCodeButton').click();
+            await waitUntil(() => $('#exportCodeDialog').open, 5000);
+            setField('#exportCodeFormat', 'fmu3', 'change');
+            $('#exportCodeSubmit').click();
+            await waitUntil(() => tutorialExportedKinds.has('fmu3'), 180000);
+        },
+        tryFmuHere: async () => {
+            await waitUntil(() => Boolean(lastExportedFmu), 10000);
+            $('#exportFmuNotice').hidden = true;
+            await tryExportedFmuHere();
+        },
+        putExampleFmus: async () => {
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            for (const fileName of tour.tutorial?.fmus ?? []) {
+                const added = await window.extensions.addFmu?.(await window.tutorials.fmuPath(fileName));
+                if (added?.error) { showFmuNotice('The example FMU was not added.', [added.error]); return 'The example FMUs could not be put in your library on this computer.'; }
+            }
+            installedFmus = null;
+            return 'Dahlquist and Feedthrough are in your library: press Add (+) to add each.';
+        },
+        addExampleFmus: async () => {
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            const live = () => model.nodes.filter((node) => !node.deleted && node.implementation?.kind === 'fmi');
+            for (const fileName of tour.tutorial?.fmus ?? []) {
+                const name = fileName.split('/').pop().replace(/\.fmu$/, '');
+                if (live().some((node) => node.title === name)) continue;
+                await addFmuToModel({ path: await window.tutorials.fmuPath(fileName) });
+            }
+        },
+        connectExampleFmus: async () => {
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            const values = fmuRoundTripValues;
+            const source = model.nodes.find((node) => !node.deleted && node.title === values.source.name && node.implementation?.kind === 'fmi');
+            const reader = model.nodes.find((node) => !node.deleted && node.title === values.reader.name && node.implementation?.kind === 'fmi');
+            const x = source?.states.find((state) => state.symbol === values.source.output);
+            const object = reader ? nodeObjects.get(reader.id) : null;
+            if (!x || !object) return;
+            selectNode(object);
+            openNodeEditor(reader, undefined, undefined, { tab: 'equations' });
+            const index = (reader.implementation.bindings ?? []).findIndex((binding) => binding.key === values.reader.input);
+            if (index < 0) return;
+            changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings[index] = { key: values.reader.input, kind: 'state', nodeId: source.id, stateId: x.id }; });
+        },
         lock2D: async () => { if (!is2DLocked) $('#lock2DButton').click(); },
         cycleNodeLabels: async () => { $('#nodeLabelsButton').click(); },
         openParameters: async () => { if ($('#parametersPanel').hidden) setParametersPanelOpen(true); },
@@ -16835,6 +16908,7 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     tutorialWaveformRuns.clear();
     tutorialChangesShown = false;
     tutorialPropertiesSeen = false;
+    tutorialComparedWithOriginal = false;
     tutorialExported = false;
     tutorialSavedWithResults = false;
     tutorialExportedKinds.clear();

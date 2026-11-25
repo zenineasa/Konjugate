@@ -25,7 +25,7 @@ const tools = [
     { name: 'OpenModelica', colour: 'var(--series-7)', caveat: ' (Linux container, background services running, not timing-comparable)' }
 ];
 const extraTheme = { light: '--series-7: #6250d6;', dark: '--series-7: #9085e9;' };
-const methodNames = { dormandPrince54: 'Adaptive (Dormand–Prince 5(4))', rodas4: 'Stiff (Rodas4)', bdf: 'BDF' };
+const methodNames = { dormandPrince54: 'Adaptive (Dormand–Prince 5(4))', tsit5: 'Adaptive (Tsit5)', rodas4: 'Stiff (Rodas4)', rodas5p: 'Stiff (Rodas5P)', bdf: 'BDF' };
 const shapes = ['circle', 'square', 'triangle', 'diamond', 'cross'];
 
 const escapeXml = (text) => String(text).replace(/[&<>"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[character]);

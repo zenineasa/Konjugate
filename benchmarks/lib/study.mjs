@@ -15,11 +15,19 @@ export const methodName = (variant = {}) => {
         if (variant.stepsPerGlobalStep) return `Dormand–Prince 5(4), error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step)`;
         return `Adaptive, Dormand–Prince 5(4)${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative})` : ''}`;
     }
+    if (variant.method === 'tsit5') {
+        if (variant.stepsPerGlobalStep) return `Tsit5, error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step)`;
+        return `Adaptive, Tsit5${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative})` : ''}`;
+    }
     // The stiff methods' Jacobian is analytic unless the variant asks for finite differences.
     const jacobian = variant.jacobian === 'finiteDifference' ? ', finite-difference Jacobian' : '';
     if (variant.method === 'rodas4') {
         if (variant.stepsPerGlobalStep) return `Rodas4, error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step${jacobian})`;
         return `Stiff, Rodas4${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative}${jacobian})` : jacobian}`;
+    }
+    if (variant.method === 'rodas5p') {
+        if (variant.stepsPerGlobalStep) return `Rodas5P, error control off (${variant.stepsPerGlobalStep} step${variant.stepsPerGlobalStep > 1 ? 's' : ''} per global step${jacobian})`;
+        return `Stiff, Rodas5P${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative}${jacobian})` : jacobian}`;
     }
     if (variant.method === 'bdf') return `Stiff, BDF${variant.tolerance?.relative ? ` (relative tolerance ${variant.tolerance.relative}${jacobian})` : jacobian}`;
     return variant.integration === 'semiImplicit' ? 'semi-implicit Euler' : 'explicit Euler';

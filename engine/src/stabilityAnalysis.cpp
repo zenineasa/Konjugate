@@ -3,7 +3,9 @@
 #include "stabilityAnalysis.hpp"
 #include "jacobianAssembly.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/tsit5.hpp"
 #include "konjugate/integrators/rodas4.hpp"
+#include "konjugate/integrators/rodas5p.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
@@ -415,6 +417,14 @@ double dormandPrince54LargestStableStep(std::complex<double> eigenvalue) {
     return explicitLargestStableStep<integrators::DormandPrince54Tableau>(eigenvalue);
 }
 
+std::complex<double> tsit5StabilityFunction(std::complex<double> z) {
+    return explicitStabilityFunction<integrators::Tsit5Tableau>(z);
+}
+
+double tsit5LargestStableStep(std::complex<double> eigenvalue) {
+    return explicitLargestStableStep<integrators::Tsit5Tableau>(eigenvalue);
+}
+
 std::complex<double> rodas4StabilityFunction(std::complex<double> z) {
     // One step of Rodas4 on y' = lambda y from y = 1 with h = 1 and z = lambda: its Jacobian is z, its matrix 1 / gamma - z, and df/dt is
     // zero, so each stage solves k_i (1 / gamma - z) = z Y_i + sum_j C[i][j] k_j; the step ends at Y_6 + k_6.
@@ -429,6 +439,23 @@ std::complex<double> rodas4StabilityFunction(std::complex<double> z) {
         } else if (row == 5) {
             stage += k[4];
         }
+        std::complex<double> right = z * stage;
+        for (std::size_t column = 0; column < row; ++column) right += T::C[row][column] * k[column];
+        k[row] = right / matrix;
+    }
+    return stage + k[T::stages - 1];
+}
+
+std::complex<double> rodas5pStabilityFunction(std::complex<double> z) {
+    // As rodas4StabilityFunction: each stage solves k_i (1 / gamma - z) = z Y_i + sum_j C[i][j] k_j, with Y_1 = 1 and
+    // Y_i = 1 + sum_j a[i][j] k_j; the step ends at Y_8 + k_8.
+    using T = integrators::Rodas5PTableau;
+    const std::complex<double> matrix = 1.0 / T::gamma - z;
+    std::complex<double> k[T::stages];
+    std::complex<double> stage = 1.0;
+    for (std::size_t row = 0; row < T::stages; ++row) {
+        stage = 1.0;
+        for (std::size_t column = 0; column < row; ++column) stage += T::a[row][column] * k[column];
         std::complex<double> right = z * stage;
         for (std::size_t column = 0; column < row; ++column) right += T::C[row][column] * k[column];
         k[row] = right / matrix;
@@ -456,13 +483,17 @@ std::optional<WholeModelStabilityAssessment> assessWholeModelStability(
     const ExecutionPlan& plan, const StateValues& states, double globalTimeStep, std::size_t stepsPerGlobalStep, std::size_t denseLimit,
     IntegrationMethod method) {
     const bool dormandPrince = method == IntegrationMethod::dormandPrince54;
+    const bool tsit5 = method == IntegrationMethod::tsit5;
     // BDF is judged as Rodas4 is, stable for every mode that decays, and its higher orders' limit near the imaginary axis by the angle
     // of the model's modes (largestDecayingAngleDegrees).
-    const bool rodas = method == IntegrationMethod::rodas4 || method == IntegrationMethod::bdf;
-    const auto stabilityFunction = rodas ? rodas4StabilityFunction : dormandPrince ? dormandPrince54StabilityFunction : rungeKutta4StabilityFunction;
-    const auto largestStableStep = rodas ? rodas4LargestStableStep : dormandPrince ? dormandPrince54LargestStableStep : rungeKutta4LargestStableStep;
+    // Rodas5P is L-stable too, with a stability function of its own.
+    const bool rodas = method == IntegrationMethod::rodas4 || method == IntegrationMethod::rodas5p || method == IntegrationMethod::bdf;
+    const auto stabilityFunction = method == IntegrationMethod::rodas5p ? rodas5pStabilityFunction
+        : rodas ? rodas4StabilityFunction : dormandPrince ? dormandPrince54StabilityFunction : tsit5 ? tsit5StabilityFunction : rungeKutta4StabilityFunction;
+    const auto largestStableStep = rodas ? rodas4LargestStableStep : dormandPrince ? dormandPrince54LargestStableStep
+        : tsit5 ? tsit5LargestStableStep : rungeKutta4LargestStableStep;
     // Adaptive (no steps per global step) is judged at the global step, the largest step it may take.
-    const bool adaptive = dormandPrince && stepsPerGlobalStep == 0;
+    const bool adaptive = (dormandPrince || tsit5) && stepsPerGlobalStep == 0;
     stepsPerGlobalStep = std::max<std::size_t>(1, stepsPerGlobalStep);
     if (!std::all_of(plan.nodes.begin(), plan.nodes.end(), isEquationOnlyForStages)) return std::nullopt;
     // The integrated states, in plan order, with their nodes: those a node's Rate terms add to.

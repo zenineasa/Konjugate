@@ -631,6 +631,9 @@ class Feed(RelationshipProvider):
     const fixtureAdaptive = await runAndCompareAll(structuredClone(document), adaptive, 'Adaptive', orderedStateIds);
     assert.ok(fixtureAdaptive.integration.steps >= targetTime / globalTimeStep, 'Adaptive must take at least one step a global step.');
     await runAndCompareAll(structuredClone(document), { method: 'dormandPrince54', stepsPerGlobalStep: 3 }, 'Dormand–Prince at fixed steps', orderedStateIds);
+    const fixtureTsit5 = await runAndCompareAll(structuredClone(document), { method: 'tsit5', tolerance: { relative: 1e-8, absolute: 1e-10 } }, 'Tsit5', orderedStateIds);
+    assert.equal(fixtureTsit5.integration.method, 'tsit5');
+    await runAndCompareAll(structuredClone(document), { method: 'tsit5', stepsPerGlobalStep: 3 }, 'Tsit5 at fixed steps', orderedStateIds);
     // y' = -k y with k a shared parameter held at 0.5 until 0.73 s, then 3 until 1.31 s, then 1: both jumps inside a global step.
     const scheduled = {
         format: 'konjugate', version: 1, metadata: { projectName: 'Adaptive with a schedule' },
@@ -670,6 +673,14 @@ class Feed(RelationshipProvider):
         const reference = await runAndCompareAll(feedDocument(kind), stiff, `Stiff, held ${kind} program`, [11, 21], [kind]);
         assert.equal(reference.integration.heldTerms.length, 1);
     }
+    // Rodas5P, the fifth-order Rosenbrock method, the same ways: adaptive (the fixture's corner as for Rodas4), at fixed steps, landing
+    // on a schedule's jumps, and with a held program.
+    const fifth = { method: 'rodas5p', tolerance: { relative: 1e-8, absolute: 1e-10 } };
+    const fixtureFifth = await runAndCompareAll(structuredClone(document), fifth, 'Rodas5P', orderedStateIds, ['cpp', 'python'], { absolute: 1e-5, relative: 1e-5 });
+    assert.equal(fixtureFifth.integration.method, 'rodas5p');
+    await runAndCompareAll(structuredClone(document), { method: 'rodas5p', stepsPerGlobalStep: 3 }, 'Rodas5P at fixed steps', orderedStateIds);
+    await runAndCompareAll(scheduled, fifth, 'Rodas5P, scheduled', [11, 21]);
+    for (const kind of ['cpp', 'python']) await runAndCompareAll(feedDocument(kind), fifth, `Rodas5P, held ${kind} program`, [11, 21], [kind]);
 
     // --- 7. Event location (docs/proposals/integrators.md): a diode-like term whose condition reads a state, and a switch on time alone,
     // under Runge–Kutta 4, Adaptive and Stiff, each switch located and stepped to in the engine and in every exported program ---
@@ -690,7 +701,9 @@ class Feed(RelationshipProvider):
         edges: []
     };
     for (const [label, configuration] of [['Runge–Kutta 4, events', { method: 'rungeKutta4', stepsPerGlobalStep: 2 }], ['Adaptive, events', { method: 'dormandPrince54', tolerance: { relative: 1e-9 } }],
-        ['Stiff, events', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }], ['BDF, events', { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }]]) {
+        ['Tsit5, events', { method: 'tsit5', tolerance: { relative: 1e-9 } }],
+        ['Stiff, events', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }], ['Rodas5P, events', { method: 'rodas5p', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
+        ['BDF, events', { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }]]) {
         const reference = await runAndCompareAll(structuredClone(switchedDocument), configuration, label, [11, 21]);
         assert.ok(reference.integration.events >= 4, `The switches must be located: ${JSON.stringify(reference.integration.events)}.`);
     }
@@ -706,6 +719,7 @@ class Feed(RelationshipProvider):
     // and finite differences, chosen by name, as before (a difference Jacobian magnifies the last bit, so within the tolerance's reach) ---
     for (const [label, configuration, tolerances] of [
         ['Stiff, every operation', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
+        ['Rodas5P, every operation', { method: 'rodas5p', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
         ['BDF, every operation', { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }],
         ['Stiff, every operation, finite differences', { method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 }, jacobian: 'finiteDifference' }, { absolute: 1e-5, relative: 1e-5 }]]) {
         const reference = await runAndCompareAll(everyOperationDocument(), configuration, label, [11, 12, 13], ['cpp', 'python'], tolerances);

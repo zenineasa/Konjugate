@@ -394,6 +394,34 @@ class Reading(NodeProvider):
     const tightSteps = (await run(decayModel, { targetTime: 8, globalTimeStep: 8, outputInterval: 8, method: 'dormandPrince54', tolerance: { relative: 1e-12 } })).integration.steps;
     assert.ok(looseSteps < tightSteps, `A state's own looser absolute tolerance must take fewer steps (${looseSteps} vs ${tightSteps}).`);
 
+    // --- Adaptive, Tsit5: Dormand–Prince 5(4)'s scheme, controller and memory with Tsitouras's coefficients ---
+    const tsit5Method = { ...timing, method: 'tsit5' };
+    const tsit5Serial = await run(split, { ...tsit5Method, execution: { backend: 'serial' } });
+    for (const execution of [{ backend: 'threadPool', workerThreads: 2 }, { backend: 'partitioned', partitionCount: 3, workerThreads: 3 }]) {
+        assert.ok(sameBits(valuesOf(tsit5Serial), valuesOf(await run(split, { ...tsit5Method, execution }))), `Tsit5 must give the serial backend's bits on ${execution.backend}.`);
+    }
+    const tsit5Summary = tsit5Serial.integration;
+    assert.equal(tsit5Summary.method, 'tsit5');
+    assert.deepEqual(tsit5Summary.tolerance, { relative: 1e-6, absolute: 1e-9 });
+    assert.ok(tsit5Summary.evaluations >= 6 * tsit5Summary.steps && tsit5Summary.largestStep <= timing.globalTimeStep * (1 + 1e-12), `The summary must count the work: ${JSON.stringify(tsit5Summary)}`);
+    assert.ok(valuesOf(tsit5Serial).every((value, index) => Math.abs(value - adaptiveParts[index]) <= 1e-5 * adaptiveLargest), 'Tsit5 must agree with Dormand–Prince 5(4) within the tolerance.');
+    assert.ok(!sameBits(valuesOf(tsit5Serial), adaptiveParts), 'Tsit5 is not Dormand–Prince 5(4) under another name.');
+    const tsit5Checkpoint = tsit5Serial.checkpoints.find((candidate) => candidate.time === timing.targetTime / 2);
+    assert.equal(tsit5Checkpoint.solver.kind, 'tsit5');
+    const tsit5Resumed = await run(split, { ...tsit5Method, startCheckpoint: tsit5Checkpoint });
+    assert.ok(sameBits(tsit5Resumed.samples.at(-1).states.map((state) => state.value), tsit5Serial.samples.at(-1).states.map((state) => state.value)),
+        'A Tsit5 run continued from its checkpoint must end on the uninterrupted run\'s bits.');
+    for (const relative of [1e-4, 1e-7, 1e-10]) {
+        const configuration = (method) => ({ targetTime: 8, globalTimeStep: 1, outputInterval: 1, method, tolerance: { relative, absolute: relative * 1e-3 } });
+        const tsit5 = await run(decayModel, configuration('tsit5'));
+        const error = Math.max(...tsit5.samples.map((sample) => Math.abs(valueOf(sample, 11) - Math.exp(-sample.time))));
+        assert.ok(error <= 50 * relative, `Under Tsit5 at relative tolerance ${relative} the error must stay near it: ${error}.`);
+    }
+    const tsit5Scheduled = await run(await modelPath('tsit5Scheduled', scheduled), { targetTime: 2, globalTimeStep: 0.5, outputInterval: 0.5, method: 'tsit5', tolerance: { relative: 1e-9, absolute: 1e-12 } });
+    assert.ok(Math.abs(valueOf(tsit5Scheduled.samples.at(-1), 11) - exactAtTwo) <= 1e-8, 'Landing on a schedule\'s jumps, Tsit5 keeps the tolerance\'s accuracy.');
+    const tsit5Stiff = await run(await modelPath('tsit5Stiff', stiff), { targetTime: 4, globalTimeStep: 1, outputInterval: 1, method: 'tsit5', tolerance: { relative: 1e-3, absolute: 1e-6 } });
+    assert.equal(tsit5Stiff.stabilityFindings.filter((finding) => finding.code === 'adaptiveStepsLimitedByStiffness').length, 1, 'Hairer\'s stiffness test fires under Tsit5 too.');
+
     // Validation under Adaptive: a stiff model is said to be held to small steps by stability; no step is called unstable.
     const stiffValidation = { ...stiff, runConfigurations: [{ id: 900, name: 'Run', globalTimeStep: 1, outputInterval: 1, method: 'dormandPrince54' }], activeRunConfigurationId: 900 };
     stiffValidation.nodes[0].sourceTerms.push({ id: 102, state: 'y', expression: '0.001 y', expressionModel: { latex: '', bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'y' }], output: { stateId: 11 }, mathJson: ['Multiply', '0.001', 'y'] } });
@@ -498,6 +526,50 @@ class Reading(NodeProvider):
     const stiffMethodIssues = issues(decodeValidationReport(await readFile(stiffMethodReportPath)));
     assert.ok(!stiffMethodIssues.some((issue) => issue.code === 'numericsPotentiallyUnstable' || issue.code === 'numericsStiffModel'),
         `Stiff is made for a stiff model: ${JSON.stringify(stiffMethodIssues)}`);
+
+    // --- Stiff, fifth order: Rodas5P, on Rodas4's machinery (its Jacobian, its LU, its controller's memory) with eight stages ---
+    const fifthMethod = { ...timing, method: 'rodas5p' };
+    const fifthSerial = await run(split, { ...fifthMethod, execution: { backend: 'serial' } });
+    for (const execution of [{ backend: 'threadPool', workerThreads: 2 }, { backend: 'partitioned', partitionCount: 3, workerThreads: 3 }]) {
+        assert.ok(sameBits(valuesOf(fifthSerial), valuesOf(await run(split, { ...fifthMethod, execution }))),
+            `Rodas5P must give the serial backend's bits on ${execution.backend}.`);
+    }
+    const fifthSummary = fifthSerial.integration;
+    assert.equal(fifthSummary.method, 'rodas5p');
+    assert.deepEqual(fifthSummary.tolerance, { relative: 1e-6, absolute: 1e-9 });
+    assert.equal(fifthSummary.jacobians, fifthSummary.steps, 'One Jacobian a step under Rodas5P too.');
+    assert.equal(fifthSummary.factorisations, fifthSummary.steps + fifthSummary.rejectedSteps, 'One factorisation a step tried.');
+    assert.equal(fifthSummary.exactColumns, 6);
+    assert.ok(valuesOf(fifthSerial).every((value, index) => Math.abs(value - stiffWhole[index]) <= 1e-6 * stiffLargest), 'Rodas5P must agree with Rodas4 within the tolerance.');
+    const fifthCheckpoint = fifthSerial.checkpoints.find((candidate) => candidate.time === timing.targetTime / 2);
+    assert.equal(fifthCheckpoint.solver.kind, 'rodas5p');
+    const fifthResumed = await run(split, { ...fifthMethod, startCheckpoint: fifthCheckpoint });
+    assert.ok(sameBits(fifthResumed.samples.at(-1).states.map((state) => state.value), fifthSerial.samples.at(-1).states.map((state) => state.value)),
+        'A Rodas5P run continued from its checkpoint must end on the uninterrupted run\'s bits.');
+    const fifthStiff = await run(stiffModel, { targetTime: 4, globalTimeStep: 1, outputInterval: 1, method: 'rodas5p', tolerance: { relative: 1e-6, absolute: 1e-9 } });
+    for (const sample of fifthStiff.samples) {
+        assert.ok(Math.abs(valueOf(sample, 11) - exactStiff(sample.time)) <= 1e-5, `Rodas5P must follow y' = -1000 (y - cos t) at ${sample.time} s.`);
+    }
+    const fifthScheduled = await run(await modelPath('fifthScheduled', scheduled), { targetTime: 2, globalTimeStep: 0.5, outputInterval: 0.5, method: 'rodas5p', tolerance: { relative: 1e-9, absolute: 1e-12 } });
+    assert.ok(Math.abs(valueOf(fifthScheduled.samples.at(-1), 11) - exactAtTwo) <= 1e-8, 'Landing on a schedule\'s jumps, Rodas5P keeps the tolerance\'s accuracy.');
+    // Its error follows the tolerance, and at a tight one it takes far fewer steps than Rodas4.
+    for (const relative of [1e-4, 1e-7, 1e-10]) {
+        const configuration = (method) => ({ targetTime: 8, globalTimeStep: 1, outputInterval: 1, method, tolerance: { relative, absolute: relative * 1e-3 } });
+        const fifth = await run(decayModel, configuration('rodas5p'));
+        const error = Math.max(...fifth.samples.map((sample) => Math.abs(valueOf(sample, 11) - Math.exp(-sample.time))));
+        assert.ok(error <= 50 * relative, `Under Rodas5P at relative tolerance ${relative} the error must stay near it: ${error}.`);
+        if (relative === 1e-10) {
+            const fourth = await run(decayModel, configuration('rodas4'));
+            assert.ok(2 * fifth.integration.steps < fourth.integration.steps,
+                `At a tight tolerance Rodas5P must take far fewer steps than Rodas4: ${fifth.integration.steps} against ${fourth.integration.steps}.`);
+        }
+    }
+    const fifthValidationPath = join(directory, 'fifthValidation.report');
+    await execute(['validate', await modelPath('fifthValidation', { ...stiffValidation, runConfigurations: [{ id: 900, name: 'Run', globalTimeStep: 1, outputInterval: 1, method: 'rodas5p' }] }),
+        '--report', fifthValidationPath]);
+    const fifthIssues = issues(decodeValidationReport(await readFile(fifthValidationPath)));
+    assert.ok(!fifthIssues.some((issue) => issue.code === 'numericsPotentiallyUnstable' || issue.code === 'numericsStiffModel'),
+        `Rodas5P is made for a stiff model too: ${JSON.stringify(fifthIssues)}`);
 
     // --- BDF: the stiff method for large models, its Jacobian and factorisation kept from step to step, its table in checkpoints ---
     const bdfMethod = { ...timing, method: 'bdf' };

@@ -3,7 +3,9 @@
 #include "executionPlan.hpp"
 #include "stabilityAnalysis.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/tsit5.hpp"
 #include "konjugate/integrators/rodas4.hpp"
+#include "konjugate/integrators/rodas5p.hpp"
 #include "konjugate/integrators/bdf.hpp"
 #include <Eigen/Dense>
 #include <random>
@@ -530,6 +532,78 @@ void dormandPrince54DenseOutputIsFourthOrder() {
     }
 }
 
+// Tsit5's fifth-order solution: R(z) agrees with e^z to z^5 (order five), and its region reaches 3.5069 along the negative real axis,
+// further than Dormand–Prince's 3.3066.
+void tsit5StabilityFunctionIsFifthOrder() {
+    for (const std::complex<double> z : {std::complex<double>{-0.05, 0.0}, {0.01, -0.04}}) {
+        const auto taylor = 1.0 + z + z * z / 2.0 + z * z * z / 6.0 + z * z * z * z / 24.0 + z * z * z * z * z / 120.0;
+        require(std::abs(konjugate::tsit5StabilityFunction(z) - taylor) < 0.01 * std::pow(std::abs(z), 6.0),
+            "R(z) must agree with e^z to z^5.");
+    }
+    require(std::abs(konjugate::tsit5LargestStableStep({-1.0, 0.0}) - 3.5069) < 1e-3, "The real-axis bound must be 3.5069.");
+    require(konjugate::tsit5LargestStableStep({0.5, 0.0}) == 0, "A growing mode has no stable step.");
+}
+
+// Tsit5 at fixed steps is of order five; its dense output, of order four, falls about 32-fold (local order five) per halving at a step's
+// middle; and adaptive, it keeps a smooth model within its tolerance, more accurately than Dormand–Prince 5(4) at the same tolerance.
+void tsit5IsFifthOrderWithAFourthOrderDenseOutput() {
+    namespace integrators = konjugate::integrators;
+    // y' = -y + sin 3t, y(0) = 1: y = 1.3 e^-t + (sin 3t - 3 cos 3t) / 10.
+    const auto exact = [](double t) { return (1.3 * std::exp(-t)) + (std::sin(3.0 * t) - 3.0 * std::cos(3.0 * t)) / 10.0; };
+    const auto evaluate = [](std::size_t, double t, const std::vector<double>& y, std::vector<double>& rates) { rates[0] = -y[0] + std::sin(3.0 * t); };
+    const auto none = [](double, const std::vector<double>&) {};
+    double previous = 0;
+    // From 16 steps on (coarser, the order is not yet settled: 3.0 from 4 to 8 steps, 4.6 from 8 to 16).
+    for (const std::size_t steps : {std::size_t{16}, std::size_t{32}, std::size_t{64}}) {
+        std::vector<double> states{exact(0.0)};
+        integrators::Tsit5Controller controller;
+        integrators::Tsit5Stiffness stiffness;
+        integrators::Tsit5Statistics statistics;
+        integrators::Tsit5Tolerance tolerance{1e-6, {1e-9}};
+        integrators::tsit5GlobalStep(0.0, 2.0, states, {1}, {{0}}, tolerance, {}, {}, steps, controller, stiffness, statistics, evaluate, none);
+        const double error = std::abs(states[0] - exact(2.0));
+        if (previous > 0) {
+            const double order = std::log2(previous / error);
+            require(order > 4.7 && order < 5.5, "Tsit5 must be of order five (observed " + std::to_string(order) + ").");
+        }
+        previous = error;
+    }
+    previous = 0;
+    for (const double step : {0.2, 0.1, 0.05, 0.025}) {
+        std::vector<double> states{exact(0.0)};
+        integrators::Tsit5Controller controller;
+        integrators::Tsit5Stiffness stiffness;
+        integrators::Tsit5Statistics statistics;
+        integrators::Tsit5Tolerance tolerance{1e-6, {1e-9}};
+        double middle = 0;
+        integrators::tsit5GlobalStep(0.0, step, states, {1}, {{0}}, tolerance, {}, {step / 2}, 1, controller, stiffness, statistics,
+            evaluate, [&](double, const std::vector<double>& values) { middle = values[0]; });
+        const double error = std::abs(middle - exact(step / 2));
+        if (previous > 0) require(previous / error > 24 && previous / error < 40, "The dense output's error must fall about 32-fold per halving.");
+        previous = error;
+    }
+    // Adaptive over 0 to 20 s at 1e-8, against Dormand–Prince 5(4) at the same tolerance.
+    const auto adaptive = [&](bool tsit5, std::size_t& steps) {
+        std::vector<double> states{exact(0.0)};
+        integrators::DormandPrince54Controller controller;
+        integrators::DormandPrince54Stiffness stiffness;
+        integrators::DormandPrince54Statistics statistics;
+        integrators::DormandPrince54Tolerance tolerance{1e-8, {1e-10}};
+        if (tsit5) integrators::tsit5GlobalStep(0.0, 20.0, states, {1}, {{0}}, tolerance, {}, {}, 0, controller, stiffness, statistics, evaluate, none);
+        else integrators::dormandPrince54GlobalStep(0.0, 20.0, states, {1}, {{0}}, tolerance, {}, {}, 0, controller, stiffness, statistics, evaluate, none);
+        steps = statistics.acceptedSteps;
+        return std::abs(states[0] - exact(20.0));
+    };
+    std::size_t tsit5Steps = 0, dormandPrinceSteps = 0;
+    const double tsit5Error = adaptive(true, tsit5Steps);
+    const double dormandPrinceError = adaptive(false, dormandPrinceSteps);
+    require(tsit5Error < 1e-7, "Tsit5 must keep the model within its tolerance (error " + std::to_string(tsit5Error) + ").");
+    // Its embedded estimate is the more cautious: here it takes 17 % more steps than Dormand–Prince 5(4), for an error 1.4 times smaller.
+    require(tsit5Error < dormandPrinceError, "Tsit5 must be more accurate than Dormand–Prince 5(4) at the same tolerance.");
+    require(10 * tsit5Steps <= 13 * dormandPrinceSteps, "Tsit5 must take at most 1.3 times Dormand–Prince 5(4)'s steps (" + std::to_string(tsit5Steps) +
+        " against " + std::to_string(dormandPrinceSteps) + ").");
+}
+
 // An undamped oscillator split over two nodes, x' = v and v' = -omega^2 x, each written as a relationship from the other node.
 boost::property_tree::ptree splitOscillatorProject(double omegaSquared) {
     std::ostringstream json;
@@ -708,6 +782,134 @@ void rodas4IsFourthOrderAtFixedSteps() {
 }
 
 
+// Rodas5P (Steinebach 2023) is L-stable, as its paper says: |R(z)| <= 1 over the left half-plane and R -> 0 far into it; and R(z) agrees
+// with exp(z) to fifth order near 0, which a slip in any of its coefficients would break.
+void rodas5pStabilityFunctionIsLStableAndFifthOrder() {
+    for (const double radius : {0.1, 1.0, 10.0, 1e3, 1e6}) {
+        for (int angle = 0; angle <= 180; ++angle) {
+            const double theta = std::numbers::pi / 2 + std::numbers::pi * angle / 180.0;
+            require(std::abs(konjugate::rodas5pStabilityFunction(std::polar(radius, theta))) <= 1.0 + 1e-12, "Rodas5P must be A-stable.");
+        }
+    }
+    require(std::abs(konjugate::rodas5pStabilityFunction({-1e8, 0})) < 1e-6, "Rodas5P must be L-stable: R(-infinity) = 0.");
+    // At -0.4 and -0.2 (nearer 0 the difference is already at rounding level).
+    const double error1 = std::abs(konjugate::rodas5pStabilityFunction({-0.4, 0}) - std::exp(-0.4));
+    const double error2 = std::abs(konjugate::rodas5pStabilityFunction({-0.2, 0}) - std::exp(-0.2));
+    require(std::log2(error1 / error2) > 5.7, "R(z) - exp(z) must be O(z^6): Rodas5P is of order five.");
+}
+
+// Rodas5P at fixed steps on a nonlinear, time-dependent model (df/dt worked out): its error falls 32 times when the step halves.
+void rodas5pIsFifthOrderAtFixedSteps() {
+    namespace integrators = konjugate::integrators;
+    const auto run = [](std::size_t steps) {
+        auto system = integrators::makeRodas4System({1, 1}, {{1}, {0, 1}}, {{0, 1}});
+        integrators::Rodas5PTolerance tolerance{1e-6, {1e-9, 1e-9}};
+        integrators::Rodas5PController controller;
+        integrators::Rodas5PStatistics statistics;
+        std::vector<double> states{1.0, 0.0};
+        integrators::rodas5pGlobalStep(0.0, 2.0, states, system, tolerance, {}, {}, steps, true, controller, statistics,
+            [](std::size_t, double time, const std::vector<double>& values, std::vector<double>& rates) {
+                rates[0] = -values[1] + 0.1 * std::sin(time);
+                rates[1] = values[0] - 0.5 * values[1] * values[1];
+            }, [](double, const std::vector<double>&) {});
+        return states;
+    };
+    const auto reference = run(2048);
+    double previous = 0;
+    // From 8 steps on (coarser, the order is not yet settled: 6.3 from 2 to 4 steps, 5.5 from 4 to 8).
+    for (const std::size_t steps : {std::size_t{8}, std::size_t{16}, std::size_t{32}}) {
+        const auto states = run(steps);
+        const double error = std::hypot(states[0] - reference[0], states[1] - reference[1]);
+        if (previous > 0) {
+            const double order = std::log2(previous / error);
+            require(order > 4.8 && order < 5.4, "Rodas5P must be of order five (observed " + std::to_string(order) + ").");
+        }
+        previous = error;
+    }
+}
+
+// Rodas5P, adaptive, on a stiff linear model with an exact solution (decay rates 1 and 1e5, a fast mode coupled into a slow one): its
+// error within the tolerance, its samples from the dense output as accurate as its steps, and at a tight tolerance far fewer steps than
+// Rodas4 takes for the same accuracy.
+void rodas5pFollowsAStiffModelWithinItsTolerance() {
+    namespace integrators = konjugate::integrators;
+    // y1' = -y1 + y2, y2' = -1e5 (y2 - cos t): y2 follows cos t closely, y1 is driven by it.
+    const auto rates = [](std::size_t, double time, const std::vector<double>& values, std::vector<double>& derivatives) {
+        derivatives[0] = -values[0] + values[1];
+        derivatives[1] = -1e5 * (values[1] - std::cos(time));
+    };
+    // The exact solution from y(0) = (0, 1), solved by hand: y2 = cos t + a (sin t - ...) is written through its parts below.
+    const double lambda = 1e5;
+    const auto exact = [&](double time) {
+        // y2 = A cos t + B sin t + (1 - A) e^{-lambda t}, with A = lambda^2 / (lambda^2 + 1), B = lambda / (lambda^2 + 1).
+        const double A = lambda * lambda / (lambda * lambda + 1), B = lambda / (lambda * lambda + 1), E = 1 - A;
+        // y1' + y1 = y2: each part's particular solution, and the homogeneous part fixing y1(0) = 0.
+        const double cosPart = A * (std::cos(time) + std::sin(time)) / 2 + B * (std::sin(time) - std::cos(time)) / 2;
+        const double expPart = E * std::exp(-lambda * time) / (1 - lambda);
+        const double homogeneous = -(A / 2 - B / 2 + E / (1 - lambda));
+        return std::vector<double>{cosPart + expPart + homogeneous * std::exp(-time), A * std::cos(time) + B * std::sin(time) + E * std::exp(-lambda * time)};
+    };
+    const auto run = [&](auto&& step, double relative, std::size_t& accepted, double& worstSample) {
+        auto system = integrators::makeRodas4System({1, 1}, {{0, 1}, {1}}, {{0, 1}});
+        integrators::Rodas4Tolerance tolerance{relative, {relative, relative}};
+        integrators::Rodas4Controller controller;
+        integrators::Rodas4Statistics statistics;
+        std::vector<double> states{0.0, 1.0};
+        std::vector<double> samples;
+        for (int i = 1; i < 40; ++i) samples.push_back(i * 0.25);
+        worstSample = 0;
+        step(0.0, 10.0, states, system, tolerance, std::vector<double>{}, samples, std::size_t{0}, true, controller, statistics, rates,
+            [&](double time, const std::vector<double>& values) {
+                const auto truth = exact(time);
+                worstSample = std::max(worstSample, std::max(std::abs(values[0] - truth[0]), std::abs(values[1] - truth[1])));
+            });
+        accepted = statistics.acceptedSteps;
+        const auto truth = exact(10.0);
+        return std::max(std::abs(states[0] - truth[0]), std::abs(states[1] - truth[1]));
+    };
+    const auto rodas5p = [](auto&&... arguments) { integrators::rodas5pGlobalStep(arguments...); };
+    const auto rodas4 = [](auto&&... arguments) { integrators::rodas4GlobalStep(arguments...); };
+    for (const double relative : {1e-4, 1e-7, 1e-10}) {
+        std::size_t steps5 = 0, steps4 = 0;
+        double sample5 = 0, sample4 = 0;
+        const double error5 = run(rodas5p, relative, steps5, sample5);
+        const double error4 = run(rodas4, relative, steps4, sample4);
+        require(error5 < 100 * relative, "Rodas5P's error must follow its tolerance (" + std::to_string(error5) + " at " + std::to_string(relative) + ").");
+        require(sample5 < 100 * relative, "Rodas5P's dense output must be as accurate as its steps (" + std::to_string(sample5) + ").");
+        if (relative == 1e-10) {
+            require(error4 < 100 * relative, "Rodas4 must follow its tolerance too (a check on the test).");
+            require(2 * steps5 < steps4, "At a tight tolerance Rodas5P must take far fewer steps than Rodas4 (" + std::to_string(steps5) + " against "
+                + std::to_string(steps4) + ").");
+        }
+    }
+}
+
+// BDF landing on many global steps of a smooth model takes not many more steps than in one: its approach to each landing planned in
+// equal steps rather than ending in a sliver, after which its table took many steps to grow back (4.1 times the steps here before).
+void bdfLandsWithoutSlivers() {
+    namespace integrators = konjugate::integrators;
+    const auto run = [](double globalStep) {
+        auto system = integrators::makeStiffSystem({1, 1, 1}, {{0, 1}, {0, 1, 2}, {1, 2}}, {{0, 1, 2}});
+        integrators::BdfTolerance tolerance{1e-3, {1e-3, 1e-3, 1e-3}};
+        integrators::BdfHistory history;
+        integrators::BdfStatistics statistics;
+        std::vector<double> states{1.0, 0.0, 0.0};
+        const auto rates = [](std::size_t, double, const std::vector<double>& y, std::vector<double>& d) {
+            d[0] = -2e-3 * y[0] + 1e-3 * y[1] + 1e-4;
+            d[1] = 1e-3 * y[0] - 3e-3 * y[1] + 1e-3 * y[2];
+            d[2] = 1e-3 * y[1] - 1.5e-3 * y[2];
+        };
+        for (double time = 0; time < 16384 - 1e-9; time += globalStep) {
+            integrators::bdfGlobalStep(time, time + globalStep, states, system, tolerance, {}, {}, false, history, statistics, rates,
+                [](double, const std::vector<double>&) {});
+        }
+        return statistics.acceptedSteps;
+    };
+    const auto once = run(16384), landing = run(256);
+    require(landing <= 2.5 * once, "Landing on 64 global steps BDF must take at most 2.5 times its steps in one (" + std::to_string(landing) + " against "
+        + std::to_string(once) + ").");
+}
+
 // BDF on Robertson's kinetics to 1e11 s: the total kept at 1, the published values reached, its factorisation kept from step to step
 // (far fewer factorisations than steps) and its order raised to five; and a run continued from its table mid-way takes the same steps.
 void bdfKeepsItsFactorisationAndItsTable() {
@@ -818,11 +1020,17 @@ int main() {
         rungeKutta4StabilityFunctionIsTheTaylorPolynomial();
         dormandPrince54StabilityFunctionIsItsPolynomial();
         dormandPrince54DenseOutputIsFourthOrder();
+        tsit5StabilityFunctionIsFifthOrder();
+        tsit5IsFifthOrderWithAFourthOrderDenseOutput();
         assessWholeModelStabilityJudgesTheCouplingWithTheMethodsRegion();
         rodas4StabilityFunctionIsLStableAndFourthOrder();
         ownLinearSolveAgreesWithEigen();
         rodas4IsFourthOrderAtFixedSteps();
+        rodas5pStabilityFunctionIsLStableAndFifthOrder();
+        rodas5pIsFifthOrderAtFixedSteps();
+        rodas5pFollowsAStiffModelWithinItsTolerance();
         bdfKeepsItsFactorisationAndItsTable();
+        bdfLandsWithoutSlivers();
     } catch (const std::exception& error) {
         std::fprintf(stderr, "stabilityAnalysisTests failed: %s\n", error.what());
         return 1;

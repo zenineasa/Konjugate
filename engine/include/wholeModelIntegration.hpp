@@ -22,7 +22,7 @@
 
 namespace konjugate {
 
-enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4, bdf };
+enum class IntegrationMethod { nodeByNode, rungeKutta4, dormandPrince54, rodas4, bdf, rodas5p, tsit5 };
 
 // How the stiff methods work out the Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): from the model's own
 // derivatives where it can ("analytic", the default; the rest by finite differences), wholly by finite differences ("finiteDifference"),
@@ -46,17 +46,21 @@ struct IntegrationSettings {
 // method is one this engine does not know, so a method added later is never silently run as another.
 IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptree& configuration);
 
-// Whether the method chooses its own steps (Dormand–Prince 5(4) with its error control on).
+// Whether the method chooses its own steps (Dormand–Prince 5(4) or Tsit5 with its error control on).
 bool isAdaptive(const IntegrationSettings& settings) noexcept;
-// Whether the stiff method chooses its own steps (Rodas4 with its error control on).
+// Whether the method is one of the explicit 5(4) pairs, Dormand–Prince 5(4) or Tsit5: the same scheme with other coefficients.
+bool isExplicitPair(IntegrationMethod method) noexcept;
+// Whether the method is one of the Rosenbrock methods, Rodas4 or Rodas5P: one step from the Jacobian, with no history.
+bool isRosenbrock(IntegrationMethod method) noexcept;
+// Whether the stiff method chooses its own steps (Rodas4 or Rodas5P with its error control on).
 bool isStiff(const IntegrationSettings& settings) noexcept;
-// Whether the method has tolerances and a step-size controller (Dormand–Prince 5(4), Rodas4 or BDF).
+// Whether the method has tolerances and a step-size controller (Dormand–Prince 5(4), Tsit5, Rodas4, Rodas5P or BDF).
 bool hasTolerance(IntegrationMethod method) noexcept;
 
-// The name a run configuration and a result give the method: nodeByNode, rungeKutta4, dormandPrince54, rodas4 or bdf.
+// The name a run configuration and a result give the method: nodeByNode, rungeKutta4, dormandPrince54, tsit5, rodas4, rodas5p or bdf.
 std::string_view integrationMethodName(IntegrationMethod method) noexcept;
 // The checkpoint's solver_kind: explicitEuler (node by node, semi-implicit and Verlet nodes included), rungeKutta4, dormandPrince54,
-// rodas4 or bdf.
+// tsit5, rodas4, rodas5p or bdf.
 std::string_view solverKindName(IntegrationMethod method) noexcept;
 // The method's number of new evaluations a step (Dormand–Prince's seventh stage is the next step's first).
 std::size_t integrationMethodStages(IntegrationMethod method) noexcept;
@@ -72,13 +76,13 @@ std::vector<double> absoluteTolerances(const boost::property_tree::ptree& docume
 // within rounding of `from` or `to`. An adaptive method lands a step on each.
 std::vector<double> scheduleBreakpoints(const ExecutionPlan& plan, const std::vector<ParameterSchedule>& active, double from, double to);
 
-// Dormand–Prince 5(4)'s hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next and
+// Dormand–Prince 5(4)'s (and Tsit5's, the same controller) hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next and
 // the previous step's error. Empty (the controller starts afresh) when `proposedStep` is not positive.
 std::string encodeAdaptiveSolverState(double proposedStep, double previousError);
 // The record read back; false (and nothing changed) when it is empty or not a record this engine wrote.
 bool decodeAdaptiveSolverState(const std::string& record, double& proposedStep, double& previousError);
 
-// Rodas4's hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next, the last
+// Rodas4's (and Rodas5P's, the same controller) hidden state in a checkpoint's solver_state: a versioned record of the step the controller proposes next, the last
 // accepted step's error and the last accepted step itself (Gustafsson's predictive controller reads both). Empty when `proposedStep`
 // is not positive.
 std::string encodeStiffSolverState(double proposedStep, double previousError, double previousStep);

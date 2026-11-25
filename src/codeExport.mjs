@@ -27,11 +27,16 @@ import { exportNoticeLines } from './ownership.mjs';
 import { saysKinds, stateKinds, withoutKinds } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
 import { differentiateNode } from './expressionDerivative.mjs';
-import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rungeKutta4Cpp,
+import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, tsit5Cpp, tsit5Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rodas5pCpp, rodas5pPython, rungeKutta4Cpp,
     rungeKutta4Python, stiffSystemCpp, stiffSystemPython } from './integratorSources.mjs';
 import { programSourceVersion } from './providerTemplate.mjs';
 import { programSdkCpp, programSdkPython } from './programSdkSources.mjs';
 import { parseUnit } from './units.mjs';
+
+// The Rosenbrock methods, Rodas4 and Rodas5P: the same machinery (Jacobian, linear algebra, controller, events), their steps apart.
+const isRosenbrock = (method) => method === 'rodas4' || method === 'rodas5p';
+// The explicit 5(4) pairs, Dormand–Prince 5(4) and Tsit5: the same scheme, controller and memory, other coefficients.
+const isExplicitPair = (method) => method === 'dormandPrince54' || method === 'tsit5';
 
 const numericLiteralPattern = /^-?\d+(\.\d+)?([eE]-?\d+)?$/;
 
@@ -775,7 +780,7 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     // step they refuse, as the engine calls them (programEntries). What the export does not write yet is refused by name.
     const currentFormat = providers.find((provider) => provider.program);
     for (const { task } of programEntries(model)) {
-        if ((method === 'rodas4' || method === 'bdf') && task.program.ownJacobian) {
+        if ((isRosenbrock(method) || method === 'bdf') && task.program.ownJacobian) {
             throw new Error(`The program of the ${task.entityLabel} gives its own Jacobian, which Stiff uses and code export cannot write yet -- export blocked.`);
         }
         if (task.algebraic && task.program.clock) {
@@ -795,7 +800,7 @@ export function generateStandaloneProgram(document, kind, options = {}) {
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     const outputInterval = runConfiguration?.outputInterval ?? globalTimeStep;
     // Event location, as the engine: under Runge–Kutta 4, Adaptive, Stiff and BDF (not Dormand–Prince or Rodas4 with the error control off).
-    const locating = method === 'rungeKutta4' || method === 'bdf' || ((method === 'dormandPrince54' || method === 'rodas4') && !runConfiguration?.stepsPerGlobalStep);
+    const locating = method === 'rungeKutta4' || method === 'bdf' || ((isExplicitPair(method) || isRosenbrock(method)) && !runConfiguration?.stepsPerGlobalStep);
     const switching = locating ? latchConditions(model) : [];
     const meta = {
         switching,
@@ -804,12 +809,12 @@ export function generateStandaloneProgram(document, kind, options = {}) {
         // when a run configuration turns its error control off with steps per global step (0: the error control chooses).
         // Stiff (Rodas4) the same, with what its Jacobian is built from: the states each state's derivative reads, and whether a stage
         // reads the time.
-        ...(method === 'dormandPrince54' || method === 'rodas4' || method === 'bdf' ? {
+        ...(isExplicitPair(method) || isRosenbrock(method) || method === 'bdf' ? {
             tolerance: toleranceOf(runConfiguration),
             absoluteTolerances: absoluteTolerancesOf(model, toleranceOf(runConfiguration).absolute),
             fixedSteps: runConfiguration?.stepsPerGlobalStep ?? 0
         } : {}),
-        ...(method === 'rodas4' || method === 'bdf' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
+        ...(isRosenbrock(method) || method === 'bdf' ? { stageReads: stageReadsOf(model), stagesReadTime: stagesReadTime(model) } : {})
     };
     // The stiff methods' Jacobian exactly, from the equations' derivatives, unless the run asks for finite differences.
     if (meta.stageReads) meta.exactJacobian = exactJacobianOf(model, meta.stageReads, runConfiguration?.jacobian);
@@ -1507,7 +1512,7 @@ function cppSwitchingLines(model, functions) {
     ];
 }
 
-// FMU export under Stiff (src/fmiCodeGen.mjs): what fmi2DoStep needs to take one global step as the engine takes it, Rodas4 or BDF,
+// FMU export under Stiff (src/fmiCodeGen.mjs): what fmi2DoStep needs to take one global step as the engine takes it, Rodas4, Rodas5P or BDF,
 // with the same stages, Jacobian, event location and Updates as the plain C++ export. The solver's memory between steps -- Rodas4's
 // controller, BDF's table, the conditions' latches -- lives in the model's members; everything else is set up again at each step.
 // Returns the integrator headers to paste in, the members, and the body of doStep(currentTime, globalTimeStep).
@@ -1525,6 +1530,8 @@ export function cppStiffFmuPieces(model, providers, providerInfo, runConfigurati
         `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n`,
         `${stiffSystemCpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n`,
         `${(bdf ? bdfCpp : rodas4Cpp).replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n`,
+        // Rodas5P builds on Rodas4's header, pasted just above.
+        method === 'rodas5p' ? `${rodas5pCpp.replace(/^#pragma once\n/m, '').replace(/^#include "rodas4\.hpp"\n/m, '')}\n` : '',
         located ? `${eventsCpp.replace(/^#pragma once\n/m, '')}\n` : ''
     ].join('');
     const members = [
@@ -1621,7 +1628,7 @@ export function cppStiffFmuPieces(model, providers, providerInfo, runConfigurati
         ] : [
             `        constexpr std::size_t fixedSteps = ${fixedSteps};`,
             `        constexpr bool readsTime = ${stagesReadTime(model)};`,
-            `        konjugate::integrators::rodas4GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
+            `        konjugate::integrators::${method === 'rodas5p' ? 'rodas5p' : 'rodas4'}GlobalStep${located ? 'WithEvents' : ''}(currentTime, endTime, globalState, system, tolerance,`,
             `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller_, statistics_,${located ? ' switching,' : ''}`,
             '            evaluateAdaptive, [](double, const std::vector<double>&) {});'
         ]),
@@ -1639,9 +1646,9 @@ export function cppStiffFmuPieces(model, providers, providerInfo, runConfigurati
 function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
     const located = meta.switching?.length > 0;
     const nodeIntegratorList = model.nodePlans.map((_plan, nodeIndex) => `stageNode${nodeIndex}`).join(', ');
-    const adaptive = meta.method === 'dormandPrince54';
+    const adaptive = isExplicitPair(meta.method);
     const bdf = meta.method === 'bdf';
-    const stiff = meta.method === 'rodas4' || bdf;
+    const stiff = isRosenbrock(meta.method) || bdf;
     // Programs in the current format: evaluated at every stage, advanced after every step the method accepts (through its events), their
     // clocks ticking and their Updates set at each global step's end.
     const programs = programEntries(model).length > 0;
@@ -1744,7 +1751,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
         ...programEventLines,
         adaptive
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                `        konjugate::integrators::dormandPrince54GlobalStep${withEvents}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
+                `        konjugate::integrators::${meta.method === 'tsit5' ? 'tsit5' : 'dormandPrince54'}GlobalStep${withEvents}(currentTime, endTime, globalState, integrated, errorGroups, tolerance,`,
                 `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, controller, stiffness, statistics,${eventsArgument}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
             : bdf
@@ -1760,7 +1767,7 @@ function cppWholeModelLoopLines(model, providers, providerInfo, meta) {
                 ...(located ? ['        bdfLatches = switching.latches;'] : [])].filter((line) => line !== null).join('\n')
             : stiff
             ? ['        const double endTime = std::min(targetTime, (step + 1) * globalTimeStep);',
-                `        konjugate::integrators::rodas4GlobalStep${withEvents}(currentTime, endTime, globalState, system, tolerance,`,
+                `        konjugate::integrators::${meta.method === 'rodas5p' ? 'rodas5p' : 'rodas4'}GlobalStep${withEvents}(currentTime, endTime, globalState, system, tolerance,`,
                 `            fixedSteps ? std::vector<double>{} : breakpointsWithin(currentTime, endTime), {}, fixedSteps, readsTime, controller, statistics,${eventsArgument}`,
                 '            evaluateAdaptive, [](double, const std::vector<double>&) {});'].join('\n')
             : programs
@@ -1878,12 +1885,16 @@ function generateCpp(model, providers, meta, document) {
         providerBlocks.join('\n'),
         cppScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
-        meta.method === 'dormandPrince54' ? `${dormandPrince54Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        isExplicitPair(meta.method) ? `${dormandPrince54Cpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        // Tsit5 builds on Dormand–Prince 5(4)'s header, pasted just above.
+        meta.method === 'tsit5' ? `${tsit5Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "dormandPrince54\.hpp"\n/m, '')}\n` : null,
         // Stiff: Konjugate's own linear algebra, then the method, which includes it.
         // The stiff methods: Konjugate's own linear algebra and their shared machinery, then the method, each less its own includes.
-        meta.method === 'rodas4' || meta.method === 'bdf' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
-        meta.method === 'rodas4' || meta.method === 'bdf' ? `${stiffSystemCpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
-        meta.method === 'rodas4' ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n` : null,
+        isRosenbrock(meta.method) || meta.method === 'bdf' ? `${linearSolveCpp.replace(/^#pragma once\n/m, '')}\n` : null,
+        isRosenbrock(meta.method) || meta.method === 'bdf' ? `${stiffSystemCpp.replace(/^#pragma once\n/m, '').replace(/^#include "linearSolve\.hpp"\n/m, '')}\n` : null,
+        isRosenbrock(meta.method) ? `${rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n` : null,
+        // Rodas5P builds on Rodas4's header, pasted just above.
+        meta.method === 'rodas5p' ? `${rodas5pCpp.replace(/^#pragma once\n/m, '').replace(/^#include "rodas4\.hpp"\n/m, '')}\n` : null,
         meta.method === 'bdf' ? `${bdfCpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, '')}\n` : null,
         meta.switching?.length ? `${eventsCpp.replace(/^#pragma once\n/m, '')}\n` : null,
         'int main(int argc, char** argv) {',
@@ -2214,9 +2225,11 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         plan.algebraic.map((task) => emitPythonAlgebraicTask(task, providerInfo.get(task))).join('\n'),
         ...plan.node.states.map((state, index) => `        global_state[${model.stateRecord.get(state.id).globalIndex}] = state[${index}]`)
     ].join('\n'));
-    const adaptive = meta.method === 'dormandPrince54';
+    const adaptive = isExplicitPair(meta.method);
+    // The adaptive method's Python function: Dormand–Prince 5(4)'s or Tsit5's, with the same arguments.
+    const adaptiveCall = meta.method === 'tsit5' ? 'tsit5_global_step' : 'dormand_prince_54_global_step';
     const bdf = meta.method === 'bdf';
-    const stiff = meta.method === 'rodas4' || bdf;
+    const stiff = isRosenbrock(meta.method) || bdf;
     const events = programs ? 'program_events' : located ? 'switching' : null;
     const eventsArgument = events ? `, ${events}` : '';
     const rungeKutta4Call = (start, size, steps, evaluate) => (located
@@ -2291,9 +2304,9 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
         located ? '        switching.begin_global_step(current_time, global_state)' : '',
         adaptive
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
-                '        dormand_prince_54_global_step(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,',
-                '                                      [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,',
-                `                                      lambda _time, _values: None${eventsArgument})`].join('\n')
+                `        ${adaptiveCall}(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,`,
+                `${' '.repeat(9 + adaptiveCall.length)}[] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, controller, evaluate_adaptive,`,
+                `${' '.repeat(9 + adaptiveCall.length)}lambda _time, _values: None${eventsArgument})`].join('\n')
             : bdf
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
                 '        # The table starts again at order 1 where a schedule turns a corner at this very instant, as the engine starts it.',
@@ -2305,7 +2318,7 @@ function pythonWholeModelLoopLines(model, providers, providerInfo, meta, isMpi) 
                 ...(located ? ['        bdf_latches = list(switching.latches)'] : [])].filter(Boolean).join('\n')
             : stiff
             ? ['        end_time = min(target_time, (step + 1) * global_time_step)',
-                '        rodas_4_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,',
+                `        ${meta.method === 'rodas5p' ? 'rodas_5p' : 'rodas_4'}_global_step(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,`,
                 '                            [] if fixed_steps else breakpoints_within(current_time, end_time), [], fixed_steps, reads_time, controller, evaluate_adaptive,',
                 `                            lambda _time, _values: None${eventsArgument})`].join('\n')
             : programs
@@ -2403,9 +2416,11 @@ function generatePython(model, providers, meta, document) {
         '',
         pythonScheduleLines(model),
         meta.method === 'rungeKutta4' ? `${rungeKutta4Python}\n` : '',
-        meta.method === 'dormandPrince54' ? `${dormandPrince54Python}\n` : '',
-        meta.method === 'rodas4' || meta.method === 'bdf' ? `${stiffSystemPython}\n` : '',
-        meta.method === 'rodas4' ? `${rodas4Python}\n` : '',
+        isExplicitPair(meta.method) ? `${dormandPrince54Python}\n` : '',
+        meta.method === 'tsit5' ? `${tsit5Python}\n` : '',
+        isRosenbrock(meta.method) || meta.method === 'bdf' ? `${stiffSystemPython}\n` : '',
+        isRosenbrock(meta.method) ? `${rodas4Python}\n` : '',
+        meta.method === 'rodas5p' ? `${rodas5pPython}\n` : '',
         meta.switching?.length ? `${eventsPython}\n` : '',
         meta.method === 'bdf' ? `${bdfPython}\n` : '',
         'def run(target_time, output_path):',

@@ -147,7 +147,7 @@ export function generateFmiModel(document) {
     // it (docs/proposals/integrators.md, Code export); Runge–Kutta 4 and Adaptive inside fmi2DoStep come later, so an FMU is never made
     // with numbers other than the run's.
     const method = methodOf(runConfiguration);
-    const stiff = method === 'rodas4' || method === 'bdf';
+    const stiff = method === 'rodas4' || method === 'rodas5p' || method === 'bdf';
     if (method !== 'nodeByNode' && !stiff) {
         throw new Error(`The run configuration's method is ${integrationMethod(method)?.name ?? `“${method}”`}, which FMU export cannot write yet; choose Euler, node by node or Stiff in the Run settings to export an FMU.`);
     }

@@ -97,18 +97,41 @@ test('what cannot take stages is named before the run: a node that is a program 
     assert.equal(nameList(['a', 'b', 'c', 'd', 'e', 'f'], 4), 'a, b, c, d and 2 more');
 });
 
-test('Stiff\'s solvers: Rosenbrock by default and BDF chosen by hand, BDF shown in the dialog as Stiff and never suggested', async () => {
+test('Stiff\'s solvers: Rosenbrock by default, its fifth-order form and BDF chosen by hand, each shown in the dialog as Stiff and never suggested', async () => {
     const integrationModule = await import('../src/integrationMethods.mjs');
     const { dialogMethodOf, stiffIntegrationMethod, stiffSolvers } = integrationModule;
-    assert.deepEqual(stiffSolvers.map((solver) => solver.id), ['rodas4', 'bdf']);
+    assert.deepEqual(stiffSolvers.map((solver) => solver.id), ['rodas4', 'rodas5p', 'bdf']);
     assert.equal(integrationMethods.filter((method) => method.offered !== false).some((method) => method.id === 'bdf'), false, 'BDF is not a Method of its own.');
+    assert.equal(integrationMethods.filter((method) => method.offered !== false).some((method) => method.id === 'rodas5p'), false, 'Rodas5P is not a Method of its own.');
     assert.equal(dialogMethodOf('bdf'), 'rodas4');
+    assert.equal(dialogMethodOf('rodas5p'), 'rodas4');
+    assert.equal(withIntegrationMethod({ id: 1 }, 'rodas5p', 1, defaultTolerance, 'check').jacobian, 'check', 'Rodas5P works out a Jacobian as Stiff does.');
     assert.equal(dialogMethodOf('dormandPrince54'), 'dormandPrince54');
     assert.equal(withIntegrationMethod({ id: 1 }, 'bdf').method, 'bdf');
     // A stiffness finding's "Use Stiff" chooses Rosenbrock at every size (the user's decision): there is no rule that picks BDF.
     assert.equal(stiffIntegrationMethod, 'rodas4');
     assert.equal(integrationModule.bdfSuits, undefined);
     assert.equal(integrationModule.bdfStateThreshold, undefined);
+});
+
+test('Adaptive\'s solvers: Tsit5 by default, Dormand–Prince kept where a file names it, each shown in the dialog as Adaptive', async () => {
+    const { adaptiveIntegrationMethod, adaptiveSolvers, defaultAdaptiveSolver, dialogMethodOf } = await import('../src/integrationMethods.mjs');
+    assert.deepEqual(adaptiveSolvers.map((solver) => solver.id), ['tsit5', 'dormandPrince54']);
+    assert.equal(defaultAdaptiveSolver, 'tsit5');
+    assert.equal(adaptiveIntegrationMethod, 'dormandPrince54', 'The Method list\'s Adaptive keeps the id saved files use.');
+    assert.equal(dialogMethodOf('tsit5'), 'dormandPrince54');
+    assert.equal(dialogMethodOf('dormandPrince54'), 'dormandPrince54');
+    assert.equal(integrationMethods.filter((method) => method.offered !== false).some((method) => method.id === 'tsit5'), false, 'Tsit5 is not a Method of its own.');
+});
+
+test('Stiff chooses Rodas5P for a relative tolerance tighter than 1e-6 and Rodas4 otherwise, the default tolerance among them', async () => {
+    const { defaultStiffSolver } = await import('../src/integrationMethods.mjs');
+    assert.equal(defaultStiffSolver(undefined), 'rodas4');
+    assert.equal(defaultStiffSolver(defaultTolerance), 'rodas4');
+    assert.equal(defaultStiffSolver({ relative: 1e-3, absolute: 1e-6 }), 'rodas4');
+    assert.equal(defaultStiffSolver({ relative: 1e-6, absolute: 1e-12 }), 'rodas4');
+    assert.equal(defaultStiffSolver({ relative: 9.9e-7, absolute: 1e-9 }), 'rodas5p');
+    assert.equal(defaultStiffSolver({ relative: 1e-10, absolute: 1e-13 }), 'rodas5p');
 });
 
 test('Stiff\'s Jacobian is written only when it is not the default, and only for Stiff', () => {

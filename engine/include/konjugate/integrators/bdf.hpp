@@ -327,6 +327,28 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
             history.equalSteps = 0;
         }
         const std::size_t order = history.order;
+        // The way to the landing in equal steps, when it would otherwise end in a sliver: within four steps of the landing, where the
+        // last step would be under half of this one, what is left is divided into as many steps of at most this one as it takes (two to
+        // four), each the same, so the last lands exactly. Landing with a sliver leaves the table at the sliver's step, which then takes
+        // many steps to grow back (at most tenfold, and only after order + 1 equal steps): on a model whose global step is a few of BDF's
+        // steps, two to five times the steps. Where the last step would be half of this one or more, it lands as before, one change of
+        // step either way. The table is rescaled exactly to the planned step; its count of equal steps starts again only for a change
+        // beyond rounding, so a landing that is the last of the planned steps carries it on.
+        {
+            const double left = target - time;
+            const double steps = left / history.step;
+            const double fraction = steps - std::floor(steps);
+            if (history.step < left * (1.0 - 1.0e-12) && steps <= 4.0 && fraction > 1.0e-9 && fraction < 0.5) {
+                const double pieces = std::ceil(steps * (1.0 - 1.0e-12));
+                const double planned = left / pieces;
+                if (planned != history.step) {
+                    const double factor = planned / history.step;
+                    rescale(D, order, factor);
+                    history.step = planned;
+                    if (std::abs(factor - 1.0) > 1.0e-9) history.equalSteps = 0;
+                }
+            }
+        }
         double step = history.step;
         bool lands = false;
         // Landing, also when what would be left is under a thousandth of this step: a sliver of a step is all rounding, and Newton
@@ -336,9 +358,11 @@ void bdfGlobalStepWithEvents(double startTime, double endTime, std::vector<doubl
             // grown again only as the error allows: stretching it back at once extrapolates its polynomial, which a steep transient
             // punishes.
             const double landing = target - time;
+            // A landing within rounding of the step (the last of the planned equal steps) is rescaled to it exactly, but is the same step:
+            // its count of equal steps carries on.
             if (landing != step) {
                 rescale(D, order, landing / step);
-                history.equalSteps = 0;
+                if (std::abs(landing - step) > 1.0e-9 * step) history.equalSteps = 0;
             }
             step = landing;
             history.step = step;

@@ -14,8 +14,10 @@
 #include "eventLocation.hpp"
 #include "jacobianAssembly.hpp"
 #include "konjugate/integrators/dormandPrince54.hpp"
+#include "konjugate/integrators/tsit5.hpp"
 #include "konjugate/integrators/events.hpp"
 #include "konjugate/integrators/rodas4.hpp"
+#include "konjugate/integrators/rodas5p.hpp"
 #include "konjugate/integrators/rungeKutta4.hpp"
 #include <algorithm>
 #include <bit>
@@ -1114,7 +1116,7 @@ private:
     // values for the step in progress, one list per node.
     WholeModelPlan wholeModel;
     std::vector<std::vector<EvaluatedContribution>> heldValues;
-    // Dormand–Prince 5(4): every state's absolute tolerance, the controller's memory (kept in checkpoints), the stiffness test and the
+    // Dormand–Prince 5(4) and Tsit5: every state's absolute tolerance, the controller's memory (kept in checkpoints), the stiffness test and the
     // work done, for the result's summary.
     std::vector<double> absoluteToleranceByState;
     integrators::DormandPrince54Controller adaptiveController;
@@ -1337,7 +1339,7 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
         heldValues.resize(executionPlan.nodes.size());
         // Rodas4's structure, from the graph: which states each state's derivative reads, so the Jacobian's pattern, its colours
         // and the sparse LU's ordering are worked out once, here.
-        if (integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf) {
+        if (isRosenbrock(integration.method) || integration.method == IntegrationMethod::bdf) {
             stiffSystem = integrators::makeStiffSystem(wholeModel.integrated, stageReads(executionPlan, wholeModel, providerRuntime.get()), wholeModel.errorGroups);
             stagesReadTimeAlways = stagesReadTime(executionPlan, wholeModel);
         }
@@ -1784,7 +1786,7 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
         }
         // Dormand–Prince: its tolerances (under error control) and the work it did -- the steps it took and rejected, its evaluations
         // of the model, its smallest and largest step -- and when its stiffness test first fired.
-        if (integration.method == IntegrationMethod::dormandPrince54) {
+        if (isExplicitPair(integration.method)) {
             if (isAdaptive(integration)) {
                 json << ",\"tolerance\":{\"relative\":" << integration.relativeTolerance << ",\"absolute\":"
                      << integration.absoluteTolerance << '}';
@@ -1797,9 +1799,10 @@ void Simulation::writeResult(const std::string& lifecycle, double simulationTime
             }
             if (!std::isnan(adaptiveStiffness.detectedAt)) json << ",\"stiffnessDetectedAt\":" << adaptiveStiffness.detectedAt;
         }
-        // Rodas4: the same, and its linear algebra -- the Jacobians worked out and the evaluations each took (one per colour), the
-        // factorisations, the size of the system, whether it was solved sparsely, and how often the sparse LU fell back to the dense.
-        if (integration.method == IntegrationMethod::rodas4) {
+        // Rodas4 and Rodas5P: the same, and their linear algebra -- the Jacobians worked out and the evaluations each took (one per
+        // colour), the factorisations, the size of the system, whether it was solved sparsely, and how often the sparse LU fell back to
+        // the dense.
+        if (isRosenbrock(integration.method)) {
             if (isStiff(integration)) {
                 json << ",\"tolerance\":{\"relative\":" << integration.relativeTolerance << ",\"absolute\":"
                      << integration.absoluteTolerance << '}';
@@ -2247,7 +2250,9 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
     // What a program's message names as where it was called from.
     auto& callContext = programCallContext();
     callContext = {integration.method == IntegrationMethod::rungeKutta4 ? "Runge–Kutta 4" : integration.method == IntegrationMethod::bdf ? "Stiff, BDF"
-        : isStiff(integration) || integration.method == IntegrationMethod::rodas4 ? "Stiff, Rodas4" : "Adaptive, Dormand–Prince 5(4)", 0,
+        : integration.method == IntegrationMethod::rodas5p ? "Stiff, Rodas5P"
+        : isStiff(integration) || integration.method == IntegrationMethod::rodas4 ? "Stiff, Rodas4"
+        : integration.method == IntegrationMethod::tsit5 ? "Adaptive, Tsit5" : "Adaptive, Dormand–Prince 5(4)", 0,
         integrationMethodStages(integration.method)};
     const auto evaluateAt = [&](bool atStart, double time, const Values& stageStates, Values& derivatives) {
         request.stageTime = time;
@@ -2271,7 +2276,7 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         request.latches = &switching->latches;
         switching->beginGlobalStep(currentTime, reached);
     }
-    if (integration.method == IntegrationMethod::dormandPrince54) {
+    if (isExplicitPair(integration.method)) {
         // Every step lands on the global step's end and on every corner of a schedule within it; the controller's memory carries
         // from one global step to the next (and into checkpoints). The held programs are evaluated at the first evaluation, the
         // global step's start.
@@ -2284,28 +2289,32 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         const auto evaluateDormandPrince = [&](std::size_t evaluation, double time, const Values& stageStates, Values& derivatives) {
             evaluateAt(evaluation == 0, time, stageStates, derivatives);
         };
-        if (programsAdvanceAtSteps) {
-            integrators::DormandPrince54NoEvents none;
-            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
-            if (switching) {
-                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
-                integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
+        // Dormand–Prince 5(4) or Tsit5: the same arguments, the same controller and memory, another tableau.
+        const auto globalStepWith = [&](auto& events) {
+            if (integration.method == IntegrationMethod::tsit5) {
+                integrators::tsit5GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
                     breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, events,
                     evaluateDormandPrince, [](double, const Values&) {});
             } else {
-                ProgramStepEvents<integrators::DormandPrince54NoEvents, decltype(advance)> events{none, advance};
                 integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
                     breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, events,
                     evaluateDormandPrince, [](double, const Values&) {});
             }
+        };
+        integrators::DormandPrince54NoEvents none;
+        if (programsAdvanceAtSteps) {
+            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
+            if (switching) {
+                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
+                globalStepWith(events);
+            } else {
+                ProgramStepEvents<integrators::DormandPrince54NoEvents, decltype(advance)> events{none, advance};
+                globalStepWith(events);
+            }
         } else if (switching) {
-            integrators::dormandPrince54GlobalStepWithEvents(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
-                breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics, *switching,
-                evaluateDormandPrince, [](double, const Values&) {});
+            globalStepWith(*switching);
         } else {
-            integrators::dormandPrince54GlobalStep(currentTime, elapsed, reached, wholeModel.integrated, wholeModel.errorGroups, tolerance,
-                breakpoints, {}, integration.stepsPerGlobalStep, adaptiveController, adaptiveStiffness, adaptiveStatistics,
-                evaluateDormandPrince, [](double, const Values&) {});
+            globalStepWith(none);
         }
         takenSteps = adaptiveStatistics.acceptedSteps - acceptedBefore;
         // Hairer's stiffness test said so: once a run, as a finding about the whole model, with what to do about it.
@@ -2318,10 +2327,10 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
                 "where its fastest parts have settled, which a looser tolerance will not make fewer.";
             stabilityFindings.push_back(std::move(finding));
         }
-    } else if (integration.method == IntegrationMethod::rodas4) {
+    } else if (isRosenbrock(integration.method)) {
         // As Adaptive: landing on the global step's end and every corner of a schedule within it, the controller's memory carried on,
         // the held programs evaluated at the first evaluation. df/dt is worked out when a stage may read the time, a recorded
-        // intervention included.
+        // intervention included. Rodas4 and Rodas5P share everything here but the step itself.
         const auto breakpoints = isStiff(integration)
             ? scheduleBreakpoints(executionPlan, runControl.activeSchedules, currentTime, elapsed) : std::vector<double>{};
         const auto acceptedBefore = stiffStatistics.acceptedSteps;
@@ -2332,24 +2341,29 @@ void Simulation::integrateWholeModelStep(double synchronizationStep, double elap
         const bool readsTime = stagesReadTimeAlways || !runControl.activeSchedules.empty();
         // df/dt from the equations' derivatives, unless a recorded intervention or a program makes the time matter otherwise.
         stiffSystem->exactTime = jacobianPlan.exactTime && runControl.activeSchedules.empty();
-        if (programsAdvanceAtSteps) {
-            integrators::Rodas4NoEvents none;
-            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
-            if (switching) {
-                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
-                integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
+        const auto globalStepWith = [&](auto& events) {
+            if (integration.method == IntegrationMethod::rodas5p) {
+                integrators::rodas5pGlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
                     integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, events, evaluateRodas, [](double, const Values&) {});
             } else {
-                ProgramStepEvents<integrators::Rodas4NoEvents, decltype(advance)> events{none, advance};
                 integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
                     integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, events, evaluateRodas, [](double, const Values&) {});
             }
+        };
+        integrators::Rodas4NoEvents none;
+        if (programsAdvanceAtSteps) {
+            const auto advance = [&](double time, double step, const Values& accepted) { return advanceProgramsAfter(time, step, accepted); };
+            if (switching) {
+                ProgramStepEvents<std::remove_reference_t<decltype(*switching)>, decltype(advance)> events{*switching, advance};
+                globalStepWith(events);
+            } else {
+                ProgramStepEvents<integrators::Rodas4NoEvents, decltype(advance)> events{none, advance};
+                globalStepWith(events);
+            }
         } else if (switching) {
-            integrators::rodas4GlobalStepWithEvents(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {},
-                integration.stepsPerGlobalStep, readsTime, stiffController, stiffStatistics, *switching, evaluateRodas, [](double, const Values&) {});
+            globalStepWith(*switching);
         } else {
-            integrators::rodas4GlobalStep(currentTime, elapsed, reached, *stiffSystem, tolerance, breakpoints, {}, integration.stepsPerGlobalStep,
-                readsTime, stiffController, stiffStatistics, evaluateRodas, [](double, const Values&) {});
+            globalStepWith(none);
         }
         takenSteps = stiffStatistics.acceptedSteps - acceptedBefore;
     } else if (integration.method == IntegrationMethod::bdf) {

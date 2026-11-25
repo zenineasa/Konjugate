@@ -17,11 +17,13 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     if (method == "nodeByNode") settings.method = IntegrationMethod::nodeByNode;
     else if (method == "rungeKutta4") settings.method = IntegrationMethod::rungeKutta4;
     else if (method == "dormandPrince54") settings.method = IntegrationMethod::dormandPrince54;
+    else if (method == "tsit5") settings.method = IntegrationMethod::tsit5;
     else if (method == "rodas4") settings.method = IntegrationMethod::rodas4;
+    else if (method == "rodas5p") settings.method = IntegrationMethod::rodas5p;
     else if (method == "bdf") settings.method = IntegrationMethod::bdf;
     else {
         throw std::runtime_error("The run's method \"" + method + "\" is not one this version of Konjugate knows (it knows nodeByNode, "
-            "rungeKutta4, dormandPrince54, rodas4 and bdf); open the model in the version that wrote it, or choose another method.");
+            "rungeKutta4, dormandPrince54, tsit5, rodas4, rodas5p and bdf); open the model in the version that wrote it, or choose another method.");
     }
     // BDF always chooses its own steps and orders: a multistep method has no fixed-step form to check here.
     if (settings.method == IntegrationMethod::bdf && configuration.get_optional<std::string>("stepsPerGlobalStep")) {
@@ -29,8 +31,8 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
     }
     // The stiff methods' Jacobian: analytic unless the run says otherwise.
     if (const auto jacobian = configuration.get_optional<std::string>("jacobian")) {
-        if (settings.method != IntegrationMethod::rodas4 && settings.method != IntegrationMethod::bdf) {
-            throw std::runtime_error("jacobian applies to the stiff methods, rodas4 and bdf, which work out a Jacobian; this run's method does not.");
+        if (!isRosenbrock(settings.method) && settings.method != IntegrationMethod::bdf) {
+            throw std::runtime_error("jacobian applies to the stiff methods, rodas4, rodas5p and bdf, which work out a Jacobian; this run's method does not.");
         }
         if (*jacobian == "analytic") settings.jacobian = JacobianMethod::analytic;
         else if (*jacobian == "finiteDifference") settings.jacobian = JacobianMethod::finiteDifference;
@@ -40,8 +42,8 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
                 "finiteDifference and check).");
         }
     }
-    // Dormand–Prince and Rodas4 choose their own steps unless told how many to take.
-    if (settings.method == IntegrationMethod::dormandPrince54 || settings.method == IntegrationMethod::rodas4 || settings.method == IntegrationMethod::bdf) {
+    // Dormand–Prince, Tsit5, Rodas4 and Rodas5P choose their own steps unless told how many to take.
+    if (isExplicitPair(settings.method) || isRosenbrock(settings.method) || settings.method == IntegrationMethod::bdf) {
         settings.stepsPerGlobalStep = 0;
     }
     if (const auto steps = configuration.get_optional<std::string>("stepsPerGlobalStep")) {
@@ -71,22 +73,32 @@ IntegrationSettings integrationSettingsFromTree(const boost::property_tree::ptre
 }
 
 bool isAdaptive(const IntegrationSettings& settings) noexcept {
-    return settings.method == IntegrationMethod::dormandPrince54 && settings.stepsPerGlobalStep == 0;
+    return isExplicitPair(settings.method) && settings.stepsPerGlobalStep == 0;
+}
+
+bool isExplicitPair(IntegrationMethod method) noexcept {
+    return method == IntegrationMethod::dormandPrince54 || method == IntegrationMethod::tsit5;
+}
+
+bool isRosenbrock(IntegrationMethod method) noexcept {
+    return method == IntegrationMethod::rodas4 || method == IntegrationMethod::rodas5p;
 }
 
 bool isStiff(const IntegrationSettings& settings) noexcept {
-    return settings.method == IntegrationMethod::rodas4 && settings.stepsPerGlobalStep == 0;
+    return isRosenbrock(settings.method) && settings.stepsPerGlobalStep == 0;
 }
 
 bool hasTolerance(IntegrationMethod method) noexcept {
-    return method == IntegrationMethod::dormandPrince54 || method == IntegrationMethod::rodas4 || method == IntegrationMethod::bdf;
+    return isExplicitPair(method) || isRosenbrock(method) || method == IntegrationMethod::bdf;
 }
 
 std::string_view integrationMethodName(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::tsit5: return "tsit5";
     case IntegrationMethod::rodas4: return "rodas4";
+    case IntegrationMethod::rodas5p: return "rodas5p";
     case IntegrationMethod::bdf: return "bdf";
     case IntegrationMethod::nodeByNode: break;
     }
@@ -97,7 +109,9 @@ std::string_view solverKindName(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return "rungeKutta4";
     case IntegrationMethod::dormandPrince54: return "dormandPrince54";
+    case IntegrationMethod::tsit5: return "tsit5";
     case IntegrationMethod::rodas4: return "rodas4";
+    case IntegrationMethod::rodas5p: return "rodas5p";
     case IntegrationMethod::bdf: return "bdf";
     case IntegrationMethod::nodeByNode: break;
     }
@@ -108,8 +122,11 @@ std::size_t integrationMethodStages(IntegrationMethod method) noexcept {
     switch (method) {
     case IntegrationMethod::rungeKutta4: return 4;
     case IntegrationMethod::dormandPrince54: return 6;
+    case IntegrationMethod::tsit5: return 6;
     // Rodas4: six stages, and the Jacobian's evaluations besides (one per colour of the model's structure), not counted here.
     case IntegrationMethod::rodas4: return 6;
+    // Rodas5P: eight stages, the Jacobian's evaluations besides.
+    case IntegrationMethod::rodas5p: return 8;
     // BDF: about two Newton iterations a step, its Jacobian kept from step to step.
     case IntegrationMethod::bdf: return 2;
     case IntegrationMethod::nodeByNode: break;

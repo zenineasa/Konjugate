@@ -64,7 +64,7 @@ try {
     const expected = [];
     // The edge at the run's very end has nothing after it to take effect in.
     for (let period = 0; period < 40; ++period) expected.push(...[period * 5e-5 + 2e-5, (period + 1) * 5e-5].filter((time) => time < timing.targetTime - 1e-12));
-    for (const method of [{ method: 'rungeKutta4' }, { method: 'dormandPrince54', tolerance: { relative: 1e-8 } }, { method: 'rodas4', tolerance: { relative: 1e-8 } },
+    for (const method of [{ method: 'rungeKutta4' }, { method: 'dormandPrince54', tolerance: { relative: 1e-8 } }, { method: 'tsit5', tolerance: { relative: 1e-8 } }, { method: 'rodas4', tolerance: { relative: 1e-8 } },
         { method: 'bdf', tolerance: { relative: 1e-8 } }]) {
         const serial = await run(buck, { ...timing, ...method, execution: { backend: 'serial' } });
         const integration = serial.integration;
@@ -102,7 +102,7 @@ try {
     // Chattering: y' = -1 above zero and +1 below it slides along zero, switching back and forth; each global step stops locating after a
     // hundred events and reads the condition at each step's start, and the run says so once.
     const sliding = await modelPath('sliding', oneNode(['Which', ['Greater', 'y', '0'], '-1', 'True', '1'], 0.5));
-    for (const method of [{ method: 'rungeKutta4', stepsPerGlobalStep: 4 }, { method: 'dormandPrince54' }, { method: 'rodas4' }, { method: 'bdf' }]) {
+    for (const method of [{ method: 'rungeKutta4', stepsPerGlobalStep: 4 }, { method: 'dormandPrince54' }, { method: 'tsit5' }, { method: 'rodas4' }, { method: 'bdf' }]) {
         const result = await run(sliding, { targetTime: 2, globalTimeStep: 0.25, outputInterval: 0.25, ...method });
         const findings = result.stabilityFindings.filter((finding) => finding.code === 'eventsChattering');
         assert.equal(findings.length, 1, `Chattering must be reported once under ${method.method}: ${JSON.stringify(result.stabilityFindings)}`);

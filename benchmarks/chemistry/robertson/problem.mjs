@@ -85,13 +85,14 @@ export async function evaluate({ engine, config }) {
     const plots = [];
     const notes = [];
     const data = referenceData(directory);
-    // Stiff (Rodas4), and BDF beside it: each check of BDF's is named as Rodas4's with Bdf after it.
-    const variants = [[config.variant, ''], ...(config.bdfVariant ? [[config.bdfVariant, 'Bdf']] : [])];
+    // Stiff (Rodas4), and BDF and Rodas5P beside it: each check of theirs is named as Rodas4's with Bdf or Rodas5p after it.
+    const variants = [[config.variant, ''], ...(config.bdfVariant ? [[config.bdfVariant, 'Bdf']] : []), ...(config.rodas5pVariant ? [[config.rodas5pVariant, 'Rodas5p']] : [])];
+    const methodLabels = { '': 'Stiff', Bdf: 'BDF', Rodas5p: 'Rodas5P' };
     const byModel = {};
     // The one-node model's largest error over every checkpoint and species, and the work to 1e11 s, for the Jacobian's comparison below.
     const measured = {};
     for (const [variant, suffix] of variants) for (const [name, build] of [['oneNode', buildOneNode], ['twoNodes', buildTwoNodes]]) {
-        const method = suffix ? 'BDF' : 'Stiff';
+        const method = methodLabels[suffix];
         const ids = build().ids;
         const values = [];
         let steps = 0;
@@ -156,6 +157,10 @@ export async function evaluate({ engine, config }) {
         const label = suffix || 'Rodas4';
         add(`evaluationRatio${label}`, exact.evaluations / work.modelEvaluations, `Robertson, one node, ${method}: evaluations of the model to 1e11 s with the exact Jacobian over those with finite differences`);
         add(`errorRatio${label}`, exact.worst / worst, `Robertson, one node, ${method}: the largest error at the checkpoints with the exact Jacobian over that with finite differences`);
+    }
+    // Rodas5P against Rodas4 at the same tolerance: how many times fewer steps the fifth-order method takes to 1e11 s.
+    if (measured.oneNodeRodas5p) {
+        add('stepRatioRodas5p', measured.oneNode.steps / measured.oneNodeRodas5p.steps, 'Robertson, one node: steps Rodas4 takes to 1e11 s for each step Rodas5P takes, at the same tolerance');
     }
     // The split model against the one node: the same equations under the same tolerances, their error norms summed in different groups.
     const split = Math.max(...byModel.twoNodes.flatMap((reached, index) => reached.map((value, species) => Math.abs(value - byModel.oneNode[index][species]) / data.states[index][species])));

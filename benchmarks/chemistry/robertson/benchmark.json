@@ -1,8 +1,9 @@
 {
     "title": "Robertson chemical kinetics",
-    "summary": "Robertson's stiff kinetics from A = 1 to 1e11 s, as one node and as two, under Stiff (Rodas4) and BDF with an absolute tolerance per species: the concentrations at Hairer and Wanner's checkpoints against a SciPy Radau reference, the total A + B + C kept at 1, no concentration below zero, the steps it takes, the two-node model against the one-node model, and Adaptive over the first 40 s beside it.",
+    "summary": "Robertson's stiff kinetics from A = 1 to 1e11 s, as one node and as two, under Stiff (Rodas4), Rodas5P and BDF with an absolute tolerance per species: the concentrations at Hairer and Wanner's checkpoints against a SciPy Radau reference, the total A + B + C kept at 1, no concentration below zero, the steps it takes, the two-node model against the one-node model, and Adaptive over the first 40 s beside it.",
     "variant": { "method": "rodas4", "tolerance": { "relative": 1e-8 } },
     "bdfVariant": { "method": "bdf", "tolerance": { "relative": 1e-8 } },
+    "rodas5pVariant": { "method": "rodas5p", "tolerance": { "relative": 1e-8 } },
     "longRun": { "targetTime": 1e11, "globalTimeStep": 1e9, "outputInterval": 1e9 },
     "explicitComparison": {
         "run": { "targetTime": 40, "globalTimeStep": 40, "outputInterval": 40 },
@@ -44,6 +45,19 @@
         "evaluationRatioRodas4": { "max": 0.75 },
         "errorRatioRodas4": { "max": 1.2 },
         "evaluationRatioBdf": { "max": 1 },
-        "errorRatioBdf": { "max": 1.2 }
+        "errorRatioBdf": { "max": 1.2 },
+        "relativeErrorAOneNodeRodas5p": { "max": 2e-6 },
+        "relativeErrorBOneNodeRodas5p": { "max": 2e-6 },
+        "relativeErrorCOneNodeRodas5p": { "max": 1e-8 },
+        "conservationOneNodeRodas5p": { "max": 1e-13 },
+        "lowestConcentrationOneNodeRodas5p": { "min": -1e-18 },
+        "stepsOneNodeRodas5p": { "max": 1000 },
+        "relativeErrorATwoNodesRodas5p": { "max": 2e-6 },
+        "relativeErrorBTwoNodesRodas5p": { "max": 2e-6 },
+        "relativeErrorCTwoNodesRodas5p": { "max": 1e-8 },
+        "conservationTwoNodesRodas5p": { "max": 1e-13 },
+        "lowestConcentrationTwoNodesRodas5p": { "min": -1e-18 },
+        "stepsTwoNodesRodas5p": { "max": 1000 },
+        "stepRatioRodas5p": { "min": 1.8 }
     }
 }

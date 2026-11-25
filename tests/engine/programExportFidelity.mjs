@@ -89,7 +89,7 @@ async function compare(model, kind, label) {
     // the Jacobian is a finite difference, which turns the last-bit difference between an exported equation and the engine's into a
     // difference in its entries and so in the steps the error control takes: there the two agree within the tolerance's reach, as in
     // tests/engine/codeExportFidelity.mjs.
-    const digits = method === 'rodas4' || method === 'bdf' ? 1e-6 : kind === 'cpp' ? 1e-14 : 1e-9;
+    const digits = method === 'rodas4' || method === 'rodas5p' || method === 'bdf' ? 1e-6 : kind === 'cpp' ? 1e-14 : 1e-9;
     rows.forEach((row, index) => row.forEach((value, state) => assert.ok(Math.abs(value - engine[index][state]) <= digits * Math.abs(engine[index][state]),
         `${label}: sample ${index}, state ${state} is ${value}, the engine ${engine[index][state]}.`)));
     return engine;
@@ -261,7 +261,9 @@ const fouled = (kind) => {
 const methods = [
     { method: 'rungeKutta4', stepsPerGlobalStep: 2 },
     { method: 'dormandPrince54', tolerance: { relative: 1e-6, absolute: 1e-9 } },
+    { method: 'tsit5', tolerance: { relative: 1e-6, absolute: 1e-9 } },
     { method: 'rodas4', tolerance: { relative: 1e-6, absolute: 1e-9 } },
+    { method: 'rodas5p', tolerance: { relative: 1e-6, absolute: 1e-9 } },
     { method: 'bdf', tolerance: { relative: 1e-6, absolute: 1e-9 } }
 ];
 

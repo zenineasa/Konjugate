@@ -194,7 +194,7 @@ try {
 
     // An exception names the program, what it belongs to, the time, the line and the inputs.
     await refused(conduction({ implementation: python, capacity: 0 }), timing,
-        /Conduction on relationship Wall → Room failed in evaluate\(\) at t = 0 s: ZeroDivisionError: float division by zero \(line 18\)\. Inputs: hot = 310 K, cold = 295 K, conductance = 4 W\/K, capacity = 0 J\/K/,
+        /Conduction on relationship Wall → Room failed in evaluate\(\) at t = 0 s: ZeroDivisionError: (?:float )?division by zero \(line 18\)\. Inputs: hot = 310 K, cold = 295 K, conductance = 4 W\/K, capacity = 0 J\/K/,
         'An exception in a program');
     // A value that is not a finite number, from finite inputs, named; under Euler the run stops.
     await refused(conduction({ implementation: { kind: 'cpp', providerApiVersion: 2, source: await example('conduction.cpp') }, capacity: 0 }), timing,
@@ -424,7 +424,7 @@ class Conduction(RelationshipProvider):
 
     // Under Adaptive and Stiff, memory advances after every step they accept (never a rejected one, or one taken again to land on an event),
     // and a run continued from its checkpoint, which keeps the controller and the memory, gives the bits of the whole run.
-    for (const method of ['dormandPrince54', 'rodas4', 'bdf']) {
+    for (const method of ['dormandPrince54', 'tsit5', 'rodas4', 'rodas5p', 'bdf']) {
         const adaptiveTiming = { ...latchTiming, method, tolerance: { relative: 1e-6, absolute: 1e-9 } };
         const whole = await run(latched, adaptiveTiming);
         const lateAdaptive = stateValues(whole, 11).slice(400);
@@ -488,7 +488,7 @@ std::unique_ptr<k::Program> createProgram() { return std::make_unique<Conduction
             document.edges[0].directionality = 'bidirectional';
             return document;
         };
-        for (const method of ['rodas4', 'bdf']) {
+        for (const method of ['rodas4', 'rodas5p', 'bdf']) {
             const stiffTiming = { targetTime: 2, globalTimeStep: 0.1, outputInterval: 0.1, method, tolerance: { relative: 1e-6, absolute: 1e-9 } };
             const equationRun = await run(bothWays(null), stiffTiming);
             const differenced = { ...stiffTiming, jacobian: 'finiteDifference' };
@@ -584,11 +584,11 @@ class Decay(Relationship):
         edges: []
     };
     const decayTiming = { targetTime: 0.5, globalTimeStep: 0.1, outputInterval: 0.1 };
-    for (const method of ['dormandPrince54', 'rodas4', 'bdf']) {
+    for (const method of ['dormandPrince54', 'tsit5', 'rodas4', 'rodas5p', 'bdf']) {
         const decayed = await run(decaying, { ...decayTiming, method, tolerance: { relative: 1e-8, absolute: 1e-12 } });
         assert.ok(Math.abs(stateValues(decayed, 11).at(-1) - Math.exp(-25)) < 1e-9, `Under ${method} the refused steps are retried smaller and the decay finishes.`);
         // Adaptive overshoots below zero at a large stage and is refused; Stiff, L-stable, does not overshoot here.
-        if (method === 'dormandPrince54') assert.ok(decayed.integration.rejectedSteps > 0, 'Under Adaptive the refusals count as rejected steps.');
+        if (method === 'dormandPrince54' || method === 'tsit5') assert.ok(decayed.integration.rejectedSteps > 0, 'Under Adaptive the refusals count as rejected steps.');
     }
     await refused(decaying, { ...decayTiming, method: 'rungeKutta4' },
         /Decay on node Store's own part refused its inputs at t = 0\.05 s \(stage 2 of 4, Runge–Kutta 4\): an amount of -1\.5 cannot decay/, 'A refusal under Runge–Kutta 4');

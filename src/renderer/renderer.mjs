@@ -21,7 +21,7 @@ import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
 import { normalizeTwinSetup } from '../twinSetup.mjs';
-import { benchmarkEvidenceUrl, defaultStiffJacobian, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodGuide, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
+import { adaptiveIntegrationMethod, adaptiveSolvers, benchmarkEvidenceUrl, defaultAdaptiveSolver, defaultStiffJacobian, defaultStiffSolver, defaultTolerance as defaultIntegrationTolerance, dialogMethodOf, integrationMethod, integrationMethodProblem, integrationMethods, methodGuide, methodOf, nameList, stageParticipation, stepsPerGlobalStepOf, stiffIntegrationMethod, stiffJacobians, stiffSolvers, toleranceOf, withIntegrationMethod } from '../integrationMethods.mjs';
 import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, seedOwnership, stampOwnership } from '../ownership.mjs';
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
@@ -6169,7 +6169,7 @@ function renderValidationStatus() {
 
 // "Use Stiff", offered where a finding says the model is stiff (docs/proposals/integrators.md, In the app): one click sets the active run
 // configuration's method to Stiff, its tolerances kept, as one undoable step. Its solver is always Rosenbrock, at any size: BDF is chosen
-// only by hand, under Stiff (the user's decision, docs/proposals/integrators.md, BDF).
+// only by hand, under Stiff (the user's decision, docs/proposals/integrators.md, BDF); Rodas5P when the tolerance is tight (defaultStiffSolver).
 function useStiffButton() {
     const button = document.createElement('button');
     button.type = 'button';
@@ -6181,11 +6181,10 @@ function useStiffButton() {
 }
 
 async function useStiffMethod() {
-    const solver = stiffIntegrationMethod;
     // The model is locked while a result is shown: close it first, as applying a substep fix does.
     if (activeResult) await discardResultPlayback();
     const before = structuredClone(activeRunConfiguration());
-    const after = withIntegrationMethod(before, solver, 1, toleranceOf(before));
+    const after = withIntegrationMethod(before, defaultStiffSolver(toleranceOf(before)), 1, toleranceOf(before));
     if (JSON.stringify(before) === JSON.stringify(after)) return;
     applyRunConfiguration(after);
     recordHistory({ undo: () => applyRunConfiguration(before), redo: () => applyRunConfiguration(after) });
@@ -8655,7 +8654,10 @@ function fillRunConfigurationFields({ continuing }) {
             activeResult.integration?.tolerance ?? defaultIntegrationTolerance, activeResult.integration?.jacobian ?? saved.jacobian)
         : saved;
     $('#runMethod').value = integrationMethod(methodOf(source)) ? dialogMethodOf(methodOf(source)) : 'nodeByNode';
-    $('#runStiffSolver').value = stiffSolvers.some((solver) => solver.id === methodOf(source)) ? methodOf(source) : stiffSolvers[0].id;
+    $('#runAdaptiveSolver').value = adaptiveSolvers.some((solver) => solver.id === methodOf(source)) ? methodOf(source) : defaultAdaptiveSolver;
+    // A configuration that names a Stiff solver opens with it; otherwise Stiff's solver follows the tolerance until it is chosen by hand.
+    $('#runStiffSolver').value = stiffSolvers.some((solver) => solver.id === methodOf(source)) ? methodOf(source) : defaultStiffSolver(toleranceOf(source));
+    stiffSolverChosen = false;
     $('#runStiffJacobian').value = stiffJacobians.some((jacobian) => jacobian.id === source.jacobian) ? source.jacobian : defaultStiffJacobian;
     $('#runStepsPerGlobalStep').value = stepsPerGlobalStepOf(source);
     $('#runRelativeTolerance').value = toleranceOf(source).relative;
@@ -8686,6 +8688,11 @@ for (const method of integrationMethods) if (method.offered !== false) $('#runMe
 function updateRunMethodFields() {
     const method = integrationMethod($('#runMethod').value) ?? integrationMethods[0];
     $('#runMethodDescription').textContent = method.description;
+    // Under Adaptive, its solver: Tsit5, the default, or Dormand–Prince.
+    const adaptive = method.id === adaptiveIntegrationMethod;
+    $('#runAdaptiveSolverField').hidden = !adaptive;
+    $('#runAdaptiveSolverDescription').hidden = !adaptive;
+    $('#runAdaptiveSolverDescription').textContent = adaptiveSolvers.find((solver) => solver.id === $('#runAdaptiveSolver').value)?.description ?? '';
     // Under Stiff, its solver: Rosenbrock, or BDF for large models.
     const stiff = method.id === stiffIntegrationMethod;
     $('#runStiffSolverField').hidden = !stiff;
@@ -8727,6 +8734,8 @@ function updateRunMethodFields() {
     $('#runMethodParticipation').replaceChildren(document.createTextNode(lines.join(' ')), ...(links.length ? [document.createElement('br'), ...links] : []));
     $('#runMethodParticipation').hidden = !lines.length;
 }
+for (const solver of adaptiveSolvers) $('#runAdaptiveSolver').append(new Option(solver.name, solver.id));
+$('#runAdaptiveSolver').addEventListener('change', updateRunMethodFields);
 for (const solver of stiffSolvers) $('#runStiffSolver').append(new Option(solver.name, solver.id));
 for (const jacobian of stiffJacobians) $('#runStiffJacobian').append(new Option(jacobian.name, jacobian.id));
 $('#runStiffJacobian').addEventListener('change', updateRunMethodFields);
@@ -8769,9 +8778,26 @@ function openMethodGuide(topic = null) {
 }
 $('#runMethodHelp').addEventListener('click', () => openMethodGuide());
 $('#runStiffSolverHelp').addEventListener('click', () => openMethodGuide('stiff'));
+$('#runAdaptiveSolverHelp').addEventListener('click', () => openMethodGuide());
 $('#nodeIntegrationHelp').addEventListener('click', () => openMethodGuide('integration'));
 $('#runMethod').addEventListener('change', updateRunMethodFields);
-$('#runStiffSolver').addEventListener('change', updateRunMethodFields);
+$('#runStiffSolver').addEventListener('change', () => {
+    stiffSolverChosen = true;
+    updateRunMethodFields();
+});
+// Stiff's Rosenbrock solver follows the relative tolerance (defaultStiffSolver: Rodas5P tighter than 1e-6, Rodas4 otherwise) as it is
+// typed or as Stiff is chosen, until the solver is chosen by hand in this dialog; BDF, once chosen, is never changed.
+let stiffSolverChosen = false;
+function followTolerance() {
+    const relative = Number($('#runRelativeTolerance').value);
+    if (stiffSolverChosen || !(relative > 0) || !['rodas4', 'rodas5p'].includes($('#runStiffSolver').value)) return;
+    const solver = defaultStiffSolver({ relative });
+    if ($('#runStiffSolver').value === solver) return;
+    $('#runStiffSolver').value = solver;
+    updateRunMethodFields();
+}
+$('#runRelativeTolerance').addEventListener('input', followTolerance);
+$('#runMethod').addEventListener('change', followTolerance);
 $('#runStepsPerGlobalStep').addEventListener('input', updateRunMethodFields);
 
 $('#nodeMethodRunSettings').addEventListener('click', () => openRunDialog());
@@ -8781,7 +8807,8 @@ function readRunConfigurationFields() {
         globalTimeStep: Number($('#runGlobalTimeStep').value),
         outputInterval: Number($('#runOutputInterval').value),
         // Always named here, so a continued run's override says Euler too; saving writes it only when it is not the default.
-        method: $('#runMethod').value === stiffIntegrationMethod ? $('#runStiffSolver').value : $('#runMethod').value,
+        method: $('#runMethod').value === stiffIntegrationMethod ? $('#runStiffSolver').value
+            : $('#runMethod').value === adaptiveIntegrationMethod ? $('#runAdaptiveSolver').value : $('#runMethod').value,
         stepsPerGlobalStep: Number($('#runStepsPerGlobalStep').value),
         tolerance: { relative: Number($('#runRelativeTolerance').value), absolute: Number($('#runAbsoluteTolerance').value) },
         jacobian: $('#runStiffJacobian').value,

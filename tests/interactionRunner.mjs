@@ -1774,8 +1774,8 @@ export async function runInteractionTests(driver) {
             document.querySelector('#saveRunConfiguration').click();
         })()`);
         assert.deepEqual(await evaluate(window, activeConfiguration), before);
-        // Stiff has two solvers, chosen under it: Rosenbrock by default, which writes `method: 'rodas4'`, and BDF, the only choice that
-        // writes `method: 'bdf'`; the solver is not offered under any other method.
+        // Stiff has three solvers, chosen under it: Rosenbrock by default, which writes `method: 'rodas4'`, its fifth-order form, which
+        // writes `method: 'rodas5p'`, and BDF, which writes `method: 'bdf'`; the solver is not offered under any other method.
         await openRunDialog(window);
         assert.equal(await evaluate(window, `document.querySelector('#runStiffSolverField').hidden`), true, 'Euler offers no stiff solver.');
         await evaluate(window, `(() => {
@@ -1785,8 +1785,25 @@ export async function runInteractionTests(driver) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#runStiffSolverField').hidden`), false);
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runStiffSolver option')].map((option) => option.textContent)`),
-            ['Rosenbrock (best for most models)', 'BDF (for large models, thousands of states)']);
+            ['Rosenbrock (Rodas4): best for most models', 'Rosenbrock, fifth order (Rodas5P): for tight tolerances', 'BDF (NDF): for large models, thousands of states']);
         assert.equal(await evaluate(window, `document.querySelector('#runStiffSolver').value`), 'rodas4');
+        // Until the solver is chosen by hand, Rosenbrock follows the relative tolerance: its fifth-order form tighter than 1e-6.
+        const typeRelativeTolerance = (value) => evaluate(window, `(() => {
+            const field = document.querySelector('#runRelativeTolerance');
+            field.value = '${value}';
+            field.dispatchEvent(new Event('input', { bubbles: true }));
+            return document.querySelector('#runStiffSolver').value;
+        })()`);
+        assert.equal(await typeRelativeTolerance('1e-8'), 'rodas5p');
+        assert.equal(await typeRelativeTolerance('1e-6'), 'rodas4');
+        await evaluate(window, `(() => {
+            const solver = document.querySelector('#runStiffSolver');
+            solver.value = 'rodas5p';
+            solver.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.match(await evaluate(window, `document.querySelector('#runStiffSolverDescription').textContent`), /far fewer of them/);
+        assert.equal(await typeRelativeTolerance('1e-5'), 'rodas5p', 'A solver chosen by hand is kept.');
+        assert.equal(await typeRelativeTolerance('1e-6'), 'rodas5p');
         await evaluate(window, `(() => {
             const solver = document.querySelector('#runStiffSolver');
             solver.value = 'bdf';
@@ -1797,7 +1814,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#runStiffSolverHelp').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#methodGuideDialog').open && document.querySelector('#runLaunchDialog').open`), true);
         assert.equal(await evaluate(window, `document.querySelector('#methodGuideTitle').textContent`), 'Choosing a method');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#methodGuideSigns .methodGuideHighlight')].map((item) => item.dataset.topic)`), ['stiff', 'stiff']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#methodGuideSigns .methodGuideHighlight')].map((item) => item.dataset.topic)`), ['stiff', 'stiff', 'stiff']);
         assert.match(await evaluate(window, `document.querySelector('#methodGuideSigns').textContent`), /Energy grows in an oscillator.*Evidence: Harmonic oscillator ›/s);
         await evaluate(window, `document.querySelector('#methodGuideClose').click()`);
         assert.equal(await evaluate(window, `!document.querySelector('#methodGuideDialog').open && document.querySelector('#runLaunchDialog').open`), true);
@@ -1805,6 +1822,40 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'bdf' });
         await openRunDialog(window);
         assert.deepEqual(await evaluate(window, `[document.querySelector('#runMethod').value, document.querySelector('#runStiffSolver').value]`), ['rodas4', 'bdf']);
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'nodeByNode';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#saveRunConfiguration').click();
+        })()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), before);
+        // Adaptive has two solvers, chosen under it: Tsit5 by default, which writes `method: 'tsit5'` and opens again as Adaptive with Tsit5
+        // chosen, and Dormand–Prince, which writes `method: 'dormandPrince54'`.
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runAdaptiveSolverField').hidden`), true, 'Euler offers no adaptive solver.');
+        await evaluate(window, `(() => {
+            const method = document.querySelector('#runMethod');
+            method.value = 'dormandPrince54';
+            method.dispatchEvent(new Event('change', { bubbles: true }));
+        })()`);
+        assert.equal(await evaluate(window, `document.querySelector('#runAdaptiveSolverField').hidden || !document.querySelector('#runStiffSolverField').hidden`), false);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#runAdaptiveSolver option')].map((option) => option.textContent)`),
+            ['Tsitouras (Tsit5): best for most models', 'Dormand–Prince (DP5): the classic']);
+        assert.equal(await evaluate(window, `document.querySelector('#runAdaptiveSolver').value`), 'tsit5');
+        assert.match(await evaluate(window, `document.querySelector('#runAdaptiveSolverDescription').textContent`), /coefficients chosen for a smaller error/);
+        await evaluate(window, `document.querySelector('#saveRunConfiguration').click()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'tsit5' });
+        await openRunDialog(window);
+        assert.deepEqual(await evaluate(window, `[document.querySelector('#runMethod').value, document.querySelector('#runAdaptiveSolver').value]`), ['dormandPrince54', 'tsit5']);
+        await evaluate(window, `(() => {
+            const solver = document.querySelector('#runAdaptiveSolver');
+            solver.value = 'dormandPrince54';
+            solver.dispatchEvent(new Event('change', { bubbles: true }));
+            document.querySelector('#saveRunConfiguration').click();
+        })()`);
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'dormandPrince54' });
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runAdaptiveSolver').value`), 'dormandPrince54', 'A file that names Dormand–Prince keeps it.');
         await evaluate(window, `(() => {
             const method = document.querySelector('#runMethod');
             method.value = 'nodeByNode';

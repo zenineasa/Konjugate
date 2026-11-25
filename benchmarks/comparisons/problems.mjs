@@ -36,8 +36,8 @@ export const tolerances = [1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10];
 // Konjugate's methods and their counterparts (README, Comparisons): explicit Runge–Kutta pairs, Rosenbrock and other one-step implicit
 // methods, and multistep BDF.
 export const families = {
-    explicit: { title: 'Explicit Runge–Kutta pairs', konjugate: ['dormandPrince54'], scipy: ['RK45', 'DOP853'], julia: ['Tsit5', 'DP5'], openmodelica: [] },
-    oneStepImplicit: { title: 'Rosenbrock and implicit Runge–Kutta', konjugate: ['rodas4'], scipy: ['Radau'], julia: ['Rodas4', 'Rodas5P'], openmodelica: [] },
+    explicit: { title: 'Explicit Runge–Kutta pairs', konjugate: ['dormandPrince54', 'tsit5'], scipy: ['RK45', 'DOP853'], julia: ['Tsit5', 'DP5'], openmodelica: [] },
+    oneStepImplicit: { title: 'Rosenbrock and implicit Runge–Kutta', konjugate: ['rodas4', 'rodas5p'], scipy: ['Radau'], julia: ['Rodas4', 'Rodas5P'], openmodelica: [] },
     multistep: { title: 'Multistep (BDF) and automatic switching', konjugate: ['bdf'], scipy: ['BDF', 'LSODA'], julia: ['FBDF', 'QNDF'], openmodelica: ['dassl', 'cvode'] }
 };
 

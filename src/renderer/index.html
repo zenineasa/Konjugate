@@ -708,6 +708,9 @@
                 <!-- The integration method (docs/proposals/integrators.md); names and descriptions from src/integrationMethods.mjs. -->
                 <label><span>Method <button id="runMethodHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="runMethod"></select></label>
                 <p id="runMethodDescription" class="runConfigurationScope"></p>
+                <!-- Adaptive's solver (docs/proposals/integrators.md, Tsit5): Tsit5, the default, or Dormand–Prince. -->
+                <label id="runAdaptiveSolverField" hidden><span>Solver <button id="runAdaptiveSolverHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="runAdaptiveSolver"></select></label>
+                <p id="runAdaptiveSolverDescription" class="runConfigurationScope" hidden></p>
                 <!-- Stiff's solver (docs/proposals/integrators.md, BDF): Rosenbrock, the default, or BDF for large models. -->
                 <label id="runStiffSolverField" hidden><span>Solver <button id="runStiffSolverHelp" class="helpButton inlineHelpButton" type="button" aria-label="Choosing a method" data-tooltip="Choosing a method">?</button></span><select id="runStiffSolver"></select></label>
                 <p id="runStiffSolverDescription" class="runConfigurationScope" hidden></p>

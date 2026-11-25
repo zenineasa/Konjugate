@@ -19,6 +19,7 @@ Start with Euler, node by node. Change the method when you see one of these sign
 * **Results jump or lag at a switch: a PWM, a thermostat, a contact.** Use Runge–Kutta 4, Adaptive or Stiff: each finds the instant a condition switches and steps to it. Evidence: [Switched circuits](../benchmarks/electrical/switchedCircuits), [Bouncing ball](../benchmarks/mechanical/bouncingBall).
 * **Tightly coupled nodes need many substeps, or disagree with the same model built as one node.** Use Runge–Kutta 4, Adaptive or Stiff, which step every node together. Evidence: [Graph split](../benchmarks/coupling/graphSplit).
 * **The model check says the model is stiff, or Adaptive takes tiny steps and rejects many.** Use Stiff. Evidence: [Robertson](../benchmarks/chemistry/robertson), [Van der Pol](../benchmarks/oscillators/vanDerPol), [Prothero–Robinson](../benchmarks/verification/protheroRobinson).
+* **A stiff model needs a tight tolerance, 1e-6 or tighter, and is slow under Stiff.** Under Stiff, choose Rosenbrock, fifth order: it takes far fewer steps for the same accuracy. Stiff chooses it for you when the relative tolerance is tighter than 1e-6, unless the run already names its solver. Evidence: [Robertson](../benchmarks/chemistry/robertson).
 * **A stiff model with thousands of states is slow under Stiff.** Under Stiff, try the BDF solver, which factorises less often. Keep Rosenbrock if the model switches often. Evidence: [Stiff network](../benchmarks/scaling/stiffNetwork).
 
 ## The methods
@@ -26,6 +27,8 @@ Start with Euler, node by node. Change the method when you see one of these sign
 * **Euler, node by node**: The default. Each node steps on its own: quick, and fine for a first look. A node's Integration can be Explicit, Semi-implicit or Verlet.
 * **Semi-implicit Euler and Verlet**: For a node that oscillates: its energy stays bounded instead of growing. Verlet is second order.
 * **Runge–Kutta 4**: Smooth models, accurate at a step you choose.
-* **Adaptive**: An accurate answer without choosing the step: it keeps the error within a tolerance.
+* **Adaptive**: An accurate answer without choosing the step: it keeps the error within a tolerance. Its solver is Tsit5.
+* **Adaptive, Dormand–Prince**: The classic pair (MATLAB's ode45, SciPy's RK45), Adaptive's method before Tsit5: about the same work for a somewhat larger error.
 * **Stiff, Rosenbrock**: Models with very fast and very slow parts together. Best for most stiff models.
+* **Stiff, Rosenbrock, fifth order**: The same at a tight tolerance, and chosen for you tighter than 1e-6: far fewer steps than Rosenbrock for the same accuracy, each a little dearer.
 * **Stiff, BDF**: Large stiff models, thousands of states, that switch rarely: it factorises less often than Rosenbrock, which pays where factorising is slow.

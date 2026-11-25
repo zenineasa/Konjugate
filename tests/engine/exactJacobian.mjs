@@ -54,7 +54,7 @@ try {
     const model = join(directory, 'everything.kjt');
     await writeFile(model, await encodeProjectFile(JSON.stringify(everyOperationDocument())));
     const timing = { targetTime: 2, globalTimeStep: 0.25, outputInterval: 0.25 };
-    for (const method of ['rodas4', 'bdf']) {
+    for (const method of ['rodas4', 'rodas5p', 'bdf']) {
         const stiff = { ...timing, method, tolerance: { relative: 1e-8, absolute: 1e-10 } };
         const analytic = await run(model, stiff);
         assert.equal(analytic.integration.jacobian, 'analytic', 'The exact Jacobian is the default.');

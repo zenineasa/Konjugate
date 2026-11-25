@@ -49,14 +49,45 @@ export const integrationMethods = Object.freeze([
         tolerance: true,
         // Not a Method of its own: the Run dialog offers it as Stiff's solver for large models (stiffSolvers).
         offered: false
+    }),
+    Object.freeze({
+        id: 'rodas5p',
+        name: 'Stiff (Rosenbrock, fifth order)',
+        summaryName: 'Stiff: Rodas5P (an eight-stage Rosenbrock method, fifth order, with a fourth-order error estimate, L-stable)',
+        description: 'For models with very fast and very slow parts together, when you want a tight tolerance: fifth order, so it takes far fewer steps than Rodas4 for the same accuracy. Solves a set of equations each step.',
+        stepsPerGlobalStep: false,
+        tolerance: true,
+        // Not a Method of its own: the Run dialog offers it as one of Stiff's solvers (stiffSolvers).
+        offered: false
+    }),
+    Object.freeze({
+        id: 'tsit5',
+        name: 'Adaptive (Tsit5)',
+        summaryName: 'Adaptive: Tsit5 (Tsitouras 5(4), seven stages, fifth order, with a fourth-order error estimate)',
+        description: 'Chooses its own steps to keep the error within a tolerance, as Dormand–Prince does, with coefficients that make a smaller error for the same work.',
+        stepsPerGlobalStep: false,
+        tolerance: true,
+        // Not a Method of its own: the Run dialog offers it as one of Adaptive's solvers (adaptiveSolvers).
+        offered: false
     })
 ]);
 
+// Adaptive's solvers, the choice the Run dialog shows under Adaptive (docs/proposals/integrators.md, Tsit5): Tsit5, the default (the
+// user's decision, 25 November 2026), and Dormand–Prince 5(4), the same scheme with Dormand and Prince's coefficients. Each is a method
+// of its own in the file; Dormand–Prince's id is the Method list's Adaptive (adaptiveIntegrationMethod), so files that name it keep it.
+export const adaptiveIntegrationMethod = 'dormandPrince54';
+export const defaultAdaptiveSolver = 'tsit5';
+export const adaptiveSolvers = Object.freeze([
+    Object.freeze({ id: 'tsit5', name: 'Tsitouras (Tsit5): best for most models', description: 'The same seven stages a step with coefficients chosen for a smaller error: at the same tolerance its error is usually two to four times smaller than Dormand–Prince\'s, for about the same work.' }),
+    Object.freeze({ id: 'dormandPrince54', name: 'Dormand–Prince (DP5): the classic', description: 'The fifth-order pair most adaptive solvers use (MATLAB\'s ode45, SciPy\'s RK45), Adaptive\'s method before Tsit5.' })
+]);
+
 // Stiff's solvers, the choice the Run dialog shows under Stiff (docs/proposals/integrators.md, BDF): the Rosenbrock method, the default,
-// and BDF for large models. Each is a method of its own in the file; only Rosenbrock's is the Method list's.
+// its fifth-order form, the default for tight tolerances (defaultStiffSolver), and BDF for large models. Each is a method of its own in the file; only Rosenbrock's is the Method list's.
 export const stiffSolvers = Object.freeze([
-    Object.freeze({ id: 'rodas4', name: 'Rosenbrock (best for most models)', description: 'Works out the equations afresh at every step: robust, and accurate for its tolerance.' }),
-    Object.freeze({ id: 'bdf', name: 'BDF (for large models, thousands of states)', description: 'Factorises its equations less often, keeping them from step to step: worth trying on a large model where that work is slow. Close to Rosenbrock\'s accuracy at the same tolerance; best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
+    Object.freeze({ id: 'rodas4', name: 'Rosenbrock (Rodas4): best for most models', description: 'Works out the equations afresh at every step: robust, and accurate for its tolerance.' }),
+    Object.freeze({ id: 'rodas5p', name: 'Rosenbrock, fifth order (Rodas5P): for tight tolerances', description: 'Rosenbrock\'s way with two more stages a step: each step costs a little more, but at a tolerance tighter than 1e-6 it takes far fewer of them, often two to four times fewer. Chosen for you at such tolerances.' }),
+    Object.freeze({ id: 'bdf', name: 'BDF (NDF): for large models, thousands of states', description: 'Factorises its equations less often, keeping them from step to step: worth trying on a large model where that work is slow. Close to Rosenbrock\'s accuracy at the same tolerance; best where the model has few jumps (schedules, Updates, events) and oscillates little.' })
 ]);
 
 // How Stiff works out its Jacobian (docs/proposals/integrators.md, Jacobians for Rodas4 and BDF): exactly from the equations, the
@@ -68,8 +99,9 @@ export const stiffJacobians = Object.freeze([
     Object.freeze({ id: 'check', name: 'Exact, checked by small changes', description: 'As Exact, and compared at every step with small changes; the run\'s summary says by how much they differ. For checking a model, not for speed.' })
 ]);
 
-// The Method the Run dialog shows for a method: Stiff for each of Stiff's solvers.
+// The Method the Run dialog shows for a method: Stiff for each of Stiff's solvers, Adaptive for each of Adaptive's.
 export function dialogMethodOf(method) {
+    if (adaptiveSolvers.some((solver) => solver.id === method)) return adaptiveIntegrationMethod;
     return stiffSolvers.some((solver) => solver.id === method) ? 'rodas4' : method;
 }
 
@@ -114,6 +146,12 @@ export const methodGuide = Object.freeze({
                 Object.freeze({ name: 'Prothero–Robinson', path: 'verification/protheroRobinson' })])
         }),
         Object.freeze({
+            sign: 'A stiff model needs a tight tolerance, 1e-6 or tighter, and is slow under Stiff.',
+            topic: 'stiff',
+            advice: 'Under Stiff, choose Rosenbrock, fifth order: it takes far fewer steps for the same accuracy. Stiff chooses it for you when the relative tolerance is tighter than 1e-6, unless the run already names its solver.',
+            evidence: Object.freeze([Object.freeze({ name: 'Robertson', path: 'chemistry/robertson' })])
+        }),
+        Object.freeze({
             sign: 'A stiff model with thousands of states is slow under Stiff.',
             topic: 'stiff',
             advice: 'Under Stiff, try the BDF solver, which factorises less often. Keep Rosenbrock if the model switches often.',
@@ -124,8 +162,10 @@ export const methodGuide = Object.freeze({
         Object.freeze({ name: 'Euler, node by node', use: 'The default. Each node steps on its own: quick, and fine for a first look. A node\'s Integration can be Explicit, Semi-implicit or Verlet.' }),
         Object.freeze({ name: 'Semi-implicit Euler and Verlet', use: 'For a node that oscillates: its energy stays bounded instead of growing. Verlet is second order.' }),
         Object.freeze({ name: 'Runge–Kutta 4', use: 'Smooth models, accurate at a step you choose.' }),
-        Object.freeze({ name: 'Adaptive', use: 'An accurate answer without choosing the step: it keeps the error within a tolerance.' }),
+        Object.freeze({ name: 'Adaptive', use: 'An accurate answer without choosing the step: it keeps the error within a tolerance. Its solver is Tsit5.' }),
+        Object.freeze({ name: 'Adaptive, Dormand–Prince', use: 'The classic pair (MATLAB\'s ode45, SciPy\'s RK45), Adaptive\'s method before Tsit5: about the same work for a somewhat larger error.' }),
         Object.freeze({ name: 'Stiff, Rosenbrock', use: 'Models with very fast and very slow parts together. Best for most stiff models.' }),
+        Object.freeze({ name: 'Stiff, Rosenbrock, fifth order', use: 'The same at a tight tolerance, and chosen for you tighter than 1e-6: far fewer steps than Rosenbrock for the same accuracy, each a little dearer.' }),
         Object.freeze({ name: 'Stiff, BDF', use: 'Large stiff models, thousands of states, that switch rarely: it factorises less often than Rosenbrock, which pays where factorising is slow.' })
     ])
 });
@@ -161,6 +201,15 @@ export function methodGuideMarkdown() {
 
 // The method a stiffness finding offers, by its id: "Use Stiff".
 export const stiffIntegrationMethod = 'rodas4';
+
+// Stiff's Rosenbrock solver for a tolerance (the user's decision, 25 November 2026, docs/proposals/integrators.md, Rodas5P): Rodas5P
+// when the relative tolerance is tighter than 1e-6, where it takes half or less of Rodas4's steps and less time, its error usually
+// smaller; Rodas4 at 1e-6 and looser, the default tolerance among them, where the two take about the same time. "Use Stiff" and
+// the Run dialog choose by it; a run configuration that names a solver keeps it.
+export const tightTolerance = 1e-6;
+export function defaultStiffSolver(tolerance) {
+    return (tolerance?.relative ?? defaultTolerance.relative) < tightTolerance ? 'rodas5p' : 'rodas4';
+}
 
 // Adaptive's tolerances when a run configuration does not say (docs/proposals/integrators.md, decision 4).
 export const defaultTolerance = Object.freeze({ relative: 1e-6, absolute: 1e-9 });

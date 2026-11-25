@@ -307,7 +307,8 @@ print(json.dumps([dict(zip(result.dtype.names, [float(v) for v in row])) for row
 
         // --- 8. Stiff (docs/proposals/integrators.md): an FMU under Rodas4 and under BDF takes each global step inside fmi2DoStep as the
         // engine takes it -- the same stages, exact Jacobian, error control and Updates -- with the live parameter set by the host ---
-        for (const run of [{ method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }, { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }]) {
+        for (const run of [{ method: 'rodas4', tolerance: { relative: 1e-8, absolute: 1e-10 } }, { method: 'rodas5p', tolerance: { relative: 1e-8, absolute: 1e-10 } },
+            { method: 'bdf', tolerance: { relative: 1e-8, absolute: 1e-10 } }]) {
             const stiffDocument = { ...document, runConfigurations: [{ id: 900, globalTimeStep, outputInterval: communicationStepSize, ...run }], activeRunConfigurationId: 900 };
             const stiffEngine = await runRealEngine(executable, directory, document, run.method, run);
             assert.equal(stiffEngine.integration?.method, run.method, `The engine must run the fixture under ${run.method}.`);

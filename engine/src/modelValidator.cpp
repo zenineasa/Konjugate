@@ -152,9 +152,10 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
     // The names the Run dialog gives the methods.
     const auto adaptive = isAdaptive(integration);
     const std::string methodName = integration.method == IntegrationMethod::dormandPrince54
-        ? (adaptive ? "Adaptive" : "Dormand–Prince 5(4) at fixed steps") : "Runge–Kutta 4";
+        ? (adaptive ? "Adaptive" : "Dormand–Prince 5(4) at fixed steps")
+        : integration.method == IntegrationMethod::tsit5 ? (adaptive ? "Adaptive" : "Tsit5 at fixed steps") : "Runge–Kutta 4";
     std::ostringstream message;
-    if (integration.method == IntegrationMethod::rodas4 || integration.method == IntegrationMethod::bdf) {
+    if (isRosenbrock(integration.method) || integration.method == IntegrationMethod::bdf) {
         // Stiff is L-stable: no step is too large for a mode that decays, however fast, and a stiff model is what it is for. Only a
         // mode that grows whatever the step is worth saying.
         if (assessment->unconditionallyUnstable) {

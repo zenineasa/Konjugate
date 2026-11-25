@@ -670,6 +670,50 @@ test('the C++ export pastes the engine\'s own Rodas4 and linear algebra headers,
     assert.match(python, /rodas_4_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,/);
 });
 
+// Stiff, fifth order: Rodas5P's own header pasted after Rodas4's, which it builds on, and its Python port after Rodas4's.
+test('the C++ export pastes the engine\'s own Rodas5P header after Rodas4\'s, byte for byte, and the Python port after Rodas4\'s', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { rodas4Cpp, rodas4Python, rodas5pCpp, rodas5pPython } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/rodas5p.hpp', import.meta.url), 'utf8');
+    assert.equal(rodas5pCpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/rodas5p.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'rodas5p';
+    document.runConfigurations[0].tolerance = { relative: 1e-8 };
+    const source = generateStandaloneProgram(document, 'cpp');
+    const fourth = source.indexOf(rodas4Cpp.replace(/^#pragma once\n/m, '').replace(/^#include "stiffSystem\.hpp"\n/m, ''));
+    const fifth = source.indexOf(header.replace(/^#pragma once\n/m, '').replace(/^#include "rodas4\.hpp"\n/m, ''));
+    assert.ok(fourth >= 0 && fifth > fourth, 'Rodas4\'s header, then Rodas5P\'s, each less its #pragma once and include.');
+    assert.match(source, /rodas5pGlobalStep\(currentTime, endTime, globalState, system, tolerance,/);
+    assert.doesNotMatch(source, /rodas4GlobalStep\(currentTime/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.ok(python.indexOf(rodas4Python) >= 0 && python.indexOf(rodas5pPython) > python.indexOf(rodas4Python));
+    assert.match(python, /rodas_5p_global_step\(current_time, end_time, global_state, system, relative_tolerance, absolute_tolerance,/);
+});
+
+// Adaptive, Tsit5: its own header pasted after Dormand–Prince 5(4)'s, which it builds on, and its Python port after Dormand–Prince's.
+test('the C++ export pastes the engine\'s own Tsit5 header after Dormand–Prince 5(4)\'s, byte for byte, and the Python port after its', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const { dormandPrince54Cpp, dormandPrince54Python, tsit5Cpp, tsit5Python } = await import('../src/integratorSources.mjs');
+    const header = await readFile(new URL('../engine/include/konjugate/integrators/tsit5.hpp', import.meta.url), 'utf8');
+    assert.equal(tsit5Cpp, header, 'src/integratorSources.mjs must carry the header exactly as engine/include/konjugate/integrators/tsit5.hpp has it.');
+    const document = singleNodeSourceTermModel();
+    document.runConfigurations[0].method = 'tsit5';
+    document.runConfigurations[0].tolerance = { relative: 1e-8 };
+    const source = generateStandaloneProgram(document, 'cpp');
+    const pair = source.indexOf(dormandPrince54Cpp.replace(/^#pragma once\n/m, ''));
+    const tsit5 = source.indexOf(header.replace(/^#pragma once\n/m, '').replace(/^#include "dormandPrince54\.hpp"\n/m, ''));
+    assert.ok(pair >= 0 && tsit5 > pair, 'Dormand–Prince 5(4)\'s header, then Tsit5\'s, each less its #pragma once and include.');
+    assert.match(source, /Reproduces one Adaptive \(Tsit5\) run/);
+    assert.match(source, /tsit5GlobalStep\(currentTime, endTime, globalState, integrated, errorGroups, tolerance,/);
+    assert.doesNotMatch(source, /dormandPrince54GlobalStep\(currentTime/);
+    balanced(source, /\{/g, /\}/g);
+    const python = generateStandaloneProgram(document, 'python');
+    assert.ok(python.indexOf(dormandPrince54Python) >= 0 && python.indexOf(tsit5Python) > python.indexOf(dormandPrince54Python));
+    assert.match(python, /\n        tsit5_global_step\(current_time, end_time, global_state, integrated, error_groups, relative_tolerance, absolute_tolerance,\n {26}\[\] if fixed_steps/);
+    assert.doesNotMatch(python, /\n        dormand_prince_54_global_step\(/);
+});
+
 // Event location (docs/proposals/integrators.md): under Runge–Kutta 4, Adaptive and Stiff each comparison of a Which condition in a Rate equation
 // becomes a switching function, the term reads its latch, and the program locates the switch with the engine's own events header.
 test('under Runge–Kutta 4, Adaptive and Stiff a switching condition is latched and located with the engine\'s events header, byte for byte', async () => {

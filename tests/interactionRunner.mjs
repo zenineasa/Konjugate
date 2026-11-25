@@ -11009,6 +11009,90 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeFmuNotice').click()`);
     }, { skip: driver.kind !== 'playwright' && 'the desktop app runs FMUs' });
 
+    // Connections (docs/proposals/fmuImportWorkflow.md, stage 5): a program's input that reads another node is drawn as a dashed
+    // arrow from it, labelled with the input, which opens the reading node's card; the file gains nothing. A C++ program here, so
+    // the web edition draws it too, without running anything.
+    await run('a program input that reads another node is drawn as an arrow labelled with the input, which opens its card', async () => {
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
+            nodes: [
+                { id: 1, name: 'Tank', position: [-3, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Level', symbol: 'level', initialValue: 1, unit: 'm' }], sourceTerms: [] },
+                {
+                    id: 3, name: 'Controller', position: [3, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                    states: [{ id: 4, name: 'Command', symbol: 'command', initialValue: 0, unit: '' }], sourceTerms: [],
+                    implementation: { kind: 'cpp', providerApiVersion: 1, source: '', bindings: [{ key: 'level', kind: 'state', nodeId: 1, stateId: 2 }], outputs: [{ key: 'command', stateId: 4, setsValue: true }] }
+                }
+            ]
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Reads.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.programReadLabel').length === 1`, 'The program\'s read was not drawn.');
+        assert.equal(await evaluate(window, `document.querySelector('.programReadLabel').textContent`), '→ level');
+        assert.match(await evaluate(window, `document.querySelector('.programReadLabel').title`), /^Controller's level reads Tank\.level, at the start of each step: one step late\.$/);
+        assert.deepEqual((await evaluate(window, `window.__debugProject.serialize()`)).edges, [], 'Drawing it adds nothing to the file.');
+        await evaluate(window, `document.querySelector('.programReadLabel').click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Controller'`, 'The label did not open the reading node.');
+        // Reading its own state, it is not drawn.
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ ...project, nodes: [project.nodes[0], { ...project.nodes[1], implementation: { ...project.nodes[1].implementation, bindings: [{ key: 'level', kind: 'state', stateId: 4 }] } }] })}, 'Reads.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.programReadLabel').length === 0`, 'A read of its own state was drawn.');
+    });
+
+    // Two FMUs connected through the picker (stage 5): the Reference FMU Dahlquist feeds Feedthrough's continuous input; the arrow
+    // is drawn; the row says it is read a step late; and the run shows it, Feedthrough's output being Dahlquist's x a step before.
+    await run('two FMUs are connected by the picker, the connection is drawn, and it is read a step late', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const paths = {};
+        for (const name of ['Dahlquist', 'Feedthrough']) {
+            paths[name] = join(folder, `${name}.fmu`);
+            await writeFile(paths[name], await referenceFmuArchive('3.0', name));
+        }
+        const installedFmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => ({ guid: entry.packageId, version: entry.version })))`);
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Two FMUs.kjt')`);
+            for (const [index, name] of ['Dahlquist', 'Feedthrough'].entries()) {
+                await driver.answerDialogs({ open: paths[name] }, async () => {
+                    await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('#addFmuFromFile').click()`);
+                    await waitFor(window, `window.__debugProject.serialize().nodes.length === ${index + 1} && window.__debugProject.serialize().nodes[${index}].implementation?.kind === 'fmi'`, `${name} was not added.`, 20000);
+                });
+            }
+            let saved = await evaluate(window, `window.__debugProject.serialize()`);
+            const dahlquist = saved.nodes.find((node) => node.name === 'Dahlquist');
+            const feedthrough = saved.nodes.find((node) => node.name === 'Feedthrough');
+            const x = dahlquist.states.find((state) => state.symbol === 'x');
+            assert.ok(feedthrough.position[0] - dahlquist.position[0] >= 4, 'The second FMU stands beside the first, not on it.');
+            // Feedthrough's card is open (it was added last): its continuous input, connected to Dahlquist's x by the picker.
+            const row = `[...document.querySelectorAll('#nodeProgramInputs .fmuPortRow')].find((element) => element.querySelector('[data-field="key"]').value === 'Float64_continuous_input')`;
+            await waitFor(window, `Boolean(${row})`, 'Feedthrough\'s continuous input was not listed.', 10000);
+            assert.ok((await evaluate(window, `[...${row}.querySelectorAll('optgroup')].map((group) => group.label)`)).includes('Dahlquist'), 'The picker groups Dahlquist\'s states under its name.');
+            await evaluate(window, `(() => { const select = ${row}.querySelector('select'); select.value = 'state:${dahlquist.id}:${x.id}'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(window, `${row}?.querySelector('.fmuPortConnection')?.textContent === 'Read at the start of each step, so one step late.'`, 'The row does not say when it is read.');
+            await waitFor(window, `[...document.querySelectorAll('.programReadLabel')].some((label) => label.textContent === '→ Float64_continuous_input')`, 'The connection was not drawn.');
+            saved = await evaluate(window, `window.__debugProject.serialize()`);
+            assert.deepEqual(saved.nodes.find((node) => node.name === 'Feedthrough').implementation.bindings, [{ key: 'float64ContinuousInput', kind: 'state', nodeId: dahlquist.id, stateId: x.id }]);
+
+            await openRunDialog(window);
+            await evaluate(window, `(() => {
+                for (const [id, value] of [['#runTargetTime', '1'], ['#runGlobalTimeStep', '0.1'], ['#runOutputInterval', '0.1']]) {
+                    const field = document.querySelector(id); field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The two FMUs did not run.', 180000);
+            const output = feedthrough.states.find((state) => state.symbol === 'float64ContinuousOutput');
+            const series = await evaluate(window, `window.__debugSteering.result().samples.map((sample) => [sample.states.find((state) => state.stateId === ${x.id}).value, sample.states.find((state) => state.stateId === ${output.id}).value])`);
+            assert.equal(series.length, 11);
+            for (let index = 1; index < series.length; index += 1) assert.ok(Object.is(series[index][1], series[index - 1][0]), `Feedthrough at step ${index} is Dahlquist's x a step before (${series[index][1]} against ${series[index - 1][0]}).`);
+            await evaluate(window, `(() => {
+                document.querySelector('#closeResults').click();
+                document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click();
+            })()`);
+        } finally {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Empty.kjt')`).catch(() => {});
+            for (const fmu of await installedFmus().catch(() => [])) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {

@@ -20,10 +20,10 @@ import { packageKey } from '../src/packageArchive.mjs';
 
 const thisPlatformBinary = `binaries/${process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64'}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}`;
 
-function fakeFmuBytes({ guid = 'guid-1', variables = '', binaryPath = thisPlatformBinary } = {}) {
+function fakeFmuBytes({ guid = 'guid-1', variables = '', binaryPath = thisPlatformBinary, coSimulation = '' } = {}) {
     const xml = `<?xml version="1.0"?>
 <fmiModelDescription fmiVersion="2.0" modelName="Decay" guid="${guid}" generationTool="Test">
-    <CoSimulation modelIdentifier="decayModel" canGetAndSetFMUstate="false"/>
+    <CoSimulation modelIdentifier="decayModel" canGetAndSetFMUstate="false"${coSimulation}/>
     <ModelVariables>${variables}</ModelVariables>
 </fmiModelDescription>`;
     return zipSync({
@@ -298,5 +298,31 @@ test('an installed FMU\'s ports are described under the keys a node\'s implement
         });
         await assert.rejects(describeInstalledFmuPorts(directory, installed.guid, '9.9.9'), /is not installed/);
         await assert.rejects(describeInstalledFmuPorts(directory, '../escape', '1.0.0'), /unsafe/);
+    });
+});
+
+// Refusals a connection of FMUs meets (docs/proposals/fmuImportWorkflow.md, stage 5).
+test('an FMU that needs its exporting tool running beside it is refused by name', async () => {
+    await withInstalledFmu(async (directory, installed) => {
+        await assert.rejects(resolveFmiSource({ kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [], outputs: [{ key: 'decayLevel', stateId: 12 }] }, directory),
+            (error) => error.code === 'FMU_NEEDS_TOOL' && /needs the tool it was exported from/.test(error.message));
+    }, { coSimulation: ' needsExecutionTool="true"' });
+});
+
+test('an FMU that can run only once at a time is refused as a second node, naming both; once is fine', async () => {
+    const node = (id, name, implementation) => ({ id, name, states: [{ id: id * 10, symbol: 'level' }], implementation: { ...implementation, outputs: [{ key: 'decayLevel', stateId: id * 10 }] } });
+    await withInstalledFmu(async (directory, installed) => {
+        const reference = { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [] };
+        const one = { format: 'konjugate', version: 1, nodes: [node(1, 'Tank A', reference)], edges: [] };
+        assert.equal(JSON.parse(await resolveInstalledFmus(one, { fmuDirectory: directory })).nodes[0].implementation.kind, 'cpp');
+        const two = { ...one, nodes: [...one.nodes, node(2, 'Tank B', reference)] };
+        await assert.rejects(resolveInstalledFmus(two, { fmuDirectory: directory }),
+            (error) => error.code === 'FMU_ONCE_PER_PROCESS' && /2 nodes use it: 'Tank A', 'Tank B'/.test(error.message));
+    }, { coSimulation: ' canBeInstantiatedOnlyOncePerProcess="true"' });
+    // Without the flag, two nodes are two instances.
+    await withInstalledFmu(async (directory, installed) => {
+        const reference = { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [] };
+        const two = { format: 'konjugate', version: 1, nodes: [node(1, 'Tank A', reference), node(2, 'Tank B', reference)], edges: [] };
+        assert.deepEqual(JSON.parse(await resolveInstalledFmus(two, { fmuDirectory: directory })).nodes.map((entry) => entry.implementation.kind), ['cpp', 'cpp']);
     });
 });

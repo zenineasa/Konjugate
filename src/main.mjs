@@ -2026,6 +2026,7 @@ ipcMain.handle('packageAddFmu', async (event, { path = null } = {}) => {
         const name = inspected.description.modelName;
         const chosen = await chooseFmuBinary(inspected.description, async (entry) => inspected.files[entry] ?? null);
         if (chosen.error) return { error: `${name} cannot run on this computer: ${chosen.error}.` };
+        if (inspected.description.coSimulation?.needsExecutionTool) return { error: `${name} needs the tool it was exported from installed and running beside it, which Konjugate cannot start; export it from that tool as a standalone FMU.` };
         const directory = join(app.getPath('userData'), 'packages');
         const existing = (await listInstalledFmus(directory)).find((entry) => entry.packageId === inspected.description.guid);
         if (existing) return { guid: existing.packageId, version: existing.version, name: existing.name, reused: true };

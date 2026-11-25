@@ -187,6 +187,12 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
         throw new FmiResolutionError(`FMU ${guid} version ${version} is not installed.`, 'FMU_NOT_INSTALLED');
     }
     const description = parseModelDescription(xmlText);
+    if (description.coSimulation?.needsExecutionTool) {
+        throw new FmiResolutionError(
+            `FMU ${description.modelName} needs the tool it was exported from installed and running beside it (needsExecutionTool), which Konjugate cannot start; export it from that tool as a standalone FMU.`,
+            'FMU_NEEDS_TOOL'
+        );
+    }
 
     const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
     if (chosen.error) {
@@ -344,6 +350,28 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
 export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuKeys = [] } = {}) {
     const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
     let changed = false;
+    // An FMU that may be loaded only once in a process (canBeInstantiatedOnlyOncePerProcess) cannot be two nodes: refused, naming them.
+    const byFmu = new Map();
+    for (const node of document.nodes ?? []) {
+        if (node.implementation?.kind !== 'fmi' || typeof node.implementation.fmuId !== 'string') continue;
+        const key = `${node.implementation.fmuId}@${node.implementation.fmuVersion}`;
+        byFmu.set(key, [...(byFmu.get(key) ?? []), node]);
+    }
+    for (const nodes of byFmu.values()) {
+        if (nodes.length < 2 || !fmuDirectory) continue;
+        const { fmuId, fmuVersion } = nodes[0].implementation;
+        const fmusRoot = resolve(fmuDirectory, 'fmus');
+        const fmuRoot = resolve(fmusRoot, fmuId, fmuVersion);
+        if (!fmuRoot.startsWith(`${fmusRoot}${sep}`)) continue;
+        const xmlText = await readFile(resolve(fmuRoot, 'modelDescription.xml'), 'utf8').catch(() => null);
+        const description = xmlText ? parseModelDescription(xmlText) : null;
+        if (description?.coSimulation?.canBeInstantiatedOnlyOncePerProcess) {
+            throw new FmiResolutionError(
+                `FMU ${description.modelName} can run only once at a time (canBeInstantiatedOnlyOncePerProcess), but ${nodes.length} nodes use it: ${nodes.map((node) => `'${node.name ?? node.id}'`).join(', ')}. Keep one of them.`,
+                'FMU_ONCE_PER_PROCESS'
+            );
+        }
+    }
     for (const node of document.nodes ?? []) {
         if (node.implementation?.kind !== 'fmi') continue;
         changed = true;

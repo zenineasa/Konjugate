@@ -41,7 +41,7 @@ import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import {
-    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -2005,6 +2005,101 @@ function updateRelationships() {
     });
 
     syncContextualOverlays();
+    updateProgramReads();
+}
+
+// ---- What a program or an FMU reads from another node, drawn (docs/proposals/fmuImportWorkflow.md, stage 5) -------------------
+// A node's program (C++, Python or an FMU) that reads another node's state is joined to it by a thin dashed arrow from that node,
+// with the input's name on a small label; clicking the label opens the reading node's card at the input. It draws bindings the
+// file already has and adds nothing to it. Every input is read at the start of each step, which the label's title says.
+const programReadObjects = new Map();
+const programReadMaterial = new THREE.LineDashedMaterial({ color: 0x7cd9cc, dashSize: 0.12, gapSize: 0.08, transparent: true, opacity: 0.7, depthTest: false });
+const programReadMarkerMaterial = new THREE.MeshBasicMaterial({ color: 0x7cd9cc, transparent: true, opacity: 0.8, depthTest: false });
+
+function programReads() {
+    const reads = [];
+    for (const node of model.nodes) {
+        const implementation = node.implementation;
+        if (node.deleted || !['cpp', 'python', 'fmi'].includes(implementation?.kind)) continue;
+        for (const binding of implementation.bindings ?? []) {
+            if (binding?.kind !== 'state' || binding.nodeId === undefined || binding.nodeId === null || binding.nodeId === node.id) continue;
+            const source = model.nodes.find((candidate) => candidate.id === binding.nodeId && !candidate.deleted);
+            const state = source?.states?.find((candidate) => candidate.id === binding.stateId);
+            if (!state) continue;
+            // An FMU's input by the FMU's own name, once its ports are known (they may not be, as the page starts).
+            let input = binding.key;
+            if (implementation.kind === 'fmi') {
+                try { input = fmuPortsFor(implementation)?.inputs?.find((port) => port.key === binding.key)?.name ?? binding.key; } catch { /* not yet */ }
+            }
+            reads.push({ id: `${node.id}:${binding.key}`, from: source, to: node, state, input });
+        }
+    }
+    return reads;
+}
+
+function updateProgramReads() {
+    const reads = programReads();
+    const wanted = new Set(reads.map((read) => read.id));
+    for (const [id, object] of programReadObjects) {
+        if (wanted.has(id)) continue;
+        scene.remove(object.line, object.marker, object.label);
+        object.line.geometry.dispose();
+        object.marker.geometry.dispose();
+        object.label.element.remove();
+        programReadObjects.delete(id);
+    }
+    for (const read of reads) {
+        const fromObject = nodeObjects.get(read.from.id);
+        const toObject = nodeObjects.get(read.to.id);
+        if (!fromObject || !toObject) continue;
+        let object = programReadObjects.get(read.id);
+        if (!object) {
+            const line = new THREE.Line(new THREE.BufferGeometry(), programReadMaterial);
+            line.renderOrder = 7;
+            const marker = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.24, 12), programReadMarkerMaterial);
+            marker.renderOrder = 8;
+            const element = document.createElement('button');
+            element.type = 'button';
+            element.className = 'programReadLabel';
+            element.addEventListener('pointerdown', (event) => event.stopPropagation());
+            element.addEventListener('click', (event) => {
+                event.stopPropagation();
+                openProgramRead(element.dataset.nodeId, element.dataset.inputKey);
+            });
+            const label = new CSS2DObject(element);
+            scene.add(line, marker, label);
+            object = { line, marker, label };
+            programReadObjects.set(read.id, object);
+        }
+        const start = fromObject.position.clone();
+        const end = toObject.position.clone();
+        object.line.geometry.dispose();
+        object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+        object.line.computeLineDistances();
+        const curve = new THREE.LineCurve3(start, end);
+        positionDirectionMarker(object.marker, curve);
+        object.label.position.copy(start.clone().lerp(end, 0.4));
+        const visible = fromObject.visible !== false && toObject.visible !== false;
+        object.line.visible = visible;
+        object.marker.visible = visible;
+        object.label.visible = visible;
+        const element = object.label.element;
+        element.dataset.nodeId = String(read.to.id);
+        element.dataset.inputKey = read.id.slice(read.id.indexOf(':') + 1);
+        element.textContent = `→ ${read.input}`;
+        element.title = `${read.to.title ?? read.to.name}'s ${read.input} reads ${read.from.title ?? read.from.name}.${read.state.symbol}, at the start of each step: one step late.`;
+    }
+}
+
+// The reading node's card, at the input's row.
+function openProgramRead(nodeId, inputKey) {
+    const definition = model.nodes.find((node) => String(node.id) === String(nodeId) && !node.deleted);
+    const object = definition ? nodeObjects.get(definition.id) : null;
+    if (!object) return;
+    selectNode(object);
+    openNodeEditor(definition, undefined, undefined, { tab: 'equations' });
+    const index = (definition.implementation?.bindings ?? []).findIndex((binding) => binding.key === inputKey);
+    $(`#nodeProgramInputs .nodeProgramRow[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });
 }
 
 updateRelationships();
@@ -2443,6 +2538,7 @@ function applyNodeModel(node, snapshot) {
     refreshNodeLabel(node);
     invalidateRelationshipBundles();
     syncContextualOverlays();
+    updateProgramReads();
     updateValidationStatus();
     if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
         renderNodeEditorModel(node);
@@ -3342,7 +3438,17 @@ function renderNodeProgram(node) {
         // one given a value in the file keeps that; a program's input must read something.
         reads.add(new Option(isFmu ? `The FMU's own start value${Number.isFinite(port?.start) ? `, ${fmuValueText(port.start, port.unit)}` : ''}` : 'Choose…', ''));
         if (isFmu) reads.add(new Option('A value of its own…', 'value'));
-        candidates.forEach((candidate) => reads.add(new Option(candidate.label, candidate.value)));
+        // Connect to…: what it can read, grouped by whose it is, each with its unit (stage 5 of docs/proposals/fmuImportWorkflow.md).
+        const groups = new Map();
+        candidates.forEach((candidate) => {
+            if (!groups.has(candidate.group)) {
+                const group = document.createElement('optgroup');
+                group.label = candidate.group;
+                groups.set(candidate.group, group);
+                reads.appendChild(group);
+            }
+            groups.get(candidate.group).appendChild(new Option(candidate.label, candidate.value));
+        });
         reads.value = isFmu && binding.kind === 'value' ? 'value' : nodeProgramInputValue(binding, definition);
         reads.addEventListener('change', () => {
             if (isFmu && reads.value === 'value') {
@@ -3395,7 +3501,10 @@ function renderNodeProgram(node) {
                 snapshot.sharedParameters.push(created);
                 snapshot.implementation.bindings[index] = { key: binding.key, kind: 'parameter', sharedParameterId: created.id };
             }));
-            row.append(name, reads, value, share, about, rowError(errors.inputs[index] ?? []));
+            const connection = document.createElement('small');
+            connection.className = 'fmuPortConnection';
+            connection.textContent = fmuConnectionNotes(binding, port, definition, nodes).join(' ');
+            row.append(name, reads, value, share, about, connection, rowError(errors.inputs[index] ?? []));
         } else {
             row.append(
                 keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index].key = key; })),
@@ -3476,6 +3585,7 @@ async function renderNodeProgramFmus(node) {
     const known = fmuPortsCache.has(fmuPortsKey(implementation));
     const ports = implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null;
     if (ports) fmuPortsCache.set(fmuPortsKey(implementation), ports);
+    if (!known && ports && !ports.error) updateProgramReads();
     await showFmuNotes(ports);
     const aboutLines = fmuAboutLines(ports && !ports.error ? ports.about : null);
     $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
@@ -13503,7 +13613,7 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     }
     $('#fmuNotice').hidden = true;
     installedFmus = null;
-    const node = newNodeFromMenu({ position });
+    const node = newNodeFromMenu({ position: position ?? besideVisibleNodes() });
     if (!node) return null;
     await useFmuForNode(node, added.guid, added.version);
     $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}`;
@@ -13513,6 +13623,16 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
 // For the interaction tests, which cannot drop a file with a place on disk: what a drop of the .fmu at `path` at the screen point
 // (clientX, clientY) does.
 window.__debugFmuDrop = (path, clientX, clientY) => addFmuToModel({ path, position: modelPointUnder({ clientX, clientY }) }).then(Boolean);
+
+// Where an FMU added from a menu goes when it is not dropped: to the right of the rightmost node in view, so several FMUs added one
+// after another stand side by side rather than on top of each other, and the arrows between them can be seen.
+function besideVisibleNodes() {
+    const shown = model.nodes.filter((node) => !node.deleted && nodeObjects.get(node.id)?.visible !== false);
+    if (!shown.length) return null;
+    const rightmost = shown.reduce((best, node) => (nodeObjects.get(node.id).position.x > nodeObjects.get(best.id).position.x ? node : best));
+    const at = nodeObjects.get(rightmost.id).position;
+    return [at.x + 4.5, at.y, at.z];
+}
 
 // The FMUs already in the library, under Add › FMU…: each a click from a node.
 async function renderAddFmuRecent() {

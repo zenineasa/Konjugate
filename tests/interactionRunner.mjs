@@ -1949,6 +1949,8 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('#runMethodDescription').textContent`), /Chooses its own steps to keep the error within a tolerance/);
         assert.equal(await evaluate(window, `!document.querySelector('#runRelativeToleranceField').hidden && !document.querySelector('#runAbsoluteToleranceField').hidden`), true);
         assert.equal(await evaluate(window, `document.querySelector('#runStepsPerGlobalStepField').hidden`), true);
+        // Its solver is Tsit5 unless another is chosen (src/integrationMethods.mjs defaultAdaptiveSolver, docs/choosingAMethod.md).
+        assert.equal(await evaluate(window, `!document.querySelector('#runAdaptiveSolverField').hidden && document.querySelector('#runAdaptiveSolver').value`), 'tsit5');
         assert.equal(Number(await evaluate(window, `document.querySelector('#runRelativeTolerance').value`)), 1e-6);
         assert.equal(Number(await evaluate(window, `document.querySelector('#runAbsoluteTolerance').value`)), 1e-9);
         assert.match(await evaluate(window, `document.querySelector('#runGlobalStepMeaning').textContent`), /Adaptive chooses smaller steps within it/);
@@ -1959,7 +1961,8 @@ export async function runInteractionTests(driver) {
         // Only the relative tolerance changed: only it is written.
         await evaluate(window, `(() => { document.querySelector('#runRelativeTolerance').value = '1e-8'; document.querySelector('#saveRunConfiguration').click(); })()`);
         assert.equal(await evaluate(window, `document.querySelector('#runLaunchDialog').open`), false);
-        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'dormandPrince54', tolerance: { relative: 1e-8 } });
+        // Adaptive is saved as the solver it runs: Tsit5, the default.
+        assert.deepEqual(await evaluate(window, activeConfiguration), { ...before, method: 'tsit5', tolerance: { relative: 1e-8 } });
         // The Numerics tab offers each state its own absolute tolerance, written only when set.
         const batteryLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Battery module'))`;
         await settle(window, 'validation');
@@ -1998,8 +2001,18 @@ export async function runInteractionTests(driver) {
         // The card may still show the run before's summary for a moment: wait for this run's.
         await waitFor(window, `document.querySelector('#executionSummaryMethod').textContent.startsWith('Method: Adaptive')`, 'The execution summary did not name Adaptive.');
         assert.match(await evaluate(window, `document.querySelector('#executionSummaryMethod').textContent`),
-            /^Method: Adaptive: Dormand–Prince 5\(4\) \(seven stages, fifth order, with a fourth-order error estimate\), relative tolerance 1e-8, absolute 1e-9\. [\d,]+ steps? taken, [\d,]+ steps? rejected, [\d,]+ evaluations? of the model; steps from .+ s to .+ s\.$/);
+            /^Method: Adaptive: Tsit5 \(Tsitouras 5\(4\), seven stages, fifth order, with a fourth-order error estimate\), relative tolerance 1e-8, absolute 1e-9\. [\d,]+ steps? taken, [\d,]+ steps? rejected, [\d,]+ evaluations? of the model; steps from .+ s to .+ s\.$/);
         await evaluate(window, `document.querySelector('#closeExecutionSummary').click()`);
+        // Dormand–Prince, Adaptive's method before Tsit5, is still there to choose, and saved as itself.
+        await evaluate(window, `(() => {
+            document.querySelector('#closeResults').click();
+            document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click();
+        })()`);
+        await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+        await openRunDialog(window);
+        assert.equal(await evaluate(window, `document.querySelector('#runAdaptiveSolver').value`), 'tsit5', 'The dialog opens with the saved solver.');
+        await evaluate(window, `(() => { const solver = document.querySelector('#runAdaptiveSolver'); solver.value = 'dormandPrince54'; solver.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#saveRunConfiguration').click(); })()`);
+        assert.equal((await evaluate(window, activeConfiguration)).method, 'dormandPrince54');
     });
 
     await run('Run until is the open project\'s own: its run configuration\'s length or a reachable default, never the project before\'s, and never written into the file', async () => {
@@ -4590,7 +4603,9 @@ export async function runInteractionTests(driver) {
             document.querySelector('#startRun').click();
         })()`);
         await waitFor(poseWindow, `/^Live/.test(document.querySelector('#runLifecycle').textContent)`, 'The add-on did not follow the extended run live.', 15000);
-        assert.equal(await evaluate(poseWindow, `document.querySelector('#timeline').max`), '3', 'The add-on did not take the extended run\'s new end.');
+        // The add-on says "Live" from the run's status at once, and takes the new end as it reads its session again, a moment
+        // later (several requests to the host): waited for, not read at the instant "Live" appears.
+        await waitFor(poseWindow, `document.querySelector('#timeline').max === '3'`, 'The add-on did not take the extended run\'s new end.', 5000);
         await waitFor(poseWindow, `document.querySelector('#runLifecycle').textContent === 'Completed'`, 'The add-on did not see the extended run complete.', 15000);
         await evaluate(window, `(() => { const online = document.querySelector('#runOnlineMode'); online.checked = false; online.dispatchEvent(new Event('change', { bubbles: true })); })()`);
 

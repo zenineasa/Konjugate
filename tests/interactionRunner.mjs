@@ -2447,8 +2447,8 @@ export async function runInteractionTests(driver) {
     // Template ▾, then one of its choices; a program with code first shows the two side by side, and the choice is used from there.
     const chooseTemplate = async (editor, id) => {
         if (await evaluate(editor, `document.querySelector('#programEditorTemplateMenu').hidden`)) await evaluate(editor, `document.querySelector('#programEditorTemplates').click()`);
-        await waitFor(editor, `Boolean(document.querySelector('#programEditorTemplateMenu [data-template-id="${id}"]'))`, `Template ▾ did not offer ${id}.`);
-        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="${id}"]').click()`);
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorTemplateMenu [data-program-template="${id}"]'))`, `Template ▾ did not offer ${id}.`);
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-program-template="${id}"]').click()`);
         if (!await evaluate(editor, `document.querySelector('#programEditorConvertPanel').hidden`)) await evaluate(editor, `document.querySelector('#programEditorConvertAccept').click()`);
     };
 
@@ -2648,7 +2648,7 @@ export async function runInteractionTests(driver) {
         await waitFor(editor, `!document.querySelector('#programEditorTemplateMenu').hidden`, 'Write program did not open with the templates showing.');
         const offered = await evaluate(editor, `[...document.querySelectorAll('#programEditorTemplateMenu .templateChoiceLabel')].map((label) => label.textContent)`);
         assert.deepEqual(offered, ['A node', 'A node with memory and a clock', 'PID controller'], 'A node is offered the node templates and the node example.');
-        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="pidController"]').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-program-template="pidController"]').click()`);
         assert.match(await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), /class PidController\(Node\):/, 'One click did not give the example.');
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorConvertPanel').hidden`), true, 'An empty program takes the example without asking.');
         await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
@@ -2657,7 +2657,7 @@ export async function runInteractionTests(driver) {
             `The example did not pass Test: ${await evaluate(editor, `document.querySelector('#programEditorTestPanel').textContent`)}`);
         // Another choice over code shows the two side by side, and Keep it as it is changes nothing.
         await evaluate(editor, `document.querySelector('#programEditorTemplates').click()`);
-        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-template-id="blankSampledNode"]').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorTemplateMenu [data-program-template="blankSampledNode"]').click()`);
         await waitFor(editor, `!document.querySelector('#programEditorConvertPanel').hidden`, 'A template over code did not show the two side by side.');
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorConvertAfterHeading').textContent`), 'A node with memory and a clock');
         const before = await evaluate(editor, `window.__providerEditorView.state.doc.toString()`);

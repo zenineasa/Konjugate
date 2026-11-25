@@ -83,17 +83,23 @@ test('a change sent as a run ends is refused calmly, never raised as an uncaught
             const run = await startEngineRun(content, { name: 'Short', targetTime: 2, globalTimeStep: 0.01, outputInterval: 0.1 }, { applicationPath: root, resourcesPath: '', packaged: false });
             let finished = false;
             const ended = run.completion.finally(() => { finished = true; });
-            const refusals = [];
+            // Every change sent, so each one's answer is waited for: under load some are still being written when the run ends, and a
+            // write that fails then (EPIPE, or ENOTCONN on macOS) answers only after.
+            const sent = [];
             while (!finished) {
-                run.setParameterValue(21, round % 2).catch((error) => refusals.push(error.message));
+                // Its answer is taken at once (a refusal no one has listened for yet would be an unhandled rejection), and read below.
+                sent.push(run.setParameterValue(21, round % 2).then(() => null, (error) => error.message));
                 await new Promise((resolve) => setImmediate(resolve));
             }
             await ended;
             await assert.rejects(run.setParameterValue(21, 1), { message: 'The run has finished; the change was not applied.' });
-            for (const message of refusals) assert.equal(message, 'The run has finished; the change was not applied.');
+            for (const refusal of await Promise.all(sent)) {
+                if (refusal !== null) assert.equal(refusal, 'The run has finished; the change was not applied.');
+            }
         }
-        // An 'error' event left unheard is raised on a later tick.
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        // Every write has been answered by now, and with it any 'error' event a write could raise; one left unheard would be raised as
+        // an uncaught exception on the next turn of the event loop.
+        await new Promise((resolve) => setImmediate(resolve));
         assert.deepEqual(uncaught.map((error) => error.message), []);
     } finally {
         process.off('uncaughtException', onUncaught);

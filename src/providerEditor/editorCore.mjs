@@ -720,7 +720,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
             if (!items.length) return [];
             return [Object.assign(document.createElement('h4'), { textContent: group }), ...items.map((choice) => {
                 const item = Object.assign(document.createElement('button'), { type: 'button', className: 'templateChoice' });
-                item.dataset.templateId = choice.id;
+                // Its own attribute: the page around the web edition's panel has the component library's data-template-id.
+                item.dataset.programTemplate = choice.id;
                 item.setAttribute('role', 'menuitem');
                 item.append(Object.assign(document.createElement('span'), { className: 'templateChoiceLabel', textContent: choice.label }),
                     Object.assign(document.createElement('span'), { className: 'templateChoiceNote', textContent: choice.description ?? '' }));
@@ -738,9 +739,9 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         if (!$('#programEditorTemplateMenu').hidden && !event.target.closest('#programEditorTemplateMenu, #programEditorTemplates')) showTemplateMenu(false);
     });
     $('#programEditorTemplateMenu').addEventListener('click', (event) => {
-        const item = event.target.closest('[data-template-id]');
+        const item = event.target.closest('[data-program-template]');
         if (!item || !view) return;
-        const choice = templateChoices().find((candidate) => candidate.id === item.dataset.templateId);
+        const choice = templateChoices().find((candidate) => candidate.id === item.dataset.programTemplate);
         showTemplateMenu(false);
         if (!choice) return;
         // An empty program takes it at once; one with code shows the two side by side first.

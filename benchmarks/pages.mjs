@@ -12,9 +12,11 @@
 // largestSupersededPage, and otherwise the index links to it in the repository. Every link is relative, so the site works at any address,
 // and a link to a file that is not there stops the build, naming it. Nothing in the repository changes and nothing is timed; the copy
 // differs from results/ only in one correction to old sessions' links, below. No dependencies, so a CI job runs it without npm ci.
+// Beside them, at the root of the site, the link-preview image the index and the combined reports name (lib/brand.mjs).
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, normalize, relative, resolve, sep } from 'node:path';
+import { aboutBox, brandBar, brandHead, brandStyles, siteUrl, socialCard, taglineHtml } from './lib/brand.mjs';
 
 const repositoryRoot = join(import.meta.dirname, '..');
 const results = join(repositoryRoot, 'benchmarks', 'results');
@@ -83,22 +85,30 @@ export function writeSite(site) {
     if (!machines.length) throw new Error(`No combined results under ${results}: run npm run benchmark:combine.`);
     rmSync(site, { recursive: true, force: true });
     mkdirSync(site, { recursive: true });
+    const description = `Konjugate evaluated against established benchmarks and tools, reproducibly: one combined report per computer (${machines.length} so far), with every session's results and all the raw data.`;
     const index = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Konjugate benchmark reports</title>
+${brandHead({ title: 'Konjugate benchmark reports', description, url: siteUrl })}
 <style>
-:root { color-scheme: light dark; } body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; } main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+:root { color-scheme: light dark; --brand-width: 1100px; } body { margin: 0; font: 15px/1.5 system-ui, -apple-system, sans-serif; } main { max-width: 1100px; margin: 0 auto; padding: 24px; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; } th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid #8884; vertical-align: top; } .scroll { overflow-x: auto; }
 h2 { margin-top: 36px; padding-top: 12px; border-top: 1px solid #8884; }
-</style></head>
-<body><main>
+${brandStyles}</style></head>
+<body>
+${brandBar()}
+<main>
 <h1>Konjugate benchmark reports</h1>
+${taglineHtml}
 <p>Konjugate evaluated against established benchmarks and tools, reproducibly: timing sessions on one documented computer each, combined into one report per computer. These pages are the reports committed under <code>benchmarks/results/</code>${repositoryUrl ? ` in <a href="${escapeXml(`${repositoryUrl}/tree/master/benchmarks/results`)}">the repository</a>` : ''}, unchanged, as of this release, where all the raw data is; how they were measured, and how to reproduce them, is in ${repositoryUrl ? `<a href="${escapeXml(`${repositoryUrl}/blob/master/benchmarks/README.md`)}">benchmarks/README.md</a>` : 'benchmarks/README.md'}. Timings are of that computer only.</p>
 ${machines.map(machineSection).join('\n')}
-</main></body></html>
+</main>
+${aboutBox}
+</body></html>
 `;
     writeFileSync(join(site, 'index.html'), index);
+    copyFileSync(join(repositoryRoot, socialCard.source), join(site, socialCard.path));
     // Every file the index links to, and every file those link to in turn, copied under its path in results/.
-    const published = new Map([['index.html', Buffer.byteLength(index)]]);
+    const published = new Map([['index.html', Buffer.byteLength(index)], [socialCard.path, statSync(join(site, socialCard.path)).size]]);
     const missing = [];
     const pending = relativeLinks(index).map((link) => ({ from: 'index.html', path: toPosix(normalize(link)) }));
     while (pending.length) {
@@ -127,6 +137,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         process.exitCode = 1;
     } else {
         const { files, bytes } = writeSite(site);
-        console.log(`Wrote ${join(site, 'index.html')} and the ${files.length - 1} files of benchmarks/results/ it needs: ${(bytes / 2 ** 20).toFixed(1)} MiB in all.`);
+        console.log(`Wrote ${join(site, 'index.html')}, ${socialCard.path} and the ${files.length - 2} files of benchmarks/results/ it needs: ${(bytes / 2 ** 20).toFixed(1)} MiB in all.`);
     }
 }

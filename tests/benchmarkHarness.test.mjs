@@ -306,4 +306,13 @@ test('the published reports are the index and only the committed files the repor
     // Not everything: the raw session files stay in the repository.
     assert.ok(!files.some((name) => /\/sessions\/[^/]+\/(problems|scaling)\/(results|checks)\.csv$/.test(name)));
     assert.equal(bytes, files.reduce((sum, name) => sum + statSync(join(site, name)).size, 0));
+    // The index and the combined reports carry the brand bar, the About box and a link preview whose image the site publishes.
+    assert.ok(files.includes('socialCard.png'));
+    for (const page of ['index.html', ...files.filter((name) => /^[^/]+\/report\.html$/.test(name))]) {
+        const html = readFileSync(join(site, page), 'utf8');
+        assert.match(html, /<header class="brand">/, page);
+        assert.match(html, /<footer class="about">/, page);
+        assert.ok(html.includes('<meta property="og:image" content="https://web.konjugate.com/benchmarks/socialCard.png">'), page);
+        assert.ok(html.includes(`<meta property="og:url" content="https://web.konjugate.com/benchmarks/${page === 'index.html' ? '' : page}">`), page);
+    }
 });

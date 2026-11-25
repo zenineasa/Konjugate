@@ -17,9 +17,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { noisyWithinRun, writeComparisonReport } from './comparisons/report.mjs';
+import { aboutBox, brandBar, brandHead, brandStyles, siteUrl, taglineHtml } from './lib/brand.mjs';
 import { repositoryRoot } from './lib/engine.mjs';
 import { describeEngineBuild } from './lib/machine.mjs';
 import { resultsDirectory } from './lib/results.mjs';
@@ -323,8 +324,14 @@ export async function combineSessions(machineDirectory, { sessions: chosen = nul
     const machineText = machine ? [machine.model, machine.chip ?? machine.cpu, `${machine.logicalProcessors} cores`, `${Math.round(machine.memoryBytes / 2 ** 30)} GiB`, machine.operatingSystem, machine.engineBuild ? `engine ${describeEngineBuild(machine.engineBuild)}` : null].filter(Boolean).join(' · ') : '';
     const sessionEntries = [...problems.sessions.map((entry) => ({ ...entry, part: 'problems' })), ...scaling.sessions.map((entry) => ({ ...entry, part: 'scaling' })),
         ...(comparisons?.sessions ?? []).map((entry) => ({ ...entry, part: entry.part }))].sort((a, b) => a.session.localeCompare(b.session));
+    // What a link preview says: what was measured, counted from the data, and where.
+    const compared = comparisons?.problems?.length ?? 0;
+    const measured = [problems.rows.length ? `${problems.rows.length} problem timings` : null, scaling.rows.length ? `${scaling.rows.length} graph-scalability cases` : null, compared ? `${compared} problems compared with established tools` : null].filter(Boolean);
+    const description = `Konjugate${source?.konjugateVersion ? ` ${source.konjugateVersion}` : ''} benchmarked reproducibly${machine ? ` on a ${[machine.model, machine.chip ?? machine.cpu].filter(Boolean).join(', ')}` : ''}: ${measured.length ? measured.join(', ').replace(/, ([^,]*)$/, ' and $1') : 'no timings yet'}, from ${sessions.length} timing session${sessions.length === 1 ? '' : 's'}, with all the raw data.`;
+    const head = brandHead({ title: 'Konjugate performance report', description, url: new URL(`${encodeURIComponent(basename(machineDirectory))}/report.html`, siteUrl).href });
     writeFileSync(reportPath, `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Konjugate performance report</title>
+${head}
 <style>
 .viz-root { color-scheme: light; ${lightTheme} }
 @media (prefers-color-scheme: dark) { :root:where(:not([data-theme="light"])) .viz-root { color-scheme: dark; ${darkTheme} } }
@@ -333,16 +340,21 @@ main { max-width: 1200px; margin: 0 auto; padding: 24px; } p, dd, li { color: va
 h2 { margin-top: 36px; padding-top: 12px; border-top: 1px solid var(--grid); } table { border-collapse: collapse; width: 100%; background: var(--surface-1); font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--grid); vertical-align: top; } .number { text-align: right; font-variant-numeric: tabular-nums; }
 .scroll { overflow-x: auto; } a { color: var(--series-1); } .notice { color: var(--text-primary); background: var(--surface-1); border-left: 4px solid var(--series-4); padding: 8px 12px; } dl.machine { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; } dt { font-weight: 600; }
-</style></head>
-<body class="viz-root"><main>
+${brandStyles}</style></head>
+<body class="viz-root">
+${brandBar()}
+<main>
 <h1>Konjugate performance report</h1>
+${taglineHtml}
 <p>${escapeXml(machineText)}</p>
 ${source ? `<p>Timed from Konjugate ${escapeXml(source.konjugateVersion ?? 'version not recorded')}, the engine ${sourceHtml(source)}: ${combinedParts.map((entry) => `${escapeXml(entry.part)} started ${escapeXml(utc(entry.startedAt))}${timedUncommitted(entry) && !entry.provenance ? ' (dirty: uncommitted changes)' : ''}`).join('; ')}.</p>\n` : ''}${uncommittedNotice(combinedParts)}<p class="lede">Konjugate evaluated against established tools, reproducibly, on this computer: ${sessions.length} timing session${sessions.length === 1 ? '' : 's'} combined${superseded.length ? `, all timed from that commit; ${supersededSessions.length} earlier session${supersededSessions.length === 1 ? '' : 's'}, timed from an older source, ${supersededSessions.length === 1 ? 'is' : 'are'} kept but not combined (<a href="#superseded">Superseded sessions</a>)` : ''}. Every timing's headline is its minimum over all runs of the combined sessions, since noise on a computer only adds time; beside it are the median and interquartile range over all runs, the spread between the sessions' minimums, and a flag where a session's runs spread more than 5 %. The accuracy checks are in each session's own report${latestProblems ? ` (<a href="sessions/${latestProblems.name}/problems/report.html">the latest</a>)` : ''}; the methods are in benchmarks/README.md.</p>
 <nav><p><a href="#sessions">Sessions</a> · <a href="#problems">Problem timings</a> · <a href="#scaling">Graph scalability</a>${superseded.length ? ' · <a href="#superseded">Superseded sessions</a>' : ''}</p></nav>
 <section id="sessions"><h2>Sessions and their conditions</h2>${sessionsTable(sessionEntries)}</section>
 <section id="problems"><h2>Problem timings</h2><p>Each problem's timing cases: the engine process's wall time and its own integration time.</p>${problems.rows.length ? suiteTable(problems.rows, { scaling: false }) : '<p>Not run in these sessions.</p>'}</section>
 <section id="scaling"><h2>Graph scalability</h2><p>Generated thermal graphs on the serial, thread-pool and partitioned backends: the engine's integration time, node steps per second and each parallel backend's speed-up over serial, all from the minimums.${latestScaling ? ` The plots are in <a href="sessions/${latestScaling.name}/scaling/report.html">the latest session's report</a>.` : ''}</p>${scaling.rows.length ? suiteTable(scaling.rows, { scaling: true }) : '<p>Not run in these sessions.</p>'}</section>
-${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>Timed from an older source than the engine ${sourceHtml(source)}, so not combined: their results stay in sessions/ for the record, and none of their numbers are above.</p>${supersededTable(superseded)}</section>\n` : ''}</main></body></html>
+${superseded.length ? `<section id="superseded"><h2>Superseded sessions</h2><p>Timed from an older source than the engine ${sourceHtml(source)}, so not combined: their results stay in sessions/ for the record, and none of their numbers are above.</p>${supersededTable(superseded)}</section>\n` : ''}</main>
+${aboutBox}
+</body></html>
 `);
     if (comparisons) {
         const directory = join(machineDirectory, 'comparisons');

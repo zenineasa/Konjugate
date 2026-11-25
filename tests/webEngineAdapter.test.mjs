@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { decodeProjectContent } from '../src/browserProjectCodec.mjs';
 import {
-    checkSubstepConvergenceWithWebEngine, ensureCppProvidersReady, ensurePythonProvidersReady, fitWithWebEngine, getWebEngineCapabilities,
+    checkProgramWithWebEngine, checkSubstepConvergenceWithWebEngine, ensureCppProvidersReady, ensurePythonProvidersReady, fitWithWebEngine, getWebEngineCapabilities,
     inferWithWebEngine, runWithWebEngine, validateWithWebEngine
 } from '../src/webEngineAdapter.mjs';
 import { encodeMessage, resultFile } from './fixtures/engineMessages.mjs';
@@ -121,3 +121,23 @@ test('providers are made ready only for a model that has them', async () => {
     assert.deepEqual(Module, {}, 'Neither Pyodide nor a C++ toolchain is loaded, and nothing is installed on the module.');
     assert.deepEqual(await checkSubstepConvergenceWithWebEngine(), { available: false });
 });
+
+test('Check program writes the source and the desktop\'s configuration, answers the engine\'s JSON, and says why when it stops', async () => {
+    const report = { ok: true, program: 'Heater', kind: 'node', inputs: [], problems: [], outputs: { power: 1.5 }, memory: {} };
+    answer((Module, argv) => { Module.FS.writeFile(argv[5], JSON.stringify(report)); });
+    assert.deepEqual(await checkProgramWithWebEngine(engineModuleUrl, { kind: 'cpp', source: 'struct Heater {};', inputs: { kp: 2 }, time: 0.5 }),
+        { available: true, ...report });
+    const [command, sourcePath, ...flags] = seen.argv;
+    assert.equal(command, 'checkProgram');
+    assert.match(sourcePath, /program\.cpp$/);
+    assert.equal(text(seen.files[sourcePath]), 'struct Heater {};');
+    assert.deepEqual(flags.filter((arg) => arg.startsWith('--')), ['--configuration', '--report']);
+    assert.deepEqual(JSON.parse(text(seen.files[flags[1]])), { kind: 'cpp', inputs: { kp: 2 }, time: 0.5 });
+    answer((Module) => { Module.options.printErr('Something went wrong.'); return 1; });
+    assert.deepEqual(await checkProgramWithWebEngine(engineModuleUrl, { kind: 'cpp', source: '' }),
+        { available: true, ok: false, problems: ['Something went wrong.'] });
+    answer(() => 3);
+    assert.deepEqual((await checkProgramWithWebEngine(engineModuleUrl, { kind: 'cpp', source: '' })).problems, ['The engine exited with code 3.']);
+    assert.deepEqual(scratchDirectories(), []);
+});
+

@@ -104,9 +104,17 @@ class WebProgramBridge:
     def __init__(self, module_path):
         from konjugate.v2._host import ProgramHost, load_program_class
 
-        self._host = ProgramHost(load_program_class(module_path, f"_konjugate_web_program_{abs(hash(module_path))}"), module_path)
+        # A program that cannot be loaded is answered as the native worker answers it (its factoryFailed message, the error's own
+        # words), not raised: raised, it would reach the engine as Pyodide's whole traceback.
+        self._failure = None
+        try:
+            self._host = ProgramHost(load_program_class(module_path, f"_konjugate_web_program_{abs(hash(module_path))}"), module_path)
+        except Exception as error:  # noqa: BLE001 -- reported to the engine, as __main__.py reports it
+            self._failure = str(error)
 
     def created_json(self):
+        if self._failure is not None:
+            return json.dumps({"ok": False, "code": "factoryFailed", "message": self._failure, "fatal": True})
         return json.dumps({"ok": True, "description": json.dumps(self._host.describe())})
 
     @staticmethod

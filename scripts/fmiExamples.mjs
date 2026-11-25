@@ -147,8 +147,9 @@ export function sampleTimes(example) {
 }
 
 // Runs the Konjugate engine on the example's project and returns { names, rows }: rows[i] = [time, ...values in names' order].
-export async function engineReference(example, workDirectory, executable = enginePath()) {
-    const document = await exportDocument(example);
+// `document` runs a changed copy of the project instead (tests/engine/fmi3ExportFidelity.mjs tunes a parameter).
+export async function engineReference(example, workDirectory, executable = enginePath(), document = null) {
+    document ??= await exportDocument(example);
     const outputs = outputNames(document);
     const modelPath = join(workDirectory, `${example.name}.kjt`);
     const configurationPath = join(workDirectory, `${example.name}Configuration.json`);

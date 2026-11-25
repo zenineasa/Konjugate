@@ -1,13 +1,15 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// End-to-end fidelity check for FMI 3.0 import (Phase 3): unlike tests/engine/fmiImportFidelity.mjs
-// (FMI 2.0), Konjugate cannot export FMI 3.0 itself, so the "known good" FMU here is a
-// hand-authored real fmi3* Co-Simulation shared library (fixtures/fmi3DecayFixture.cpp) standing
-// in for a third-party vendor FMU -- compiled directly (not through Konjugate's own build
+// End-to-end fidelity check for FMI 3.0 import (Phase 3). Two "known good" FMUs are imported. The
+// first is a hand-authored real fmi3* Co-Simulation shared library (fixtures/fmi3DecayFixture.cpp)
+// standing in for a third-party vendor FMU -- compiled directly (not through Konjugate's own build
 // machinery, which plays no role in producing a vendor's own FMU), zipped into a real .fmu shape,
 // installed exactly like the Extensions UI would, then imported into a host project and compared
 // against a hand-computed Euler trajectory using the exact same expression order as the fixture's
-// own fmi3DoStep, so the comparison is exact rather than approximate.
+// own fmi3DoStep, so the comparison is exact rather than approximate. The second is Konjugate's own
+// FMI 3.0 export of a decay model (src/fmiExport.mjs), round-tripped as tests/engine/fmiImportFidelity.mjs
+// round-trips the FMI 2.0 one: exported, installed, imported into a host project, and compared with
+// the engine's own run of the model it was exported from.
 //
 // It then checks the importer against FMUs it did not write: the FMI 3.0 Reference FMUs, every
 // output at every communication point compared bit for bit with FMPy (fixtures/referenceFmuFidelity.mjs),
@@ -22,7 +24,7 @@ import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { installFmuArchive } from '../../src/fmuPackage.mjs';
 import { runWithEngine } from '../../src/engineAdapter.mjs';
-import { libraryExtension } from '../../src/fmiExport.mjs';
+import { generateFmuPackage, libraryExtension } from '../../src/fmiExport.mjs';
 import { binaryDirectoryCandidates } from '../../src/fmiBinary.mjs';
 import { closeEnough } from './fixtures/fmuFidelityFixture.mjs';
 import { checkReferenceFmus, engineOptionsFor, installReferenceFmu, referenceHostDocument } from './fixtures/referenceFmuFidelity.mjs';
@@ -151,12 +153,60 @@ async function main() {
         );
         console.log('✓ FMI3 import: a value the FMU refuses stops the run naming the FMU, the call, the variable, the time and the FMU\'s own reason.');
 
+        await checkKonjugateExport(directory, engineOptions);
+
         const packages = join(directory, 'referencePackages');
         console.log(`✓ ${await checkReferenceFmus('3.0', packages)}`);
         await checkImportErrors(packages);
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// Konjugate's own FMI 3.0 export of a decay model with a live parameter (an FMI 3.0 input), installed and imported back: the imported
+// node gives the engine's own run of the model it was exported from, from the first step, though the host's state starts elsewhere.
+async function checkKonjugateExport(directory, engineOptions) {
+    const exported = {
+        format: 'konjugate', version: 1, metadata: { projectName: 'FMI 3.0 export fixture: decay' },
+        nodes: [{
+            id: 1, name: 'Decay',
+            states: [{ id: 11, name: 'Level', symbol: 'level', initialValue: initialLevel, unit: 'm' }],
+            numerics: { substepsPerGlobalStep: 1 },
+            sourceTerms: [{
+                id: 101, state: 'level', expression: '-k level',
+                expressionModel: {
+                    latex: '-k x', output: { stateId: 11 }, mathJson: ['Multiply', ['Negate', 'k'], 'x'],
+                    bindings: [{ kind: 'state', nodeId: 1, stateId: 11, symbol: 'x' }, { kind: 'parameter', parameterId: 21, symbol: 'k' }]
+                },
+                parameters: [{ id: 21, name: 'Decay rate', symbol: 'k', value: decayRate, unit: '1/s', mode: 'live', control: { minimum: 0, maximum: 1, step: 0.01 } }]
+            }]
+        }],
+        edges: [],
+        runConfigurations: [{ id: 900, globalTimeStep, outputInterval: globalTimeStep }],
+        activeRunConfigurationId: 900
+    };
+    const fmu = await generateFmuPackage(exported, { modelName: 'konjugateDecay', engineOptions, fmiVersion: '3.0' });
+    const packages = join(directory, 'konjugatePackages');
+    const installed = await installFmuArchive(fmu, { directory: packages, version: '1.0.0' });
+    assert.equal(installed.description.fmiVersion, '3.0');
+    assert.deepEqual(installed.description.variables.map((variable) => `${variable.name} ${variable.causality} ${variable.type}`).sort(),
+        ['Decay.Level output Float64', 'k input Float64'], 'The export\'s "time" is not a port; its state and live parameter are.');
+
+    const runOptions = { targetTime, globalTimeStep, outputInterval: globalTimeStep, pacing: { mode: 'fastest' } };
+    const reference = await runWithEngine(JSON.stringify(exported), runOptions, engineOptions);
+    const imported = await runWithEngine(JSON.stringify(hostDocument({ fmuId: installed.guid, fmuVersion: installed.version })), runOptions,
+        { ...engineOptions, fmuDirectory: packages, disabledFmuKeys: [] });
+    if (!reference.available || !imported.available) throw new Error('The engine runs of the FMI 3.0 export round trip were not available.');
+    const referenceSamples = reference.result.samples;
+    const importedSamples = imported.result.samples;
+    assert.equal(importedSamples.length, referenceSamples.length);
+    // Sample 0 is the host's own, deliberately different, initial value.
+    for (let index = 1; index < referenceSamples.length; index += 1) {
+        const expected = referenceSamples[index].states.find((state) => state.stateId === 11).value;
+        const actual = importedSamples[index].states.find((state) => state.stateId === 12).value;
+        assert.ok(Object.is(actual, expected), `Sample ${index}: the imported FMI 3.0 export gives ${actual}, the engine ${expected}.`);
+    }
+    console.log(`✓ FMI3 import of Konjugate's own FMI 3.0 export: the imported FMU gave the engine's run of the exported model bit for bit across ${referenceSamples.length - 1} samples, from the first step.`);
 }
 
 // A fixed parameter bound to something that changes during the run, and an integer input given a number outside its

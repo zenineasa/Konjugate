@@ -1,7 +1,7 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 // The checks every release runs (.github/workflows/release.yml) and a developer can run with `npm run test:release`: that code export
-// (C++ in each of its parallel modes, and Python), FMU export and the FMU round trip give the engine's own numbers, and that the
+// (C++ in each of its parallel modes, and Python), FMU export (FMI 2.0 and FMI 3.0) and the FMU round trip give the engine's own numbers, and that the
 // accuracy benchmarks still meet their thresholds. Each check runs in turn against one engine build; the summary at the end says what
 // passed, what failed, what was skipped and why, and how long each took. Exits with status 1 if any check failed.
 //
@@ -98,7 +98,7 @@ if (missingMpi.length) {
     else notes.push(`${message} Install Open MPI (and pip install mpi4py) to check ${!cppMpi && !pythonMpi ? 'them' : 'it'}.`);
 }
 if (!tools.fmpy) {
-    const message = 'FMPy is not importable, so the FMU export fidelity check (an independent FMI simulator driving the exported FMU) does not run.';
+    const message = 'FMPy is not importable, so the FMU export fidelity checks (an independent FMI simulator driving the exported FMI 2.0 and FMI 3.0 FMUs) do not run.';
     if (required.has('fmpy')) problems.push(`${message} This run requires FMPy (pip install fmpy).`);
     else notes.push(`${message} pip install fmpy to run it; the FMU round trip below still checks the FMU without it.`);
 }
@@ -107,6 +107,7 @@ if (!tools.fmpy) {
 const checks = [
     { name: 'Code export fidelity (C++ serial, openmp, stdThread, mpi; Python)', script: 'tests/engine/codeExportFidelity.mjs', args: [engine] },
     { name: 'FMU export fidelity (FMPy)', script: 'tests/engine/fmiExportFidelity.mjs', args: [engine] },
+    { name: 'FMI 3.0 FMU export fidelity (FMPy)', script: 'tests/engine/fmi3ExportFidelity.mjs', args: [engine] },
     { name: 'FMU round trip', script: 'tests/engine/fmiRoundTrip.mjs', args: [engine] },
     { name: 'FMI example FMUs (examples/fmi)', script: 'tests/engine/fmiExamples.mjs', args: [engine] },
     { name: 'Accuracy benchmarks', script: 'benchmarks/run.mjs', args: ['--accuracy', '--engine', engine] }

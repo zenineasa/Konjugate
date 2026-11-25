@@ -18,9 +18,9 @@
   "memoryBytes": 8589934592,
   "node": "v24.19.0",
   "loadAverage": [
-   1.26,
-   1.57,
-   1.93
+   1.31,
+   1.62,
+   3.38
   ],
   "engineBuild": {
    "buildType": "RelWithDebInfo",
@@ -33,29 +33,110 @@
   }
  },
  "source": {
-  "konjugateVersion": "2.0.0",
-  "gitCommit": "1dcf5fb",
-  "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-  "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-  "provenance": {
-   "summary": "The timed engine was built from commit 1dcf5fb with uncommitted changes, which were committed afterwards, unchanged, as 5817a58: konjugateEngine built again from 5817a58 has the same machine code and data, byte for byte, as the binary timed.",
-   "builtFrom": {
-    "gitCommit": "1dcf5fb",
-    "fullCommit": "1dcf5fb3bca94164346209eb0e6234af8ab84ed5",
-    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/1dcf5fb3bca94164346209eb0e6234af8ab84ed5"
-   },
-   "committedAs": {
-    "gitCommit": "5817a58",
-    "fullCommit": "5817a58a1e4e40a33137f37322c9667e8f4aab83",
-    "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5817a58a1e4e40a33137f37322c9667e8f4aab83"
-   },
-   "file": "sessions/2026-11-24T21-11-16/provenance.json"
-  }
+  "konjugateVersion": "2.0.1",
+  "gitCommit": "e30c15f",
+  "fullCommit": "e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+  "commitUrl": "https://github.com/zenineasa/Konjugate/commit/e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e"
  },
  "sessions": [
-  "2026-11-24T21-11-16"
+  "2026-11-25T06-49-56"
  ],
  "sessionParts": [
+  {
+   "session": "2026-11-25T06-49-56",
+   "part": "problems",
+   "startedAt": "2026-11-25T06:52:58.055Z",
+   "konjugateVersion": "2.0.1",
+   "gitCommit": "e30c15f",
+   "fullCommit": "e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "workingTreeChanges": false,
+   "uncommittedSources": []
+  },
+  {
+   "session": "2026-11-25T06-49-56",
+   "part": "scaling",
+   "startedAt": "2026-11-25T07:01:31.994Z",
+   "konjugateVersion": "2.0.1",
+   "gitCommit": "e30c15f",
+   "fullCommit": "e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "workingTreeChanges": false,
+   "uncommittedSources": []
+  },
+  {
+   "session": "2026-11-25T06-49-56",
+   "part": "comparisons",
+   "startedAt": "2026-11-25T08:01:08.076Z",
+   "konjugateVersion": "2.0.1",
+   "gitCommit": "e30c15f",
+   "fullCommit": "e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/e30c15f0badb5e1ab66ea3b3ec36f25e2b8bad5e",
+   "workingTreeChanges": false,
+   "uncommittedSources": []
+  }
+ ],
+ "supersededSessions": [
+  {
+   "session": "2026-11-23T22-06-11",
+   "part": "problems",
+   "startedAt": "2026-11-23T22:09:12.616Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "212d40f",
+   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "workingTreeChanges": false
+  },
+  {
+   "session": "2026-11-23T22-06-11",
+   "part": "scaling",
+   "startedAt": "2026-11-23T22:19:34.236Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "212d40f",
+   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
+   "workingTreeChanges": true
+  },
+  {
+   "session": "2026-11-24T06-25-38",
+   "part": "comparisons",
+   "startedAt": "2026-11-24T06:30:41.227Z",
+   "konjugateVersion": "1.5.0",
+   "gitCommit": "5a7148d",
+   "fullCommit": "5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
+   "workingTreeChanges": null
+  },
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "problems",
+   "startedAt": "2026-11-24T14:59:46.908Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": false
+  },
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "scaling",
+   "startedAt": "2026-11-24T15:08:48.436Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": true
+  },
+  {
+   "session": "2026-11-24T14-56-45",
+   "part": "comparisons",
+   "startedAt": "2026-11-24T16:47:32.613Z",
+   "konjugateVersion": "2.0.0",
+   "gitCommit": "41b2450",
+   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
+   "workingTreeChanges": null
+  },
   {
    "session": "2026-11-24T21-11-16",
    "part": "problems",
@@ -129,68 +210,6 @@
    }
   }
  ],
- "supersededSessions": [
-  {
-   "session": "2026-11-23T22-06-11",
-   "part": "problems",
-   "startedAt": "2026-11-23T22:09:12.616Z",
-   "konjugateVersion": "1.5.0",
-   "gitCommit": "212d40f",
-   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
-   "workingTreeChanges": false
-  },
-  {
-   "session": "2026-11-23T22-06-11",
-   "part": "scaling",
-   "startedAt": "2026-11-23T22:19:34.236Z",
-   "konjugateVersion": "1.5.0",
-   "gitCommit": "212d40f",
-   "fullCommit": "212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/212d40fcdb1022809aa59bc46f3bfa753b1a9f53",
-   "workingTreeChanges": true
-  },
-  {
-   "session": "2026-11-24T06-25-38",
-   "part": "comparisons",
-   "startedAt": "2026-11-24T06:30:41.227Z",
-   "konjugateVersion": "1.5.0",
-   "gitCommit": "5a7148d",
-   "fullCommit": "5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/5a7148d8b03f7a9d77159cfd90d0c3780158ce39",
-   "workingTreeChanges": null
-  },
-  {
-   "session": "2026-11-24T14-56-45",
-   "part": "problems",
-   "startedAt": "2026-11-24T14:59:46.908Z",
-   "konjugateVersion": "2.0.0",
-   "gitCommit": "41b2450",
-   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "workingTreeChanges": false
-  },
-  {
-   "session": "2026-11-24T14-56-45",
-   "part": "scaling",
-   "startedAt": "2026-11-24T15:08:48.436Z",
-   "konjugateVersion": "2.0.0",
-   "gitCommit": "41b2450",
-   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "workingTreeChanges": true
-  },
-  {
-   "session": "2026-11-24T14-56-45",
-   "part": "comparisons",
-   "startedAt": "2026-11-24T16:47:32.613Z",
-   "konjugateVersion": "2.0.0",
-   "gitCommit": "41b2450",
-   "fullCommit": "41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "commitUrl": "https://github.com/zenineasa/Konjugate/commit/41b2450c4455d108a5013f99ed3d08d995df32ad",
-   "workingTreeChanges": null
-  }
- ],
  "problems": [
   {
    "problem": "thermal/rcNetwork",
@@ -201,35 +220,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 17.080707999994047,
-    "median": 17.115041000011843,
-    "interquartileRange": 0.1834999999991851,
-    "minimumOverMedian": 0.9979939866917191,
+    "minimum": 20.663624999986496,
+    "median": 21.11837499999092,
+    "interquartileRange": 0.6694375000079162,
+    "minimumOverMedian": 0.9784666197089208,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     17.080707999994047
+     20.663624999986496
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.010721563564998654,
+    "withinRunSpread": 0.03169929031036735,
     "noisy": false
    },
    "compute": {
-    "minimum": 6.445333,
-    "median": 6.471316,
-    "interquartileRange": 0.028945499999998958,
-    "minimumOverMedian": 0.9959848970441252,
+    "minimum": 6.676417,
+    "median": 6.709,
+    "interquartileRange": 0.08787099999999981,
+    "minimumOverMedian": 0.9951433894768222,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     6.445333
+     6.676417
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004472892376140952,
+    "withinRunSpread": 0.01309748099567742,
     "noisy": false
    },
-   "peakResidentBytes": 9814016,
-   "substepsPerSecond": 7625983.017479469,
+   "peakResidentBytes": 9846784,
+   "substepsPerSecond": 7362032.659134383,
    "nodeStepsPerSecond": null
   },
   {
@@ -241,35 +260,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 33.239666999987094,
-    "median": 33.410040999995545,
-    "interquartileRange": 0.04266599999391474,
-    "minimumOverMedian": 0.9949005150874112,
+    "minimum": 37.01395799999591,
+    "median": 38.12179199999082,
+    "interquartileRange": 1.0997504999977536,
+    "minimumOverMedian": 0.9709396137517571,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     33.239666999987094
+     37.01395799999591
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0012770412342181928,
+    "withinRunSpread": 0.028848342176517265,
     "noisy": false
    },
    "compute": {
-    "minimum": 18.263546,
-    "median": 18.383964,
-    "interquartileRange": 0.08874850000000123,
-    "minimumOverMedian": 0.9934498348669527,
+    "minimum": 18.770223,
+    "median": 18.984924,
+    "interquartileRange": 0.2850235000000012,
+    "minimumOverMedian": 0.9886909739538595,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     18.263546
+     18.770223
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0048274953105870546,
+    "withinRunSpread": 0.015013149381056317,
     "noisy": false
    },
-   "peakResidentBytes": 9453568,
-   "substepsPerSecond": 7176700.515880102,
+   "peakResidentBytes": 9469952,
+   "substepsPerSecond": 6982975.109033067,
    "nodeStepsPerSecond": null
   },
   {
@@ -281,35 +300,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 231.29349999999977,
-    "median": 234.56895800001803,
-    "interquartileRange": 1.582021000009263,
-    "minimumOverMedian": 0.9860362682771605,
+    "minimum": 240.24683299998287,
+    "median": 242.10499999998137,
+    "interquartileRange": 1.781562499993015,
+    "minimumOverMedian": 0.9923249540488687,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     231.29349999999977
+     240.24683299998287
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006744374931354478,
+    "withinRunSpread": 0.007358635715880102,
     "noisy": false
    },
    "compute": {
-    "minimum": 214.84252,
-    "median": 217.956387,
-    "interquartileRange": 1.5667614999999842,
-    "minimumOverMedian": 0.98571334823971,
+    "minimum": 219.80166,
+    "median": 221.942646,
+    "interquartileRange": 2.7186869999999885,
+    "minimumOverMedian": 0.9903534267136745,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     214.84252
+     219.80166
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007188417469959181,
+    "withinRunSpread": 0.012249502513365497,
     "noisy": false
    },
-   "peakResidentBytes": 10010624,
-   "substepsPerSecond": 915126.1119074567,
+   "peakResidentBytes": 10076160,
+   "substepsPerSecond": 894479.14087637,
    "nodeStepsPerSecond": null
   },
   {
@@ -321,35 +340,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 66.6657079999859,
-    "median": 66.8830420000013,
-    "interquartileRange": 0.17066700002760626,
-    "minimumOverMedian": 0.9967505365558075,
+    "minimum": 70.15166699999827,
+    "median": 70.5492919999815,
+    "interquartileRange": 0.2758954999881098,
+    "minimumOverMedian": 0.9943638697326213,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     66.6657079999859
+     70.15166699999827
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002551723051526319,
+    "withinRunSpread": 0.003910677090681252,
     "noisy": false
    },
    "compute": {
-    "minimum": 37.029523,
-    "median": 37.21061,
-    "interquartileRange": 0.04397250000000241,
-    "minimumOverMedian": 0.9951334579035387,
+    "minimum": 37.193578,
+    "median": 37.347457,
+    "interquartileRange": 0.11795449999999619,
+    "minimumOverMedian": 0.9958797997946689,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     37.029523
+     37.193578
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0011817194074486392,
+    "withinRunSpread": 0.0031583007110764245,
     "noisy": false
    },
-   "peakResidentBytes": 10584064,
-   "substepsPerSecond": 7079324.2462237505,
+   "peakResidentBytes": 10682368,
+   "substepsPerSecond": 7048098.464740337,
    "nodeStepsPerSecond": null
   },
   {
@@ -361,35 +380,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 162.66270799998892,
-    "median": 163.6414170000062,
-    "interquartileRange": 1.0892295000085142,
-    "minimumOverMedian": 0.9940191852529777,
+    "minimum": 167.69745800000965,
+    "median": 168.69395800001803,
+    "interquartileRange": 2.6056249999965075,
+    "minimumOverMedian": 0.994092853046887,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     162.66270799998892
+     167.69745800000965
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006656196945596438,
+    "withinRunSpread": 0.015445870325694944,
     "noisy": false
    },
    "compute": {
-    "minimum": 133.115238,
-    "median": 134.113674,
-    "interquartileRange": 0.6018919999999923,
-    "minimumOverMedian": 0.992555300513205,
+    "minimum": 134.987557,
+    "median": 135.865683,
+    "interquartileRange": 2.1598999999999933,
+    "minimumOverMedian": 0.9935368079664386,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     133.115238
+     134.987557
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004487924176918696,
+    "withinRunSpread": 0.015897318235981586,
     "noisy": false
    },
-   "peakResidentBytes": 10797056,
-   "substepsPerSecond": 1969301.2155377734,
+   "peakResidentBytes": 10813440,
+   "substepsPerSecond": 1941986.401013243,
    "nodeStepsPerSecond": null
   },
   {
@@ -401,35 +420,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 276.3950419999892,
-    "median": 278.1043340000033,
-    "interquartileRange": 0.6849584999872604,
-    "minimumOverMedian": 0.9938537743176125,
+    "minimum": 284.60691699999734,
+    "median": 285.6933330000029,
+    "interquartileRange": 2.1033325000025798,
+    "minimumOverMedian": 0.9961972651283202,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     276.3950419999892
+     284.60691699999734
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002462955143975758,
+    "withinRunSpread": 0.007362203653532785,
     "noisy": false
    },
    "compute": {
-    "minimum": 246.544006,
-    "median": 248.02475,
-    "interquartileRange": 0.7605944999999963,
-    "minimumOverMedian": 0.99402985387547,
+    "minimum": 251.403873,
+    "median": 252.452234,
+    "interquartileRange": 1.1369680000000244,
+    "minimumOverMedian": 0.9958472896698549,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     246.544006
+     251.403873
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003066607263992792,
+    "withinRunSpread": 0.004503695538697528,
     "noisy": false
    },
-   "peakResidentBytes": 10829824,
-   "substepsPerSecond": 1063274.683709001,
+   "peakResidentBytes": 10878976,
+   "substepsPerSecond": 1042720.6107520865,
    "nodeStepsPerSecond": null
   },
   {
@@ -441,35 +460,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 90.04041700001108,
-    "median": 91.3057919999992,
-    "interquartileRange": 1.566228499999852,
-    "minimumOverMedian": 0.9861413501567553,
+    "minimum": 94.12141699998756,
+    "median": 95.37779200001387,
+    "interquartileRange": 0.6261245000205236,
+    "minimumOverMedian": 0.9868273843031916,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     90.04041700001108
+     94.12141699998756
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.017153659868586055,
+    "withinRunSpread": 0.006564678075378727,
     "noisy": false
    },
    "compute": {
-    "minimum": 70.580221,
-    "median": 71.890872,
-    "interquartileRange": 1.3264410000000026,
-    "minimumOverMedian": 0.9817688815904193,
+    "minimum": 71.227915,
+    "median": 72.167909,
+    "interquartileRange": 0.8187494999999956,
+    "minimumOverMedian": 0.9869749032080173,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     70.580221
+     71.227915
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.018450756863819966,
+    "withinRunSpread": 0.011345063357731422,
     "noisy": false
    },
-   "peakResidentBytes": 10125312,
-   "substepsPerSecond": 1857064.1766621843,
+   "peakResidentBytes": 10190848,
+   "substepsPerSecond": 1840177.4079727028,
    "nodeStepsPerSecond": null
   },
   {
@@ -481,35 +500,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 147.62991700001294,
-    "median": 148.36412499999278,
-    "interquartileRange": 0.7979579999955604,
-    "minimumOverMedian": 0.9950513104163161,
+    "minimum": 153.02766700001666,
+    "median": 154.3264579999959,
+    "interquartileRange": 1.373166499994113,
+    "minimumOverMedian": 0.9915841326444538,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     147.62991700001294
+     153.02766700001666
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005378375668616649,
+    "withinRunSpread": 0.008897803512046842,
     "noisy": false
    },
    "compute": {
-    "minimum": 128.60125,
-    "median": 129.18885,
-    "interquartileRange": 0.7527860000000146,
-    "minimumOverMedian": 0.9954516198572864,
+    "minimum": 130.604739,
+    "median": 131.584454,
+    "interquartileRange": 0.4517529999999681,
+    "minimumOverMedian": 0.9925544775980908,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     128.60125
+     130.604739
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005827019901485419,
+    "withinRunSpread": 0.003433179120080311,
     "noisy": false
    },
-   "peakResidentBytes": 10141696,
-   "substepsPerSecond": 1019212.4882145391,
+   "peakResidentBytes": 10240000,
+   "substepsPerSecond": 1003577.6726294748,
    "nodeStepsPerSecond": null
   },
   {
@@ -521,35 +540,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 45.12475000001723,
-    "median": 45.34437499998603,
-    "interquartileRange": 0.21177100000204518,
-    "minimumOverMedian": 0.9951565105932353,
+    "minimum": 49.07612499999232,
+    "median": 49.45975000000908,
+    "interquartileRange": 0.2446875000023283,
+    "minimumOverMedian": 0.9922436931036511,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     45.12475000001723
+     49.07612499999232
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004670281595062462,
+    "withinRunSpread": 0.004947204545156079,
     "noisy": false
    },
    "compute": {
-    "minimum": 25.13213,
-    "median": 25.174842,
-    "interquartileRange": 0.04957950000000366,
-    "minimumOverMedian": 0.9983033855783483,
+    "minimum": 25.436815,
+    "median": 25.646719,
+    "interquartileRange": 0.07032949999999971,
+    "minimumOverMedian": 0.9918155612809576,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     25.13213
+     25.436815
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.001969406600446734,
+    "withinRunSpread": 0.002742241609930678,
     "noisy": false
    },
-   "peakResidentBytes": 10715136,
-   "substepsPerSecond": 5215316.011814359,
+   "peakResidentBytes": 10780672,
+   "substepsPerSecond": 5152846.37640365,
    "nodeStepsPerSecond": null
   },
   {
@@ -561,35 +580,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 49.79504199998337,
-    "median": 49.85787499998696,
-    "interquartileRange": 0.1013119999988703,
-    "minimumOverMedian": 0.9987397577613645,
+    "minimum": 53.803249999997206,
+    "median": 54.0291670000006,
+    "interquartileRange": 1.5141664999973727,
+    "minimumOverMedian": 0.9958186103442352,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     49.79504199998337
+     53.803249999997206
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0020320160054734943,
+    "withinRunSpread": 0.028024983246500098,
     "noisy": false
    },
    "compute": {
-    "minimum": 28.613474,
-    "median": 28.713382,
-    "interquartileRange": 0.0747189999999982,
-    "minimumOverMedian": 0.9965205074066162,
+    "minimum": 29.160439,
+    "median": 29.243415,
+    "interquartileRange": 0.2008234999999985,
+    "minimumOverMedian": 0.9971625748907917,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     28.613474
+     29.160439
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0026022361280882275,
+    "withinRunSpread": 0.006867306708193913,
     "noisy": false
    },
    "peakResidentBytes": 10829824,
-   "substepsPerSecond": 9161557.94294674,
+   "substepsPerSecond": 8989713.769398328,
    "nodeStepsPerSecond": null
   },
   {
@@ -601,35 +620,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 46.25591600002372,
-    "median": 46.396375000011176,
-    "interquartileRange": 0.17616700001235586,
-    "minimumOverMedian": 0.9969726298662897,
+    "minimum": 50.3192080000008,
+    "median": 50.57895799999824,
+    "interquartileRange": 0.6251664999872446,
+    "minimumOverMedian": 0.9948644651794241,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     46.25591600002372
+     50.3192080000008
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003796999227036884,
+    "withinRunSpread": 0.01236020916024538,
     "noisy": false
    },
    "compute": {
-    "minimum": 30.645719,
-    "median": 30.837506,
-    "interquartileRange": 0.2519449999999992,
-    "minimumOverMedian": 0.9937807227341925,
+    "minimum": 31.2924,
+    "median": 31.440088,
+    "interquartileRange": 0.1988149999999962,
+    "minimumOverMedian": 0.9953025576773196,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     30.645719
+     31.2924
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.008170083533992638,
+    "withinRunSpread": 0.006323614615836832,
     "noisy": false
    },
-   "peakResidentBytes": 10600448,
-   "substepsPerSecond": 2138504.2393686376,
+   "peakResidentBytes": 10649600,
+   "substepsPerSecond": 2094310.4395955568,
    "nodeStepsPerSecond": null
   },
   {
@@ -641,35 +660,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 31.751375000021653,
-    "median": 31.840874999994412,
-    "interquartileRange": 0.13172900001518428,
-    "minimumOverMedian": 0.9971891475980866,
+    "minimum": 35.579292000009445,
+    "median": 35.915792000014335,
+    "interquartileRange": 0.49449949999689125,
+    "minimumOverMedian": 0.9906308623236053,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     31.751375000021653
+     35.579292000009445
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004137103644771301,
+    "withinRunSpread": 0.013768302812219592,
     "noisy": false
    },
    "compute": {
-    "minimum": 21.13163,
-    "median": 21.145708,
-    "interquartileRange": 0.02019000000000304,
-    "minimumOverMedian": 0.9993342384185009,
+    "minimum": 21.710558,
+    "median": 21.765956,
+    "interquartileRange": 0.09719549999999799,
+    "minimumOverMedian": 0.9974548326753946,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     21.13163
+     21.710558
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0009548036887676232,
+    "withinRunSpread": 0.004465482701517819,
     "noisy": false
    },
-   "peakResidentBytes": 10682368,
-   "substepsPerSecond": 9303967.559530428,
+   "peakResidentBytes": 10764288,
+   "substepsPerSecond": 9055870.42028123,
    "nodeStepsPerSecond": null
   },
   {
@@ -681,35 +700,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 50.55433399998583,
-    "median": 50.91029100000742,
-    "interquartileRange": 0.44156249999650754,
-    "minimumOverMedian": 0.9930081523199006,
+    "minimum": 55.01249999998254,
+    "median": 55.56500000000233,
+    "interquartileRange": 0.46285399998305365,
+    "minimumOverMedian": 0.9900566903622826,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     50.55433399998583
+     55.01249999998254
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.008673344648461019,
+    "withinRunSpread": 0.008329955907190394,
     "noisy": false
    },
    "compute": {
-    "minimum": 34.175655,
-    "median": 34.317922,
-    "interquartileRange": 0.21538750000000562,
-    "minimumOverMedian": 0.9958544401377215,
+    "minimum": 35.062411,
+    "median": 35.30021,
+    "interquartileRange": 0.157547000000001,
+    "minimumOverMedian": 0.9932635244946134,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     34.175655
+     35.062411
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006276239569517222,
+    "withinRunSpread": 0.004463061267907499,
     "noisy": false
    },
-   "peakResidentBytes": 10633216,
-   "substepsPerSecond": 5752867.062825862,
+   "peakResidentBytes": 10715136,
+   "substepsPerSecond": 5607372.522100663,
    "nodeStepsPerSecond": null
   },
   {
@@ -721,35 +740,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 54.328249999991385,
-    "median": 54.40920799999731,
-    "interquartileRange": 0.7110834999912186,
-    "minimumOverMedian": 0.9985120533273353,
+    "minimum": 58.514832999993814,
+    "median": 60.21308300000965,
+    "interquartileRange": 1.7598540000180947,
+    "minimumOverMedian": 0.9717959965608212,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     54.328249999991385
+     58.514832999993814
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.013069175717302369,
+    "withinRunSpread": 0.029227103352568954,
     "noisy": false
    },
    "compute": {
-    "minimum": 33.462599,
-    "median": 33.640932,
-    "interquartileRange": 0.3609600000000057,
-    "minimumOverMedian": 0.9946989280796381,
+    "minimum": 34.032114,
+    "median": 34.254259,
+    "interquartileRange": 0.2362564999999961,
+    "minimumOverMedian": 0.9935148210329117,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     33.462599
+     34.032114
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01072978596431293,
+    "withinRunSpread": 0.006897142337832972,
     "noisy": false
    },
-   "peakResidentBytes": 15990784,
-   "substepsPerSecond": 1530066.4482158127,
+   "peakResidentBytes": 16023552,
+   "substepsPerSecond": 1504461.3449520061,
    "nodeStepsPerSecond": null
   },
   {
@@ -761,35 +780,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 108.55779200000688,
-    "median": 108.74025000000256,
-    "interquartileRange": 0.37056250000023283,
-    "minimumOverMedian": 0.9983220748527277,
+    "minimum": 113.20362499999464,
+    "median": 113.82083299997612,
+    "interquartileRange": 0.6670629999862285,
+    "minimumOverMedian": 0.9945773723165283,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     108.55779200000688
+     113.20362499999464
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003407776789185459,
+    "withinRunSpread": 0.005860640643759552,
     "noisy": false
    },
    "compute": {
-    "minimum": 80.215721,
-    "median": 80.529884,
-    "interquartileRange": 0.2941420000000079,
-    "minimumOverMedian": 0.9960988022781705,
+    "minimum": 81.323147,
+    "median": 81.377427,
+    "interquartileRange": 0.1474304999999987,
+    "minimumOverMedian": 0.9993329845633975,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     80.215721
+     81.323147
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0036525819408855464,
+    "withinRunSpread": 0.0018116879021008946,
     "noisy": false
    },
-   "peakResidentBytes": 21528576,
-   "substepsPerSecond": 829762.5349524689,
+   "peakResidentBytes": 21544960,
+   "substepsPerSecond": 818463.1615399732,
    "nodeStepsPerSecond": null
   },
   {
@@ -801,35 +820,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 46.737083000014536,
-    "median": 46.82554200000595,
-    "interquartileRange": 0.14974999996775296,
-    "minimumOverMedian": 0.9981108814503118,
+    "minimum": 50.65374999999767,
+    "median": 51.35800000000745,
+    "interquartileRange": 1.0072289999952773,
+    "minimumOverMedian": 0.9862874333110776,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     46.737083000014536
+     50.65374999999767
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003198040931757585,
+    "withinRunSpread": 0.019611920246020702,
     "noisy": false
    },
    "compute": {
-    "minimum": 26.932232,
-    "median": 26.994498,
-    "interquartileRange": 0.08467249999999993,
-    "minimumOverMedian": 0.9976933818143238,
+    "minimum": 27.251346,
+    "median": 27.475447,
+    "interquartileRange": 0.15787450000000192,
+    "minimumOverMedian": 0.9918435903881747,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     26.932232
+     27.251346
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003136657699654201,
+    "withinRunSpread": 0.00574602116573397,
     "noisy": false
    },
    "peakResidentBytes": 11550720,
-   "substepsPerSecond": 7300100.48925763,
+   "substepsPerSecond": 7214616.114741635,
    "nodeStepsPerSecond": null
   },
   {
@@ -841,35 +860,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 47.84270799998194,
-    "median": 48.23120900001959,
-    "interquartileRange": 0.20356249999895226,
-    "minimumOverMedian": 0.9919450287875328,
+    "minimum": 51.89091600000393,
+    "median": 53.66766700000153,
+    "interquartileRange": 1.1804380000248784,
+    "minimumOverMedian": 0.9668934556071246,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     47.84270799998194
+     51.89091600000393
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004220555615739792,
+    "withinRunSpread": 0.021995329143427174,
     "noisy": false
    },
    "compute": {
-    "minimum": 35.672654,
-    "median": 35.877217,
-    "interquartileRange": 0.1526605000000032,
-    "minimumOverMedian": 0.9942982478267476,
+    "minimum": 36.624131,
+    "median": 36.785571,
+    "interquartileRange": 0.12453750000000241,
+    "minimumOverMedian": 0.995611322711288,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     35.672654
+     36.624131
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004255081992563782,
+    "withinRunSpread": 0.0033854986239034435,
     "noisy": false
    },
-   "peakResidentBytes": 10878976,
-   "substepsPerSecond": 430581.92418203596,
+   "peakResidentBytes": 10977280,
+   "substepsPerSecond": 419395.616513058,
    "nodeStepsPerSecond": null
   },
   {
@@ -881,35 +900,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 17.26183299999684,
-    "median": 17.421000000002095,
-    "interquartileRange": 0.11289649999525864,
-    "minimumOverMedian": 0.9908634980767329,
+    "minimum": 20.536374999996042,
+    "median": 21.046624999988126,
+    "interquartileRange": 1.0107290000014473,
+    "minimumOverMedian": 0.9757562079434412,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     17.26183299999684
+     20.536374999996042
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006480483324450092,
+    "withinRunSpread": 0.04802332915619571,
     "noisy": false
    },
    "compute": {
-    "minimum": 7.959629,
-    "median": 8.086368,
-    "interquartileRange": 0.11810599999999916,
-    "minimumOverMedian": 0.9843268325161555,
+    "minimum": 8.076414,
+    "median": 8.327081,
+    "interquartileRange": 0.2318245000000001,
+    "minimumOverMedian": 0.9698973746022166,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     7.959629
+     8.076414
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.014605568284797223,
+    "withinRunSpread": 0.027839827665901186,
     "noisy": false
    },
-   "peakResidentBytes": 9633792,
-   "substepsPerSecond": 514596.84867221833,
+   "peakResidentBytes": 9666560,
+   "substepsPerSecond": 507155.77482778864,
    "nodeStepsPerSecond": null
   },
   {
@@ -921,35 +940,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 667.310582999984,
-    "median": 670.1014579999901,
-    "interquartileRange": 1.51841649999551,
-    "minimumOverMedian": 0.995835145608643,
+    "minimum": 672.9085840000189,
+    "median": 675.4290829999954,
+    "interquartileRange": 2.9486459999752697,
+    "minimumOverMedian": 0.9962682995692435,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     667.310582999984
+     672.9085840000189
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002265950151082245,
+    "withinRunSpread": 0.004365589333048144,
     "noisy": false
    },
    "compute": {
-    "minimum": 550.345034,
-    "median": 552.850715,
-    "interquartileRange": 1.6284369999999626,
-    "minimumOverMedian": 0.9954677077698996,
+    "minimum": 552.086847,
+    "median": 553.321585,
+    "interquartileRange": 2.5922875000001113,
+    "minimumOverMedian": 0.997768498404052,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     550.345034
+     552.086847
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0029455275281681827,
+    "withinRunSpread": 0.004684956398366623,
     "noisy": false
    },
-   "peakResidentBytes": 11747328,
-   "substepsPerSecond": 5715919.660683265,
+   "peakResidentBytes": 11796480,
+   "substepsPerSecond": 5697886.151596725,
    "nodeStepsPerSecond": null
   },
   {
@@ -961,35 +980,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 4691.849917000043,
-    "median": 4722.470541999966,
-    "interquartileRange": 16.254875000042375,
-    "minimumOverMedian": 0.9935159733178652,
+    "minimum": 4703.0069169999915,
+    "median": 4720.747791000002,
+    "interquartileRange": 15.93416599999182,
+    "minimumOverMedian": 0.9962419356454855,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     4691.849917000043
+     4703.0069169999915
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0034420278232499962,
+    "withinRunSpread": 0.0033753478697527424,
     "noisy": false
    },
    "compute": {
-    "minimum": 4591.075774,
-    "median": 4615.550292,
-    "interquartileRange": 13.530606000000262,
-    "minimumOverMedian": 0.9946973781127635,
+    "minimum": 4597.110627,
+    "median": 4611.795442,
+    "interquartileRange": 14.022573499999453,
+    "minimumOverMedian": 0.9968158138875233,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     4591.075774
+     4597.110627
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002931526068181398,
+    "withinRunSpread": 0.0030405887850737533,
     "noisy": false
    },
    "peakResidentBytes": 12648448,
-   "substepsPerSecond": 685183.2021189376,
+   "substepsPerSecond": 684283.7284629043,
    "nodeStepsPerSecond": null
   },
   {
@@ -1001,35 +1020,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 655.4250840000459,
-    "median": 656.4647920000134,
-    "interquartileRange": 2.8889380000764504,
-    "minimumOverMedian": 0.9984162014282596,
+    "minimum": 660.9395000000368,
+    "median": 663.8119580000057,
+    "interquartileRange": 1.3793960000039078,
+    "minimumOverMedian": 0.9956727835867505,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     655.4250840000459
+     660.9395000000368
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004400750863233487,
+    "withinRunSpread": 0.0020779920930618367,
     "noisy": false
    },
    "compute": {
-    "minimum": 587.127638,
-    "median": 588.159339,
-    "interquartileRange": 2.2205479999998943,
-    "minimumOverMedian": 0.998245881801768,
+    "minimum": 589.114888,
+    "median": 591.885552,
+    "interquartileRange": 1.087543500000038,
+    "minimumOverMedian": 0.995318919357572,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     587.127638
+     589.114888
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0037754190960825568,
+    "withinRunSpread": 0.0018374219413283433,
     "noisy": false
    },
    "peakResidentBytes": 18825216,
-   "substepsPerSecond": 9376196.322067877,
+   "substepsPerSecond": 9344567.778093565,
    "nodeStepsPerSecond": null
   },
   {
@@ -1041,35 +1060,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 482.7732079999987,
-    "median": 486.13608399999794,
-    "interquartileRange": 1.7025004999886733,
-    "minimumOverMedian": 0.9930824390316205,
+    "minimum": 487.50366699998267,
+    "median": 492.2975420000148,
+    "interquartileRange": 2.4190420000231825,
+    "minimumOverMedian": 0.9902622406348882,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     482.7732079999987
+     487.50366699998267
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003502106829800111,
+    "withinRunSpread": 0.004913780373949358,
     "noisy": false
    },
    "compute": {
-    "minimum": 461.071881,
-    "median": 464.5156,
-    "interquartileRange": 1.5678480000000263,
-    "minimumOverMedian": 0.9925864298206563,
+    "minimum": 462.273418,
+    "median": 465.903887,
+    "interquartileRange": 1.6084574999999859,
+    "minimumOverMedian": 0.9922076868184617,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     461.071881
+     462.273418
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003375232177347814,
+    "withinRunSpread": 0.0034523375848117487,
     "noisy": false
    },
-   "peakResidentBytes": 19726336,
-   "substepsPerSecond": 2984905.514114403,
+   "peakResidentBytes": 19709952,
+   "substepsPerSecond": 2977147.17396967,
    "nodeStepsPerSecond": null
   },
   {
@@ -1081,35 +1100,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 79.53008400002727,
-    "median": 79.86870799999451,
-    "interquartileRange": 0.8015624999825377,
-    "minimumOverMedian": 0.9957602419214385,
+    "minimum": 83.27566699997988,
+    "median": 83.68020800000522,
+    "interquartileRange": 1.399833499948727,
+    "minimumOverMedian": 0.9951656310411499,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     79.53008400002727
+     83.27566699997988
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.010036001834192594,
+    "withinRunSpread": 0.01672837022523462,
     "noisy": false
    },
    "compute": {
-    "minimum": 61.033944,
-    "median": 61.121535,
-    "interquartileRange": 0.39748949999999894,
-    "minimumOverMedian": 0.9985669371687081,
+    "minimum": 61.244461,
+    "median": 61.457849,
+    "interquartileRange": 0.27028299999999206,
+    "minimumOverMedian": 0.9965278967052686,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     61.033944
+     61.244461
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0065032643568261,
+    "withinRunSpread": 0.004397859742862007,
     "noisy": false
    },
-   "peakResidentBytes": 10502144,
-   "substepsPerSecond": 6442578.903306658,
+   "peakResidentBytes": 10551296,
+   "substepsPerSecond": 6420433.678075802,
    "nodeStepsPerSecond": null
   },
   {
@@ -1121,35 +1140,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 63.02687499998137,
-    "median": 63.30316700000549,
-    "interquartileRange": 0.29712450003717095,
-    "minimumOverMedian": 0.9956354158390829,
+    "minimum": 66.29604200000176,
+    "median": 66.7597919999971,
+    "interquartileRange": 0.3005204999935813,
+    "minimumOverMedian": 0.9930534534919557,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     63.02687499998137
+     66.29604200000176
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0046936751211380185,
+    "withinRunSpread": 0.004501519417460053,
     "noisy": false
    },
    "compute": {
-    "minimum": 51.724411,
-    "median": 52.000624,
-    "interquartileRange": 0.17197550000000206,
-    "minimumOverMedian": 0.9946882752791583,
+    "minimum": 51.573656,
+    "median": 52.054784,
+    "interquartileRange": 0.33273999999999404,
+    "minimumOverMedian": 0.9907572760267337,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     51.724411
+     51.573656
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003307181467668581,
+    "withinRunSpread": 0.0063921118181951165,
     "noisy": false
    },
-   "peakResidentBytes": 11173888,
-   "substepsPerSecond": 1113594.1209654373,
+   "peakResidentBytes": 11075584,
+   "substepsPerSecond": 1116849.2689368385,
    "nodeStepsPerSecond": null
   },
   {
@@ -1161,35 +1180,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 199.83862499997485,
-    "median": 200.04145800002152,
-    "interquartileRange": 0.29772949998732656,
-    "minimumOverMedian": 0.9989860451824609,
+    "minimum": 203.62570900004357,
+    "median": 204.2361249999958,
+    "interquartileRange": 1.046395500015933,
+    "minimumOverMedian": 0.997011224140919,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     199.83862499997485
+     203.62570900004357
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.001488338982148863,
+    "withinRunSpread": 0.005123459427248507,
     "noisy": false
    },
    "compute": {
-    "minimum": 168.433427,
-    "median": 168.975045,
-    "interquartileRange": 0.2654254999999921,
-    "minimumOverMedian": 0.9967946864579915,
+    "minimum": 168.836351,
+    "median": 169.67555,
+    "interquartileRange": 0.5289159999999811,
+    "minimumOverMedian": 0.9950540958906573,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     168.433427
+     168.836351
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0015707970369233642,
+    "withinRunSpread": 0.003117219894085984,
     "noisy": false
    },
-   "peakResidentBytes": 13778944,
-   "substepsPerSecond": 4669096.948315372,
+   "peakResidentBytes": 13795328,
+   "substepsPerSecond": 4657954.257729723,
    "nodeStepsPerSecond": null
   },
   {
@@ -1201,35 +1220,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 495.8706249999814,
-    "median": 500.91425000003073,
-    "interquartileRange": 5.079270499991253,
-    "minimumOverMedian": 0.989931160872247,
+    "minimum": 501.9228329999605,
+    "median": 504.22287499997765,
+    "interquartileRange": 3.451937999983784,
+    "minimumOverMedian": 0.9954384417802996,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     495.8706249999814
+     501.9228329999605
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.010140000009963665,
+    "withinRunSpread": 0.006846055923154889,
     "noisy": false
    },
    "compute": {
-    "minimum": 478.879956,
-    "median": 484.124994,
-    "interquartileRange": 4.988770999999986,
-    "minimumOverMedian": 0.9891659425458211,
+    "minimum": 480.92653,
+    "median": 482.861105,
+    "interquartileRange": 3.0459205000000225,
+    "minimumOverMedian": 0.9959935166034961,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     478.879956
+     480.92653
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0103047168847473,
+    "withinRunSpread": 0.006308067617084259,
     "noisy": false
    },
    "peakResidentBytes": 13598720,
-   "substepsPerSecond": 615837.0094738315,
+   "substepsPerSecond": 613216.3264106058,
    "nodeStepsPerSecond": null
   },
   {
@@ -1241,35 +1260,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 403.6543749999837,
-    "median": 404.5372909999569,
-    "interquartileRange": 1.7418959999631625,
-    "minimumOverMedian": 0.9978174669687663,
+    "minimum": 406.69670800003223,
+    "median": 409.21483299997635,
+    "interquartileRange": 1.7922709999838844,
+    "minimumOverMedian": 0.9938464473990749,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     403.6543749999837
+     406.69670800003223
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004305897228058879,
+    "withinRunSpread": 0.004379780143463147,
     "noisy": false
    },
    "compute": {
-    "minimum": 364.498157,
-    "median": 365.433559,
-    "interquartileRange": 1.587977500000079,
-    "minimumOverMedian": 0.9974402952959227,
+    "minimum": 364.196182,
+    "median": 365.446906,
+    "interquartileRange": 0.6232234999999946,
+    "minimumOverMedian": 0.9965775493526822,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     364.498157
+     364.196182
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0043454616055119315,
+    "withinRunSpread": 0.001705373584418839,
     "noisy": false
    },
    "peakResidentBytes": 14925824,
-   "substepsPerSecond": 4108662.749699445,
+   "substepsPerSecond": 4112069.466999519,
    "nodeStepsPerSecond": null
   },
   {
@@ -1281,35 +1300,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 232.435959000024,
-    "median": 232.79275000002235,
-    "interquartileRange": 0.33645800000522286,
-    "minimumOverMedian": 0.9984673448808079,
+    "minimum": 236.28549999999814,
+    "median": 237.46554200001992,
+    "interquartileRange": 1.021979500015732,
+    "minimumOverMedian": 0.9950306811250043,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     232.435959000024
+     236.28549999999814
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0014453113338159824,
+    "withinRunSpread": 0.004303695986408193,
     "noisy": false
    },
    "compute": {
-    "minimum": 215.896594,
-    "median": 216.194924,
-    "interquartileRange": 0.49830550000001494,
-    "minimumOverMedian": 0.9986200878610823,
+    "minimum": 216.415339,
+    "median": 217.427215,
+    "interquartileRange": 0.35699900000000184,
+    "minimumOverMedian": 0.9953461391666172,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     215.896594
+     216.415339
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002304889914991783,
+    "withinRunSpread": 0.001641924172187929,
     "noisy": false
    },
-   "peakResidentBytes": 15581184,
-   "substepsPerSecond": 867081.7660050718,
+   "peakResidentBytes": 15646720,
+   "substepsPerSecond": 865003.3812991417,
    "nodeStepsPerSecond": null
   },
   {
@@ -1321,35 +1340,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 34.52624999999534,
-    "median": 34.55595800001174,
-    "interquartileRange": 0.1852499999513384,
-    "minimumOverMedian": 0.999140292970133,
+    "minimum": 37.98099999997066,
+    "median": 38.24712499999441,
+    "interquartileRange": 0.2257920000120066,
+    "minimumOverMedian": 0.9930419606696245,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     34.52624999999534
+     37.98099999997066
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005360870040161394,
+    "withinRunSpread": 0.0059035025511601094,
     "noisy": false
    },
    "compute": {
-    "minimum": 19.898875,
-    "median": 20.008581,
-    "interquartileRange": 0.09437749999999667,
-    "minimumOverMedian": 0.9945170524586426,
+    "minimum": 20.112367,
+    "median": 20.167149,
+    "interquartileRange": 0.11012999999999806,
+    "minimumOverMedian": 0.9972836021591351,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     19.898875
+     20.112367
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0047168512349774665,
+    "withinRunSpread": 0.0054608611261809025,
     "noisy": false
    },
-   "peakResidentBytes": 12058624,
-   "substepsPerSecond": 4824393.338819406,
+   "peakResidentBytes": 12091392,
+   "substepsPerSecond": 4773182.589597734,
    "nodeStepsPerSecond": null
   },
   {
@@ -1361,35 +1380,35 @@
    "backend": null,
    "workers": null,
    "wall": {
-    "minimum": 17.79720900004031,
-    "median": 17.94854099996155,
-    "interquartileRange": 0.1261884999985341,
-    "minimumOverMedian": 0.9915685625967279,
+    "minimum": 21.03295799996704,
+    "median": 21.353457999997772,
+    "interquartileRange": 0.305312500015134,
+    "minimumOverMedian": 0.9849907214077098,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     17.79720900004031
+     21.03295799996704
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007030571454181397,
+    "withinRunSpread": 0.014298035475807517,
     "noisy": false
    },
    "compute": {
-    "minimum": 6.167083,
-    "median": 6.18083,
-    "interquartileRange": 0.017075000000000173,
-    "minimumOverMedian": 0.9977758650537225,
+    "minimum": 6.150561,
+    "median": 6.304227,
+    "interquartileRange": 0.07333350000000038,
+    "minimumOverMedian": 0.9756249259425461,
     "runs": 7,
     "sessions": 1,
     "sessionMinimums": [
-     6.167083
+     6.150561
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0027625739585136902,
+    "withinRunSpread": 0.011632433286428358,
     "noisy": false
    },
    "peakResidentBytes": 10354688,
-   "substepsPerSecond": 7783258.308668782,
+   "substepsPerSecond": 7804166.156550598,
    "nodeStepsPerSecond": null
   }
  ],
@@ -1403,36 +1422,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 96.04366700000537,
-    "median": 96.72970799999894,
-    "interquartileRange": 0.4692910000012489,
-    "minimumOverMedian": 0.9929076494266521,
+    "minimum": 99.73674999999639,
+    "median": 100.45562500000233,
+    "interquartileRange": 0.6820420000003651,
+    "minimumOverMedian": 0.9928438551847553,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     96.04366700000537
+     99.73674999999639
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004851570522690444,
+    "withinRunSpread": 0.006789485407117314,
     "noisy": false
    },
    "compute": {
-    "minimum": 73.274357,
-    "median": 73.407381,
-    "interquartileRange": 0.26374300000000517,
-    "minimumOverMedian": 0.9981878661493181,
+    "minimum": 73.442712,
+    "median": 74.001033,
+    "interquartileRange": 0.38811199999999246,
+    "minimumOverMedian": 0.9924552269425752,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     73.274357
+     73.442712
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0035928675891598034,
+    "withinRunSpread": 0.0052446835438093465,
     "noisy": false
    },
-   "peakResidentBytes": 13107200,
-   "substepsPerSecond": 13647339.136664141,
-   "nodeStepsPerSecond": 13647339.136664141,
+   "peakResidentBytes": 13172736,
+   "substepsPerSecond": 13616054.91910484,
+   "nodeStepsPerSecond": 13616054.91910484,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -1445,38 +1464,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 655.1035420000117,
-    "median": 659.3194159999985,
-    "interquartileRange": 2.8989999999903375,
-    "minimumOverMedian": 0.9936057184155687,
+    "minimum": 656.7739580000052,
+    "median": 667.6995420000021,
+    "interquartileRange": 25.816666999991867,
+    "minimumOverMedian": 0.9836369754466645,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     655.1035420000117
+     656.7739580000052
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004396958332545669,
+    "withinRunSpread": 0.038665096163854766,
     "noisy": false
    },
    "compute": {
-    "minimum": 627.028524,
-    "median": 631.429779,
-    "interquartileRange": 2.8101389999999355,
-    "minimumOverMedian": 0.9930296999818881,
+    "minimum": 625.278116,
+    "median": 632.919023,
+    "interquartileRange": 24.75181299999997,
+    "minimumOverMedian": 0.987927512490014,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     627.028524
+     625.278116
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004450437868879693,
+    "withinRunSpread": 0.03910739304797285,
     "noisy": false
    },
-   "peakResidentBytes": 13893632,
-   "substepsPerSecond": 1594823.7787026097,
-   "nodeStepsPerSecond": 1594823.7787026097,
-   "speedUp": 0.11685968691274402,
-   "efficiency": 0.029214921728186006
+   "peakResidentBytes": 13860864,
+   "substepsPerSecond": 1599288.3397185775,
+   "nodeStepsPerSecond": 1599288.3397185775,
+   "speedUp": 0.11745607293890964,
+   "efficiency": 0.02936401823472741
   },
   {
    "problem": "scaling/graphScalability",
@@ -1487,38 +1506,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 360.3578750000015,
-    "median": 362.12104199999885,
-    "interquartileRange": 1.9907499999826541,
-    "minimumOverMedian": 0.9951310009761948,
+    "minimum": 355.120333999992,
+    "median": 360.6100829999923,
+    "interquartileRange": 3.7286659999808762,
+    "minimumOverMedian": 0.9847764961136696,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     360.3578750000015
+     355.120333999992
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005497471201860345,
+    "withinRunSpread": 0.010339882814593833,
     "noisy": false
    },
    "compute": {
-    "minimum": 336.09322,
-    "median": 337.418952,
-    "interquartileRange": 1.9884649999999624,
-    "minimumOverMedian": 0.9960709616571863,
+    "minimum": 326.426543,
+    "median": 331.78766,
+    "interquartileRange": 5.059433000000013,
+    "minimumOverMedian": 0.9838417227452039,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     336.09322
+     326.426543
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005893163345489742,
+    "withinRunSpread": 0.015249008959525537,
     "noisy": false
    },
-   "peakResidentBytes": 13942784,
-   "substepsPerSecond": 2975364.989510946,
-   "nodeStepsPerSecond": 2975364.989510946,
-   "speedUp": 0.2180179564467263,
-   "efficiency": 0.05450448911168158
+   "peakResidentBytes": 13877248,
+   "substepsPerSecond": 3063476.3668713057,
+   "nodeStepsPerSecond": 3063476.3668713057,
+   "speedUp": 0.22499001253093565,
+   "efficiency": 0.05624750313273391
   },
   {
    "problem": "scaling/graphScalability",
@@ -1529,36 +1548,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 189.59291599999415,
-    "median": 190.66312499999185,
-    "interquartileRange": 1.1070009999966715,
-    "minimumOverMedian": 0.9943869114701768,
+    "minimum": 195.407583000022,
+    "median": 196.4126249999972,
+    "interquartileRange": 1.6824580000247806,
+    "minimumOverMedian": 0.9948830071387965,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     189.59291599999415
+     195.407583000022
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005806057149208683,
+    "withinRunSpread": 0.008565936125668116,
     "noisy": false
    },
    "compute": {
-    "minimum": 173.690344,
-    "median": 174.710817,
-    "interquartileRange": 1.2092810000000043,
-    "minimumOverMedian": 0.9941590737338262,
+    "minimum": 176.276479,
+    "median": 176.670404,
+    "interquartileRange": 0.9324440000000038,
+    "minimumOverMedian": 0.9977702830180883,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     173.690344
+     176.276479
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006921614933550476,
+    "withinRunSpread": 0.005277873253745454,
     "noisy": false
    },
-   "peakResidentBytes": 13598720,
-   "substepsPerSecond": 5757372.44207427,
-   "nodeStepsPerSecond": 5757372.44207427,
+   "peakResidentBytes": 13565952,
+   "substepsPerSecond": 5672906.593510982,
+   "nodeStepsPerSecond": 5672906.593510982,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -1571,38 +1590,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 2542.3378329999978,
-    "median": 2567.6667080000043,
-    "interquartileRange": 42.28904199996032,
-    "minimumOverMedian": 0.9901354506326346,
+    "minimum": 2508.9127500000177,
+    "median": 2556.591167000006,
+    "interquartileRange": 34.93983300001128,
+    "minimumOverMedian": 0.9813507855243293,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2542.3378329999978
+     2508.9127500000177
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.016469833046556075,
+    "withinRunSpread": 0.013666570334360854,
     "noisy": false
    },
    "compute": {
-    "minimum": 2524.271061,
-    "median": 2549.625479,
-    "interquartileRange": 42.51456300000018,
-    "minimumOverMedian": 0.9900556304410857,
+    "minimum": 2485.901532,
+    "median": 2534.946428,
+    "interquartileRange": 34.993433000000095,
+    "minimumOverMedian": 0.9806524921164921,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2524.271061
+     2485.901532
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01667482669520349,
+    "withinRunSpread": 0.013804407309549696,
     "noisy": false
    },
-   "peakResidentBytes": 14172160,
-   "substepsPerSecond": 396153.96913984587,
-   "nodeStepsPerSecond": 396153.96913984587,
-   "speedUp": 0.06880811917686522,
-   "efficiency": 0.017202029794216304
+   "peakResidentBytes": 14188544,
+   "substepsPerSecond": 402268.5481011241,
+   "nodeStepsPerSecond": 402268.5481011241,
+   "speedUp": 0.07091048327170829,
+   "efficiency": 0.017727620817927073
   },
   {
    "problem": "scaling/graphScalability",
@@ -1613,38 +1632,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1312.2205829999875,
-    "median": 1338.1173750000016,
-    "interquartileRange": 2.7331669999693986,
-    "minimumOverMedian": 0.9806468457223239,
+    "minimum": 1337.4218330000003,
+    "median": 1342.7610830000194,
+    "interquartileRange": 3.0956240000086837,
+    "minimumOverMedian": 0.9960236783240023,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1312.2205829999875
+     1337.4218330000003
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0020425465292006955,
+    "withinRunSpread": 0.0023054168304404445,
     "noisy": false
    },
    "compute": {
-    "minimum": 1294.476505,
-    "median": 1319.830252,
-    "interquartileRange": 3.120648000000074,
-    "minimumOverMedian": 0.9807901455800243,
+    "minimum": 1314.837622,
+    "median": 1319.73315,
+    "interquartileRange": 3.592788000000155,
+    "minimumOverMedian": 0.9962905167609073,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1294.476505
+     1314.837622
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002364431331431607,
+    "withinRunSpread": 0.0027223594406188515,
     "noisy": false
    },
-   "peakResidentBytes": 14598144,
-   "substepsPerSecond": 772513.0553837282,
-   "nodeStepsPerSecond": 772513.0553837282,
-   "speedUp": 0.1341780583340908,
-   "efficiency": 0.0335445145835227
+   "peakResidentBytes": 14647296,
+   "substepsPerSecond": 760550.1875424735,
+   "nodeStepsPerSecond": 760550.1875424735,
+   "speedUp": 0.1340671091627769,
+   "efficiency": 0.03351677729069422
   },
   {
    "problem": "scaling/graphScalability",
@@ -1655,36 +1674,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 144.86412499999278,
-    "median": 145.9362909999909,
-    "interquartileRange": 0.37270799998077564,
-    "minimumOverMedian": 0.9926531913847381,
+    "minimum": 149.88641700000153,
+    "median": 149.9438749999972,
+    "interquartileRange": 0.6493760000157636,
+    "minimumOverMedian": 0.9996168032872588,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     144.86412499999278
+     149.88641700000153
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0025539089518233603,
+    "withinRunSpread": 0.004330793772108235,
     "noisy": false
    },
    "compute": {
-    "minimum": 76.567062,
-    "median": 76.955918,
-    "interquartileRange": 0.352879999999999,
-    "minimumOverMedian": 0.9949470292849993,
+    "minimum": 77.131804,
+    "median": 77.29795,
+    "interquartileRange": 0.32524000000000797,
+    "minimumOverMedian": 0.9978505768911078,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     76.567062
+     77.131804
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004585482301698993,
+    "withinRunSpread": 0.004207614820315519,
     "noisy": false
    },
-   "peakResidentBytes": 46120960,
-   "substepsPerSecond": 13060446.279106282,
-   "nodeStepsPerSecond": 13060446.279106282,
+   "peakResidentBytes": 46186496,
+   "substepsPerSecond": 12964820.581663046,
+   "nodeStepsPerSecond": 12964820.581663046,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -1697,38 +1716,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 658.3292500000098,
-    "median": 671.0105829999957,
-    "interquartileRange": 13.032750000042142,
-    "minimumOverMedian": 0.9811011430799058,
+    "minimum": 662.1659170000057,
+    "median": 682.699208999984,
+    "interquartileRange": 32.95524999999907,
+    "minimumOverMedian": 0.9699233692828568,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     658.3292500000098
+     662.1659170000057
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01942256997166053,
+    "withinRunSpread": 0.04827199089372292,
     "noisy": false
    },
    "compute": {
-    "minimum": 583.908237,
-    "median": 595.915872,
-    "interquartileRange": 12.198217999999997,
-    "minimumOverMedian": 0.9798501171655316,
+    "minimum": 581.591856,
+    "median": 605.142757,
+    "interquartileRange": 32.45845799999995,
+    "minimumOverMedian": 0.9610820740600884,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     583.908237
+     581.591856
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.02046969811201806,
-    "noisy": false
+    "withinRunSpread": 0.053637687346557716,
+    "noisy": true
    },
-   "peakResidentBytes": 47431680,
-   "substepsPerSecond": 1712597.8649278758,
-   "nodeStepsPerSecond": 1712597.8649278758,
-   "speedUp": 0.1311285869050003,
-   "efficiency": 0.03278214672625007
+   "peakResidentBytes": 47366144,
+   "substepsPerSecond": 1719418.8496339605,
+   "nodeStepsPerSecond": 1719418.8496339605,
+   "speedUp": 0.13262187770387213,
+   "efficiency": 0.03315546942596803
   },
   {
    "problem": "scaling/graphScalability",
@@ -1739,38 +1758,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 174.40924999999697,
-    "median": 174.837583000015,
-    "interquartileRange": 0.355375000013737,
-    "minimumOverMedian": 0.9975501091203143,
+    "minimum": 178.90741700000945,
+    "median": 180.04058400000213,
+    "interquartileRange": 1.09170799999265,
+    "minimumOverMedian": 0.9937060468544544,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     174.40924999999697
+     178.90741700000945
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002032600736728936,
+    "withinRunSpread": 0.0060636772872978304,
     "noisy": false
    },
    "compute": {
-    "minimum": 103.885452,
-    "median": 104.372961,
-    "interquartileRange": 0.20685899999999435,
-    "minimumOverMedian": 0.9953291638434977,
+    "minimum": 105.029286,
+    "median": 105.111698,
+    "interquartileRange": 0.2088900000000109,
+    "minimumOverMedian": 0.9992159578660788,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     103.885452
+     105.029286
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.001981921352216829,
+    "withinRunSpread": 0.0019873144852061175,
     "noisy": false
    },
-   "peakResidentBytes": 47235072,
-   "substepsPerSecond": 9625986.899493877,
-   "nodeStepsPerSecond": 9625986.899493877,
-   "speedUp": 0.7370335357447355,
-   "efficiency": 0.18425838393618388
+   "peakResidentBytes": 47251456,
+   "substepsPerSecond": 9521153.937959742,
+   "nodeStepsPerSecond": 9521153.937959742,
+   "speedUp": 0.734383779396539,
+   "efficiency": 0.18359594484913475
   },
   {
    "problem": "scaling/graphScalability",
@@ -1781,36 +1800,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 249.1184169999906,
-    "median": 249.4927500000049,
-    "interquartileRange": 0.6088330000056885,
-    "minimumOverMedian": 0.9984996237365041,
+    "minimum": 253.61749999999302,
+    "median": 254.04558299999917,
+    "interquartileRange": 1.022249000001466,
+    "minimumOverMedian": 0.9983149362608436,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     249.1184169999906
+     253.61749999999302
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002440283334909237,
+    "withinRunSpread": 0.004023880234128964,
     "noisy": false
    },
    "compute": {
-    "minimum": 186.049908,
-    "median": 186.354798,
-    "interquartileRange": 0.720893000000018,
-    "minimumOverMedian": 0.9983639272867018,
+    "minimum": 187.173791,
+    "median": 187.604992,
+    "interquartileRange": 0.9508020000000101,
+    "minimumOverMedian": 0.9977015483681798,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     186.049908
+     187.173791
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003868389801265101,
+    "withinRunSpread": 0.005068106076836218,
     "noisy": false
    },
-   "peakResidentBytes": 49283072,
-   "substepsPerSecond": 5374901.878478758,
-   "nodeStepsPerSecond": 5374901.878478758,
+   "peakResidentBytes": 49430528,
+   "substepsPerSecond": 5342628.338387397,
+   "nodeStepsPerSecond": 5342628.338387397,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -1823,38 +1842,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 2612.585208000004,
-    "median": 2721.5135420000006,
-    "interquartileRange": 20.062459000007948,
-    "minimumOverMedian": 0.9599750902139745,
+    "minimum": 2387.274624999991,
+    "median": 2515.709959,
+    "interquartileRange": 135.99595899999258,
+    "minimumOverMedian": 0.9489466845967163,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2612.585208000004
+     2387.274624999991
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007371802010312372,
-    "noisy": false
+    "withinRunSpread": 0.05405867974305403,
+    "noisy": true
    },
    "compute": {
-    "minimum": 2548.313866,
-    "median": 2657.116503,
-    "interquartileRange": 20.369244999999864,
-    "minimumOverMedian": 0.9590523648936141,
+    "minimum": 2318.677221,
+    "median": 2446.947379,
+    "interquartileRange": 135.850414,
+    "minimumOverMedian": 0.9475795192406545,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2548.313866
+     2318.677221
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007665920924807813,
-    "noisy": false
+    "withinRunSpread": 0.0555183226112195,
+    "noisy": true
    },
-   "peakResidentBytes": 50380800,
-   "substepsPerSecond": 392416.33981675317,
-   "nodeStepsPerSecond": 392416.33981675317,
-   "speedUp": 0.07300902392060366,
-   "efficiency": 0.018252255980150914
+   "peakResidentBytes": 50348032,
+   "substepsPerSecond": 431280.3830318045,
+   "nodeStepsPerSecond": 431280.3830318045,
+   "speedUp": 0.08072438427599492,
+   "efficiency": 0.02018109606899873
   },
   {
    "problem": "scaling/graphScalability",
@@ -1865,38 +1884,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 454.2372500000056,
-    "median": 458.287290999986,
-    "interquartileRange": 3.4063329999917187,
-    "minimumOverMedian": 0.9911626591452205,
+    "minimum": 455.741417000012,
+    "median": 459.08874999999534,
+    "interquartileRange": 1.187041000026511,
+    "minimumOverMedian": 0.9927087453134424,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     454.2372500000056
+     455.741417000012
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007432745936635242,
+    "withinRunSpread": 0.00258564602166035,
     "noisy": false
    },
    "compute": {
-    "minimum": 389.850406,
-    "median": 392.983602,
-    "interquartileRange": 3.097617000000014,
-    "minimumOverMedian": 0.9920271584258114,
+    "minimum": 387.859035,
+    "median": 391.574198,
+    "interquartileRange": 1.6690939999999728,
+    "minimumOverMedian": 0.9905122374789362,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     389.850406
+     387.859035
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007882305989958364,
+    "withinRunSpread": 0.004262522935691418,
     "noisy": false
    },
-   "peakResidentBytes": 51429376,
-   "substepsPerSecond": 2565086.4654992814,
-   "nodeStepsPerSecond": 2565086.4654992814,
-   "speedUp": 0.4772341009181865,
-   "efficiency": 0.11930852522954663
+   "peakResidentBytes": 51363840,
+   "substepsPerSecond": 2578256.298709143,
+   "nodeStepsPerSecond": 2578256.298709143,
+   "speedUp": 0.4825820055990187,
+   "efficiency": 0.12064550139975468
   },
   {
    "problem": "scaling/graphScalability",
@@ -1907,36 +1926,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 636.3080410000111,
-    "median": 642.5299999999988,
-    "interquartileRange": 6.679624000011245,
-    "minimumOverMedian": 0.9903164692699366,
+    "minimum": 642.3771660000202,
+    "median": 648.3714999999793,
+    "interquartileRange": 2.9748339999932796,
+    "minimumOverMedian": 0.9907547848726244,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     636.3080410000111
+     642.3771660000202
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01039581653776673,
+    "withinRunSpread": 0.004588162804801529,
     "noisy": false
    },
    "compute": {
-    "minimum": 88.381662,
-    "median": 92.555119,
-    "interquartileRange": 3.2252009999999984,
-    "minimumOverMedian": 0.9549084151682632,
+    "minimum": 93.415956,
+    "median": 98.874961,
+    "interquartileRange": 5.822754000000003,
+    "minimumOverMedian": 0.9447888024957096,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     88.381662
+     93.415956
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.03484627360265182,
-    "noisy": false
+    "withinRunSpread": 0.058890076325794995,
+    "noisy": true
    },
-   "peakResidentBytes": 400211968,
-   "substepsPerSecond": 11314564.326703882,
-   "nodeStepsPerSecond": 11314564.326703882,
+   "peakResidentBytes": 399687680,
+   "substepsPerSecond": 10704809.358264236,
+   "nodeStepsPerSecond": 10704809.358264236,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -1949,38 +1968,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 1231.5932500000054,
-    "median": 1240.1867919999931,
-    "interquartileRange": 10.253167000017129,
-    "minimumOverMedian": 0.9930707680041251,
+    "minimum": 1240.7674169999955,
+    "median": 1247.1834590000217,
+    "interquartileRange": 27.40062499998021,
+    "minimumOverMedian": 0.9948555748124093,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1231.5932500000054
+     1240.7674169999955
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.008267437668387284,
+    "withinRunSpread": 0.021970003532559464,
     "noisy": false
    },
    "compute": {
-    "minimum": 678.02813,
-    "median": 683.993951,
-    "interquartileRange": 9.87666999999999,
-    "minimumOverMedian": 0.9912779623397576,
+    "minimum": 676.942709,
+    "median": 678.65612,
+    "interquartileRange": 30.501990999999975,
+    "minimumOverMedian": 0.9974752883684304,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     678.02813
+     676.942709
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.014439703721882753,
+    "withinRunSpread": 0.04494469305014147,
     "noisy": false
    },
-   "peakResidentBytes": 404258816,
-   "substepsPerSecond": 1474865.0620144622,
-   "nodeStepsPerSecond": 1474865.0620144622,
-   "speedUp": 0.13035102540657126,
-   "efficiency": 0.032587756351642815
+   "peakResidentBytes": 403652608,
+   "substepsPerSecond": 1477229.8847523297,
+   "nodeStepsPerSecond": 1477229.8847523297,
+   "speedUp": 0.13799684191590872,
+   "efficiency": 0.03449921047897718
   },
   {
    "problem": "scaling/graphScalability",
@@ -1991,38 +2010,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 643.8430829999852,
-    "median": 648.0052090000245,
-    "interquartileRange": 3.6701260000118054,
-    "minimumOverMedian": 0.9935770176809812,
+    "minimum": 648.4153750000114,
+    "median": 650.4709169999987,
+    "interquartileRange": 2.747750000009546,
+    "minimumOverMedian": 0.9968399171334706,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     643.8430829999852
+     648.4153750000114
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005663729163034655,
+    "withinRunSpread": 0.00422424727716082,
     "noisy": false
    },
    "compute": {
-    "minimum": 88.256248,
-    "median": 89.88688,
-    "interquartileRange": 1.8436980000000034,
-    "minimumOverMedian": 0.9818590655276943,
+    "minimum": 89.606416,
+    "median": 90.741047,
+    "interquartileRange": 0.3695419999999956,
+    "minimumOverMedian": 0.9874959454677661,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     88.256248
+     89.606416
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.02051131377571458,
+    "withinRunSpread": 0.004072489928400271,
     "noisy": false
    },
-   "peakResidentBytes": 402997248,
-   "substepsPerSecond": 11330642.562552625,
-   "nodeStepsPerSecond": 11330642.562552625,
-   "speedUp": 1.0014210212063401,
-   "efficiency": 0.25035525530158503
+   "peakResidentBytes": 402784256,
+   "substepsPerSecond": 11159915.156075431,
+   "nodeStepsPerSecond": 11159915.156075431,
+   "speedUp": 1.0425141431836755,
+   "efficiency": 0.2606285357959189
   },
   {
    "problem": "scaling/graphScalability",
@@ -2033,36 +2052,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 883.5002500000119,
-    "median": 890.2613330000022,
-    "interquartileRange": 10.426625000021886,
-    "minimumOverMedian": 0.9924055075185543,
+    "minimum": 926.2578750000102,
+    "median": 937.0565420000057,
+    "interquartileRange": 12.421249000006355,
+    "minimumOverMedian": 0.9884759707488436,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     883.5002500000119
+     926.2578750000102
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.011711870002133251,
+    "withinRunSpread": 0.013255602456491126,
     "noisy": false
    },
    "compute": {
-    "minimum": 330.568791,
-    "median": 338.208331,
-    "interquartileRange": 4.062327000000039,
-    "minimumOverMedian": 0.9774117332432003,
+    "minimum": 368.870332,
+    "median": 376.264631,
+    "interquartileRange": 10.043838999999991,
+    "minimumOverMedian": 0.9803481422626726,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     330.568791
+     368.870332
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.012011315593524037,
+    "withinRunSpread": 0.026693550688796978,
     "noisy": false
    },
-   "peakResidentBytes": 432390144,
-   "substepsPerSecond": 3025088.9594716765,
-   "nodeStepsPerSecond": 3025088.9594716765,
+   "peakResidentBytes": 432422912,
+   "substepsPerSecond": 2710979.748840305,
+   "nodeStepsPerSecond": 2710979.748840305,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2075,38 +2094,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 3414.766082999995,
-    "median": 3543.3789170000236,
-    "interquartileRange": 72.34674999999697,
-    "minimumOverMedian": 0.963703335992946,
+    "minimum": 3581.6962080000085,
+    "median": 3623.2935419999994,
+    "interquartileRange": 134.33470899998792,
+    "minimumOverMedian": 0.9885194689533684,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3414.766082999995
+     3581.6962080000085
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.020417446650399115,
+    "withinRunSpread": 0.037075303847956334,
     "noisy": false
    },
    "compute": {
-    "minimum": 2852.017545,
-    "median": 2984.615082,
-    "interquartileRange": 67.26508000000013,
-    "minimumOverMedian": 0.9555729856758797,
+    "minimum": 3017.056087,
+    "median": 3057.949704,
+    "interquartileRange": 133.4061740000002,
+    "minimumOverMedian": 0.986627112621732,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2852.017545
+     3017.056087
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.022537271357258432,
+    "withinRunSpread": 0.04362601969074119,
     "noisy": false
    },
-   "peakResidentBytes": 435814400,
-   "substepsPerSecond": 350628.9790373642,
-   "nodeStepsPerSecond": 350628.9790373642,
-   "speedUp": 0.11590699768994582,
-   "efficiency": 0.028976749422486455
+   "peakResidentBytes": 433750016,
+   "substepsPerSecond": 331448.9260934976,
+   "nodeStepsPerSecond": 331448.9260934976,
+   "speedUp": 0.12226167540915192,
+   "efficiency": 0.03056541885228798
   },
   {
    "problem": "scaling/graphScalability",
@@ -2117,38 +2136,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1024.589208999998,
-    "median": 1026.6250830000208,
-    "interquartileRange": 7.91158399998676,
-    "minimumOverMedian": 0.9980169255225348,
+    "minimum": 1034.9850000000151,
+    "median": 1040.5140419999952,
+    "interquartileRange": 5.96837499999674,
+    "minimumOverMedian": 0.9946862398998935,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1024.589208999998
+     1034.9850000000151
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007706400448416279,
+    "withinRunSpread": 0.005735986982477232,
     "noisy": false
    },
    "compute": {
-    "minimum": 463.029836,
-    "median": 466.513539,
-    "interquartileRange": 6.6427040000000375,
-    "minimumOverMedian": 0.9925324718175007,
+    "minimum": 471.236953,
+    "median": 475.731628,
+    "interquartileRange": 4.696169000000054,
+    "minimumOverMedian": 0.9905520786606183,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     463.029836
+     471.236953
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01423903797998891,
+    "withinRunSpread": 0.009871466859882721,
     "noisy": false
    },
-   "peakResidentBytes": 435535872,
-   "substepsPerSecond": 2159688.042219379,
-   "nodeStepsPerSecond": 2159688.042219379,
-   "speedUp": 0.713925465053617,
-   "efficiency": 0.17848136626340425
+   "peakResidentBytes": 433487872,
+   "substepsPerSecond": 2122074.6667547524,
+   "nodeStepsPerSecond": 2122074.6667547524,
+   "speedUp": 0.782770386854615,
+   "efficiency": 0.19569259671365374
   },
   {
    "problem": "scaling/graphScalability",
@@ -2159,36 +2178,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 6103.065541999997,
-    "median": 6178.471082999982,
-    "interquartileRange": 108.21899999998277,
-    "minimumOverMedian": 0.9877954367695492,
+    "minimum": 6128.21970799999,
+    "median": 6359.575917000009,
+    "interquartileRange": 56.540999999968335,
+    "minimumOverMedian": 0.9636208118246418,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     6103.065541999997
+     6128.21970799999
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.017515498340317,
+    "withinRunSpread": 0.008890687168121789,
     "noisy": false
    },
    "compute": {
-    "minimum": 119.305709,
-    "median": 122.820917,
-    "interquartileRange": 4.477205999999995,
-    "minimumOverMedian": 0.9713794027445667,
+    "minimum": 120.349209,
+    "median": 122.828334,
+    "interquartileRange": 3.5399599999999936,
+    "minimumOverMedian": 0.9798163427015139,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     119.305709
+     120.349209
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.036453123045808195,
+    "withinRunSpread": 0.028820386019401626,
     "noisy": false
    },
-   "peakResidentBytes": 2940010496,
-   "substepsPerSecond": 8381828.567818159,
-   "nodeStepsPerSecond": 8381828.567818159,
+   "peakResidentBytes": 2891153408,
+   "substepsPerSecond": 8309153.074699477,
+   "nodeStepsPerSecond": 8309153.074699477,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2201,38 +2220,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 7042.535499999998,
-    "median": 7217.587583999964,
-    "interquartileRange": 178.96054100000765,
-    "minimumOverMedian": 0.975746455174576,
+    "minimum": 7050.1319169999915,
+    "median": 7123.286416999996,
+    "interquartileRange": 12.359875000023749,
+    "minimumOverMedian": 0.9897302318455962,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     7042.535499999998
+     7050.1319169999915
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.024795063297427738,
+    "withinRunSpread": 0.0017351366035944355,
     "noisy": false
    },
    "compute": {
-    "minimum": 664.524625,
-    "median": 708.793749,
-    "interquartileRange": 71.08083299999998,
-    "minimumOverMedian": 0.9375430101317104,
+    "minimum": 668.641041,
+    "median": 707.817457,
+    "interquartileRange": 37.389749999999935,
+    "minimumOverMedian": 0.9446518087219202,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     664.524625
+     668.641041
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.10028422668834792,
+    "withinRunSpread": 0.05282400092033889,
     "noisy": true
    },
-   "peakResidentBytes": 2942943232,
-   "substepsPerSecond": 1504835.1293227095,
-   "nodeStepsPerSecond": 1504835.1293227095,
-   "speedUp": 0.17953542203195252,
-   "efficiency": 0.04488385550798813
+   "peakResidentBytes": 2912108544,
+   "substepsPerSecond": 1495570.7751717262,
+   "nodeStepsPerSecond": 1495570.7751717262,
+   "speedUp": 0.1799907597954341,
+   "efficiency": 0.04499768994885853
   },
   {
    "problem": "scaling/graphScalability",
@@ -2243,38 +2262,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 6610.587999999989,
-    "median": 6714.209708000009,
-    "interquartileRange": 92.80441600002814,
-    "minimumOverMedian": 0.98456680495449,
+    "minimum": 6585.910208000045,
+    "median": 6721.894625000015,
+    "interquartileRange": 86.48374999995576,
+    "minimumOverMedian": 0.9797699272918949,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     6610.587999999989
+     6585.910208000045
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.013822090765120322,
+    "withinRunSpread": 0.012865978243441382,
     "noisy": false
    },
    "compute": {
-    "minimum": 105.799752,
-    "median": 111.490627,
-    "interquartileRange": 4.923749999999998,
-    "minimumOverMedian": 0.9489564714709157,
+    "minimum": 103.836418,
+    "median": 108.220708,
+    "interquartileRange": 5.125912999999997,
+    "minimumOverMedian": 0.9594875132400722,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     105.799752
+     103.836418
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.044162905281714834,
+    "withinRunSpread": 0.04736536190467352,
     "noisy": false
    },
-   "peakResidentBytes": 2990456832,
-   "substepsPerSecond": 9451817.99670003,
-   "nodeStepsPerSecond": 9451817.99670003,
-   "speedUp": 1.1276558474352567,
-   "efficiency": 0.2819139618588142
+   "peakResidentBytes": 2853552128,
+   "substepsPerSecond": 9630532.517021148,
+   "nodeStepsPerSecond": 9630532.517021148,
+   "speedUp": 1.1590269706722742,
+   "efficiency": 0.28975674266806856
   },
   {
    "problem": "scaling/graphScalability",
@@ -2285,36 +2304,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 7246.139458999969,
-    "median": 7373.201707999979,
-    "interquartileRange": 54.38029199995799,
-    "minimumOverMedian": 0.9827670184497806,
+    "minimum": 7281.921957999992,
+    "median": 7298.182499999995,
+    "interquartileRange": 11.425041000009514,
+    "minimumOverMedian": 0.9977719737756622,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     7246.139458999969
+     7281.921957999992
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007375397304125692,
+    "withinRunSpread": 0.0015654638672038582,
     "noisy": false
    },
    "compute": {
-    "minimum": 550.304208,
-    "median": 567.692707,
-    "interquartileRange": 13.729875000000106,
-    "minimumOverMedian": 0.9693698742548756,
+    "minimum": 570.758708,
+    "median": 572.173002,
+    "interquartileRange": 6.494916999999987,
+    "minimumOverMedian": 0.9975282056387553,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     550.304208
+     570.758708
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.024185399654958233,
+    "withinRunSpread": 0.011351316782332185,
     "noisy": false
    },
-   "peakResidentBytes": 2929541120,
-   "substepsPerSecond": 1817176.727821787,
-   "nodeStepsPerSecond": 1817176.727821787,
+   "peakResidentBytes": 2770468864,
+   "substepsPerSecond": 1752053.8644151534,
+   "nodeStepsPerSecond": 1752053.8644151534,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2327,38 +2346,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 10791.909999999974,
-    "median": 10876.204167000018,
-    "interquartileRange": 71.3308750000433,
-    "minimumOverMedian": 0.9922496704083761,
+    "minimum": 10833.28804200003,
+    "median": 10958.661625000008,
+    "interquartileRange": 153.10737500002142,
+    "minimumOverMedian": 0.9885594074084774,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     10791.909999999974
+     10833.28804200003
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006558434717184837,
+    "withinRunSpread": 0.013971357109041252,
     "noisy": false
    },
    "compute": {
-    "minimum": 3976.940291,
-    "median": 4019.809917,
-    "interquartileRange": 54.85062499999958,
-    "minimumOverMedian": 0.9893354096623569,
+    "minimum": 3960.879503,
+    "median": 4045.121081,
+    "interquartileRange": 160.44708200000014,
+    "minimumOverMedian": 0.9791745225141261,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3976.940291
+     3960.879503
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.013645079278010942,
+    "withinRunSpread": 0.03966434595830091,
     "noisy": false
    },
-   "peakResidentBytes": 2894790656,
-   "substepsPerSecond": 251449.5885852363,
-   "nodeStepsPerSecond": 251449.5885852363,
-   "speedUp": 0.13837376669832432,
-   "efficiency": 0.03459344167458108
+   "peakResidentBytes": 2767929344,
+   "substepsPerSecond": 252469.17994919876,
+   "nodeStepsPerSecond": 252469.17994919876,
+   "speedUp": 0.1440989829576242,
+   "efficiency": 0.03602474573940605
   },
   {
    "problem": "scaling/graphScalability",
@@ -2369,38 +2388,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 6975.982667000033,
-    "median": 7217.214000000036,
-    "interquartileRange": 378.9281670000055,
-    "minimumOverMedian": 0.9665755604586476,
+    "minimum": 7456.0084579999675,
+    "median": 7499.332958000014,
+    "interquartileRange": 32.37129199993797,
+    "minimumOverMedian": 0.9942228861896538,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     6975.982667000033
+     7456.0084579999675
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0525033852397897,
-    "noisy": true
-   },
-   "compute": {
-    "minimum": 548.168917,
-    "median": 550.109751,
-    "interquartileRange": 7.488582999999949,
-    "minimumOverMedian": 0.9964719149288448,
-    "runs": 5,
-    "sessions": 1,
-    "sessionMinimums": [
-     548.168917
-    ],
-    "betweenSessionSpread": null,
-    "withinRunSpread": 0.013612889039663558,
+    "withinRunSpread": 0.004316556176560404,
     "noisy": false
    },
-   "peakResidentBytes": 3562586112,
-   "substepsPerSecond": 1824255.2048969974,
-   "nodeStepsPerSecond": 1824255.2048969974,
-   "speedUp": 1.0038953157207198,
-   "efficiency": 0.25097382893017994
+   "compute": {
+    "minimum": 539.173541,
+    "median": 544.395084,
+    "interquartileRange": 6.642417000000023,
+    "minimumOverMedian": 0.9904085412351005,
+    "runs": 5,
+    "sessions": 1,
+    "sessionMinimums": [
+     539.173541
+    ],
+    "betweenSessionSpread": null,
+    "withinRunSpread": 0.012201463964726073,
+    "noisy": false
+   },
+   "peakResidentBytes": 2723037184,
+   "substepsPerSecond": 1854690.4177554958,
+   "nodeStepsPerSecond": 1854690.4177554958,
+   "speedUp": 1.058580706578107,
+   "efficiency": 0.26464517664452675
   },
   {
    "problem": "scaling/graphScalability",
@@ -2411,36 +2430,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 151.68691699998453,
-    "median": 152.8799580000341,
-    "interquartileRange": 0.9600409999256954,
-    "minimumOverMedian": 0.9921962236537945,
+    "minimum": 157.17733299999963,
+    "median": 157.3501249999972,
+    "interquartileRange": 0.036666000029072165,
+    "minimumOverMedian": 0.9989018629632638,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     151.68691699998453
+     157.17733299999963
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006279704759766361,
+    "withinRunSpread": 0.00023302174071404655,
     "noisy": false
    },
    "compute": {
-    "minimum": 124.773472,
-    "median": 125.232924,
-    "interquartileRange": 0.16738300000000095,
-    "minimumOverMedian": 0.9963312203746038,
+    "minimum": 125.343869,
+    "median": 125.601289,
+    "interquartileRange": 0.21236899999999537,
+    "minimumOverMedian": 0.9979504987405026,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     124.773472
+     125.343869
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0013365734397449743,
+    "withinRunSpread": 0.0016908186348310117,
     "noisy": false
    },
-   "peakResidentBytes": 15712256,
-   "substepsPerSecond": 8014524.11294606,
-   "nodeStepsPerSecond": 8014524.11294606,
+   "peakResidentBytes": 15761408,
+   "substepsPerSecond": 7978052.759804311,
+   "nodeStepsPerSecond": 7978052.759804311,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2453,38 +2472,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 695.1030000000028,
-    "median": 720.795541999978,
-    "interquartileRange": 16.652374999946915,
-    "minimumOverMedian": 0.9643552984127973,
+    "minimum": 684.5995419999817,
+    "median": 694.2145420000888,
+    "interquartileRange": 8.569874999928288,
+    "minimumOverMedian": 0.9861498147641714,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     695.1030000000028
+     684.5995419999817
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.02310277190913512,
+    "withinRunSpread": 0.0123447068326137,
     "noisy": false
    },
    "compute": {
-    "minimum": 662.457504,
-    "median": 687.978501,
-    "interquartileRange": 16.695065,
-    "minimumOverMedian": 0.9629043684317106,
+    "minimum": 646.40841,
+    "median": 656.351372,
+    "interquartileRange": 8.267745999999988,
+    "minimumOverMedian": 0.9848511598753846,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     662.457504
+     646.40841
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.024266841152351646,
+    "withinRunSpread": 0.01259652428973667,
     "noisy": false
    },
-   "peakResidentBytes": 16285696,
-   "substepsPerSecond": 1509530.7909743297,
-   "nodeStepsPerSecond": 1509530.7909743297,
-   "speedUp": 0.18834939788077334,
-   "efficiency": 0.047087349470193336
+   "peakResidentBytes": 16302080,
+   "substepsPerSecond": 1547009.57557158,
+   "nodeStepsPerSecond": 1547009.57557158,
+   "speedUp": 0.19390816558218973,
+   "efficiency": 0.048477041395547434
   },
   {
    "problem": "scaling/graphScalability",
@@ -2495,38 +2514,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 477.72066700004507,
-    "median": 479.424291000003,
-    "interquartileRange": 2.9312510000308976,
-    "minimumOverMedian": 0.9964465213132934,
+    "minimum": 485.2628750000149,
+    "median": 488.18270799994934,
+    "interquartileRange": 2.1467069999780506,
+    "minimumOverMedian": 0.9940189749614509,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     477.72066700004507
+     485.2628750000149
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0061141061374190555,
+    "withinRunSpread": 0.004397343381483052,
     "noisy": false
    },
    "compute": {
-    "minimum": 448.654529,
-    "median": 450.006998,
-    "interquartileRange": 2.5251589999999737,
-    "minimumOverMedian": 0.9969945600712636,
+    "minimum": 452.774173,
+    "median": 455.713609,
+    "interquartileRange": 3.463121000000001,
+    "minimumOverMedian": 0.9935498173810298,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     448.654529
+     452.774173
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0056113771812943535,
+    "withinRunSpread": 0.007599336363027071,
     "noisy": false
    },
-   "peakResidentBytes": 16416768,
-   "substepsPerSecond": 2228886.449065579,
-   "nodeStepsPerSecond": 2228886.449065579,
-   "speedUp": 0.2781059009436635,
-   "efficiency": 0.06952647523591587
+   "peakResidentBytes": 16367616,
+   "substepsPerSecond": 2208606.5408152156,
+   "nodeStepsPerSecond": 2208606.5408152156,
+   "speedUp": 0.2768352889244855,
+   "efficiency": 0.06920882223112138
   },
   {
    "problem": "scaling/graphScalability",
@@ -2537,36 +2556,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 316.5399580000667,
-    "median": 318.35612499993294,
-    "interquartileRange": 2.0566250000847504,
-    "minimumOverMedian": 0.9942951717989825,
+    "minimum": 322.2260000000242,
+    "median": 325.05483399995137,
+    "interquartileRange": 5.009792000055313,
+    "minimumOverMedian": 0.9912973636936359,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     316.5399580000667
+     322.2260000000242
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006460139568808935,
+    "withinRunSpread": 0.015412144278574435,
     "noisy": false
    },
    "compute": {
-    "minimum": 296.52878,
-    "median": 297.867795,
-    "interquartileRange": 1.2176299999999856,
-    "minimumOverMedian": 0.9955046667599631,
+    "minimum": 298.171679,
+    "median": 301.885927,
+    "interquartileRange": 3.275118999999961,
+    "minimumOverMedian": 0.9876965182282247,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     296.52878
+     298.171679
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004087820235819672,
+    "withinRunSpread": 0.010848862789155327,
     "noisy": false
    },
-   "peakResidentBytes": 16318464,
-   "substepsPerSecond": 3372353.941495999,
-   "nodeStepsPerSecond": 3372353.941495999,
+   "peakResidentBytes": 16400384,
+   "substepsPerSecond": 3353772.5761003615,
+   "nodeStepsPerSecond": 3353772.5761003615,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2579,38 +2598,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 2688.909417000017,
-    "median": 2835.269750000094,
-    "interquartileRange": 9.503292000037618,
-    "minimumOverMedian": 0.9483786920097913,
+    "minimum": 2706.7708750000456,
+    "median": 2719.420124999946,
+    "interquartileRange": 4.616874999948777,
+    "minimumOverMedian": 0.9953485488014101,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2688.909417000017
+     2706.7708750000456
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0033518122923003367,
+    "withinRunSpread": 0.0016977424552776187,
     "noisy": false
    },
    "compute": {
-    "minimum": 2666.476106,
-    "median": 2812.635834,
-    "interquartileRange": 9.5351840000003,
-    "minimumOverMedian": 0.9480346064594724,
+    "minimum": 2679.033235,
+    "median": 2691.586598,
+    "interquartileRange": 14.763045000000147,
+    "minimumOverMedian": 0.9953360731513049,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2666.476106
+     2679.033235
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0033901239132119723,
+    "withinRunSpread": 0.005484885758819694,
     "noisy": false
    },
-   "peakResidentBytes": 16973824,
-   "substepsPerSecond": 375026.79950884957,
-   "nodeStepsPerSecond": 375026.79950884957,
-   "speedUp": 0.11120623932566376,
-   "efficiency": 0.02780155983141594
+   "peakResidentBytes": 16908288,
+   "substepsPerSecond": 373268.9788747619,
+   "nodeStepsPerSecond": 373268.9788747619,
+   "speedUp": 0.11129823814970329,
+   "efficiency": 0.02782455953742582
   },
   {
    "problem": "scaling/graphScalability",
@@ -2621,38 +2640,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1499.9763329999987,
-    "median": 1632.3725829999894,
-    "interquartileRange": 32.22141600004397,
-    "minimumOverMedian": 0.9188933633296685,
+    "minimum": 1635.188916999963,
+    "median": 1655.1050830000313,
+    "interquartileRange": 11.32854200003203,
+    "minimumOverMedian": 0.9879668268772589,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1499.9763329999987
+     1635.188916999963
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01973900832175652,
+    "withinRunSpread": 0.00684460589021816,
     "noisy": false
    },
    "compute": {
-    "minimum": 1476.379543,
-    "median": 1609.96471,
-    "interquartileRange": 32.346524000000045,
-    "minimumOverMedian": 0.9170260278562256,
+    "minimum": 1609.384519,
+    "median": 1628.419008,
+    "interquartileRange": 11.308999000000085,
+    "minimumOverMedian": 0.988311061891019,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1476.379543
+     1609.384519
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.02009144908524116,
+    "withinRunSpread": 0.0069447721651748765,
     "noisy": false
    },
-   "peakResidentBytes": 17367040,
-   "substepsPerSecond": 677332.6037612268,
-   "nodeStepsPerSecond": 677332.6037612268,
-   "speedUp": 0.20084861064753995,
-   "efficiency": 0.05021215266188499
+   "peakResidentBytes": 17350656,
+   "substepsPerSecond": 621355.5481578483,
+   "nodeStepsPerSecond": 621355.5481578483,
+   "speedUp": 0.18527062705019098,
+   "efficiency": 0.046317656762547746
   },
   {
    "problem": "scaling/graphScalability",
@@ -2663,36 +2682,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 238.28625000000466,
-    "median": 239.00904199993238,
-    "interquartileRange": 0.5118340000044554,
-    "minimumOverMedian": 0.9969758801011054,
+    "minimum": 241.34483300009742,
+    "median": 243.08595799992327,
+    "interquartileRange": 0.29095900000538677,
+    "minimumOverMedian": 0.9928374102142651,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     238.28625000000466
+     241.34483300009742
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002141483835597317,
+    "withinRunSpread": 0.0011969387388698059,
     "noisy": false
    },
    "compute": {
-    "minimum": 127.994882,
-    "median": 128.075911,
-    "interquartileRange": 0.08532399999999996,
-    "minimumOverMedian": 0.9993673361417669,
+    "minimum": 128.071538,
+    "median": 128.316287,
+    "interquartileRange": 0.46318899999999985,
+    "minimumOverMedian": 0.998092611579386,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     127.994882
+     128.071538
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.000666198657763207,
+    "withinRunSpread": 0.003609744412258437,
     "noisy": false
    },
-   "peakResidentBytes": 73007104,
-   "substepsPerSecond": 7816312.530371332,
-   "nodeStepsPerSecond": 7816312.530371332,
+   "peakResidentBytes": 73023488,
+   "substepsPerSecond": 7811634.150907127,
+   "nodeStepsPerSecond": 7811634.150907127,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2705,38 +2724,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 714.3837500000373,
-    "median": 738.7569169999333,
-    "interquartileRange": 86.1502089999849,
-    "minimumOverMedian": 0.9670078662696322,
+    "minimum": 736.4639169999864,
+    "median": 758.9895410001045,
+    "interquartileRange": 81.45883300004061,
+    "minimumOverMedian": 0.9703215620462483,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     714.3837500000373
+     736.4639169999864
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.1166150962752917,
+    "withinRunSpread": 0.10732536958638986,
     "noisy": true
    },
    "compute": {
-    "minimum": 597.043849,
-    "median": 621.70791,
-    "interquartileRange": 88.94703500000003,
-    "minimumOverMedian": 0.9603285391688198,
+    "minimum": 615.179026,
+    "median": 637.543087,
+    "interquartileRange": 82.61033199999997,
+    "minimumOverMedian": 0.9649214908670165,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     597.043849
+     615.179026
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.1430688488425377,
+    "withinRunSpread": 0.1295760767930654,
     "noisy": true
    },
-   "peakResidentBytes": 74416128,
-   "substepsPerSecond": 1675669.2187276848,
-   "nodeStepsPerSecond": 1675669.2187276848,
-   "speedUp": 0.21438104121561766,
-   "efficiency": 0.053595260303904414
+   "peakResidentBytes": 74465280,
+   "substepsPerSecond": 1626271.3091912204,
+   "nodeStepsPerSecond": 1626271.3091912204,
+   "speedUp": 0.2081858005347536,
+   "efficiency": 0.0520464501336884
   },
   {
    "problem": "scaling/graphScalability",
@@ -2747,38 +2766,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 247.31133399996907,
-    "median": 250.11645800003316,
-    "interquartileRange": 2.514041999937035,
-    "minimumOverMedian": 0.9887847284321301,
+    "minimum": 251.96241699997336,
+    "median": 253.54495800007135,
+    "interquartileRange": 1.3351679999614134,
+    "minimumOverMedian": 0.9937583416661847,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     247.31133399996907
+     251.96241699997336
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.010051485696062038,
+    "withinRunSpread": 0.005266000990487209,
     "noisy": false
    },
    "compute": {
-    "minimum": 134.442197,
-    "median": 136.386485,
-    "interquartileRange": 2.57230899999999,
-    "minimumOverMedian": 0.9857442766414869,
+    "minimum": 137.582778,
+    "median": 137.967215,
+    "interquartileRange": 0.0976880000000051,
+    "minimumOverMedian": 0.9972135626568963,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     134.442197
+     137.582778
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.018860439141018922,
+    "withinRunSpread": 0.0007080522716937143,
     "noisy": false
    },
-   "peakResidentBytes": 74268672,
-   "substepsPerSecond": 7441473.15593184,
-   "nodeStepsPerSecond": 7441473.15593184,
-   "speedUp": 0.952043962804327,
-   "efficiency": 0.23801099070108175
+   "peakResidentBytes": 74235904,
+   "substepsPerSecond": 7271607.788003816,
+   "nodeStepsPerSecond": 7271607.788003816,
+   "speedUp": 0.9308689638466234,
+   "efficiency": 0.23271724096165586
   },
   {
    "problem": "scaling/graphScalability",
@@ -2789,36 +2808,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 394.57387500000186,
-    "median": 395.3747919999296,
-    "interquartileRange": 1.3648340000072494,
-    "minimumOverMedian": 0.9979742841067929,
+    "minimum": 398.5754579999484,
+    "median": 401.3937089999672,
+    "interquartileRange": 3.7712909998372197,
+    "minimumOverMedian": 0.9929788361480797,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     394.57387500000186
+     398.5754579999484
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003452000551434985,
+    "withinRunSpread": 0.009395491048509503,
     "noisy": false
    },
    "compute": {
-    "minimum": 288.950423,
-    "median": 289.543083,
-    "interquartileRange": 0.5331890000000499,
-    "minimumOverMedian": 0.9979531198125703,
+    "minimum": 292.256203,
+    "median": 292.48388,
+    "interquartileRange": 1.2644559999999956,
+    "minimumOverMedian": 0.9992215741941061,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     288.950423
+     292.256203
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0018414841566083962,
+    "withinRunSpread": 0.004323164750139377,
     "noisy": false
    },
-   "peakResidentBytes": 78872576,
-   "substepsPerSecond": 3462351.7405267823,
-   "nodeStepsPerSecond": 3462351.7405267823,
+   "peakResidentBytes": 78626816,
+   "substepsPerSecond": 3423188.249660521,
+   "nodeStepsPerSecond": 3423188.249660521,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2831,38 +2850,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 2583.771999999997,
-    "median": 2690.5770410000114,
-    "interquartileRange": 316.77150000003166,
-    "minimumOverMedian": 0.9603040391066752,
+    "minimum": 2594.122667000047,
+    "median": 2609.0581249999814,
+    "interquartileRange": 18.30191699997522,
+    "minimumOverMedian": 0.9942755365023022,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2583.771999999997
+     2594.122667000047
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.11773366648601769,
-    "noisy": true
+    "withinRunSpread": 0.007014760163679891,
+    "noisy": false
    },
    "compute": {
-    "minimum": 2477.735556,
-    "median": 2584.366245,
-    "interquartileRange": 317.0944519999998,
-    "minimumOverMedian": 0.9587401014827912,
+    "minimum": 2483.509078,
+    "median": 2500.838404,
+    "interquartileRange": 19.480011000000104,
+    "minimumOverMedian": 0.9930705934568653,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2477.735556
+     2483.509078
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.12269718063896157,
-    "noisy": true
+    "withinRunSpread": 0.007789392136989953,
+    "noisy": false
    },
-   "peakResidentBytes": 80314368,
-   "substepsPerSecond": 403775.1315217434,
-   "nodeStepsPerSecond": 403775.1315217434,
-   "speedUp": 0.11661874985015551,
-   "efficiency": 0.029154687462538877
+   "peakResidentBytes": 80068608,
+   "substepsPerSecond": 402836.4578420116,
+   "nodeStepsPerSecond": 402836.4578420116,
+   "speedUp": 0.11767873352625612,
+   "efficiency": 0.02941968338156403
   },
   {
    "problem": "scaling/graphScalability",
@@ -2873,38 +2892,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 583.8992080000462,
-    "median": 607.1968329999363,
-    "interquartileRange": 7.425083999987692,
-    "minimumOverMedian": 0.9616308522480509,
+    "minimum": 599.9962079999968,
+    "median": 612.5603750000009,
+    "interquartileRange": 3.4534589999821037,
+    "minimumOverMedian": 0.9794890960748088,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     583.8992080000462
+     599.9962079999968
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.012228462990004546,
+    "withinRunSpread": 0.005637744687586262,
     "noisy": false
    },
    "compute": {
-    "minimum": 478.232885,
-    "median": 501.078431,
-    "interquartileRange": 7.575693999999999,
-    "minimumOverMedian": 0.9544072452801305,
+    "minimum": 489.811529,
+    "median": 502.909121,
+    "interquartileRange": 3.44121100000001,
+    "minimumOverMedian": 0.9739563442914768,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     478.232885
+     489.811529
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.015118778880346575,
+    "withinRunSpread": 0.006842610038882173,
     "noisy": false
    },
-   "peakResidentBytes": 80330752,
-   "substepsPerSecond": 2091968.225898978,
-   "nodeStepsPerSecond": 2091968.225898978,
-   "speedUp": 0.6042044201958215,
-   "efficiency": 0.1510511050489554
+   "peakResidentBytes": 80461824,
+   "substepsPerSecond": 2042516.23485163,
+   "nodeStepsPerSecond": 2042516.23485163,
+   "speedUp": 0.5966707308761612,
+   "efficiency": 0.1491676827190403
   },
   {
    "problem": "scaling/graphScalability",
@@ -2915,36 +2934,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 1123.5493339999812,
-    "median": 1125.3357499999693,
-    "interquartileRange": 1.3329590000212193,
-    "minimumOverMedian": 0.9984125484327783,
+    "minimum": 1134.125124999904,
+    "median": 1139.7600409999723,
+    "interquartileRange": 2.047749000019394,
+    "minimumOverMedian": 0.995056050574361,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1123.5493339999812
+     1134.125124999904
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0011844989373360401,
+    "withinRunSpread": 0.0017966492299754556,
     "noisy": false
    },
    "compute": {
-    "minimum": 192.068878,
-    "median": 193.047707,
-    "interquartileRange": 3.606956999999994,
-    "minimumOverMedian": 0.9949296004847134,
+    "minimum": 195.917789,
+    "median": 197.214376,
+    "interquartileRange": 2.3186729999999898,
+    "minimumOverMedian": 0.9934254944984335,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     192.068878
+     195.917789
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.018684277871272484,
+    "withinRunSpread": 0.01175711957225669,
     "noisy": false
    },
-   "peakResidentBytes": 634699776,
-   "substepsPerSecond": 5206465.568044813,
-   "nodeStepsPerSecond": 5206465.568044813,
+   "peakResidentBytes": 634732544,
+   "substepsPerSecond": 5104181.734104808,
+   "nodeStepsPerSecond": 5104181.734104808,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -2957,38 +2976,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 1658.7741659999592,
-    "median": 1667.4046249999665,
-    "interquartileRange": 22.122166999964975,
-    "minimumOverMedian": 0.9948240163961357,
+    "minimum": 1630.7065840000287,
+    "median": 1659.9320830000797,
+    "interquartileRange": 32.993207999970764,
+    "minimumOverMedian": 0.982393557363365,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1658.7741659999592
+     1630.7065840000287
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.013267425715558046,
+    "withinRunSpread": 0.019876239719603745,
     "noisy": false
    },
    "compute": {
-    "minimum": 718.931747,
-    "median": 721.574164,
-    "interquartileRange": 21.383289999999988,
-    "minimumOverMedian": 0.996337982799506,
+    "minimum": 675.807292,
+    "median": 708.488081,
+    "interquartileRange": 41.44245999999998,
+    "minimumOverMedian": 0.9538724928810765,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     718.931747
+     675.807292
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.029634223433753635,
-    "noisy": false
+    "withinRunSpread": 0.05849422327826004,
+    "noisy": true
    },
-   "peakResidentBytes": 639352832,
-   "substepsPerSecond": 1390952.6240465217,
-   "nodeStepsPerSecond": 1390952.6240465217,
-   "speedUp": 0.26715870985177126,
-   "efficiency": 0.06678967746294281
+   "peakResidentBytes": 640172032,
+   "substepsPerSecond": 1479711.7637493617,
+   "nodeStepsPerSecond": 1479711.7637493617,
+   "speedUp": 0.28990185711106536,
+   "efficiency": 0.07247546427776634
   },
   {
    "problem": "scaling/graphScalability",
@@ -2999,38 +3018,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1073.2496249999385,
-    "median": 1077.7962089999346,
-    "interquartileRange": 4.41579199989792,
-    "minimumOverMedian": 0.9957815921395615,
+    "minimum": 1088.392332999967,
+    "median": 1093.596375000081,
+    "interquartileRange": 1.8747499999590218,
+    "minimumOverMedian": 0.9952413503564205,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1073.2496249999385
+     1088.392332999967
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004097056533530809,
+    "withinRunSpread": 0.0017142979282085522,
     "noisy": false
    },
    "compute": {
-    "minimum": 132.205921,
-    "median": 133.07633,
-    "interquartileRange": 1.6924589999999853,
-    "minimumOverMedian": 0.9934593251857785,
+    "minimum": 135.825415,
+    "median": 137.090962,
+    "interquartileRange": 0.2227929999999958,
+    "minimumOverMedian": 0.9907685599288449,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     132.205921
+     135.825415
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.012717956679448443,
+    "withinRunSpread": 0.0016251472507720517,
     "noisy": false
    },
-   "peakResidentBytes": 638599168,
-   "substepsPerSecond": 7563957.744373644,
-   "nodeStepsPerSecond": 7563957.744373644,
-   "speedUp": 1.4528008772012566,
-   "efficiency": 0.36320021930031415
+   "peakResidentBytes": 638287872,
+   "substepsPerSecond": 7362392.377008382,
+   "nodeStepsPerSecond": 7362392.377008382,
+   "speedUp": 1.4424236362539369,
+   "efficiency": 0.3606059090634842
   },
   {
    "problem": "scaling/graphScalability",
@@ -3041,36 +3060,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 1564.1892919999082,
-    "median": 1573.4913339999039,
-    "interquartileRange": 26.890708000049926,
-    "minimumOverMedian": 0.9940882788490806,
+    "minimum": 1628.9697079999605,
+    "median": 1632.8679579999298,
+    "interquartileRange": 7.188833000021987,
+    "minimumOverMedian": 0.9976126361100599,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1564.1892919999082
+     1628.9697079999605
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0170898354627046,
+    "withinRunSpread": 0.0044025807260174655,
     "noisy": false
    },
    "compute": {
-    "minimum": 644.916377,
-    "median": 652.758036,
-    "interquartileRange": 6.446709000000055,
-    "minimumOverMedian": 0.9879868824778437,
+    "minimum": 676.217832,
+    "median": 680.244464,
+    "interquartileRange": 5.403039000000035,
+    "minimumOverMedian": 0.9940806104083194,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     644.916377
+     676.217832
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.009876108212323955,
+    "withinRunSpread": 0.007942790108469057,
     "noisy": false
    },
-   "peakResidentBytes": 686653440,
-   "substepsPerSecond": 1550588.6277097906,
-   "nodeStepsPerSecond": 1550588.6277097906,
+   "peakResidentBytes": 686227456,
+   "substepsPerSecond": 1478813.4128944413,
+   "nodeStepsPerSecond": 1478813.4128944413,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3083,38 +3102,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 4256.740333999973,
-    "median": 4345.182041999884,
-    "interquartileRange": 36.32179199997336,
-    "minimumOverMedian": 0.9796460292928935,
+    "minimum": 4374.921415999997,
+    "median": 4425.707208000007,
+    "interquartileRange": 151.06904099998064,
+    "minimumOverMedian": 0.9885248188338785,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     4256.740333999973
+     4374.921415999997
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.00835909557963103,
+    "withinRunSpread": 0.03413444087012916,
     "noisy": false
    },
    "compute": {
-    "minimum": 3313.150369,
-    "median": 3387.427335,
-    "interquartileRange": 42.943377000000055,
-    "minimumOverMedian": 0.9780727500092633,
+    "minimum": 3406.321874,
+    "median": 3459.439505,
+    "interquartileRange": 154.64321399999972,
+    "minimumOverMedian": 0.9846455962235421,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3313.150369
+     3406.321874
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.012677283599944751,
+    "withinRunSpread": 0.04470181189076747,
     "noisy": false
    },
-   "peakResidentBytes": 691814400,
-   "substepsPerSecond": 301827.5322957429,
-   "nodeStepsPerSecond": 301827.5322957429,
-   "speedUp": 0.19465351860702101,
-   "efficiency": 0.048663379651755254
+   "peakResidentBytes": 692142080,
+   "substepsPerSecond": 293571.78710352257,
+   "nodeStepsPerSecond": 293571.78710352257,
+   "speedUp": 0.19851847741150958,
+   "efficiency": 0.049629619352877394
   },
   {
    "problem": "scaling/graphScalability",
@@ -3125,38 +3144,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1619.202874999959,
-    "median": 1622.1170830000192,
-    "interquartileRange": 4.051166000077501,
-    "minimumOverMedian": 0.9982034539734514,
+    "minimum": 1656.2442499999888,
+    "median": 1659.7915829999838,
+    "interquartileRange": 2.9921249999897555,
+    "minimumOverMedian": 0.9978627840770325,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1619.202874999959
+     1656.2442499999888
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0024974559743770686,
+    "withinRunSpread": 0.001802711274497278,
     "noisy": false
    },
    "compute": {
-    "minimum": 670.353379,
-    "median": 673.307252,
-    "interquartileRange": 3.3289559999999483,
-    "minimumOverMedian": 0.9956128899678034,
+    "minimum": 688.818663,
+    "median": 692.390424,
+    "interquartileRange": 4.387126999999964,
+    "minimumOverMedian": 0.9948414061255128,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     670.353379
+     688.818663
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004944185570720614,
+    "withinRunSpread": 0.006336204037391429,
     "noisy": false
    },
-   "peakResidentBytes": 691322880,
-   "substepsPerSecond": 1491750.5174535713,
-   "nodeStepsPerSecond": 1491750.5174535713,
-   "speedUp": 0.9620543391040325,
-   "efficiency": 0.24051358477600812
+   "peakResidentBytes": 691617792,
+   "substepsPerSecond": 1451760.8969024115,
+   "nodeStepsPerSecond": 1451760.8969024115,
+   "speedUp": 0.9817066062857244,
+   "efficiency": 0.2454266515714311
   },
   {
    "problem": "scaling/graphScalability",
@@ -3167,36 +3186,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 13328.848832999822,
-    "median": 13798.896458999952,
-    "interquartileRange": 160.65079199988395,
-    "minimumOverMedian": 0.9659358538273867,
+    "minimum": 13521.737791999942,
+    "median": 13692.58941600006,
+    "interquartileRange": 47.075041999924,
+    "minimumOverMedian": 0.9875223291366295,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     13328.848832999822
+     13521.737791999942
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01164229273530811,
+    "withinRunSpread": 0.0034379941273135583,
     "noisy": false
    },
    "compute": {
-    "minimum": 209.248041,
-    "median": 210.962873,
-    "interquartileRange": 2.332875999999999,
-    "minimumOverMedian": 0.9918714038370154,
+    "minimum": 211.610167,
+    "median": 212.218084,
+    "interquartileRange": 1.1018740000000093,
+    "minimumOverMedian": 0.9971354137755762,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     209.248041
+     211.610167
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01105823013701562,
+    "withinRunSpread": 0.00519217768453705,
     "noisy": false
    },
-   "peakResidentBytes": 3439247360,
-   "substepsPerSecond": 4772135.477244444,
-   "nodeStepsPerSecond": 4772135.477244444,
+   "peakResidentBytes": 3360342016,
+   "substepsPerSecond": 4718865.894567344,
+   "nodeStepsPerSecond": 4718865.894567344,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3209,38 +3228,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 14286.384374999907,
-    "median": 14395.971084000077,
-    "interquartileRange": 112.25729199987836,
-    "minimumOverMedian": 0.9923876820562687,
+    "minimum": 14129.610791999963,
+    "median": 14251.245958000072,
+    "interquartileRange": 102.5688749999972,
+    "minimumOverMedian": 0.9914649451452469,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     14286.384374999907
+     14129.610791999963
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.007797826999294476,
+    "withinRunSpread": 0.007197186498800071,
     "noisy": false
    },
    "compute": {
-    "minimum": 690.368043,
-    "median": 713.842917,
-    "interquartileRange": 15.303291999999942,
-    "minimumOverMedian": 0.9671147903257824,
+    "minimum": 712.098373,
+    "median": 714.455376,
+    "interquartileRange": 33.08179499999994,
+    "minimumOverMedian": 0.9967009794044857,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     690.368043
+     712.098373
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.021437898500574377,
+    "withinRunSpread": 0.04630351469284758,
     "noisy": false
    },
-   "peakResidentBytes": 3302719488,
-   "substepsPerSecond": 1446416.8933149765,
-   "nodeStepsPerSecond": 1446416.8933149765,
-   "speedUp": 0.3030963601540867,
-   "efficiency": 0.07577409003852167
+   "peakResidentBytes": 3297607680,
+   "substepsPerSecond": 1402278.1652950076,
+   "nodeStepsPerSecond": 1402278.1652950076,
+   "speedUp": 0.2971642332343877,
+   "efficiency": 0.07429105830859692
   },
   {
    "problem": "scaling/graphScalability",
@@ -3251,38 +3270,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 13744.378415999934,
-    "median": 13793.623542000074,
-    "interquartileRange": 70.20274999993853,
-    "minimumOverMedian": 0.9964298629834145,
+    "minimum": 13532.124584000092,
+    "median": 13736.743250000058,
+    "interquartileRange": 74.28370899986476,
+    "minimumOverMedian": 0.9851042811038953,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     13744.378415999934
+     13532.124584000092
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005089507465980846,
+    "withinRunSpread": 0.0054076652411672935,
     "noisy": false
    },
    "compute": {
-    "minimum": 141.077625,
-    "median": 145.055875,
-    "interquartileRange": 4.189957000000021,
-    "minimumOverMedian": 0.9725743614314141,
+    "minimum": 141.549708,
+    "median": 144.973209,
+    "interquartileRange": 0.18812600000001112,
+    "minimumOverMedian": 0.9763852850908474,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     141.077625
+     141.549708
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.028885124439117144,
+    "withinRunSpread": 0.0012976604525599701,
     "noisy": false
    },
-   "peakResidentBytes": 3392749568,
-   "substepsPerSecond": 7078089.101655914,
-   "nodeStepsPerSecond": 7078089.101655914,
-   "speedUp": 1.4832121039746733,
-   "efficiency": 0.3708030259936683
+   "peakResidentBytes": 3277062144,
+   "substepsPerSecond": 7054482.938248096,
+   "nodeStepsPerSecond": 7054482.938248096,
+   "speedUp": 1.4949530450461965,
+   "efficiency": 0.37373826126154913
   },
   {
    "problem": "scaling/graphScalability",
@@ -3293,36 +3312,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 14521.173166000051,
-    "median": 14817.924750000006,
-    "interquartileRange": 88.73416600003839,
-    "minimumOverMedian": 0.9799734720612646,
+    "minimum": 14462.726249999832,
+    "median": 14555.084541999968,
+    "interquartileRange": 180.79450000007637,
+    "minimumOverMedian": 0.993654568495729,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     14521.173166000051
+     14462.726249999832
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005988299137504957,
+    "withinRunSpread": 0.01242139813605191,
     "noisy": false
    },
    "compute": {
-    "minimum": 782.047375,
-    "median": 798.279416,
-    "interquartileRange": 19.468166999999994,
-    "minimumOverMedian": 0.9796662162713212,
+    "minimum": 791.064542,
+    "median": 804.974835,
+    "interquartileRange": 10.979583999999932,
+    "minimumOverMedian": 0.9827195927186966,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     782.047375
+     791.064542
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.024387660022039195,
+    "withinRunSpread": 0.01363966117027737,
     "noisy": false
    },
-   "peakResidentBytes": 3349643264,
-   "substepsPerSecond": 1276853.5921497084,
-   "nodeStepsPerSecond": 1276853.5921497084,
+   "peakResidentBytes": 3232251904,
+   "substepsPerSecond": 1262299.0249005498,
+   "nodeStepsPerSecond": 1262299.0249005498,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3335,38 +3354,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 17767.359042000026,
-    "median": 18311.732792000053,
-    "interquartileRange": 94.50279100006446,
-    "minimumOverMedian": 0.970271860332199,
+    "minimum": 17883.71158299991,
+    "median": 18068.540042000124,
+    "interquartileRange": 426.57379100006074,
+    "minimumOverMedian": 0.989770703190707,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     17767.359042000026
+     17883.71158299991
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005160778178313655,
+    "withinRunSpread": 0.023608647406403317,
     "noisy": false
    },
    "compute": {
-    "minimum": 3799.486875,
-    "median": 4214.344542,
-    "interquartileRange": 275.885581,
-    "minimumOverMedian": 0.9015605717886747,
+    "minimum": 4032.570375,
+    "median": 4231.973001,
+    "interquartileRange": 124.19779300000027,
+    "minimumOverMedian": 0.9528818766204599,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3799.486875
+     4032.570375
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.06546346134031868,
-    "noisy": true
+    "withinRunSpread": 0.029347491813074604,
+    "noisy": false
    },
-   "peakResidentBytes": 3451912192,
-   "substepsPerSecond": 262814.4359624877,
-   "nodeStepsPerSecond": 262814.4359624877,
-   "speedUp": 0.20582973457435616,
-   "efficiency": 0.05145743364358904
+   "peakResidentBytes": 3221487616,
+   "substepsPerSecond": 247623.70080150184,
+   "nodeStepsPerSecond": 247623.70080150184,
+   "speedUp": 0.19616881255296134,
+   "efficiency": 0.049042203138240335
   },
   {
    "problem": "scaling/graphScalability",
@@ -3377,38 +3396,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 14751.307165999897,
-    "median": 14760.155709000072,
-    "interquartileRange": 90.32120799995027,
-    "minimumOverMedian": 0.999400511541028,
+    "minimum": 14359.48595800018,
+    "median": 14672.438165999949,
+    "interquartileRange": 217.04891599994153,
+    "minimumOverMedian": 0.9786707427586939,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     14751.307165999897
+     14359.48595800018
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006119258480781237,
+    "withinRunSpread": 0.014792968526724019,
     "noisy": false
    },
    "compute": {
-    "minimum": 718.813834,
-    "median": 743.419665,
-    "interquartileRange": 21.79599900000005,
-    "minimumOverMedian": 0.9669018292649012,
+    "minimum": 728.941416,
+    "median": 741.701501,
+    "interquartileRange": 22.360207999999943,
+    "minimumOverMedian": 0.9827961990331742,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     718.813834
+     728.941416
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.02931856665373528,
+    "withinRunSpread": 0.03014717911431049,
     "noisy": false
    },
-   "peakResidentBytes": 3242459136,
-   "substepsPerSecond": 1389177.4932089022,
-   "nodeStepsPerSecond": 1389177.4932089022,
-   "speedUp": 1.0879692877474587,
-   "efficiency": 0.2719923219368647
+   "peakResidentBytes": 3446063104,
+   "substepsPerSecond": 1369876.8900791886,
+   "nodeStepsPerSecond": 1369876.8900791886,
+   "speedUp": 1.0852237568567513,
+   "efficiency": 0.27130593921418783
   },
   {
    "problem": "scaling/graphScalability",
@@ -3419,36 +3438,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 193.96849999995902,
-    "median": 194.44699999992736,
-    "interquartileRange": 0.8520409998018295,
-    "minimumOverMedian": 0.9975391751995736,
+    "minimum": 198.45966699998826,
+    "median": 199.18091699993238,
+    "interquartileRange": 1.141541999997571,
+    "minimumOverMedian": 0.9963789201756493,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     193.96849999995902
+     198.45966699998826
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0043818675515803675,
+    "withinRunSpread": 0.005731181566946791,
     "noisy": false
    },
    "compute": {
-    "minimum": 165.069093,
-    "median": 165.579759,
-    "interquartileRange": 0.3267489999999782,
-    "minimumOverMedian": 0.9969158911506811,
+    "minimum": 165.388376,
+    "median": 166.102648,
+    "interquartileRange": 0.372745000000009,
+    "minimumOverMedian": 0.9956998156946902,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     165.069093
+     165.388376
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0019733631814259265,
+    "withinRunSpread": 0.0022440641644677997,
     "noisy": false
    },
    "peakResidentBytes": 16596992,
-   "substepsPerSecond": 6058069.271635242,
-   "nodeStepsPerSecond": 6058069.271635242,
+   "substepsPerSecond": 6046374.141795794,
+   "nodeStepsPerSecond": 6046374.141795794,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3461,38 +3480,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 800.6982090000529,
-    "median": 801.2903330000117,
-    "interquartileRange": 11.749207999790087,
-    "minimumOverMedian": 0.9992610368856667,
+    "minimum": 795.5580840001348,
+    "median": 804.5274159999099,
+    "interquartileRange": 12.964332999894395,
+    "minimumOverMedian": 0.9888514277805841,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     800.6982090000529
+     795.5580840001348
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.014662860034516247,
+    "withinRunSpread": 0.016114221519451424,
     "noisy": false
    },
    "compute": {
-    "minimum": 764.29453,
-    "median": 766.356634,
-    "interquartileRange": 10.750570000000039,
-    "minimumOverMedian": 0.9973092110011016,
+    "minimum": 754.482422,
+    "median": 764.777159,
+    "interquartileRange": 13.29848400000003,
+    "minimumOverMedian": 0.9865389062959712,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     764.29453
+     754.482422
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.014028155460581606,
+    "withinRunSpread": 0.01738870446574102,
     "noisy": false
    },
-   "peakResidentBytes": 17268736,
-   "substepsPerSecond": 1308396.1231542504,
-   "nodeStepsPerSecond": 1308396.1231542504,
-   "speedUp": 0.21597576133378843,
-   "efficiency": 0.05399394033344711
+   "peakResidentBytes": 17317888,
+   "substepsPerSecond": 1325411.9258990502,
+   "nodeStepsPerSecond": 1325411.9258990502,
+   "speedUp": 0.21920772595547625,
+   "efficiency": 0.05480193148886906
   },
   {
    "problem": "scaling/graphScalability",
@@ -3503,38 +3522,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 540.0693749999627,
-    "median": 541.518875000067,
-    "interquartileRange": 2.2634580000303686,
-    "minimumOverMedian": 0.9973232696642308,
+    "minimum": 541.6500829998404,
+    "median": 543.222415999975,
+    "interquartileRange": 1.7244170000776649,
+    "minimumOverMedian": 0.9971055447017216,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     540.0693749999627
+     541.6500829998404
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.004179832143487313,
+    "withinRunSpread": 0.0031744216536118497,
     "noisy": false
    },
    "compute": {
-    "minimum": 508.594748,
-    "median": 510.54519,
-    "interquartileRange": 0.9150970000000029,
-    "minimumOverMedian": 0.9961796878352727,
+    "minimum": 506.699991,
+    "median": 508.155742,
+    "interquartileRange": 1.4550380000000018,
+    "minimumOverMedian": 0.997135226703785,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     508.594748
+     506.699991
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0017923917763283657,
+    "withinRunSpread": 0.002863370183072736,
     "noisy": false
    },
-   "peakResidentBytes": 17334272,
-   "substepsPerSecond": 1966201.978947687,
-   "nodeStepsPerSecond": 1966201.978947687,
-   "speedUp": 0.32455917731969974,
-   "efficiency": 0.08113979432992494
+   "peakResidentBytes": 17383424,
+   "substepsPerSecond": 1973554.4064771852,
+   "nodeStepsPerSecond": 1973554.4064771852,
+   "speedUp": 0.3264029582349055,
+   "efficiency": 0.08160073955872638
   },
   {
    "problem": "scaling/graphScalability",
@@ -3545,36 +3564,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 479.5700000000652,
-    "median": 483.127165999962,
-    "interquartileRange": 9.358458000002429,
-    "minimumOverMedian": 0.9926372055843014,
+    "minimum": 480.2863330000546,
+    "median": 483.9917920001317,
+    "interquartileRange": 17.077833999879658,
+    "minimumOverMedian": 0.9923439631387879,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     479.5700000000652
+     480.2863330000546
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.019370589481617278,
+    "withinRunSpread": 0.035285379384853315,
     "noisy": false
    },
    "compute": {
-    "minimum": 458.293803,
-    "median": 460.81178,
-    "interquartileRange": 10.159250999999983,
-    "minimumOverMedian": 0.9945357798795856,
+    "minimum": 455.52268,
+    "median": 457.27925,
+    "interquartileRange": 18.95219800000001,
+    "minimumOverMedian": 0.9961586492280154,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     458.293803
+     455.52268
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.022046422077143912,
+    "withinRunSpread": 0.041445567451398706,
     "noisy": false
    },
    "peakResidentBytes": 17252352,
-   "substepsPerSecond": 2182006.3755040565,
-   "nodeStepsPerSecond": 2182006.3755040565,
+   "substepsPerSecond": 2195280.37550183,
+   "nodeStepsPerSecond": 2195280.37550183,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3587,38 +3606,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 3134.0002909998875,
-    "median": 3137.8480410000775,
-    "interquartileRange": 9.630791999865323,
-    "minimumOverMedian": 0.9987737615238488,
+    "minimum": 3145.651000000071,
+    "median": 3169.1025419998914,
+    "interquartileRange": 79.51374900015071,
+    "minimumOverMedian": 0.9925999421953001,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3134.0002909998875
+     3145.651000000071
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003069234671031377,
+    "withinRunSpread": 0.025090304888011866,
     "noisy": false
    },
    "compute": {
-    "minimum": 3103.382212,
-    "median": 3109.246831,
-    "interquartileRange": 11.612537999999859,
-    "minimumOverMedian": 0.9981138136279409,
+    "minimum": 3117.901393,
+    "median": 3141.47489,
+    "interquartileRange": 83.62086799999997,
+    "minimumOverMedian": 0.9924960415647315,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3103.382212
+     3117.901393
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003734839538701088,
+    "withinRunSpread": 0.026618346772779702,
     "noisy": false
    },
-   "peakResidentBytes": 18006016,
-   "substepsPerSecond": 322229.08159144915,
-   "nodeStepsPerSecond": 322229.08159144915,
-   "speedUp": 0.14767559123974255,
-   "efficiency": 0.03691889780993564
+   "peakResidentBytes": 17989632,
+   "substepsPerSecond": 320728.55230287265,
+   "nodeStepsPerSecond": 320728.55230287265,
+   "speedUp": 0.1460991296975247,
+   "efficiency": 0.036524782424381175
   },
   {
    "problem": "scaling/graphScalability",
@@ -3629,38 +3648,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1996.251084000105,
-    "median": 2009.0650829998776,
-    "interquartileRange": 3.6305430000647902,
-    "minimumOverMedian": 0.9936219094601758,
+    "minimum": 1757.701916999882,
+    "median": 1778.576374999946,
+    "interquartileRange": 153.4560000000056,
+    "minimumOverMedian": 0.9882633895887296,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1996.251084000105
+     1757.701916999882
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.001807080831171367,
-    "noisy": false
+    "withinRunSpread": 0.08628024197162197,
+    "noisy": true
    },
    "compute": {
-    "minimum": 1971.953104,
-    "median": 1981.119595,
-    "interquartileRange": 3.049261999999999,
-    "minimumOverMedian": 0.9953730753947745,
+    "minimum": 1729.484804,
+    "median": 1751.297096,
+    "interquartileRange": 153.46243800000002,
+    "minimumOverMedian": 0.9875450647124239,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1971.953104
+     1729.484804
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0015391609914392871,
-    "noisy": false
+    "withinRunSpread": 0.08762787213575099,
+    "noisy": true
    },
    "peakResidentBytes": 18382848,
-   "substepsPerSecond": 507111.4510642034,
-   "nodeStepsPerSecond": 507111.4510642034,
-   "speedUp": 0.23240603545306218,
-   "efficiency": 0.058101508863265545
+   "substepsPerSecond": 578206.8727560788,
+   "nodeStepsPerSecond": 578206.8727560788,
+   "speedUp": 0.26338634427226804,
+   "efficiency": 0.06584658606806701
   },
   {
    "problem": "scaling/graphScalability",
@@ -3671,36 +3690,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 288.07133299997076,
-    "median": 288.3002499998547,
-    "interquartileRange": 0.37170800007879734,
-    "minimumOverMedian": 0.9992059771023991,
+    "minimum": 286.88245900021866,
+    "median": 288.46945800003596,
+    "interquartileRange": 1.6280829997267574,
+    "minimumOverMedian": 0.9944985545061859,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     288.07133299997076
+     286.88245900021866
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0012893086290385967,
+    "withinRunSpread": 0.005643866116760806,
     "noisy": false
    },
    "compute": {
-    "minimum": 167.665933,
-    "median": 167.733796,
-    "interquartileRange": 0.09191699999999514,
-    "minimumOverMedian": 0.9995954124832421,
+    "minimum": 164.743085,
+    "median": 165.155853,
+    "interquartileRange": 0.8006719999999916,
+    "minimumOverMedian": 0.9975007364710229,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     167.665933
+     164.743085
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0005479933215128282,
+    "withinRunSpread": 0.004847978351696634,
     "noisy": false
    },
-   "peakResidentBytes": 77283328,
-   "substepsPerSecond": 5964240.809729666,
-   "nodeStepsPerSecond": 5964240.809729666,
+   "peakResidentBytes": 77250560,
+   "substepsPerSecond": 6070057.508028333,
+   "nodeStepsPerSecond": 6070057.508028333,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3713,38 +3732,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 715.0304580000229,
-    "median": 777.6257499998901,
-    "interquartileRange": 41.69166600005701,
-    "minimumOverMedian": 0.9195046048823923,
+    "minimum": 731.5895000000019,
+    "median": 754.8090000001248,
+    "interquartileRange": 50.64500000001863,
+    "minimumOverMedian": 0.9692379131672793,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     715.0304580000229
+     731.5895000000019
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.05361405020353673,
+    "withinRunSpread": 0.06709644426604645,
     "noisy": true
    },
    "compute": {
-    "minimum": 587.538022,
-    "median": 647.689424,
-    "interquartileRange": 42.46700299999998,
-    "minimumOverMedian": 0.9071292508861468,
+    "minimum": 601.197135,
+    "median": 625.164413,
+    "interquartileRange": 50.40536600000007,
+    "minimumOverMedian": 0.9616624403091224,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     587.538022
+     601.197135
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.06556692363097776,
+    "withinRunSpread": 0.0806273756980471,
     "noisy": true
    },
-   "peakResidentBytes": 78790656,
-   "substepsPerSecond": 1702017.5078984082,
-   "nodeStepsPerSecond": 1702017.5078984082,
-   "speedUp": 0.2853703534441215,
-   "efficiency": 0.07134258836103037
+   "peakResidentBytes": 78774272,
+   "substepsPerSecond": 1663347.9133263,
+   "nodeStepsPerSecond": 1663347.9133263,
+   "speedUp": 0.27402506666968734,
+   "efficiency": 0.06850626666742184
   },
   {
    "problem": "scaling/graphScalability",
@@ -3755,38 +3774,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 291.6012079999782,
-    "median": 292.53187500010245,
-    "interquartileRange": 1.037125000031665,
-    "minimumOverMedian": 0.9968185791715043,
+    "minimum": 293.18070799997076,
+    "median": 294.49212499987334,
+    "interquartileRange": 2.1450000000186265,
+    "minimumOverMedian": 0.9955468520596157,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     291.6012079999782
+     293.18070799997076
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0035453401446638995,
+    "withinRunSpread": 0.007283726177803733,
     "noisy": false
    },
    "compute": {
-    "minimum": 166.191474,
-    "median": 166.737543,
-    "interquartileRange": 0.6324689999999862,
-    "minimumOverMedian": 0.9967249787289957,
+    "minimum": 168.400072,
+    "median": 168.537611,
+    "interquartileRange": 1.3920249999999896,
+    "minimumOverMedian": 0.9991839269633411,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     166.191474
+     168.400072
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0037932009109669213,
+    "withinRunSpread": 0.00825943237085513,
     "noisy": false
    },
-   "peakResidentBytes": 78757888,
-   "substepsPerSecond": 6017155.850004676,
-   "nodeStepsPerSecond": 6017155.850004676,
-   "speedUp": 1.008872049597442,
-   "efficiency": 0.2522180123993605
+   "peakResidentBytes": 78725120,
+   "substepsPerSecond": 5938239.7413701825,
+   "nodeStepsPerSecond": 5938239.7413701825,
+   "speedUp": 0.9782839344629259,
+   "efficiency": 0.24457098361573149
   },
   {
    "problem": "scaling/graphScalability",
@@ -3797,36 +3816,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 581.0298750000075,
-    "median": 582.699874999933,
-    "interquartileRange": 11.86525100003928,
-    "minimumOverMedian": 0.9971340306192349,
+    "minimum": 574.2116670000833,
+    "median": 586.1798330000602,
+    "interquartileRange": 11.58683400019072,
+    "minimumOverMedian": 0.9795827742167041,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     581.0298750000075
+     574.2116670000833
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.020362542552528683,
+    "withinRunSpread": 0.01976668822072821,
     "noisy": false
    },
    "compute": {
-    "minimum": 465.2176,
-    "median": 465.399242,
-    "interquartileRange": 11.223508999999979,
-    "minimumOverMedian": 0.9996097071425827,
+    "minimum": 456.422655,
+    "median": 469.044582,
+    "interquartileRange": 10.94265299999995,
+    "minimumOverMedian": 0.9730901336794463,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     465.2176
+     456.422655
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.024115872969126963,
+    "withinRunSpread": 0.023329665067957122,
     "noisy": false
    },
-   "peakResidentBytes": 84574208,
-   "substepsPerSecond": 2149531.74600445,
-   "nodeStepsPerSecond": 2149531.74600445,
+   "peakResidentBytes": 84590592,
+   "substepsPerSecond": 2190951.7177669457,
+   "nodeStepsPerSecond": 2190951.7177669457,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3839,38 +3858,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 2554.414124999894,
-    "median": 2710.4676250000484,
-    "interquartileRange": 147.66391799994744,
-    "minimumOverMedian": 0.9424256174245388,
+    "minimum": 2690.671375000151,
+    "median": 2737.3274999998976,
+    "interquartileRange": 152.52583399997093,
+    "minimumOverMedian": 0.9829555926356096,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2554.414124999894
+     2690.671375000151
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.05447912996191748,
+    "withinRunSpread": 0.05572071080277265,
     "noisy": true
    },
    "compute": {
-    "minimum": 2434.526495,
-    "median": 2589.81362,
-    "interquartileRange": 147.125626,
-    "minimumOverMedian": 0.9400392662233354,
+    "minimum": 2567.801978,
+    "median": 2614.886055,
+    "interquartileRange": 153.55789699999968,
+    "minimumOverMedian": 0.981993832232204,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2434.526495
+     2567.801978
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.056809349083583864,
+    "withinRunSpread": 0.05872450797860853,
     "noisy": true
    },
-   "peakResidentBytes": 85934080,
-   "substepsPerSecond": 410757.4931116122,
-   "nodeStepsPerSecond": 410757.4931116122,
-   "speedUp": 0.19109161512740078,
-   "efficiency": 0.047772903781850194
+   "peakResidentBytes": 85999616,
+   "substepsPerSecond": 389438.12979647145,
+   "nodeStepsPerSecond": 389438.12979647145,
+   "speedUp": 0.1777483851599401,
+   "efficiency": 0.044437096289985024
   },
   {
    "problem": "scaling/graphScalability",
@@ -3881,38 +3900,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 739.9726249999367,
-    "median": 755.8122910000384,
-    "interquartileRange": 7.119959000032395,
-    "minimumOverMedian": 0.9790428573486893,
+    "minimum": 762.1645839998964,
+    "median": 768.9565000000875,
+    "interquartileRange": 6.7320000000763685,
+    "minimumOverMedian": 0.9911673599219327,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     739.9726249999367
+     762.1645839998964
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.009420274167031287,
+    "withinRunSpread": 0.008754721496047698,
     "noisy": false
    },
    "compute": {
-    "minimum": 620.462672,
-    "median": 637.25254,
-    "interquartileRange": 6.7751839999999675,
-    "minimumOverMedian": 0.9736527248679151,
+    "minimum": 638.349211,
+    "median": 646.683685,
+    "interquartileRange": 5.446811000000025,
+    "minimumOverMedian": 0.9871119773185557,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     620.462672
+     638.349211
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.010631866606604609,
+    "withinRunSpread": 0.008422681948439793,
     "noisy": false
    },
-   "peakResidentBytes": 86097920,
-   "substepsPerSecond": 1611700.5021053061,
-   "nodeStepsPerSecond": 1611700.5021053061,
-   "speedUp": 0.7497914395082256,
-   "efficiency": 0.1874478598770564
+   "peakResidentBytes": 86081536,
+   "substepsPerSecond": 1566540.6689129598,
+   "nodeStepsPerSecond": 1566540.6689129598,
+   "speedUp": 0.7150046512707291,
+   "efficiency": 0.17875116281768227
   },
   {
    "problem": "scaling/graphScalability",
@@ -3923,36 +3942,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 1318.8324580001645,
-    "median": 1321.6603330001235,
-    "interquartileRange": 3.954791999887675,
-    "minimumOverMedian": 0.9978603617515404,
+    "minimum": 1325.2597920000553,
+    "median": 1328.971499999985,
+    "interquartileRange": 4.783166999928653,
+    "minimumOverMedian": 0.9972070823189738,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1318.8324580001645
+     1325.2597920000553
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0029922907581787167,
+    "withinRunSpread": 0.003599149417371785,
     "noisy": false
    },
    "compute": {
-    "minimum": 248.90167,
-    "median": 252.520497,
-    "interquartileRange": 0.19379599999999186,
-    "minimumOverMedian": 0.9856691752036271,
+    "minimum": 252.700499,
+    "median": 252.947539,
+    "interquartileRange": 3.1467039999999997,
+    "minimumOverMedian": 0.9990233547992732,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     248.90167
+     252.700499
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.00076744661246248,
+    "withinRunSpread": 0.012440144752703048,
     "noisy": false
    },
-   "peakResidentBytes": 685604864,
-   "substepsPerSecond": 4017650.8257256774,
-   "nodeStepsPerSecond": 4017650.8257256774,
+   "peakResidentBytes": 685457408,
+   "substepsPerSecond": 3957253.7607058696,
+   "nodeStepsPerSecond": 3957253.7607058696,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -3965,38 +3984,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 1821.311999999918,
-    "median": 1848.8299579999875,
-    "interquartileRange": 15.030583000043407,
-    "minimumOverMedian": 0.9851160146551078,
+    "minimum": 1857.4639580000658,
+    "median": 1860.840833999915,
+    "interquartileRange": 5.899167000083253,
+    "minimumOverMedian": 0.9981852956264988,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1821.311999999918
+     1857.4639580000658
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.00812978118133864,
+    "withinRunSpread": 0.0031701620537866603,
     "noisy": false
    },
    "compute": {
-    "minimum": 724.370754,
-    "median": 747.911046,
-    "interquartileRange": 11.551461000000018,
-    "minimumOverMedian": 0.9685252783390499,
+    "minimum": 746.390662,
+    "median": 751.53525,
+    "interquartileRange": 1.9794150000000172,
+    "minimumOverMedian": 0.9931545619450318,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     724.370754
+     746.390662
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.015444966432545532,
+    "withinRunSpread": 0.0026338285529521298,
     "noisy": false
    },
-   "peakResidentBytes": 691044352,
-   "substepsPerSecond": 1380508.5234018157,
-   "nodeStepsPerSecond": 1380508.5234018157,
-   "speedUp": 0.34361087692394604,
-   "efficiency": 0.08590271923098651
+   "peakResidentBytes": 690126848,
+   "substepsPerSecond": 1339780.9631224994,
+   "nodeStepsPerSecond": 1339780.9631224994,
+   "speedUp": 0.3385633179317562,
+   "efficiency": 0.08464082948293905
   },
   {
    "problem": "scaling/graphScalability",
@@ -4007,38 +4026,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 1303.9014580000658,
-    "median": 1304.7228750002105,
-    "interquartileRange": 1.9142090000677854,
-    "minimumOverMedian": 0.9993704279921171,
+    "minimum": 1311.3108330001123,
+    "median": 1312.7301659998484,
+    "interquartileRange": 2.8990829999092966,
+    "minimumOverMedian": 0.9989187930341685,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1303.9014580000658
+     1311.3108330001123
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.001467138376084252,
+    "withinRunSpread": 0.0022084378610292645,
     "noisy": false
    },
    "compute": {
-    "minimum": 198.180418,
-    "median": 199.980668,
-    "interquartileRange": 1.361091999999985,
-    "minimumOverMedian": 0.9909978798550667,
+    "minimum": 201.263083,
+    "median": 202.559154,
+    "interquartileRange": 1.1757460000000037,
+    "minimumOverMedian": 0.9936015184976532,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     198.180418
+     201.263083
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006806117879354144,
+    "withinRunSpread": 0.005804457496894975,
     "noisy": false
    },
-   "peakResidentBytes": 690192384,
-   "substepsPerSecond": 5045907.209661854,
-   "nodeStepsPerSecond": 5045907.209661854,
-   "speedUp": 1.2559347311498756,
-   "efficiency": 0.3139836827874689
+   "peakResidentBytes": 690601984,
+   "substepsPerSecond": 4968621.095802254,
+   "nodeStepsPerSecond": 4968621.095802254,
+   "speedUp": 1.2555730302511565,
+   "efficiency": 0.31389325756278913
   },
   {
    "problem": "scaling/graphScalability",
@@ -4049,36 +4068,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 2050.9301660000347,
-    "median": 2059.691707999911,
-    "interquartileRange": 78.0079989999067,
-    "minimumOverMedian": 0.9957461876620436,
+    "minimum": 2070.1860829999205,
+    "median": 2086.7694580000825,
+    "interquartileRange": 66.14904199982993,
+    "minimumOverMedian": 0.9920530871598747,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2050.9301660000347
+     2070.1860829999205
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.03787362870711235,
+    "withinRunSpread": 0.031699257311934126,
     "noisy": false
    },
    "compute": {
-    "minimum": 965.537503,
-    "median": 967.096048,
-    "interquartileRange": 78.72762399999999,
-    "minimumOverMedian": 0.9983884279092825,
+    "minimum": 970.570961,
+    "median": 978.647325,
+    "interquartileRange": 69.97017200000005,
+    "minimumOverMedian": 0.9917474213706148,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     965.537503
+     970.570961
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.08140621002723815,
+    "withinRunSpread": 0.07149682036886991,
     "noisy": true
    },
-   "peakResidentBytes": 752615424,
-   "substepsPerSecond": 1035692.5514471706,
-   "nodeStepsPerSecond": 1035692.5514471706,
+   "peakResidentBytes": 752271360,
+   "substepsPerSecond": 1030321.3677129579,
+   "nodeStepsPerSecond": 1030321.3677129579,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -4091,38 +4110,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 4600.824959000107,
-    "median": 4627.64462500019,
-    "interquartileRange": 20.296207999810576,
-    "minimumOverMedian": 0.994204467245563,
+    "minimum": 4622.597291999962,
+    "median": 4717.9016669997945,
+    "interquartileRange": 52.684791000559926,
+    "minimumOverMedian": 0.9797994147130162,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     4600.824959000107
+     4622.597291999962
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.0043858614142847545,
+    "withinRunSpread": 0.011166996414756394,
     "noisy": false
    },
    "compute": {
-    "minimum": 3480.279088,
-    "median": 3507.518045,
-    "interquartileRange": 31.083302999999887,
-    "minimumOverMedian": 0.9922341220627989,
+    "minimum": 3491.786458,
+    "median": 3588.035078,
+    "interquartileRange": 56.74259200000006,
+    "minimumOverMedian": 0.9731751173253163,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     3480.279088
+     3491.786458
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.008861908221487108,
+    "withinRunSpread": 0.015814391656290283,
     "noisy": false
    },
-   "peakResidentBytes": 758071296,
-   "substepsPerSecond": 287333.2783706914,
-   "nodeStepsPerSecond": 287333.2783706914,
-   "speedUp": 0.2774310561268413,
-   "efficiency": 0.06935776403171033
+   "peakResidentBytes": 758185984,
+   "substepsPerSecond": 286386.356104025,
+   "nodeStepsPerSecond": 286386.356104025,
+   "speedUp": 0.27795828086117175,
+   "efficiency": 0.06948957021529294
   },
   {
    "problem": "scaling/graphScalability",
@@ -4133,38 +4152,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 2060.810042000143,
-    "median": 2067.1578329999465,
-    "interquartileRange": 28.351998999947682,
-    "minimumOverMedian": 0.996929218031411,
+    "minimum": 2073.175707999617,
+    "median": 2112.8401660001837,
+    "interquartileRange": 33.19108400028199,
+    "minimumOverMedian": 0.9812269481436187,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     2060.810042000143
+     2073.175707999617
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01371544956429479,
+    "withinRunSpread": 0.015709226156522767,
     "noisy": false
    },
    "compute": {
-    "minimum": 936.226832,
-    "median": 939.699131,
-    "interquartileRange": 34.22821900000008,
-    "minimumOverMedian": 0.9963048821846787,
+    "minimum": 944.60292,
+    "median": 984.635873,
+    "interquartileRange": 37.762253999999984,
+    "minimumOverMedian": 0.9593423781341349,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     936.226832
+     944.60292
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.036424657500295256,
+    "withinRunSpread": 0.0383514911811465,
     "noisy": false
    },
-   "peakResidentBytes": 758005760,
-   "substepsPerSecond": 1068117.218840829,
-   "nodeStepsPerSecond": 1068117.218840829,
-   "speedUp": 1.0313072323908785,
-   "efficiency": 0.25782680809771963
+   "peakResidentBytes": 758644736,
+   "substepsPerSecond": 1058645.8911221658,
+   "nodeStepsPerSecond": 1058645.8911221658,
+   "speedUp": 1.0274909599051418,
+   "efficiency": 0.25687273997628546
   },
   {
    "problem": "scaling/graphScalability",
@@ -4175,36 +4194,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 15334.758791000117,
-    "median": 15508.5593330001,
-    "interquartileRange": 279.0226670000702,
-    "minimumOverMedian": 0.9887932503420767,
+    "minimum": 15024.712834000122,
+    "median": 15284.576708000153,
+    "interquartileRange": 94.03541600052267,
+    "minimumOverMedian": 0.9829982943613993,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     15334.758791000117
+     15024.712834000122
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.017991527195330648,
+    "withinRunSpread": 0.006152307505598325,
     "noisy": false
    },
    "compute": {
-    "minimum": 283.6285,
-    "median": 286.051458,
-    "interquartileRange": 3.0898310000000038,
-    "minimumOverMedian": 0.9915296428938318,
+    "minimum": 280.813625,
+    "median": 284.031166,
+    "interquartileRange": 3.4406249999999545,
+    "minimumOverMedian": 0.9886718734239186,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     283.6285
+     280.813625
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.01080166142694509,
+    "withinRunSpread": 0.01211354742669315,
     "noisy": false
    },
-   "peakResidentBytes": 3806068736,
-   "substepsPerSecond": 3525738.77448846,
-   "nodeStepsPerSecond": 3525738.77448846,
+   "peakResidentBytes": 3871047680,
+   "substepsPerSecond": 3561080.770208354,
+   "nodeStepsPerSecond": 3561080.770208354,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -4217,38 +4236,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 16372.273457999807,
-    "median": 16417.3255830002,
-    "interquartileRange": 47.42674999986775,
-    "minimumOverMedian": 0.9972558182651232,
+    "minimum": 15862.153667000122,
+    "median": 16189.483957999852,
+    "interquartileRange": 679.3090830002911,
+    "minimumOverMedian": 0.9797813017481646,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     16372.273457999807
+     15862.153667000122
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.002888823137489407,
+    "withinRunSpread": 0.04195989722480427,
     "noisy": false
    },
    "compute": {
-    "minimum": 784.438458,
-    "median": 790.275667,
-    "interquartileRange": 4.832871999999952,
-    "minimumOverMedian": 0.9926137052629257,
+    "minimum": 733.641667,
+    "median": 763.648209,
+    "interquartileRange": 88.80520999999999,
+    "minimumOverMedian": 0.9607063283245388,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     784.438458
+     733.641667
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.006115425543021246,
-    "noisy": false
+    "withinRunSpread": 0.1162907330278306,
+    "noisy": true
    },
-   "peakResidentBytes": 3786719232,
-   "substepsPerSecond": 1274797.263955664,
-   "nodeStepsPerSecond": 1274797.263955664,
-   "speedUp": 0.361568835779849,
-   "efficiency": 0.09039220894496225
+   "peakResidentBytes": 4034265088,
+   "substepsPerSecond": 1363063.2568746945,
+   "nodeStepsPerSecond": 1363063.2568746945,
+   "speedUp": 0.38276673426728913,
+   "efficiency": 0.09569168356682228
   },
   {
    "problem": "scaling/graphScalability",
@@ -4259,38 +4278,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 15617.958457999863,
-    "median": 15894.774708999787,
-    "interquartileRange": 95.77208399958909,
-    "minimumOverMedian": 0.982584449539685,
+    "minimum": 15395.49204199994,
+    "median": 15698.871000000276,
+    "interquartileRange": 137.71025000000373,
+    "minimumOverMedian": 0.9806751098215706,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     15617.958457999863
+     15395.49204199994
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.00602538165862533,
+    "withinRunSpread": 0.008771984303839513,
     "noisy": false
    },
    "compute": {
-    "minimum": 273.703918,
-    "median": 277.207374,
-    "interquartileRange": 1.508749000000023,
-    "minimumOverMedian": 0.9873616060444336,
+    "minimum": 271.572583,
+    "median": 274.884166,
+    "interquartileRange": 1.5286290000000236,
+    "minimumOverMedian": 0.9879528055464643,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     273.703918
+     271.572583
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.005442672675799825,
+    "withinRunSpread": 0.005560993280347853,
     "noisy": false
    },
-   "peakResidentBytes": 3948871680,
-   "substepsPerSecond": 3653583.066355667,
-   "nodeStepsPerSecond": 3653583.066355667,
-   "speedUp": 1.0362602847358582,
-   "efficiency": 0.25906507118396455
+   "peakResidentBytes": 3967352832,
+   "substepsPerSecond": 3682256.835182806,
+   "nodeStepsPerSecond": 3682256.835182806,
+   "speedUp": 1.0340278900687114,
+   "efficiency": 0.25850697251717786
   },
   {
    "problem": "scaling/graphScalability",
@@ -4301,36 +4320,36 @@
    "backend": "serial",
    "workers": 1,
    "wall": {
-    "minimum": 16843.725333000068,
-    "median": 16927.02245900035,
-    "interquartileRange": 64.82012499962002,
-    "minimumOverMedian": 0.995079044397676,
+    "minimum": 16745.249416999985,
+    "median": 16902.916665999684,
+    "interquartileRange": 356.58575000055134,
+    "minimumOverMedian": 0.9906721868115904,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     16843.725333000068
+     16745.249416999985
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.003829387309943232,
+    "withinRunSpread": 0.02109610767459001,
     "noisy": false
    },
    "compute": {
-    "minimum": 1086.088501,
-    "median": 1091.845292,
-    "interquartileRange": 68.89583600000014,
-    "minimumOverMedian": 0.9947274663890752,
+    "minimum": 1113.058375,
+    "median": 1168.719542,
+    "interquartileRange": 3.3922909999998865,
+    "minimumOverMedian": 0.9523742309427389,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1086.088501
+     1113.058375
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.06310036458901555,
-    "noisy": true
+    "withinRunSpread": 0.0029025706151834725,
+    "noisy": false
    },
-   "peakResidentBytes": 3680436224,
-   "substepsPerSecond": 920735.2799327724,
-   "nodeStepsPerSecond": 920735.2799327724,
+   "peakResidentBytes": 3464396800,
+   "substepsPerSecond": 898425.4756629453,
+   "nodeStepsPerSecond": 898425.4756629453,
    "speedUp": 1,
    "efficiency": 1
   },
@@ -4343,38 +4362,38 @@
    "backend": "threadPool",
    "workers": 4,
    "wall": {
-    "minimum": 20094.46366700018,
-    "median": 20504.676541999914,
-    "interquartileRange": 316.7264580000192,
-    "minimumOverMedian": 0.9799941796614303,
+    "minimum": 20136.37616700027,
+    "median": 20433.38183300011,
+    "interquartileRange": 297.0622910000384,
+    "minimumOverMedian": 0.9854646837989309,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     20094.46366700018
+     20136.37616700027
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.015446547393774563,
+    "withinRunSpread": 0.014538087401679145,
     "noisy": false
    },
    "compute": {
-    "minimum": 4022.466792,
-    "median": 4067.349792,
-    "interquartileRange": 35.92695800000001,
-    "minimumOverMedian": 0.9889650503902371,
+    "minimum": 4043.034834,
+    "median": 4062.927459,
+    "interquartileRange": 18.118711000000076,
+    "minimumOverMedian": 0.9951038690203698,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     4022.466792
+     4043.034834
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.008833014084666168,
+    "withinRunSpread": 0.0044595211661641624,
     "noisy": false
    },
-   "peakResidentBytes": 3689086976,
-   "substepsPerSecond": 248603.6682736149,
-   "nodeStepsPerSecond": 248603.6682736149,
-   "speedUp": 0.27000558541839165,
-   "efficiency": 0.06750139635459791
+   "peakResidentBytes": 3312418816,
+   "substepsPerSecond": 247338.95231138638,
+   "nodeStepsPerSecond": 247338.95231138638,
+   "speedUp": 0.27530269233391425,
+   "efficiency": 0.06882567308347856
   },
   {
    "problem": "scaling/graphScalability",
@@ -4385,38 +4404,38 @@
    "backend": "partitioned",
    "workers": 4,
    "wall": {
-    "minimum": 16215.805832999758,
-    "median": 17321.136834000237,
-    "interquartileRange": 453.7856669998728,
-    "minimumOverMedian": 0.9361860014389594,
+    "minimum": 17003.114957999904,
+    "median": 17434.07258399995,
+    "interquartileRange": 138.41612499998882,
+    "minimumOverMedian": 0.9752807254917846,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     16215.805832999758
+     17003.114957999904
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.026198376662501837,
+    "withinRunSpread": 0.007939402817848749,
     "noisy": false
    },
    "compute": {
-    "minimum": 1252.341208,
-    "median": 1282.36754,
-    "interquartileRange": 35.04762400000004,
-    "minimumOverMedian": 0.9765852370218292,
+    "minimum": 1252.395877,
+    "median": 1257.522752,
+    "interquartileRange": 31.026333000000022,
+    "minimumOverMedian": 0.99592303599132,
     "runs": 5,
     "sessions": 1,
     "sessionMinimums": [
-     1252.341208
+     1252.395877
     ],
     "betweenSessionSpread": null,
-    "withinRunSpread": 0.027330404822941825,
+    "withinRunSpread": 0.024672581828563227,
     "noisy": false
    },
-   "peakResidentBytes": 3594207232,
-   "substepsPerSecond": 798504.4280360373,
-   "nodeStepsPerSecond": 798504.4280360373,
-   "speedUp": 0.867246477287522,
-   "efficiency": 0.2168116193218805
+   "peakResidentBytes": 3560898560,
+   "substepsPerSecond": 798469.5720936169,
+   "nodeStepsPerSecond": 798469.5720936169,
+   "speedUp": 0.8887432444014666,
+   "efficiency": 0.22218581110036664
   }
  ],
  "statistic": "minimum over all runs of all combined sessions (those timed from the source commit); median and interquartile range over all runs; between-session spread of the session minimums; flagged noisy when a session's interquartile range exceeds 5 % of its median"

@@ -19,7 +19,8 @@ const editor = createProgramEditor({
         apply: (source, target) => bridge.apply(source, target),
         close: () => window.windowControls.close(),
         setTitle: (text) => { $('#editorTitle').textContent = text; document.title = text; },
-        dirtyChanged: (dirty) => bridge.setDirty(dirty)
+        dirtyChanged: (dirty) => bridge.setDirty(dirty),
+        reportStatus: (status) => bridge.reportStatus(status)
     }
 });
 

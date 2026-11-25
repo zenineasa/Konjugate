@@ -19,6 +19,7 @@ let panel = null;
 let titleElement = null;
 let editorPromise = null;
 const appliedListeners = [];
+const statusListeners = [];
 let pendingApply = null;
 
 function savedBounds() {
@@ -132,7 +133,8 @@ function ensureEditor() {
                 check,
                 apply,
                 close: () => { panel.hidden = true; },
-                setTitle: (text) => { titleElement.textContent = text; panel.setAttribute('aria-label', text); }
+                setTitle: (text) => { titleElement.textContent = text; panel.setAttribute('aria-label', text); },
+                reportStatus: (status) => statusListeners.forEach((listener) => listener(status))
             }
         }));
         editorPromise.catch(() => { editorPromise = null; });
@@ -155,6 +157,11 @@ function onApplied(callback) {
     appliedListeners.push(callback);
 }
 
+// What lint and Check found, for the card's status line.
+function onStatus(callback) {
+    statusListeners.push(callback);
+}
+
 // Leaving the page, or anything that asks the editor to go first: true when it may.
 async function confirmClose() {
     if (!editorPromise || panel?.hidden) return true;
@@ -172,5 +179,6 @@ export default {
     openWindow,
     onApplied,
     reportApplied,
-    confirmClose
+    confirmClose,
+    onStatus
 };

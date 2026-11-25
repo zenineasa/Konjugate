@@ -13,7 +13,8 @@ import { createTour } from './tour.mjs';
 import { bindingInsertTitle, EquationEditor, letMathFieldsWrap, ReferenceChips, showAddParameterActions } from './equationEditor.mjs';
 import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
-import { ProgramSourceSection } from './programSourceSection.mjs';
+import { ProgramSourceSection, ProgramSummaryView } from './programSourceSection.mjs';
+import { programStatusKey } from './programSummary.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
@@ -131,19 +132,21 @@ import {
 const relationshipPluginHint = 'A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.';
 const termProgramSection = new ProgramSourceSection({
     container: document.querySelector('#termProviderSection'),
-    ids: { code: 'termProviderCode', open: 'termOpenProviderEditor', reset: 'termInsertProviderTemplate', source: 'termProviderSource', pluginFields: 'termPluginProviderFields', pluginSelect: 'termPluginProvider', addBinding: 'termAddProviderBinding', bindings: 'termProviderBindings', outputKey: 'termProviderOutputKey' },
+    ids: { code: 'termProviderCode', open: 'termOpenProviderEditor', pluginFields: 'termPluginProviderFields', pluginSelect: 'termPluginProvider', addBinding: 'termAddProviderBinding', bindings: 'termProviderBindings', outputKey: 'termProviderOutputKey' },
     bindingHint: 'Each binding exposes one state of this node to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. rateGradient'
 });
 const edgeProgramSection = new ProgramSourceSection({
     container: document.querySelector('#editEdgeProviderSection'),
-    ids: { code: 'editEdgeProviderCode', open: 'editOpenProviderEditor', reset: 'editInsertProviderTemplate', source: 'editEdgeProviderSource', pluginFields: 'editEdgePluginProviderFields', pluginSelect: 'editEdgePluginProvider', addBinding: 'editAddProviderBinding', bindings: 'editEdgeProviderBindings', outputKey: 'editProviderOutputKey' },
+    ids: { code: 'editEdgeProviderCode', open: 'editOpenProviderEditor', pluginFields: 'editEdgePluginProviderFields', pluginSelect: 'editEdgePluginProvider', addBinding: 'editAddProviderBinding', bindings: 'editEdgeProviderBindings', outputKey: 'editProviderOutputKey' },
     bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
 const groupProgramSection = new ProgramSourceSection({
-    container: document.querySelector('#groupProviderSection'), rows: 10, bindingsClass: 'builderRows',
-    ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', reset: 'groupInsertProviderTemplate', source: 'groupProviderSource', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
+    container: document.querySelector('#groupProviderSection'), bindingsClass: 'builderRows',
+    ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
     bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used by every relationship of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
+// A node's own program (its Program section): the same summary and Edit program.
+const nodeProgramSummary = new ProgramSummaryView({ container: document.querySelector('#nodeProgramSummary'), openId: 'editNodeProgramOpenEditor' });
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -2664,7 +2667,9 @@ function partChip(entry, node, equations, names, { reader = node.userData.id, st
         label = reader === node.userData.id ? 'its program' : `${node.userData.definition.title} · its program`;
         body = escapeHtml(`${programLanguage(program?.kind)}${outputs.length > 1 ? ` · output ${position + 1} of ${outputs.length}` : ''}`);
         if (reader !== node.userData.id) chip.classList.remove('own');
-        open = () => revealNodeProgram();
+        open = () => (program && program.kind !== 'fmi'
+            ? openProgramEditor({ type: 'node', nodeId: node.userData.id }, { port: entry.outputKey })
+            : revealNodeProgram());
     }
     if (entry.off) chip.classList.add('off');
     chip.dataset.sign = sign;
@@ -2712,7 +2717,10 @@ function setByProgramLine(entry, node) {
     line.dataset.outputKey = entry.outputKey;
     const which = outputs.length > 1 ? ` · output ${position + 1} of ${outputs.length}` : '';
     line.innerHTML = `set by program <small>${escapeHtml(`${programLanguage(program?.kind)}${which}`)} ›</small>`;
-    line.addEventListener('click', () => revealNodeProgram());
+    // It opens the program's code editor with this output's port; an installed FMU, which has no source, its section.
+    line.addEventListener('click', () => (program && program.kind !== 'fmi'
+        ? openProgramEditor({ type: 'node', nodeId: node.userData.id }, { port: entry.outputKey })
+        : revealNodeProgram()));
     return line;
 }
 
@@ -3260,7 +3268,7 @@ function renderNodeProgram(node) {
     $('#nodeProgramFmuFields').hidden = !isFmu;
     $('#editAddNodeProgramInput').hidden = isFmu;
     $('#editAddNodeProgramOutput').hidden = isFmu;
-    if (!isFmu && document.activeElement !== $('#editNodeProgramSource')) $('#editNodeProgramSource').value = implementation.source ?? '';
+    if (!isFmu) nodeProgramSummary.render({ kind, source: implementation.source ?? '', ...nodeProgramBindingsSummary(node), record: programRecord(kind, implementation.source ?? '') });
     if (isFmu) renderNodeProgramFmus(node);
     const errors = nodeProgramErrors(implementation, definition, nodes, model.sharedParameters);
     const rowError = (messages) => {
@@ -3792,7 +3800,8 @@ function renderSourceTermEditor(node, term) {
         const fromPlugin = implementationKind === 'plugin';
         termProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#termPluginProvider'), term.implementation);
-        termProgramSection.source = term.implementation.source;
+        termProgramSection.show({ kind: term.implementation.kind, source: term.implementation.source ?? '', ...sourceTermProgramBindingsSummary(node, term),
+            record: programRecord(term.implementation.kind, term.implementation.source ?? '') });
         termProgramSection.outputKey = term.implementation.output?.key;
         renderSourceTermProviderBindingRows(node, term);
     }
@@ -3820,17 +3829,6 @@ function previewSourceTermExpression(latex, origin) {
     updateValidationStatus();
 }
 
-function previewSourceTermProviderSource(source) {
-    if (activeResult || !selectedSourceTermNodeId) return;
-    const node = nodeObjects.get(selectedSourceTermNodeId);
-    const definition = node?.userData.definition;
-    const term = definition?.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
-    if (!term) return;
-    beginEquationEditSession(`sourceTerm:${term.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
-    term.implementation = { ...term.implementation, source };
-    termProgramSection.refreshReset();
-    updateValidationStatus();
-}
 
 // A live run's window gets only its latest samples with each update, and its record cannot be read back until it ends, so the samples
 // are kept here as they come, by run, for the node's plot to draw the run so far. Thinned to every other sample past a limit, so a long
@@ -4423,7 +4421,8 @@ function renderEdgeEditor(definition) {
         edgeProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#editEdgePluginProvider'), definition.implementation);
         output.value = equationOutputValue(definition.implementation.output?.role ?? 'target', definition.implementation.output?.stateId);
-        edgeProgramSection.source = definition.implementation.source;
+        edgeProgramSection.show({ kind: definition.implementation.kind, source: definition.implementation.source ?? '', ...edgeProgramBindingsSummary(definition),
+            record: programRecord(definition.implementation.kind, definition.implementation.source ?? '') });
         edgeProgramSection.outputKey = definition.implementation.output?.key;
         renderProviderBindingRows(definition);
         renderProgramOutputRows(definition);
@@ -13948,34 +13947,10 @@ $('#editNodeProgramFmu').addEventListener('change', (event) => {
     const [guid, version] = JSON.parse(event.target.value);
     useFmuForNode(selectedNode, guid, version);
 });
-$('#editNodeProgramSource').addEventListener('input', (event) => {
-    if (activeResult || !selectedNode) return;
-    const node = selectedNode;
-    const definition = node.userData.definition;
-    if (!definition.implementation) return;
-    beginEquationEditSession(`nodeProgram:${node.userData.id}`, () => captureNodeModel(node), (snapshot) => applyNodeModel(node, snapshot));
-    definition.implementation = { ...definition.implementation, source: event.target.value };
-    updateValidationStatus();
-});
-$('#editNodeProgramSource').addEventListener('change', () => finishEquationEdit());
-$('#editNodeProgramTemplate').addEventListener('click', () => {
-    if (!selectedNode?.userData.definition.implementation) return;
-    const node = selectedNode;
-    if ($('#editNodeProgramSource').value.trim() && !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
-    changeNodeModel(node, (snapshot) => {
-        snapshot.implementation.source = nodeProgramTemplate(snapshot.implementation.kind, snapshot.implementation, snapshot.title);
-    });
-});
-$('#editNodeProgramOpenEditor').addEventListener('click', () => {
+nodeProgramSummary.onOpen((options) => {
     const implementation = selectedNode?.userData.definition.implementation;
     if (!implementation || implementation.kind === 'fmi') return;
-    providerEditTarget = { type: 'node', nodeId: selectedNode.userData.id };
-    window.providerEditor.openWindow({ target: providerEditTarget,
-        source: $('#editNodeProgramSource').value,
-        kind: implementation.kind,
-        title: selectedNode.userData.definition.title,
-        ...programEditorContext(implementation)
-    });
+    openProgramEditor({ type: 'node', nodeId: selectedNode.userData.id }, options);
 });
 $('#editAddNodeProgramInput').addEventListener('click', () => {
     if (!selectedNode?.userData.definition.implementation) return;
@@ -14122,14 +14097,6 @@ function finishEquationEdit() {
     });
 }
 
-function previewProviderSource(source) {
-    if (activeResult || !selectedRelationship) return;
-    const definition = selectedRelationship;
-    beginEquationEditSession(`edge:${definition.id}`, () => captureEdgeModel(definition), (snapshot) => applyEdgeModel(definition, snapshot));
-    definition.implementation = { ...definition.implementation, source };
-    edgeProgramSection.refreshReset();
-    updateValidationStatus();
-}
 
 function previewEdgeEquation(typed, origin) {
     if (activeResult || !selectedRelationship) return;
@@ -14287,25 +14254,9 @@ $('#editEdgeProgramLanguage').addEventListener('change', (event) => {
     lastEdgeProgramLanguage = event.target.value;
     setEdgeImplementation(event.target.value);
 });
-edgeProgramSection.onReset(() => {
+edgeProgramSection.onOpenEditor((options) => {
     if (!selectedRelationship?.implementation) return;
-    const { kind, bindings, output } = selectedRelationship.implementation;
-    if (edgeProgramSection.source.trim() &&
-        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
-    changeEdgeModel(selectedRelationship, (snapshot) => {
-        snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title);
-    });
-});
-edgeProgramSection.onOpenEditor(() => {
-    if (!selectedRelationship?.implementation) return;
-    providerEditTarget = { type: 'editor', relationshipId: selectedRelationship.id };
-    window.providerEditor.openWindow({ target: providerEditTarget,
-        source: edgeProgramSection.source,
-        kind: selectedRelationship.implementation.kind,
-        title: selectedRelationship.title,
-        ...programEditorContext(selectedRelationship.implementation, selectedRelationship.parameters),
-        convert: edgeProgramSection.takeConversionRequest()
-    });
+    openProgramEditor({ type: 'editor', relationshipId: selectedRelationship.id }, options);
 });
 // What the code editor is told of a model's program: that it is one (so it says which program format it is in, offers to convert an older
 // one and offers Check program), and the values its inputs have in the model now, which Check program checks it at.
@@ -14317,32 +14268,139 @@ function programEditorContext(implementation, parameters = []) {
     return { program: true, checkInputs };
 }
 
+// ---- A program on its card, and opening it (docs/proposals/codeEditor.md, "The card") ------------------------------------------------
+// What the code editor last said of each exact source in this session: its problems and whether Check passed, for the card's one status.
+// Not kept in the project.
+const programStatuses = new Map();
+function programRecord(kind, source) {
+    return programStatuses.get(programStatusKey(kind, source)) ?? null;
+}
+window.providerEditor.onStatus?.(({ kind, source, problems = [], checkPassed = false }) => {
+    const key = programStatusKey(kind, source);
+    if (!problems.length && !checkPassed) programStatuses.delete(key);
+    else programStatuses.set(key, { problems, checkPassed });
+    for (const view of [edgeProgramSection.summary, termProgramSection.summary, groupProgramSection.summary, nodeProgramSummary]) {
+        if (view.details && view.details.kind === kind && view.details.source === source) view.render({ ...view.details, record: programRecord(kind, source) });
+    }
+});
+
+// A state in the model's names, as chips write it: "Room · Temperature".
+function modelStateName(stateId) {
+    const owner = model.nodes.find((node) => !node.deleted && node.states?.some((state) => state.id === stateId));
+    const state = owner?.states.find((candidate) => candidate.id === stateId);
+    return state ? `${owner.title} · ${state.label || state.symbol}` : '';
+}
+const labelledBindings = (bindings, label) => (bindings ?? []).map((binding) => ({
+    key: binding.key ?? '', label: binding.kind === 'time' ? 'time' : label(binding) ?? ''
+}));
+
+// What a relationship's program reads (its bindings) and sets (the states its part lands on).
+function edgeProgramBindingsSummary(definition) {
+    const candidates = providerReferenceCandidates(definition);
+    const reads = labelledBindings(definition.implementation?.bindings, (binding) => {
+        const value = providerReferenceValue(providerBindingToReference(binding));
+        return candidates.find((candidate) => providerReferenceValue(candidate) === value)?.label;
+    });
+    let stateIds = [];
+    try {
+        const context = relationshipEquationContext(definition);
+        stateIds = [...new Set([context.main, context.other, ...context.outputs].filter(Boolean).map((landing) => landing.stateId))];
+    } catch { stateIds = []; }
+    return { reads, sets: stateIds.map((stateId) => ({ key: String(stateId), label: modelStateName(stateId) })).filter((entry) => entry.label) };
+}
+function sourceTermProgramBindingsSummary(node, term) {
+    const candidates = sourceTermExpressionBindingCandidates(node.userData.definition, term);
+    const reads = labelledBindings(term.implementation?.bindings, (binding) => candidates.find((candidate) => sourceTermReferenceValue(candidate) === sourceTermReferenceValue(binding))?.label);
+    const stateId = term.implementation?.output?.stateId;
+    const output = term.implementation?.output?.key ?? 'output';
+    return { reads, sets: stateId === undefined || stateId === null ? [{ key: output, label: '' }] : [{ key: output, label: modelStateName(stateId) }] };
+}
+function groupProgramBindingsSummary(group, previewSource, previewTarget) {
+    const reads = labelledBindings(group.definition.implementation?.bindings, (binding) => {
+        if (binding.kind === 'parameter') return group.definition.parameters?.find((parameter) => parameter.id === binding.parameterId)?.name ?? '';
+        return binding.symbol ? `${binding.role === 'source' ? 'source' : 'target'} · ${binding.symbol}` : '';
+    });
+    return { reads, sets: [] };
+}
+function nodeProgramBindingsSummary(node) {
+    const { definition, candidates } = nodeProgramContext(node);
+    const implementation = definition.implementation;
+    const reads = labelledBindings(implementation?.bindings, (binding) => candidates.find((candidate) => candidate.value === nodeProgramInputValue(binding, definition))?.label);
+    const sets = (implementation?.outputs ?? []).map((output) => ({ key: output.key ?? '', label: output.stateId === null || output.stateId === undefined ? '' : modelStateName(output.stateId) }));
+    return { reads, sets };
+}
+
+// The program a code editor target names: its implementation, what it belongs to, its own parameters and a blank template from its
+// bindings; null when it no longer has one.
+function programOfTarget(target) {
+    if (target?.type === 'editor') {
+        const relationship = model.relationships.find((candidate) => candidate.id === target.relationshipId && !candidate.deleted);
+        const implementation = relationship?.implementation;
+        if (!implementation || implementation.kind === 'plugin' || implementation.kind === 'equation') return null;
+        return { implementation, title: relationship.title, parameters: relationship.parameters, program: true,
+            template: () => defaultProviderSource(implementation.kind, implementation.bindings, implementation.output?.key, relationship.title) };
+    }
+    if (target?.type === 'sourceTerm' || target?.type === 'node') {
+        const node = nodeObjects.get(target.nodeId);
+        const definition = node?.userData.definition;
+        if (!definition || definition.deleted) return null;
+        if (target.type === 'node') {
+            const implementation = definition.implementation;
+            if (!implementation || implementation.kind === 'fmi') return null;
+            return { implementation, title: definition.title, parameters: [], program: true, template: () => nodeProgramTemplate(implementation.kind, implementation, definition.title) };
+        }
+        const term = definition.sourceTerms.find((candidate) => candidate.id === target.termId);
+        const implementation = term?.implementation;
+        if (!implementation || implementation.kind === 'plugin') return null;
+        return { implementation, title: definition.title, parameters: term.parameters, program: true,
+            template: () => defaultProviderSource(implementation.kind, implementation.bindings, implementation.output?.key, definition.title) };
+    }
+    if (target?.type === 'group') {
+        const group = model.edgeGroups.find((candidate) => candidate.id === target.groupId && !candidate.deleted);
+        const implementation = group?.definition.implementation;
+        if (!implementation || implementation.kind === 'plugin') return null;
+        return { implementation, title: group.name, parameters: group.definition.parameters, program: false,
+            template: () => defaultProviderSource(implementation.kind, implementation.bindings, implementation.output?.key, group.name) };
+    }
+    return null;
+}
+
+// Opens a program in the code editor, from any entry point: Edit program, a preview line (`line`), "set by program ›" or a program chip
+// (`port`), the card's status or the Run dialog (`convert`), or Write program (`write`, starting from its template).
+function openProgramEditor(target, { line, port, convert = false, write = false } = {}) {
+    const found = programOfTarget(target);
+    if (!found) return;
+    providerEditTarget = target;
+    const source = found.implementation.source ?? '';
+    const template = found.template();
+    window.providerEditor.openWindow({
+        target,
+        source,
+        kind: found.implementation.kind,
+        title: found.title,
+        ...(found.program ? programEditorContext(found.implementation, found.parameters) : {}),
+        templateSource: template,
+        ...(write && !source.trim() ? { startWith: template } : {}),
+        ...(line ? { line } : {}),
+        ...(port ? { port } : {}),
+        convert
+    });
+}
+
+// Debug/test hook only: the source each card's program section shows (the card has no field of its own to read it from).
+window.__debugProgramCards = {
+    edge: () => edgeProgramSection.source,
+    term: () => termProgramSection.source,
+    group: () => groupProgramSection.source,
+    node: () => nodeProgramSummary.details?.source ?? ''
+};
+
 // "Convert to version 2 ›" beside a program the Run dialog names as held (docs/proposals/programSdkV2.md, Migration): its code editor,
 // opened on the conversion.
 function openProgramConversion(target) {
-    if (target.type === 'edge') {
-        const relationship = model.relationships.find((candidate) => candidate.id === target.edgeId && !candidate.deleted);
-        if (!relationship?.implementation) return;
-        providerEditTarget = { type: 'editor', relationshipId: relationship.id };
-        window.providerEditor.openWindow({ target: providerEditTarget, source: relationship.implementation.source ?? '', kind: relationship.implementation.kind, title: relationship.title,
-            ...programEditorContext(relationship.implementation, relationship.parameters), convert: true });
-        return;
-    }
-    const node = nodeObjects.get(target.nodeId);
-    const definition = node?.userData.definition;
-    if (!definition) return;
-    if (target.type === 'node') {
-        if (!definition.implementation) return;
-        providerEditTarget = { type: 'node', nodeId: target.nodeId };
-        window.providerEditor.openWindow({ target: providerEditTarget, source: definition.implementation.source ?? '', kind: definition.implementation.kind, title: definition.title,
-            ...programEditorContext(definition.implementation), convert: true });
-        return;
-    }
-    const term = definition.sourceTerms.find((candidate) => candidate.id === target.termId);
-    if (!term?.implementation) return;
-    providerEditTarget = { type: 'sourceTerm', nodeId: target.nodeId, termId: term.id };
-    window.providerEditor.openWindow({ target: providerEditTarget, source: term.implementation.source ?? '', kind: term.implementation.kind, title: definition.title,
-        ...programEditorContext(term.implementation, term.parameters), convert: true });
+    if (target.type === 'edge') return openProgramEditor({ type: 'editor', relationshipId: target.edgeId }, { convert: true });
+    if (target.type === 'node') return openProgramEditor({ type: 'node', nodeId: target.nodeId }, { convert: true });
+    return openProgramEditor({ type: 'sourceTerm', nodeId: target.nodeId, termId: target.termId }, { convert: true });
 }
 
 window.providerEditor.onApplied(({ source, target }) => {
@@ -14392,12 +14450,6 @@ window.providerEditor.onApplied(({ source, target }) => {
     }
     return fail('Unknown edit target.');
 });
-edgeProgramSection.sourceField.addEventListener('input', (event) => {
-    previewProviderSource(event.target.value);
-});
-edgeProgramSection.sourceField.addEventListener('change', () => {
-    finishEquationEdit();
-});
 edgeProgramSection.onOutputKeyChange((event) => {
     if (!selectedRelationship) return;
     changeEdgeModel(selectedRelationship, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
@@ -14446,19 +14498,6 @@ $('#termImplementationKind').addEventListener('change', (event) => {
         term.implementation = pluginOrProgram(kind, term.implementation, bindings, output, node.userData.definition.title);
     });
 });
-termProgramSection.onReset(() => {
-    if (!selectedSourceTermNodeId) return;
-    const node = nodeObjects.get(selectedSourceTermNodeId);
-    const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
-    if (!term?.implementation) return;
-    if (termProgramSection.source.trim() &&
-        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
-    changeSourceTermModel(node, selectedSourceTermId, (snapshotTerm) => {
-        snapshotTerm.implementation.source = defaultProviderSource(
-            snapshotTerm.implementation.kind, snapshotTerm.implementation.bindings,
-            snapshotTerm.implementation.output?.key, node.userData.definition.title);
-    });
-});
 termProgramSection.onAddBinding(() => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
@@ -14469,26 +14508,9 @@ termProgramSection.onAddBinding(() => {
             sourceTermReferenceToBinding(`input${implementation.bindings.length + 1}`, candidates[0])));
     });
 });
-termProgramSection.onOpenEditor(() => {
+termProgramSection.onOpenEditor((options) => {
     if (!selectedSourceTermNodeId) return;
-    const node = nodeObjects.get(selectedSourceTermNodeId);
-    const definition = node.userData.definition;
-    const term = definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
-    if (!term?.implementation) return;
-    providerEditTarget = { type: 'sourceTerm', nodeId: node.userData.id, termId: term.id };
-    window.providerEditor.openWindow({ target: providerEditTarget,
-        source: termProgramSection.source,
-        kind: term.implementation.kind,
-        title: definition.title,
-        ...programEditorContext(term.implementation, term.parameters),
-        convert: termProgramSection.takeConversionRequest()
-    });
-});
-termProgramSection.sourceField.addEventListener('input', (event) => {
-    previewSourceTermProviderSource(event.target.value);
-});
-termProgramSection.sourceField.addEventListener('change', () => {
-    finishEquationEdit();
+    openProgramEditor({ type: 'sourceTerm', nodeId: selectedSourceTermNodeId, termId: selectedSourceTermId }, options);
 });
 termProgramSection.onOutputKeyChange((event) => {
     if (!selectedSourceTermNodeId) return;
@@ -15595,17 +15617,15 @@ const tour = createTour({
                 await new Promise((resolve) => setTimeout(resolve, 50));
             }
         },
-        // The template inserted, as its button does, and its placeholder line replaced with the step's.
+        // The template written again from the bindings, its placeholder line replaced with the step's, as Edit program and Apply would.
         writeProgram: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
-            const confirm = window.confirm;
-            window.confirm = () => true;
-            try { $('#editInsertProviderTemplate').click(); } finally { window.confirm = confirm; }
-            await new Promise((resolve) => setTimeout(resolve, 100));
-            const source = $('#editEdgeProviderSource');
-            source.value = source.value.replace('        return 0.0', step.line);
-            source.dispatchEvent(new Event('input', { bubbles: true }));
-            source.dispatchEvent(new Event('change', { bubbles: true }));
+            const relationship = selectedRelationship;
+            if (!relationship?.implementation) return;
+            changeEdgeModel(relationship, (snapshot) => {
+                const { kind, bindings, output } = snapshot.implementation;
+                snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title).replace('        return 0.0', step.line);
+            });
         },
         openReplay: async () => {
             if ($('#parameterTuning').classList.contains('hidden')) openParameterTuning();
@@ -18614,7 +18634,9 @@ function renderEdgeGroupEditor(group) {
         const fromPlugin = group.definition.implementation?.kind === 'plugin';
         groupProgramSection.showPlugin(fromPlugin);
         if (fromPlugin) fillPluginProviders($('#groupPluginProvider'), group.definition.implementation);
-        groupProgramSection.source = group.definition.implementation?.source;
+        groupProgramSection.show({ kind: group.definition.implementation?.kind ?? 'cpp', source: group.definition.implementation?.source ?? '',
+            ...groupProgramBindingsSummary(group, previewSource, previewTarget),
+            record: programRecord(group.definition.implementation?.kind ?? 'cpp', group.definition.implementation?.source ?? '') });
         groupProgramSection.outputKey = group.definition.implementation?.output?.key;
         renderGroupProviderBindingRows(group, previewSource, previewTarget);
     }
@@ -18694,14 +18716,6 @@ function previewGroupEquation(latex, origin) {
     renderGroupEquationDiagnostics(group);
 }
 
-function previewGroupProviderSource(source) {
-    const group = currentEdgeGroup();
-    if (activeResult || !group?.definition.implementation) return;
-    beginEquationEditSession(`group:${group.id}`, () => captureEdgeGroupModel(group), (snapshot) => applyEdgeGroupModel(group, snapshot));
-    group.definition.implementation = { ...group.definition.implementation, source };
-    applyEdgeGroupModel(group, captureEdgeGroupModel(group), { rerenderEditor: false });
-    groupProgramSection.refreshReset();
-}
 
 // The one field whose commit isn't a plain changeEdgeGroupModel call: picking a different
 // "Updates" state can require adding that state to a member node first, and doing so must land in
@@ -20376,35 +20390,15 @@ $('#groupImplementationKind').addEventListener('change', (event) => {
         snapshot.definition.implementation = pluginOrProgram(kind, snapshot.definition.implementation, bindings, output, snapshot.name);
     });
 });
-groupProgramSection.onReset(() => {
-    const group = currentEdgeGroup();
-    if (!group?.definition.implementation) return;
-    const { kind, bindings, output } = group.definition.implementation;
-    if (groupProgramSection.source.trim() &&
-        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
-    changeEdgeGroupModel(group, (snapshot) => {
-        snapshot.definition.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.name);
-    });
-});
-groupProgramSection.sourceField.addEventListener('input', (event) => {
-    previewGroupProviderSource(event.target.value);
-});
-groupProgramSection.sourceField.addEventListener('change', () => finishEquationEdit());
 groupProgramSection.onOutputKeyChange((event) => {
     const group = currentEdgeGroup();
     if (group) changeEdgeGroupModel(group, (snapshot) => {
         if (snapshot.definition.implementation) changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => { implementation.output = { key: event.target.value.trim() }; });
     });
 });
-groupProgramSection.onOpenEditor(() => {
+groupProgramSection.onOpenEditor((options) => {
     const group = currentEdgeGroup();
-    if (!group) return;
-    providerEditTarget = { type: 'group', groupId: group.id };
-    window.providerEditor.openWindow({ target: providerEditTarget,
-        source: groupProgramSection.source,
-        kind: $('#groupImplementationKind').value,
-        title: group.name
-    });
+    if (group) openProgramEditor({ type: 'group', groupId: group.id }, options);
 });
 groupProgramSection.onAddBinding(() => {
     const group = currentEdgeGroup();

@@ -61,8 +61,8 @@ const steps = Object.freeze([
     {
         id: 'write',
         title: 'Write the program',
-        text: 'The program already declares both keys as inputs, hot and cold. In its evaluate method, replace return 0.0 with return 0.05 * (x.hot - x.cold): the conductance over the capacitance, times the difference. "Open code editor" opens it in a larger editor that checks it as you type; "Reset template" writes the template again, from the bindings as they are.',
-        target: () => '#editEdgeProviderSource', skip: 'writeProgram', relationship: values.relationship, line: values.line,
+        text: 'Press Edit program. The program already declares both keys as inputs, hot and cold. In its evaluate method, replace return 0.0 with return 0.05 * (x.hot - x.cold): the conductance over the capacitance, times the difference. The editor checks it as you type; Apply puts it in the model. "Reset template" there writes the template again, from the bindings as they are.',
+        target: () => '#editOpenProviderEditor', skip: 'writeProgram', relationship: values.relationship, line: values.line,
         done: ({ document }) => written(document)
     },
     {

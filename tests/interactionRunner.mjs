@@ -2415,22 +2415,60 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `!document.querySelector('#editEdgeMathField').hidden && document.querySelector('#editEdgeEquation').hidden`), true);
     });
 
+    // The code editor on both hosts (docs/proposals/codeEditor.md, stage 1): the desktop's own window, the web edition's in-page panel.
+    const programEditorWeb = !driver.capabilities.multiWindow;
+    const programEditorShown = `(() => { const panel = document.querySelector('#webProgramEditorPanel'); return Boolean(panel && !panel.hidden && panel.querySelector('.cm-editor')); })()`;
+    const openProgramEditor = async (button = '#editOpenProviderEditor') => {
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('${button}').click()`);
+        if (programEditorWeb) {
+            await waitFor(window, programEditorShown, 'The code editor panel did not open.', 30000);
+            return window;
+        }
+        const editor = await driver.waitForNewHandle(before, { titleIncludes: 'Program' });
+        await waitFor(editor, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the code editor window.');
+        return editor;
+    };
+    const programEditorClosed = async (editor) => {
+        if (programEditorWeb) {
+            await waitFor(window, `!${programEditorShown}`, 'The code editor panel did not close.');
+            return;
+        }
+        const deadline = Date.now() + 5000;
+        while (driver.allHandles().includes(editor) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.ok(!driver.allHandles().includes(editor), 'The code editor window did not close.');
+    };
+    const closeProgramEditor = (editor) => evaluate(editor, programEditorWeb ? `document.querySelector('.webProgramEditorClose').click()` : `document.querySelector('#close').click()`);
+    const setEditorSource = (editor, source) => evaluate(editor, `(() => {
+        const view = window.__providerEditorView;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(source)} } });
+    })()`);
+    const leaveQuestionShown = `!document.querySelector('#programEditorLeave').hidden`;
+
+    const edgeCardSource = `window.__debugProgramCards.edge()`;
+
     await run('relationship editor authors an inline C++ provider implementation', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('cpp'));
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), false);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), false);
-        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), /#include <konjugate\/sdk\/v2\/program\.hpp>/);
+        assert.match(await evaluate(window, edgeCardSource), /#include <konjugate\/sdk\/v2\/program\.hpp>/);
+        // The card shows the program, read-only, and one button; it has no source field of its own.
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection textarea')`), null);
+        assert.equal(await evaluate(window, `document.querySelector('#editOpenProviderEditor').textContent`), 'Edit program');
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programIdentity').textContent`), / · C\+\+$/);
+        assert.ok(await evaluate(window, `document.querySelectorAll('#editEdgeProviderSection .programPreviewLine').length`) > 0);
 
+        // A program of one's own, written in the editor and applied.
         const source = 'int main() {}';
-        await evaluate(window, `(() => {
-            const textarea = document.querySelector('#editEdgeProviderSource');
-            textarea.value = ${JSON.stringify(source)};
-            textarea.dispatchEvent(new Event('input', { bubbles: true }));
-            textarea.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), source);
+        let editor = await openProgramEditor();
+        await setEditorSource(editor, source);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(window, `${edgeCardSource} === ${JSON.stringify(source)}`, 'Apply did not reach the card.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programPreviewLine code').textContent`), source);
 
         const bindingCountBefore = await evaluate(window, `document.querySelectorAll('.providerBindingRow').length`);
         await evaluate(window, `document.querySelector('#editAddProviderBinding').click()`);
@@ -2450,11 +2488,15 @@ export async function runInteractionTests(driver) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editProviderOutputKey').value`), 'gradient');
 
-        await evaluate(window, `(() => {
-            window.confirm = () => true;
-            document.querySelector('#editInsertProviderTemplate').click();
-        })()`);
-        const regeneratedSource = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        // Reset template, in the editor: the program written again from the bindings as they are now.
+        editor = await openProgramEditor();
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTemplate').hidden`), false);
+        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(window, `${edgeCardSource} !== ${JSON.stringify(source)}`, 'Reset template did not reach the card.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        const regeneratedSource = await evaluate(window, edgeCardSource);
         assert.match(regeneratedSource, /k::Input delta\{this, "delta"\};/);
         assert.match(regeneratedSource, /k::Output gradient\{this, "gradient"\};/);
 
@@ -2467,7 +2509,7 @@ export async function runInteractionTests(driver) {
 
     await run('provider editor window syntax-highlights, validates and applies C++ source', async () => {
         await evaluate(window, writeRelationshipAs('cpp'));
-        const validCpp = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        const validCpp = await evaluate(window, `window.__debugProgramCards.edge()`);
         const beforeEditorOpen = driver.allHandles();
         await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
 
@@ -2516,7 +2558,7 @@ export async function runInteractionTests(driver) {
             'Restoring valid C++ source did not clear the invalid status.', compileCheckTimeout);
 
         await evaluate(editorWindow, `document.querySelector('#programEditorApply').click()`);
-        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(validCpp)}`,
+        await waitFor(window, `window.__debugProgramCards.edge() === ${JSON.stringify(validCpp)}`,
             'Applying from the provider editor window did not update the relationship editor.');
 
         await evaluate(editorWindow, `document.querySelector('#close').click()`);
@@ -2533,40 +2575,10 @@ export async function runInteractionTests(driver) {
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
     });
 
-    // The code editor on both hosts (docs/proposals/codeEditor.md, stage 1): the desktop's own window, the web edition's in-page panel.
-    const programEditorWeb = !driver.capabilities.multiWindow;
-    const programEditorShown = `(() => { const panel = document.querySelector('#webProgramEditorPanel'); return Boolean(panel && !panel.hidden && panel.querySelector('.cm-editor')); })()`;
-    const openProgramEditor = async () => {
-        const before = driver.allHandles();
-        await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
-        if (programEditorWeb) {
-            await waitFor(window, programEditorShown, 'The code editor panel did not open.', 30000);
-            return window;
-        }
-        const editor = await driver.waitForNewHandle(before, { titleIncludes: 'Program' });
-        await waitFor(editor, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the code editor window.');
-        return editor;
-    };
-    const programEditorClosed = async (editor) => {
-        if (programEditorWeb) {
-            await waitFor(window, `!${programEditorShown}`, 'The code editor panel did not close.');
-            return;
-        }
-        const deadline = Date.now() + 5000;
-        while (driver.allHandles().includes(editor) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
-        assert.ok(!driver.allHandles().includes(editor), 'The code editor window did not close.');
-    };
-    const closeProgramEditor = (editor) => evaluate(editor, programEditorWeb ? `document.querySelector('.webProgramEditorClose').click()` : `document.querySelector('#close').click()`);
-    const setEditorSource = (editor, source) => evaluate(editor, `(() => {
-        const view = window.__providerEditorView;
-        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(source)} } });
-    })()`);
-    const leaveQuestionShown = `!document.querySelector('#programEditorLeave').hidden`;
-
     await run('the code editor highlights a Python program, marks its error on its line, and converts an older one', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));
-        const original = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        const original = await evaluate(window, `window.__debugProgramCards.edge()`);
         const editor = await openProgramEditor();
         const title = programEditorWeb ? '.webProgramEditorTitleBar span' : '#editorTitle';
         assert.match(await evaluate(editor, `document.querySelector('${title}').textContent`), /\S · Program$/);
@@ -2600,7 +2612,7 @@ export async function runInteractionTests(driver) {
         // Cancel closes without asking, and the card keeps what it had.
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), original);
+        assert.equal(await evaluate(window, `window.__debugProgramCards.edge()`), original);
     });
 
     await run('the code editor\'s Check program passes on a Python program, through the engine a run uses', async () => {
@@ -2619,10 +2631,46 @@ export async function runInteractionTests(driver) {
         await evaluate(window, writeRelationshipAs('equation'));
     });
 
+    await run('the card shows a program read-only; a preview line opens the editor there, and its status follows lint and Check', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('python'));
+        const original = await evaluate(window, edgeCardSource);
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programIdentity').textContent`), / · Python$/);
+        // What it sets, in the model's names.
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection .programSets'), true);
+        assert.match(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programSets .programLineItems').textContent`), /\S · \S/);
+        // The third preview line opens the editor at that line.
+        const third = await evaluate(window, `Number(document.querySelectorAll('#editEdgeProviderSection .programPreviewLine')[2].dataset.line)`);
+        let editor = await openProgramEditor(`#editEdgeProviderSection .programPreviewLine:nth-child(3)`);
+        const cursorLine = `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number`;
+        await waitFor(editor, `${cursorLine} === ${third}`, `The editor did not open at line ${third}.`);
+
+        // A problem, applied: the card says so and where; the status opens the editor at that line.
+        const broken = `${original}\ndef broken(:\n    pass\n`;
+        const brokenLine = broken.split('\n').findIndex((line) => line.startsWith('def broken')) + 1;
+        await setEditorSource(editor, broken);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').classList.contains('problem')`, 'The card did not show the problem lint found.', 60000);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent`), `1 problem · line ${brokenLine} ›`);
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        editor = await openProgramEditor('#editEdgeProviderSection .programStatus');
+        await waitFor(editor, `${cursorLine} === ${brokenLine}`, 'The status did not open the editor at the problem\'s line.');
+
+        // Put right and checked: the card says it passed.
+        await setEditorSource(editor, original);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorCheck').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent === '✓ passed Check'`, 'The card did not say Check passed.', 90000);
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('equation'));
+    });
+
     await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));
-        const original = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        const original = await evaluate(window, `window.__debugProgramCards.edge()`);
         let editor = await openProgramEditor();
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorApply').disabled`), true, 'Nothing to apply yet.');
         await setEditorSource(editor, `${original}\n# first edit\n`);
@@ -2650,7 +2698,7 @@ export async function runInteractionTests(driver) {
         await waitFor(editor, leaveQuestionShown, 'Closing with unsaved changes did not ask.');
         await evaluate(editor, `document.querySelector('#programEditorLeaveDiscard').click()`);
         await programEditorClosed(editor);
-        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), original, 'Don\'t apply changed the model.');
+        assert.equal(await evaluate(window, `window.__debugProgramCards.edge()`), original, 'Don\'t apply changed the model.');
 
         // Apply from the question applies, then closes; the card has it.
         editor = await openProgramEditor();
@@ -2660,13 +2708,13 @@ export async function runInteractionTests(driver) {
         await waitFor(editor, leaveQuestionShown, 'Closing with unsaved changes did not ask.');
         await evaluate(editor, `document.querySelector('#programEditorLeaveApply').click()`);
         await programEditorClosed(editor);
-        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(edited)}`, 'Apply on leaving did not reach the card.');
+        await waitFor(window, `window.__debugProgramCards.edge() === ${JSON.stringify(edited)}`, 'Apply on leaving did not reach the card.');
 
         // Apply keeps the editor open, with nothing left to apply.
         editor = await openProgramEditor();
         await setEditorSource(editor, original);
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
-        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(original)}`, 'Apply did not reach the card.');
+        await waitFor(window, `window.__debugProgramCards.edge() === ${JSON.stringify(original)}`, 'Apply did not reach the card.');
         await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'Apply left something to apply.');
         await closeProgramEditor(editor);
         await programEditorClosed(editor);
@@ -2775,6 +2823,9 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#termImplementationKind option[value="python"]').hidden`), true, 'A part per state can be made a Python program.');
         assert.equal(await isRenderedVisible(window, '#termProviderSection'), true);
         assert.equal(await isRenderedVisible(window, '#termEquationHeading'), false);
+        // No program yet: the card says so, and offers to write one.
+        assert.equal(await isRenderedVisible(window, '#termProviderSection .programEmpty'), true);
+        assert.equal(await evaluate(window, `document.querySelector('#termOpenProviderEditor').textContent`), 'Write program');
 
         await evaluate(window, `(() => {
             document.querySelector('#termAddProviderBinding').click();
@@ -2789,11 +2840,14 @@ export async function runInteractionTests(driver) {
             outputKey.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
 
-        await evaluate(window, `(() => {
-            window.confirm = () => true;
-            document.querySelector('#termInsertProviderTemplate').click();
-        })()`);
-        const regenerated = await evaluate(window, `document.querySelector('#termProviderSource').value`);
+        // Written in the editor from its template, which names the bindings as they are, and applied.
+        const editor = await openProgramEditor('#termOpenProviderEditor');
+        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(window, `window.__debugProgramCards.term().includes('heatRate')`, 'The template did not reach the card.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        const regenerated = await evaluate(window, `window.__debugProgramCards.term()`);
         assert.match(regenerated, /k::Input temperature\{this, "temperature"\};/);
         assert.match(regenerated, /k::Output heatRate\{this, "heatRate"\};/);
 
@@ -10053,15 +10107,28 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(implementation.bindings, [{ key: 'input', kind: 'state', nodeId: 4, stateId: 6 }, { key: 'setpoint', kind: 'parameter', sharedParameterId: 100 }]);
         assert.deepEqual(implementation.outputs, [{ key: 'output', stateId: 2, setsValue: true }]);
         assert.equal(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), '');
-        // The template is written again from the inputs and outputs, and the source is typed: one undo step each.
-        await evaluate(window, `(() => { window.__confirmAnswer = window.confirm; window.confirm = () => true; })()`);
-        await evaluate(window, `document.querySelector('#editNodeProgramTemplate').click()`);
-        await evaluate(window, `(() => { window.confirm = window.__confirmAnswer; })()`);
+        // In the code editor: the template written again from the inputs and outputs, then the source edited, each applied: one undo
+        // step each.
+        const editor = await openProgramEditor('#editNodeProgramOpenEditor');
+        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'The template was not applied.');
         implementation = await program();
         assert.match(implementation.source, /^    setpoint = Input\(\)$/m);
         assert.match(implementation.source, /return self\.outputs\(output=0\.0\)/);
-        await typeInto(`document.querySelector('#editNodeProgramSource')`, implementation.source.replace('output=0.0', 'output=x.setpoint'));
+        await setEditorSource(editor, implementation.source.replace('output=0.0', 'output=x.setpoint'));
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'The edit was not applied.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
         assert.match((await program()).source, /return self\.outputs\(output=x\.setpoint\)/);
+        // "set by program ›" on the state it sets opens the same editor, at that output's port.
+        await waitFor(window, `Boolean(document.querySelector('#nodeEditorStates .setByProgram'))`, 'The state the program sets has no "set by program" line.');
+        const setByEditor = await openProgramEditor('#nodeEditorStates .setByProgram');
+        const portLine = (await program()).source.split('\n').findIndex((line) => /^\s*output\s*=\s*Output\(/.test(line)) + 1;
+        await waitFor(setByEditor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number === ${portLine}`, 'The editor did not open at the output\'s port.');
+        await evaluate(setByEditor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(setByEditor);
         assert.equal(await engineVerdict('The node with a program was not validated.'), true);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
         assert.match((await program()).source, /return self\.outputs\(output=0\.0\)/, 'Undo takes back the typing.');

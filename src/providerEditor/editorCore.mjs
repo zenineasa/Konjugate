@@ -11,6 +11,8 @@
 //   close()                       → closes the window or hides the panel (the editor has already decided it may)
 //   setTitle(text)                → "Heater · Program"
 //   dirtyChanged(dirty)           → optional: told whenever there come to be, or stop being, unsaved changes
+//   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
+//                                    checkPassed }, for the card's status line
 //
 // It touches no Electron global, so it runs the same in the window and in the web page.
 
@@ -37,6 +39,7 @@ const markup = `
         <button id="programEditorConvert" class="linkButton" type="button" hidden>Convert to version 2 ›</button>
         <button id="programEditorProblems" class="problemCount" type="button" role="status">Checking…</button>
         <span class="toolbarSpacer"></span>
+        <button id="programEditorTemplate" class="secondaryButton" type="button" hidden title="Write the template again from the program's bindings (undo brings it back)">Reset template</button>
         <button id="programEditorCheck" class="secondaryButton" type="button" hidden title="Runs the program's standard checks: its ports, its outputs, purity and its memory">Check program</button>
         <button id="programEditorCancel" class="secondaryButton" type="button" title="Close without applying">Cancel</button>
         <button id="programEditorApply" class="applyButton" type="button" title="Apply to the model (Ctrl+S)">Apply</button>
@@ -98,6 +101,18 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     let validationSequence = 0;
     let lastDirty = false;
     let pendingConversion = null;
+    let templateSource = '';
+    // What lint and Check last found, each for the source it looked at; reported to the card together.
+    let lintResult = { source: null, problems: [] };
+    let checkResult = { source: null, ok: false, problems: [] };
+    function reportStatus() {
+        const source = session.source;
+        const problems = [
+            ...(lintResult.source === source ? lintResult.problems : []),
+            ...(checkResult.source === source && !checkResult.ok ? checkResult.problems.map((message) => ({ line: null, message })) : [])
+        ];
+        host.reportStatus?.({ kind, source, problems, checkPassed: checkResult.source === source && checkResult.ok && !problems.length });
+    }
 
     // ---- Theme (kept in the app's settings under the existing konjugate.providerEditor.* keys) --------------------------------------
     const read = (key) => { try { return storage?.getItem(key) ?? null; } catch { return null; } };
@@ -265,6 +280,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
             return [];
         }
         diagnostics = result.diagnostics ?? [];
+        lintResult = { source, problems: result.valid ? [] : (diagnostics.length ? diagnostics.filter((diagnostic) => diagnostic.severity !== 'info' && diagnostic.severity !== 'warning') : [{ line: null, message: 'The program has a problem.' }]).map((diagnostic) => ({ line: diagnostic.line ?? null, message: diagnostic.message })) };
+        reportStatus();
         const errors = diagnostics.length || (result.valid ? 0 : 1);
         showProblemCount(result.valid ? 'No problems' : problemCountText(errors), result.valid ? 'valid' : 'invalid');
         const lineCount = editorView.state.doc.lines;
@@ -326,6 +343,13 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         view.focus();
     });
 
+    // ---- Reset template: the program written again from its bindings, in one edit undo takes back ------------------------------------
+    $('#programEditorTemplate').addEventListener('click', () => {
+        if (!view || !templateSource) return;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: templateSource } });
+        view.focus();
+    });
+
     // ---- Check program -------------------------------------------------------------------------------------------------------------
     $('#programEditorCheck').addEventListener('click', async () => {
         if (!view) return;
@@ -339,7 +363,12 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         $('#programEditorCheckProblems').replaceChildren();
         $('#programEditorCheckDetails').textContent = '';
         try {
-            const answer = await host.check(view.state.doc.toString(), kind, context.checkInputs);
+            const checkedSource = view.state.doc.toString();
+            const answer = await host.check(checkedSource, kind, context.checkInputs);
+            if (answer?.available) {
+                checkResult = { source: checkedSource, ok: Boolean(answer.ok), problems: answer.ok ? [] : (answer.problems?.length ? answer.problems : ['Check program found a problem.']) };
+                reportStatus();
+            }
             if (!answer?.available) {
                 $('#programEditorCheckSummary').textContent = answer?.reason ?? 'The simulation engine is not available, so the program cannot be checked here.';
                 panel.classList.add('failed');
@@ -395,6 +424,10 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         target = payload.target ?? null;
         context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {} };
         session.load(payload.source ?? '');
+        templateSource = payload.templateSource ?? '';
+        $('#programEditorTemplate').hidden = !templateSource;
+        lintResult = { source: null, problems: [] };
+        checkResult = { source: null, ok: false, problems: [] };
         diagnostics = [];
         showProblemCount('Checking…', 'unknown');
         host.setTitle(programEditorTitle(title));
@@ -405,6 +438,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         pendingConversion = null;
         refreshFormat();
         applyActiveTheme();
+        // Write program: a new program starts from its template, unsaved until applied (undo leaves it empty again).
+        if (payload.startWith && !session.source.trim()) view.dispatch({ changes: { from: 0, insert: payload.startWith } });
         if (payload.convert && context.program && programSourceVersion(kind, session.source) === 1) showConversion();
     }
 

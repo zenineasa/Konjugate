@@ -972,13 +972,7 @@
                 </select></label>
                 <p id="editNodeProgramHint" class="builderHint">A program computes this node's states itself, once per substep, beside its own equations: it reads any node's states and shared parameters, and keeps state of its own across checkpoints.</p>
                 <div id="nodeProgramFields" hidden>
-                    <div id="nodeProgramSourceFields">
-                        <div class="equationHeading"><h3>Source</h3><div class="templateButtonGroup">
-                            <button id="editNodeProgramOpenEditor" class="templateButton" type="button">Open code editor</button>
-                            <button id="editNodeProgramTemplate" class="templateButton" type="button">Reset template</button>
-                        </div></div>
-                        <textarea id="editNodeProgramSource" class="providerSource" rows="12" spellcheck="false"></textarea>
-                    </div>
+                    <div id="nodeProgramSourceFields"><div id="nodeProgramSummary"></div></div>
                     <div id="nodeProgramFmuFields" hidden>
                         <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
                         <p class="builderHint">Its inputs and outputs are the FMU's own; wire each below. Every output sets its state to the value the FMU reports. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>

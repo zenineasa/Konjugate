@@ -989,6 +989,35 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .equationModes button { height: 21px; padding: 0 7px; color: #627783; background: transparent; border: 0; border-radius: 3px; font-size: 7px; }
 .equationModes button.active { color: #80d9d1; background: rgb(66 201 188 / 12%); }
 .templateButtonGroup { display: flex; gap: 6px; }
+/* A program on its card (src/renderer/programSourceSection.mjs, docs/proposals/codeEditor.md "The card"): a summary, a read-only preview
+   and one button; the code editor is the one place it is edited. */
+.programSummary { display: flex; flex-direction: column; gap: 5px; }
+.programSummary[hidden] { display: none; }
+.programStatus { padding: 0; color: #7d939c; background: none; border: 0; font-size: 8px; cursor: pointer; }
+.programStatus[hidden] { display: none; }
+.programStatus.passed { color: #6ce0d5; cursor: default; }
+.programStatus.problem { color: #e0838a; }
+.programStatus.older { color: #d9c58a; }
+.programStatus:not(.passed):hover { text-decoration: underline; }
+.programIdentity { margin: 0; color: #dce8ec; font-size: 9px; font-weight: 600; }
+.programBindingsLine { display: flex; gap: 8px; margin: 0; color: #aab9c1; font-size: 8px; line-height: 1.45; }
+.programBindingsLine[hidden], .programIdentity[hidden], .programEmpty[hidden] { display: none; }
+.programLineLabel { flex: none; width: 30px; color: #6d838d; }
+.programBindingsLine .unbound { color: #e0838a; }
+.programPreview { display: flex; flex-direction: column; padding: 5px 0; overflow: hidden; background: #0a151d; border: 1px solid #22333d; border-radius: 4px; opacity: .78; }
+.programPreview[hidden] { display: none; }
+.programPreview:hover { opacity: 1; border-color: #31525a; }
+.programPreviewLine { display: flex; gap: 8px; width: 100%; padding: 0 7px; color: #aab9c1; background: none; border: 0; text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 8px; line-height: 1.5; white-space: pre; cursor: text; }
+.programPreviewLine:hover { background: rgb(66 201 188 / 6%); }
+.programPreviewLine code { overflow: hidden; font: inherit; text-overflow: ellipsis; }
+.programPreviewNumber { flex: none; width: 18px; color: #4c6069; text-align: right; }
+.programPreviewLine .token-keyword { color: #c090e0; }
+.programPreviewLine .token-string { color: #dfae6b; }
+.programPreviewLine .token-number { color: #6ce0d5; }
+.programPreviewLine .token-comment, .programPreviewLine .token-preprocessor { color: #5b7285; }
+.programEmpty { margin: 0; color: #7d939c; font-size: 8px; }
+.programEditButton { align-self: flex-start; height: 23px; padding: 0 12px; color: #07161a; background: var(--accent); border: 0; border-radius: 5px; font-size: 8px; font-weight: 700; cursor: pointer; }
+.programEditButton:hover { background: #57d6ca; }
 .templateButton { height: 21px; padding: 0 8px; color: #80d9d1; background: rgb(66 201 188 / 8%); border: 1px solid #31525a; border-radius: 4px; font-size: 7px; }
 .templateButton:hover { background: rgb(66 201 188 / 14%); }
 .equationMathField { display: block; width: 100%; min-height: 47px; margin-top: 3px; padding: 8px 9px; color: #d4e1e6; background: #09141b; border: 1px solid #2b3d48; border-radius: 5px; font-size: 17px; --caret-color: var(--accent); --selection-background-color: rgb(66 201 188 / 22%); }

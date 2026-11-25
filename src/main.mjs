@@ -2866,6 +2866,18 @@ ipcMain.on('providerEditorDirty', (event, dirty) => {
     const state = projectWindow && projectWindowState.get(projectWindow);
     if (state) state.providerEditorDirty = Boolean(dirty);
 });
+// What the code editor's lint and Check found on a source, handed to its project window for the card's status line.
+ipcMain.on('providerEditorStatus', (event, status) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const owner = projectWindow && projectWindowState.get(projectWindow)?.providerEditorOwner;
+    if (!owner || owner.isDestroyed() || typeof status?.source !== 'string') return;
+    owner.send('providerEditorStatus', {
+        kind: status.kind === 'python' ? 'python' : 'cpp',
+        source: status.source,
+        problems: Array.isArray(status.problems) ? status.problems.slice(0, 50).map((problem) => ({ line: Number.isInteger(problem?.line) ? problem.line : null, message: String(problem?.message ?? '') })) : [],
+        checkPassed: Boolean(status.checkPassed)
+    });
+});
 ipcMain.on('providerEditorCloseAnswer', (event, { requestId, closed }) => {
     const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
     const state = projectWindow && projectWindowState.get(projectWindow);

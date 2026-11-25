@@ -24,12 +24,17 @@ const escapeXml = (text) => String(text).replace(/[&<>"]/g, (character) => ({ '&
 const slug = (text) => text.toLowerCase().replace(/<[^>]+>/g, '').replace(/&[a-z]+;/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const size = (bytes) => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
 
-// The examples' folders and their files, in the order a reader wants them.
+// The examples' folders and their files, in the order a reader wants them. An example's folder is named by its model (FMI 2.0), or sits
+// in a folder named by its FMI version (3.0/ThermalEquilibrium); its files are named by the model either way.
 const fileOrder = [['.fmu', 'FMU'], ['_ref.csv', 'Reference result'], ['_ref.opt', 'Experiment'], ['Readme.txt', 'Readme']];
+const isFmiVersionFolder = (name) => /^\d+\.\d+$/.test(name);
 export function exampleFolders() {
-    return readdirSync(examplesDirectory, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map(({ name }) => {
+    const directories = (path) => readdirSync(path, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map(({ name }) => name);
+    const names = directories(examplesDirectory).flatMap((name) => (isFmiVersionFolder(name) ? directories(join(examplesDirectory, name)).map((model) => `${name}/${model}`) : [name]));
+    return names.map((name) => {
+        const model = posix.basename(name);
         const files = readdirSync(join(examplesDirectory, name)).map((file) => {
-            const kind = fileOrder.findIndex(([ending]) => file === (ending === 'Readme.txt' ? ending : `${name}${ending}`));
+            const kind = fileOrder.findIndex(([ending]) => file === (ending === 'Readme.txt' ? ending : `${model}${ending}`));
             if (kind < 0) throw new Error(`${source}/${name}/${file} is not one of an example's four files.`);
             return { file, kind, label: fileOrder[kind][1], bytes: statSync(join(examplesDirectory, name, file)).size };
         }).sort((a, b) => a.kind - b.kind);
@@ -119,15 +124,17 @@ function table({ head, rows }, examples) {
 <tbody>${rows.map((row) => `<tr>${row.map((text, column) => `<${column || head[0] ? 'td' : 'th scope="row"'}>${cell(text, examples)}</${column || head[0] ? 'td' : 'th'}>`).join('')}</tr>`).join('\n')}</tbody></table></div>`;
 }
 
-// The README's table of examples (its first column, Folder, links each example's folder) as a card per example, with its downloads.
-function exampleCards({ head, rows }, examples) {
+// A README table of examples (its first column, Folder, links each example's folder) as a card per example, with its downloads. There
+// is one table per FMI version; `shown` collects the folders they name, which together must be every example, each once.
+function exampleCards({ head, rows }, examples, shown) {
     const column = (name) => head.indexOf(name);
     if (['Folder', 'Model', 'FMI features it tests', 'Experiment'].some((name) => column(name) < 0)) throw new Error(`The README's table of examples has changed its columns: ${head.join(' | ')}`);
-    if (rows.length !== examples.length) throw new Error(`The README's table of examples lists ${rows.length} examples; ${source} holds ${examples.length}.`);
     return `<div class="cards">${rows.map((row) => {
         const name = row[column('Folder')].match(/^\[([^\]]+)\]/)?.[1];
         const example = examples.find((candidate) => candidate.name === name);
         if (!example) throw new Error(`The README's table of examples names ${row[column('Folder')]}, which is not a folder of ${source}.`);
+        if (shown.has(name)) throw new Error(`The README's tables of examples name ${name} twice.`);
+        shown.add(name);
         const downloads = example.files.map(({ file, label, bytes }, index) => `<a class="${index ? 'file' : 'file primary'}" href="${escapeXml(`${name}/${file}`)}" download><span>${escapeXml(label)} <small>${size(bytes)}</small></span><code>${escapeXml(file)}</code></a>`).join('');
         return `<article class="card" id="example-${slug(name)}">
 <h4>${escapeXml(name)}</h4>
@@ -147,6 +154,7 @@ export function renderPage() {
     const sections = blocks.filter((block) => block.type === 'heading' && block.level === 2);
     const body = [];
     let contentsWritten = false;
+    const shown = new Set();
     for (const block of blocks) {
         if (block.type === 'heading' && block.level === 1) continue;
         // The README's own logo: the page has the bar's, and the hero's.
@@ -160,10 +168,12 @@ export function renderPage() {
         else if (block.type === 'paragraph') body.push(`<p>${inline(block.text, examples)}</p>`);
         else if (block.type === 'list') body.push(`<ul>${block.items.map((item) => `<li>${inline(item, examples)}</li>`).join('\n')}</ul>`);
         else if (block.type === 'code') body.push(`<pre><code>${escapeXml(block.text)}</code></pre>`);
-        else if (block.head[0] === 'Folder') body.push(exampleCards(block, examples));
+        else if (block.head[0] === 'Folder') body.push(exampleCards(block, examples, shown));
         else body.push(table(block, examples));
     }
     if (!body.some((html) => html.startsWith('<div class="cards">'))) throw new Error('The README has no table of examples (its first column named Folder).');
+    const unlisted = examples.filter(({ name }) => !shown.has(name)).map(({ name }) => name);
+    if (unlisted.length) throw new Error(`The README's tables of examples leave out ${unlisted.join(', ')}, which ${source} holds.`);
     return `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeXml(title)}</title>
 ${brandHead({ title, description, url: pageUrl, image: null })}

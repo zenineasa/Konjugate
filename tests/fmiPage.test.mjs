@@ -30,7 +30,12 @@ test('the FMI page and every example file it offers are written, and its links r
         assert.ok(existsSync(join(site, posix.normalize(link))), `index.html links to ${link}, which is not on the site`);
     }
     for (const [, fragment] of html.matchAll(/href="#([^"]+)"/g)) assert.ok(ids.has(fragment), `index.html links to #${fragment}, which is not on the page`);
-    for (const { name } of examples) assert.match(html, new RegExp(`<article class="card" id="example-${name.toLowerCase()}">`));
+    for (const { name } of examples) assert.match(html, new RegExp(`<article class="card" id="example-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}">`));
+    // The FMI 3.0 examples (examples/fmi/3.0/) are on it too, their files under 3.0/ as in the repository.
+    for (const model of ['ThermalEquilibrium', 'SpringMassDamper', 'HeatedRoom']) {
+        assert.ok(examples.some(({ name }) => name === `3.0/${model}`), `3.0/${model} is an example of the page.`);
+        assert.ok(files.includes(`3.0/${model}/${model}.fmu`), `3.0/${model}/${model}.fmu is published.`);
+    }
     // Every file of the repository it names is linked on GitHub, never relatively (the page is not served from a clone).
     assert.doesNotMatch(html, /href="\.\.\//);
     assert.match(html, /<a class="home" href="https:\/\/www\.konjugate\.com\/"/);

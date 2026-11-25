@@ -67,7 +67,7 @@ FmuInstance* asInstance(fmi3Instance instance) {
     return static_cast<FmuInstance*>(instance);
 }
 
-// Errors are always reported through the host's logger (FMI 3.0 section 2.3.5, "logStatusError"), whether or not debug logging
+// Errors are always reported through the host's logger (FMI 3.0 section 2.4.5, Log Categories: "logStatusError"), whether or not debug logging
 // is on: a refused call is never silent.
 fmi3Status fail(FmuInstance* instance, const std::string& message) {
     if (instance && instance->logMessage) instance->logMessage(instance->environment, fmi3Error, "logStatusError", message.c_str());
@@ -218,7 +218,7 @@ FMI3_Export fmi3Status fmi3DoStep(fmi3Instance instance, fmi3Float64 currentComm
     fmi3Boolean* eventHandlingNeeded, fmi3Boolean* terminateSimulation, fmi3Boolean* earlyReturn, fmi3Float64* lastSuccessfulTime) {
     auto* fmu = asInstance(instance);
     if (!fmu) return fmi3Error;
-    // No Event Mode and no early return (FMI 3.0 section 4.2.2): the step is always taken whole, or refused.
+    // No Event Mode and no early return (FMI 3.0 section 4.2.1, Step Mode): the step is always taken whole, or refused.
     if (eventHandlingNeeded) *eventHandlingNeeded = fmi3False;
     if (terminateSimulation) *terminateSimulation = fmi3False;
     if (earlyReturn) *earlyReturn = fmi3False;
@@ -247,7 +247,7 @@ FMI3_Export fmi3Status fmi3DoStep(fmi3Instance instance, fmi3Float64 currentComm
     }
 }
 
-// --- FMU state (FMI 3.0 section 2.3.7): offered when the model reports supportsStateCapture() (modelDescription.xml's
+// --- FMU state (FMI 3.0 section 2.2.7.4): offered when the model reports supportsStateCapture() (modelDescription.xml's
 // canGetAndSetFMUState and canSerializeFMUState). The state also holds the time, so "time" reads back as it was. Serialized as
 // that time followed by the captured values, raw doubles: a serialized state is only ever read back by the same binary. ---
 

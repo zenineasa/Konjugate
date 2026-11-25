@@ -15,17 +15,19 @@ import test from 'node:test';
 import { unzipSync } from 'fflate';
 import { describeFmu } from '../src/fmiExport.mjs';
 import {
-    examplesDirectory, exportDocument, fmiExamples, fmuPlatforms, parseReferenceCsv, parseReferenceOptions, readmeText, sampleTimes
+    exampleFolder, examplesDirectory, exportDocument, fmiExamples, fmiVersions, fmuPlatforms, parseReferenceCsv, parseReferenceOptions, readmeText, sampleTimes
 } from '../scripts/fmiExamples.mjs';
 
-test('examples/fmi holds exactly the examples scripts/fmiExamples.mjs defines', async () => {
-    const folders = (await readdir(examplesDirectory, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
-    assert.deepEqual(folders, fmiExamples.map((example) => example.name).sort());
+const subfolders = async (path) => (await readdir(path, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+
+test('examples/fmi holds exactly the examples scripts/fmiExamples.mjs defines, FMI 2.0 beside FMI 3.0 in 3.0/', async () => {
+    assert.deepEqual(await subfolders(examplesDirectory), [...fmiExamples.map((example) => example.name), '3.0'].sort());
+    assert.deepEqual(await subfolders(join(examplesDirectory, '3.0')), fmiExamples.map((example) => example.name).sort());
 });
 
-for (const example of fmiExamples) {
-    test(`${example.name}: the files the FMI tools page asks for, following its rules`, async () => {
-        const folder = join(examplesDirectory, example.name);
+for (const fmiVersion of fmiVersions) for (const example of fmiExamples) {
+    test(`${exampleFolder(example, fmiVersion)} (FMI ${fmiVersion}): the files the FMI tools page asks for, following its rules`, async () => {
+        const folder = join(examplesDirectory, exampleFolder(example, fmiVersion));
         assert.deepEqual((await readdir(folder)).sort(), [`${example.name}.fmu`, `${example.name}_ref.csv`, `${example.name}_ref.opt`, 'Readme.txt'].sort());
 
         const options = parseReferenceOptions(await readFile(join(folder, `${example.name}_ref.opt`), 'utf8'));
@@ -47,16 +49,19 @@ for (const example of fmiExamples) {
 
         const fmu = unzipSync(new Uint8Array(await readFile(join(folder, `${example.name}.fmu`))));
         const committedXml = Buffer.from(fmu['modelDescription.xml']).toString('utf8');
-        const variableNames = [...committedXml.matchAll(/<ScalarVariable name="([^"]*)"/g)].map((match) => match[1]);
+        assert.match(committedXml, new RegExp(`fmiVersion="${fmiVersion.replace('.', '\\.')}"`));
+        const variableNames = [...committedXml.matchAll(/<(?:ScalarVariable|Float64) name="([^"]*)"/g)].map((match) => match[1]);
         for (const name of names.slice(1)) assert.ok(variableNames.includes(name), `${name} is not a variable of ${example.name}.fmu.`);
 
-        const { modelIdentifier, xml } = describeFmu(await exportDocument(example), example.name);
+        const { modelIdentifier, xml } = describeFmu(await exportDocument(example), example.name, { fmiVersion });
         assert.equal(committedXml, xml,
             `${example.name}.fmu was not made by today's exporter (its modelDescription.xml differs): regenerate the examples with node scripts/generateFmiExamples.mjs.`);
         const binaries = Object.keys(fmu).filter((path) => path.startsWith('binaries/'));
         assert.ok(binaries.length > 0, 'The FMU carries a binary.');
-        for (const path of binaries) assert.match(path, new RegExp(`^binaries/[a-z0-9]+/${modelIdentifier}\\.(dylib|so|dll)$`));
+        // FMI 2.0 names a platform darwin64, linux64, win64...; FMI 3.0 a tuple, aarch64-darwin, x86_64-linux...
+        const platform = fmiVersion === '3.0' ? '[a-z0-9_]+-(darwin|linux|windows)' : '(darwin|linux|win)(32|64)';
+        for (const path of binaries) assert.match(path, new RegExp(`^binaries/${platform}/${modelIdentifier}\\.(dylib|so|dll)$`));
 
-        assert.equal(await readFile(join(folder, 'Readme.txt'), 'utf8'), readmeText(example, fmuPlatforms(fmu)));
+        assert.equal(await readFile(join(folder, 'Readme.txt'), 'utf8'), readmeText(example, fmuPlatforms(fmu), fmiVersion));
     });
 }

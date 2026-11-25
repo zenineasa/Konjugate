@@ -1,9 +1,9 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // A hand-authored, real FMI 3.0 Co-Simulation shared library standing in for a third-party vendor
-// FMU -- Konjugate cannot export FMI 3.0 itself (export stays FMI 2.0 only, see
-// docs/codeExport.md), so unlike the FMI 2.0 import fidelity test (which reuses Konjugate's own
-// exporter as the "known good" fixture), this is authored directly against the real fmi3*
+// FMU -- written independently of Konjugate's own FMI 3.0 exporter (which
+// tests/engine/fmi3ImportFidelity.mjs checks separately), so the importer is also checked against
+// an FMU Konjugate did not write. It is authored directly against the real fmi3*
 // Co-Simulation C API, exactly like engine/tests/fmiGlueTests.cpp's DecayModel stands in for a
 // generated SimulationModel. Same dynamics as that FMI2 test fixture (x' = -k*x, explicit Euler),
 // so tests/engine/fmi3ImportFidelity.mjs can assert against the identical hand-computed

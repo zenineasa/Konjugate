@@ -24,8 +24,16 @@ export const repositoryRoot = join(import.meta.dirname, '..');
 export const examplesDirectory = join(repositoryRoot, 'examples', 'fmi');
 export const engineOptions = { applicationPath: repositoryRoot, resourcesPath: '', packaged: false };
 
-// The communication step a host uses must be a whole number of the FMU's global steps (engine/src/fmiGlue.cpp, fmi2DoStep), so
-// each StepSize below is one.
+// The communication step a host uses must be a whole number of the FMU's global steps (engine/src/fmiGlue.cpp, fmi2DoStep, and
+// engine/src/fmi3Glue.cpp, fmi3DoStep), so each StepSize below is one. Each example is exported twice: as FMI 2.0 into
+// examples/fmi/<Model_Name>/ and as FMI 3.0 into examples/fmi/3.0/<Model_Name>/, the same model with the same reference result.
+export const fmiVersions = ['2.0', '3.0'];
+
+// An example's folder, relative to examplesDirectory.
+export function exampleFolder(example, fmiVersion = '2.0') {
+    return fmiVersion === '3.0' ? `3.0/${example.name}` : example.name;
+}
+
 export const fmiExamples = [
     {
         name: 'ThermalEquilibrium',
@@ -34,12 +42,21 @@ export const fmiExamples = [
         startTime: 0, stopTime: 60, stepSize: 1, relTol: 1e-6,
         readme: [
             'A hot body (350 K) and a cold body (290 K), each a thermal mass of 1000 J/K, joined by a conductance of 50 W/K: the two',
-            'temperatures meet at 320 K with a time constant of 10 s. It is the shipped example examples/thermalEquilibrium.kjt.',
-            '',
-            'FMI features it tests: FMI 2.0 Co-Simulation; two continuous outputs (the temperatures); two tunable real parameters',
-            '("conductance", "thermalCapacitance"); fmi2DoStep over a communication step of 10 internal steps (Euler, 0.1 s);',
-            'fmi2GetFMUstate/fmi2SetFMUstate and fmi2SerializeFMUstate (canGetAndSetFMUstate="true").'
-        ]
+            'temperatures meet at 320 K with a time constant of 10 s. It is the shipped example examples/thermalEquilibrium.kjt.'
+        ],
+        features: {
+            '2.0': [
+                'FMI features it tests: FMI 2.0 Co-Simulation; two continuous outputs (the temperatures); two tunable real parameters',
+                '("conductance", "thermalCapacitance"); fmi2DoStep over a communication step of 10 internal steps (Euler, 0.1 s);',
+                'fmi2GetFMUstate/fmi2SetFMUstate and fmi2SerializeFMUstate (canGetAndSetFMUstate="true").'
+            ],
+            '3.0': [
+                'FMI features it tests: FMI 3.0 Co-Simulation; two continuous Float64 outputs (the temperatures); two tunable Float64',
+                'parameters ("conductance", "thermalCapacitance"); units (K, W/K, J/K) declared in UnitDefinitions; the independent',
+                'variable "time"; fmi3DoStep over a communication step of 10 internal steps (Euler, fixedInternalStepSize 0.1 s), with no',
+                'event mode and no early return; fmi3GetFMUState/fmi3SetFMUState and fmi3SerializeFMUState (canGetAndSetFMUState="true").'
+            ]
+        }
     },
     {
         name: 'SpringMassDamper',
@@ -49,12 +66,21 @@ export const fmiExamples = [
         readme: [
             'A 1 kg mass on a spring (4 N/m) and a damper (0.4 N*s/m) to a fixed support, released from 0.1 m: a damped oscillation of',
             'period about 3.2 s. It is the shipped example examples/springMassDamper.kjt. The mass is integrated in four substeps of each',
-            '0.01 s step.',
-            '',
-            'FMI features it tests: FMI 2.0 Co-Simulation; four continuous outputs (displacement and velocity of the mass and of the',
-            'support); tunable real parameters; fmi2DoStep over a communication step of 5 internal steps; a node integrated in',
-            'substeps inside each step; fmi2GetFMUstate/fmi2SetFMUstate (canGetAndSetFMUstate="true").'
-        ]
+            '0.01 s step.'
+        ],
+        features: {
+            '2.0': [
+                'FMI features it tests: FMI 2.0 Co-Simulation; four continuous outputs (displacement and velocity of the mass and of the',
+                'support); tunable real parameters; fmi2DoStep over a communication step of 5 internal steps; a node integrated in',
+                'substeps inside each step; fmi2GetFMUstate/fmi2SetFMUstate (canGetAndSetFMUstate="true").'
+            ],
+            '3.0': [
+                'FMI features it tests: FMI 3.0 Co-Simulation; four continuous Float64 outputs (displacement and velocity of the mass and',
+                'of the support); tunable Float64 parameters, with declared units; the independent variable "time"; fmi3DoStep over a',
+                'communication step of 5 internal steps (fixedInternalStepSize 0.01 s); a node integrated in substeps inside each step;',
+                'fmi3GetFMUState/fmi3SetFMUState (canGetAndSetFMUState="true").'
+            ]
+        }
     },
     {
         name: 'HeatedRoom',
@@ -64,13 +90,23 @@ export const fmiExamples = [
         readme: [
             'A room (heat capacity 1000 J/K, loss 50 W/K to 280 K outside) heated from 285 K towards a 293.15 K setpoint by a digital',
             'PID controller sampled every 10 ms, with a noisy temperature sensor (a random stream seeded from the model, so runs repeat) and its output',
-            'limited to 0..2000 W. The controller is the C++ program examples/providers/pidController.cpp, compiled into the FMU.',
-            '',
-            'FMI features it tests: FMI 2.0 Co-Simulation; a continuous output (the temperature) and a discrete one held between the',
-            "controller's samples (the heater power); six tunable real parameters (the controller's gains and limits); internal discrete",
-            'state (the integral, the held command, the random stream) carried in fmi2GetFMUstate/fmi2SetFMUstate',
-            '(canGetAndSetFMUstate="true"); fmi2DoStep over a communication step of 100 internal steps.'
-        ]
+            'limited to 0..2000 W. The controller is the C++ program examples/providers/pidController.cpp, compiled into the FMU.'
+        ],
+        features: {
+            '2.0': [
+                'FMI features it tests: FMI 2.0 Co-Simulation; a continuous output (the temperature) and a discrete one held between the',
+                "controller's samples (the heater power); six tunable real parameters (the controller's gains and limits); internal discrete",
+                'state (the integral, the held command, the random stream) carried in fmi2GetFMUstate/fmi2SetFMUstate',
+                '(canGetAndSetFMUstate="true"); fmi2DoStep over a communication step of 100 internal steps.'
+            ],
+            '3.0': [
+                'FMI features it tests: FMI 3.0 Co-Simulation; a Float64 output that is continuous (the temperature) and one held between',
+                "the controller's samples (the heater power); six tunable Float64 parameters (the controller's gains and limits), with",
+                'declared units; internal discrete state (the integral, the held command, the random stream) carried in',
+                'fmi3GetFMUState/fmi3SetFMUState (canGetAndSetFMUState="true"); fmi3DoStep over a communication step of 100 internal',
+                'steps (fixedInternalStepSize 0.005 s).'
+            ]
+        }
     }
 ];
 
@@ -229,16 +265,18 @@ export function fmuPlatforms(entries) {
     }).sort();
 }
 
-export function readmeText(example, platforms) {
+export function readmeText(example, platforms, fmiVersion = '2.0') {
     return [
         `${example.name}: an FMU exported by Konjugate (https://github.com/zenineasa/Konjugate)`,
         '',
         ...example.readme,
         '',
-        `Files: ${example.name}.fmu (FMI 2.0 Co-Simulation, binaries for ${platforms.join(', ')} only; no source code FMU, which Konjugate`,
+        ...example.features[fmiVersion],
+        '',
+        `Files: ${example.name}.fmu (FMI ${fmiVersion} Co-Simulation, binaries for ${platforms.join(', ')} only; no source code FMU, which Konjugate`,
         `does not export), ${example.name}_ref.csv (the Konjugate engine's own run of the same project), ${example.name}_ref.opt.`,
         `Simulate it from ${csvNumber(example.startTime)} s to ${csvNumber(example.stopTime)} s with a communication step of ${csvNumber(example.stepSize)} s, or another whole multiple of`,
-        `its internal step of ${csvNumber(example.run.globalTimeStep)} s: a step that is not one is refused (fmi2Error). The FMU has no inputs.`,
+        `its internal step of ${csvNumber(example.run.globalTimeStep)} s: a step that is not one is refused (${fmiVersion === '3.0' ? 'fmi3Error' : 'fmi2Error'}). The FMU has no inputs.`,
         '',
         'How it was made and checked, and how to regenerate it: examples/fmi/README.md.',
         ''

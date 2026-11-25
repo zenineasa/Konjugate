@@ -22,7 +22,7 @@ Draw a system as components connected by relationships, write each one's equatio
 - **Build digital twins.** Connect a running model to live measurements from a data log, an MQTT broker, an OPC UA server or a script, keep it in step with the real system, refit it as it drifts, and forecast ahead. See [Connecting a data source](docs/connectingADataSource.md).
 - **Start from data.** Import a CSV of time series and Konjugate proposes which variables drive which, in what direction and with what equation, for you to review before anything is added. See [Causal inference](docs/causalInference.md).
 - **Describe it in words.** The Model Assistant turns a plain-language request into model changes you can review and undo, with local or hosted models. See [the Model Assistant guide](docs/aiAssistantGuide.md).
-- **Take it elsewhere.** Export standalone C++ or an FMI 2.0/3.0 FMU, import FMUs, or run projects headlessly from the command line. See [Code export](docs/codeExport.md).
+- **Take it elsewhere.** Export standalone C++ or an FMI 2.0 or 3.0 Co-Simulation FMU, import FMUs, or run projects headlessly from the command line. See [Code export](docs/codeExport.md).
 
 <p align="center">
 <a href="https://www.youtube.com/watch?v=jiL0kP0VQvQ"><img src="assets/ForReadme/youtubeVideoThumbnail.png" alt="Watch the Konjugate introduction video on YouTube" width="560"></a>

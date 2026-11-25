@@ -10,6 +10,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { createLintScheduler, lintHash } from './lintScheduler.mjs';
+import { pythonProgramLintScript } from './pythonProgramLint.mjs';
 import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
@@ -2827,24 +2828,19 @@ async function validateCppSource(source, { signal, setup } = {}) {
     }
 }
 
-// Pure ast.parse — a syntax check only. It never imports or executes the source, which
-// matters because this runs automatically as the user types.
-const PYTHON_SYNTAX_CHECK_SCRIPT = 'import ast, sys\n'
-    + 'try:\n'
-    + '    ast.parse(sys.stdin.read())\n'
-    + 'except SyntaxError as error:\n'
-    + '    print(f"{error.lineno or 1}:{error.offset or 1}: {error.msg}", file=sys.stderr)\n'
-    + '    sys.exit(1)\n';
-
+// The code editor's check of a Python program (src/pythonProgramLint.mjs): ast.parse, then its checks that know the SDK, and compile()'s
+// warnings. It never imports or executes the source, which matters because this runs automatically as the user types.
 async function validatePythonSource(source, { signal, interpreter } = {}) {
     interpreter ??= await resolvePythonInterpreter();
-    const result = await runProcess(interpreter, ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '', signal });
-    if (result.code === 0) return { valid: true, diagnostics: [] };
-    const match = result.stderr.trim().match(/^(\d+):(\d+):\s*(.*)$/);
-    if (!match) {
-        return { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message: result.stderr.trim() || 'Python syntax check failed.' }] };
+    const result = await runProcess(interpreter, ['-c', pythonProgramLintScript], { input: source ?? '', signal });
+    if (result.code === 0) {
+        try {
+            const answer = JSON.parse(result.stdout.trim().split('\n').at(-1));
+            if (Array.isArray(answer?.diagnostics)) return { valid: Boolean(answer.valid), diagnostics: answer.diagnostics };
+        } catch { /* reported below */ }
     }
-    return { valid: false, diagnostics: [{ line: Number(match[1]), column: Number(match[2]), severity: 'error', message: match[3] }] };
+    const message = (result.stderr.trim() || result.stdout.trim()).split('\n').at(-1) || 'Python could not check the program.';
+    return { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message }] };
 }
 
 ipcMain.handle('providerEditorOpenWindow', (event, payload) => {

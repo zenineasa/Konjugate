@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { formatCell, plotPath, tableText, testInputs, testSummary, traceTable } from '../src/providerEditor/testTable.mjs';
+import { formatCell, nudgedValue, outputsUnmoved, plotPath, tableText, testInputs, testSummary, traceTable } from '../src/providerEditor/testTable.mjs';
 
 // The engine's Test of the PID example, three steps (testProgram's answer, as the engine gave it).
 const answer = {
@@ -71,4 +71,16 @@ test('the small plot spans its box, keeps a flat line in the middle, and breaks 
     assert.equal(plotPath([5, 5], 100, 20, 0), 'M0.0 10.0 L100.0 10.0');
     assert.equal(plotPath([0, NaN, 2, 3], 90, 20, 0), 'M0.0 20.0 M60.0 6.7 L90.0 0.0');
     assert.equal(plotPath([], 100, 20), '');
+});
+
+test('the hint rule: an input changed a little, never to itself, and the outputs compared exactly at every step', () => {
+    assert.equal(nudgedValue(0), 1);
+    assert.equal(nudgedValue(NaN), 1);
+    assert.ok(nudgedValue(290) > 290 && nudgedValue(-4) < -4);
+    assert.notEqual(nudgedValue(1e-12), 1e-12);
+    const rows = answer.trace.rows;
+    assert.equal(outputsUnmoved(rows, structuredClone(rows)), true, 'Unmoved: the same outputs at every step, memory aside.');
+    assert.equal(outputsUnmoved(rows, rows.map((row, index) => (index === 2 ? { ...row, outputs: { power: row.outputs.power + 1e-12 } } : row))), false);
+    assert.equal(outputsUnmoved(rows, rows.slice(0, 2)), false, 'A trace that stopped early moved.');
+    assert.equal(outputsUnmoved([], []), false, 'Nothing to compare says nothing.');
 });

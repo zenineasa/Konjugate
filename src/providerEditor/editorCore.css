@@ -142,3 +142,7 @@
 .programEditor .testPlot svg { flex: 1; height: 48px; background: #070f15; border: 1px solid #1c2f3a; border-radius: 4px; }
 .programEditor .testPlot path { fill: none; stroke: #42c9bc; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
 .programEditor .testPlot select { height: 22px; color: #c7d4d9; background: #101d25; border: 1px solid #253944; border-radius: 4px; font-size: 9px; }
+.programEditor .problemCount.warning { color: #d9c58a; }
+.programEditor .problemCount.warning:hover { text-decoration: underline; }
+.programEditor .testHints { margin: 0 0 6px; padding: 0; color: #d9c58a; list-style: none; }
+.programEditor .testHints li.pending { color: #778d98; }

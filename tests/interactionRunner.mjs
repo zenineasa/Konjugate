@@ -2838,6 +2838,35 @@ export async function runInteractionTests(driver) {
         assert.ok(Math.abs(cold - 319.93) < 0.01, `The cold body ended at ${cold} K, not 319.93 K.`);
     });
 
+    await run('the code editor knows the SDK: a misspelt port is underlined as you type, and an input never read is a hint, on Test too', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('python'));
+        const editor = await openProgramEditor();
+        const lintTimeout = 60000;
+        const lines = (body) => ['from konjugate.v2 import Input, Output, Relationship', '', '', 'class Gain(Relationship):', '    hot = Input()', '    cold = Input()', '    output = Output()', '', '    def evaluate(self, t, x):', body, ''].join('\n');
+        // Every mark on the code, read from the editor: where marks overlap (an unbound port's warning over its line) only the strongest
+        // is drawn.
+        const markOnLine = (severity, line) => `window.__providerEditor.marks.some((mark) => mark.severity === '${severity}' && mark.line === ${line})`;
+        // A misspelt port: an error at the read, as the run would fail there.
+        await setEditorSource(editor, lines('        return x.hot - x.colt'));
+        await waitFor(editor, markOnLine('error', 10), 'The misspelt port was not underlined as you typed.', lintTimeout);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorProblems').textContent`), '1 problem');
+        // Put right but leaving cold unread: a hint on its declaration, which is not a problem.
+        await setEditorSource(editor, lines('        return 2 * x.hot'));
+        await waitFor(editor, `document.querySelector('#programEditorProblems').textContent === 'No problems'`, 'The corrected program was not checked.', lintTimeout);
+        await waitFor(editor, `${markOnLine('info', 6)} && !${markOnLine('error', 10)}`, 'An input never read was not marked as a hint.', lintTimeout);
+        // Test passes, and then says which input moves no output.
+        await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(editor, `/passed|failed/.test(document.querySelector('#programEditorTestSummary').className)`, 'Test did not answer.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTestSummary').classList.contains('passed')`), true);
+        await waitFor(editor, `[...document.querySelectorAll('#programEditorTestHints li')].some((hint) => hint.textContent.includes('‘cold’ moves no output'))`,
+            `Test did not say cold moves no output: ${await evaluate(editor, `document.querySelector('#programEditorTestHints').textContent`)}`, 90000);
+        assert.equal(await evaluate(editor, `[...document.querySelectorAll('#programEditorTestHints li')].some((hint) => hint.textContent.includes('‘hot’'))`), false, 'hot moves the output.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('equation'));
+    });
+
     await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));

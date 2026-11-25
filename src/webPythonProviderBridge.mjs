@@ -15,6 +15,8 @@
 // webEngineWorker.mjs) and the provider editor's "Validate" button
 // (webShims/providerEditor.mjs), so Pyodide itself only ever loads once per Worker/page.
 
+import { pythonProgramLintFunction } from './pythonProgramLint.mjs';
+
 // The SDK as Pyodide needs it: version 1's package, and version 2's (konjugate.v2) beside it.
 const sdkFiles = ['__init__.py', '__main__.py', '_webBridge.py', 'v2/__init__.py', 'v2/_host.py', 'v2/testing.py', 'v2/check.py'];
 
@@ -63,27 +65,17 @@ function ensurePyodideLoaded() {
 // one needs its own diagnostic format.
 export async function runPythonSyntaxCheck(source) {
     const pyodide = await ensurePyodideLoaded();
-    // Keeps the user's source out of any shared/global Pyodide namespace -- passed as a local via
-    // globals rather than interpolated into the code string (avoids any quoting/escaping hazard).
+    // The checker is defined in its own namespace, and the user's source is handed to it as a local rather than interpolated into the
+    // code string (no quoting or escaping hazard). Its checks are src/pythonProgramLint.mjs's, the desktop's own.
     const scope = pyodide.toPy({ source });
     try {
-        const result = pyodide.runPython(
-            'import ast\n' +
-            'try:\n' +
-            '    ast.parse(source)\n' +
-            '    _konjugate_syntax_error = None\n' +
-            'except SyntaxError as error:\n' +
-            '    _konjugate_syntax_error = {"line": error.lineno or 1, "column": error.offset or 1, "message": error.msg}\n' +
-            '_konjugate_syntax_error',
-            { globals: scope }
-        );
-        const errorInfo = result?.toJs ? result.toJs({ dict_converter: Object.fromEntries }) : result;
+        const result = pyodide.runPython(`${pythonProgramLintFunction}\n_konjugate_lint(source)`, { globals: scope });
+        const answer = result?.toJs ? result.toJs({ dict_converter: Object.fromEntries }) : result;
         result?.destroy?.();
-        if (!errorInfo) return { valid: true, diagnostics: [] };
-        return { valid: false, diagnostics: [{ line: errorInfo.line, column: errorInfo.column, severity: 'error', message: errorInfo.message }] };
+        return { valid: Boolean(answer.valid), diagnostics: [...answer.diagnostics] };
     } catch (error) {
-        // A genuinely unexpected failure -- not the user's own SyntaxError, which is caught
-        // above -- still reported as a diagnostic rather than thrown out of Validate.
+        // A genuinely unexpected failure, not the user's own SyntaxError (which is reported as a diagnostic): still a diagnostic,
+        // rather than thrown out of the check.
         const lines = String(error.message ?? error).trim().split('\n');
         return { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message: lines.at(-1) }] };
     } finally {

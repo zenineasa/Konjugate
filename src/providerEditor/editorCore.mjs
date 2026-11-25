@@ -35,7 +35,7 @@ import { programSourceVersion } from '../providerTemplate.mjs';
 import { formatPortValue, portsTable } from './portsTable.mjs';
 import { portBindingChoices } from '../programBinding.mjs';
 import { sourcePorts } from './sourcePorts.mjs';
-import { formatCell, plotPath, tableText, testInputs, testSummary, traceTable } from './testTable.mjs';
+import { formatCell, nudgedValue, outputsUnmoved, plotPath, tableText, testInputs, testSummary, traceTable } from './testTable.mjs';
 import { lintHash } from '../lintScheduler.mjs';
 import {
     confirmLeave, createEditorSession, formatLabel, leaveQuestion, portDeclarationLine, problemCountText, programEditorTitle, sameTarget
@@ -104,6 +104,7 @@ const markup = `
                 <p id="programEditorTestSummary" class="testSummary" role="status"></p>
                 <ul id="programEditorTestChecks" class="testChecks"></ul>
                 <ul id="programEditorTestProblems" class="testProblems"></ul>
+                <ul id="programEditorTestHints" class="testHints"></ul>
                 <div id="programEditorTestResults" class="testResults" hidden>
                     <div class="testHead"><span>Results</span><button id="programEditorTestCopy" class="linkButton" type="button" title="Copy the table at full precision">Copy</button></div>
                     <div class="testTableWrap"><table id="programEditorTestTable"></table></div>
@@ -219,12 +220,17 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     let portContext = { bindings: [], outputs: [] };
     let description = null;
     let lastGoodDescription = null;
+    let lastGoodSource = null;
     let portsNote = '';
     let portsStale = false;
     let selectedPort = null;
     let revealPortOnDescription = false;
     let describeSequence = 0;
     let pickerPort = null;
+    let portProblems = [];
+    let lastPortProblems = '';
+    // What the code is marked with now, by line (overlapping marks show only the strongest; a test reads every one here).
+    let shownMarks = [];
     let bindingNote = '';
     let describeTimer = null;
     const describeCache = new Map();
@@ -263,6 +269,13 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     function renderPorts() {
         const shown = description ?? (portsStale ? lastGoodDescription ?? sourcePorts(kind, session.source) : null);
         const { rows } = portsTable(shown, portContext);
+        // A port's problem in the model (a unit that does not convert, nothing bound and no default), underlined where it is declared.
+        const underlined = rows.filter((row) => row.state === 'problem' && row.line).map((row) => `${row.line}|${row.note}`).join('\n');
+        portProblems = rows.filter((row) => row.state === 'problem' && row.line).map((row) => ({ line: row.line, message: `${row.key}: ${row.note}` }));
+        if (underlined !== lastPortProblems) {
+            lastPortProblems = underlined;
+            if (view) forceLinting(view);
+        }
         const note = $('#programEditorPortsNote');
         const noteText = [bindingNote, portsNote].filter(Boolean).join(' ');
         note.hidden = !noteText;
@@ -418,6 +431,7 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         } else if (answer.ok) {
             description = answer;
             lastGoodDescription = answer;
+            lastGoodSource = source;
             portsStale = false;
             portsNote = '';
         } else {
@@ -532,7 +546,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         button.textContent = text;
         button.classList.toggle('valid', state === 'valid');
         button.classList.toggle('invalid', state === 'invalid');
-        button.disabled = state !== 'invalid';
+        button.classList.toggle('warning', state === 'warning');
+        button.disabled = state !== 'invalid' && state !== 'warning';
     }
     async function sourceLinter(editorView) {
         const source = editorView.state.doc.toString();
@@ -542,33 +557,44 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         if (sequence !== validationSequence || result?.superseded) return []; // A newer keystroke superseded this request.
         const lineCount = editorView.state.doc.lines;
         // Test's problems for this exact source, underlined where they are.
-        const fromTest = (testResult.source === source ? testDiagnostics : [])
-            .filter((problem) => problem.line >= 1 && problem.line <= lineCount)
-            .map((problem) => {
-                const line = editorView.state.doc.line(problem.line);
-                return { from: line.from + (line.text.length - line.text.trimStart().length), to: line.to, severity: 'error', message: `Test: ${problem.message}` };
-            });
+        const wholeLine = (number) => {
+            const line = editorView.state.doc.line(number);
+            return { from: line.from + (line.text.length - line.text.trimStart().length), to: line.to };
+        };
+        const fromTest = [
+            ...(testResult.source === source ? testDiagnostics : [])
+                .filter((problem) => problem.line >= 1 && problem.line <= lineCount)
+                .map((problem) => ({ ...wholeLine(problem.line), severity: 'error', message: `Test: ${problem.message}` })),
+            ...(context.program ? portProblems : [])
+                .filter((problem) => problem.line >= 1 && problem.line <= lineCount)
+                .map((problem) => ({ ...wholeLine(problem.line), severity: 'warning', message: `In the model: ${problem.message}` }))
+        ];
         if (result?.valid === null || result?.valid === undefined) {
             diagnostics = [];
             showProblemCount(result?.message ?? '', 'unknown');
+            shownMarks = fromTest.map((mark) => ({ line: editorView.state.doc.lineAt(mark.from).number, severity: mark.severity, message: mark.message }));
             return fromTest;
         }
         diagnostics = result.diagnostics ?? [];
         lintResult = { source, problems: result.valid ? [] : (diagnostics.length ? diagnostics.filter((diagnostic) => diagnostic.severity !== 'info' && diagnostic.severity !== 'warning') : [{ line: null, message: 'The program has a problem.' }]).map((diagnostic) => ({ line: diagnostic.line ?? null, message: diagnostic.message })) };
         reportStatus();
-        const errors = diagnostics.length || (result.valid ? 0 : 1);
-        showProblemCount(result.valid ? 'No problems' : problemCountText(errors), result.valid ? 'valid' : 'invalid');
-        return [...diagnostics
+        // Hints (an input never read) are underlined but are not problems.
+        const counted = diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length || (result.valid ? 0 : 1);
+        showProblemCount(counted ? problemCountText(counted) : 'No problems', !result.valid ? 'invalid' : counted ? 'warning' : 'valid');
+        const marks = [...diagnostics
             .filter((diagnostic) => diagnostic.line >= 1 && diagnostic.line <= lineCount)
             .map((diagnostic) => {
                 const line = editorView.state.doc.line(diagnostic.line);
                 const from = Math.min(line.to, line.from + Math.max(0, (diagnostic.column ?? 1) - 1));
-                return { from, to: line.to, severity: diagnostic.severity ?? 'error', message: diagnostic.message };
+                const to = Number.isInteger(diagnostic.endColumn) ? Math.min(line.to, Math.max(from + 1, line.from + diagnostic.endColumn - 1)) : line.to;
+                return { from, to, severity: diagnostic.severity ?? 'error', message: diagnostic.message };
             }), ...fromTest];
+        shownMarks = marks.map((mark) => ({ line: editorView.state.doc.lineAt(mark.from).number, severity: mark.severity, message: mark.message }));
+        return marks;
     }
     // The problem count moves the cursor to the first problem.
     $('#programEditorProblems').addEventListener('click', () => {
-        const first = diagnostics.find((diagnostic) => diagnostic.line >= 1);
+        const first = diagnostics.find((diagnostic) => diagnostic.line >= 1 && diagnostic.severity !== 'info') ?? diagnostics.find((diagnostic) => diagnostic.line >= 1);
         if (first) goToLine(first.line, first.column);
     });
 
@@ -643,7 +669,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     }
     for (const button of root.querySelectorAll('[data-side-tab]')) button.addEventListener('click', () => showSideTab(button.dataset.sideTab));
 
-    const declaredForTest = () => (lastGoodDescription ?? sourcePorts(kind, session.source)).inputs ?? [];
+    // The inputs of the source as it is now: the engine's description when it is of this source, else as the code declares them.
+    const declaredForTest = () => (lastGoodDescription && lastGoodSource === session.source ? lastGoodDescription : sourcePorts(kind, session.source)).inputs ?? [];
     const clockOf = () => lastGoodDescription?.clock ?? null;
     function defaultStepSize() {
         const clock = clockOf();
@@ -743,6 +770,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         $('#programEditorTestSummary').className = 'testSummary';
         $('#programEditorTestChecks').replaceChildren();
         $('#programEditorTestProblems').replaceChildren();
+        $('#programEditorTestHints').replaceChildren();
+        hintSequence += 1;
         let answer;
         try {
             answer = await host.test(source, kind, { inputs, time: testTime, steps, stepSize });
@@ -781,6 +810,31 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         testDiagnostics = summary.problems.filter((problem) => problem.line);
         if (view) forceLinting(view);
         reportStatus();
+        // The inputs the engine says the program declares (whatever the panel had read of it), at the values Test ran them.
+        const declared = Object.fromEntries((answer.inputs ?? []).map((port) => [port.key, port.key in inputs ? inputs[port.key] : Number(port.default) || 0]));
+        if (summary.passed && lastTrace?.rows?.length) findStillInputs({ source, inputs: Object.keys(declared).length ? declared : inputs, time: testTime, steps: Math.min(steps, 20), stepSize, trace: lastTrace });
+    }
+
+    // After Test passes: each input changed a little, the same steps run again; one whose change moves no output over them is said, as a
+    // hint and never an error (it may be read only in some cases). One run per input, after the rest, and dropped if Test runs again.
+    let hintSequence = 0;
+    async function findStillInputs({ source, inputs, time, steps, stepSize, trace }) {
+        const sequence = ++hintSequence;
+        const hints = $('#programEditorTestHints');
+        const keys = Object.keys(inputs).slice(0, 12);
+        if (!keys.length) { hints.replaceChildren(); return; }
+        hints.replaceChildren(Object.assign(document.createElement('li'), { className: 'pending', textContent: 'Checking which inputs move the outputs…' }));
+        const baseline = trace.rows.slice(0, steps + 1);
+        const still = [];
+        for (const key of keys) {
+            let answer;
+            try { answer = await host.test(source, kind, { inputs: { ...inputs, [key]: nudgedValue(inputs[key]) }, time, steps, stepSize }); } catch { answer = null; }
+            if (sequence !== hintSequence || source !== session.source) return;
+            if (answer?.available && answer.ok && outputsUnmoved(baseline, answer.trace?.rows)) still.push(key);
+        }
+        hints.replaceChildren(...still.map((key) => Object.assign(document.createElement('li'), {
+            textContent: `Hint: ‘${key}’ moves no output over these steps. It may be read only in some cases, or not at all.`
+        })));
     }
     $('#programEditorTestProblems').addEventListener('click', (event) => {
         const link = event.target.closest('[data-line]');
@@ -898,6 +952,7 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         apply,
         goToLine,
         get dirty() { return session.dirty; },
+        get marks() { return shownMarks.map((mark) => ({ ...mark })); },
         get title() { return title; },
         get target() { return target; }
     };

@@ -106,3 +106,16 @@ export function plotPath(values, width = 240, height = 48, padding = 3) {
     }
     return path.trim();
 }
+
+// The hint after a passing Test (an input whose change moves no output over the steps): how an input is changed, a little and never
+// to the same value, and whether the outputs moved, compared exactly, step by step.
+export function nudgedValue(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number) || number === 0) return 1;
+    return number * 1.1 + Math.sign(number) * 1e-3;
+}
+
+export function outputsUnmoved(baselineRows, probeRows) {
+    const outputsOf = (rows) => JSON.stringify((rows ?? []).map((row) => row.outputs ?? {}));
+    return (baselineRows ?? []).length > 0 && outputsOf(baselineRows) === outputsOf(probeRows);
+}

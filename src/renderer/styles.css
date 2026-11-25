@@ -1703,47 +1703,20 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .webEditionUpdate button { padding: 5px 10px; color: #d8e5ea; background: #15232c; border: 1px solid #354954; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer; }
 .webEditionUpdate .webEditionUpdateReload { color: #07161a; background: #42c9bc; border-color: #42c9bc; }
 
-/* Minimal in-page provider editor (docs/proposals/webEdition.md, phase 4) -- only ever created
-   by src/renderer/webShims/providerEditor.mjs, never referenced by the desktop app. */
-.webProviderEditorDialog {
-    width: min(640px, 90vw);
-    background: var(--surface);
-    color: #fff;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
+/* The code editor's panel in the web edition (docs/proposals/codeEditor.md, "One editor on the web"): where a page cannot open a second
+   window, the editor floats over the project at the size the window would be, moves by its title bar and resizes from its corner, and
+   leaves the canvas usable beside it. Only ever created by src/renderer/webShims/providerEditor.mjs. The editor inside it is styled by
+   src/providerEditor/editorCore.css. */
+.webProgramEditorPanel {
+    position: fixed; z-index: 60; display: flex; flex-direction: column; min-width: 420px; min-height: 300px; max-width: 100vw; max-height: 100vh;
+    overflow: hidden; resize: both; background: #09131b; border: 1px solid #2f4855; border-radius: 8px; box-shadow: 0 16px 40px rgb(0 0 0 / 50%);
 }
-.webProviderEditorDialog::backdrop {
-    background: rgba(0, 0, 0, 0.5);
-}
-.webProviderEditorDialog h2 {
-    margin: 0 0 12px;
-    font-size: 14px;
-}
-.webProviderEditorDialog textarea {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--raised);
-    color: #fff;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    font-family: ui-monospace, monospace;
-    font-size: 12px;
-    padding: 8px;
-    resize: vertical;
-}
-.webProviderEditorStatus {
-    min-height: 1.2em;
-    font-size: 12px;
-    color: var(--muted);
-}
-.webProviderEditorDialog menu {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin: 12px 0 0;
-    padding: 0;
-}
+.webProgramEditorPanel[hidden] { display: none; }
+.webProgramEditorTitleBar { display: flex; flex: none; align-items: center; justify-content: space-between; height: 32px; padding-left: 12px; background: #081119; border-bottom: 1px solid #253944; cursor: move; user-select: none; touch-action: none; }
+.webProgramEditorTitleBar span { overflow: hidden; color: #c7d4d9; font-size: 11px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.webProgramEditorTitleBar button { width: 40px; height: 100%; color: #8499a3; background: transparent; border: 0; font-size: 14px; cursor: pointer; }
+.webProgramEditorTitleBar button:hover { color: white; background: #d64853; }
+.webProgramEditorPanel > .programEditor { flex: 1; }
 
 /* Parameters table: docked left like the branch tree so it stays open beside the right-docked
    editors it navigates to. Not a .contextCard on purpose -- hideCards() closes every context
@@ -1970,7 +1943,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .extensionsDialog { --extensions-pane-height: 300px; width: calc(100% - 16px); }
     /* The list above the detail, as the Examples window's: the two columns of the desktop's rule are more than a phone is wide. */
     .extensionsDialog .examplesExplorerBody { grid-template-columns: minmax(0, 1fr); }
-    .webProviderEditorDialog { width: calc(100% - 16px); }
+    .webProgramEditorPanel { min-width: 0; }
     .contextCard:is(.nodeEditor, .edgeEditor, .edgeGroupEditor, .causalInference, .parameterTuning) { width: calc(100% - 20px); bottom: calc(var(--math-keyboard-inset, 0px) + 10px + var(--sheet-floor, 0px)); }
     /* A card placed by script (a position from where the person last put it, or from the button that opened it) has no use for that here:
        on a phone it is docked, so the inline left and top are overridden. */

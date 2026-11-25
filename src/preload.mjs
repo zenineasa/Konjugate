@@ -183,7 +183,8 @@ contextBridge.exposeInMainWorld('componentLibrary', {
 contextBridge.exposeInMainWorld('providerEditor', {
     openWindow: (payload) => ipcRenderer.invoke('providerEditorOpenWindow', payload),
     onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload)),
-    reportApplied: (result) => ipcRenderer.send('providerEditorApplyResult', result)
+    reportApplied: (result) => ipcRenderer.send('providerEditorApplyResult', result),
+    confirmClose: () => ipcRenderer.invoke('providerEditorConfirmClose')
 });
 
 // The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md), kept in the user's own data folder.

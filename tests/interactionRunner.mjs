@@ -16,6 +16,7 @@ import { readDataLog } from '../src/dataLog.mjs';
 import { createPackageArchive } from '../src/packageArchive.mjs';
 import { startRigServer } from './fixtures/opcuaRigServer.mjs';
 import { groupTutorials } from '../src/tutorials/index.mjs';
+import { olderProviderSource } from '../src/providerTemplate.mjs';
 import { startFakeOllama } from './fixtures/fakeOllama.mjs';
 
 // What a scenario checks: what it is about, by ids, data attributes and state (a row's count, a control's value, a
@@ -2470,9 +2471,10 @@ export async function runInteractionTests(driver) {
         const beforeEditorOpen = driver.allHandles();
         await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
 
-        const editorWindow = await driver.waitForNewHandle(beforeEditorOpen, { titleIncludes: 'Provider source' });
+        const editorWindow = await driver.waitForNewHandle(beforeEditorOpen, { titleIncludes: 'Program' });
         await waitFor(editorWindow, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the provider editor window.');
-        assert.equal(await evaluate(editorWindow, `document.querySelector('#editorKindLabel').textContent`), 'C++');
+        assert.match(await evaluate(editorWindow, `document.querySelector('#editorTitle').textContent`), /\S · Program$/);
+        assert.equal(await evaluate(editorWindow, `document.querySelector('#programEditorFormat').textContent`), 'C++ · version 2');
 
         // body { user-select: none } now covers this window's chrome (see styles.css) -- confirm
         // that didn't drag CodeMirror's own editable content down with it. A real double-click
@@ -2496,24 +2498,24 @@ export async function runInteractionTests(driver) {
         // which is far more variable than a DOM/JS operation, so give it real headroom
         // rather than the default timeout tuned for in-process checks.
         const compileCheckTimeout = 20000;
-        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
+        await waitFor(editorWindow, `document.querySelector('#programEditorProblems').classList.contains('valid')`,
             'The starter template was not reported valid by the C++ syntax check.', compileCheckTimeout);
 
         await evaluate(editorWindow, `(() => {
             const view = window.__providerEditorView;
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'this is not valid c plus plus' } });
         })()`);
-        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('invalid')`,
+        await waitFor(editorWindow, `document.querySelector('#programEditorProblems').classList.contains('invalid')`,
             'Invalid C++ source was not flagged by the syntax check.', compileCheckTimeout);
 
         await evaluate(editorWindow, `(() => {
             const view = window.__providerEditorView;
             view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(validCpp)} } });
         })()`);
-        await waitFor(editorWindow, `document.querySelector('#editorStatus').classList.contains('valid')`,
+        await waitFor(editorWindow, `document.querySelector('#programEditorProblems').classList.contains('valid')`,
             'Restoring valid C++ source did not clear the invalid status.', compileCheckTimeout);
 
-        await evaluate(editorWindow, `document.querySelector('#applyButton').click()`);
+        await evaluate(editorWindow, `document.querySelector('#programEditorApply').click()`);
         await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(validCpp)}`,
             'Applying from the provider editor window did not update the relationship editor.');
 
@@ -2529,6 +2531,146 @@ export async function runInteractionTests(driver) {
         assert.equal(await isRenderedVisible(window, '#editEdgeEquationHeading'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeMathField'), true);
         assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection'), false);
+    });
+
+    // The code editor on both hosts (docs/proposals/codeEditor.md, stage 1): the desktop's own window, the web edition's in-page panel.
+    const programEditorWeb = !driver.capabilities.multiWindow;
+    const programEditorShown = `(() => { const panel = document.querySelector('#webProgramEditorPanel'); return Boolean(panel && !panel.hidden && panel.querySelector('.cm-editor')); })()`;
+    const openProgramEditor = async () => {
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#editOpenProviderEditor').click()`);
+        if (programEditorWeb) {
+            await waitFor(window, programEditorShown, 'The code editor panel did not open.', 30000);
+            return window;
+        }
+        const editor = await driver.waitForNewHandle(before, { titleIncludes: 'Program' });
+        await waitFor(editor, `document.querySelector('.cm-editor') !== null`, 'CodeMirror did not mount in the code editor window.');
+        return editor;
+    };
+    const programEditorClosed = async (editor) => {
+        if (programEditorWeb) {
+            await waitFor(window, `!${programEditorShown}`, 'The code editor panel did not close.');
+            return;
+        }
+        const deadline = Date.now() + 5000;
+        while (driver.allHandles().includes(editor) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
+        assert.ok(!driver.allHandles().includes(editor), 'The code editor window did not close.');
+    };
+    const closeProgramEditor = (editor) => evaluate(editor, programEditorWeb ? `document.querySelector('.webProgramEditorClose').click()` : `document.querySelector('#close').click()`);
+    const setEditorSource = (editor, source) => evaluate(editor, `(() => {
+        const view = window.__providerEditorView;
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(source)} } });
+    })()`);
+    const leaveQuestionShown = `!document.querySelector('#programEditorLeave').hidden`;
+
+    await run('the code editor highlights a Python program, marks its error on its line, and converts an older one', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('python'));
+        const original = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        const editor = await openProgramEditor();
+        const title = programEditorWeb ? '.webProgramEditorTitleBar span' : '#editorTitle';
+        assert.match(await evaluate(editor, `document.querySelector('${title}').textContent`), /\S · Program$/);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorFormat').textContent`), 'Python · version 2');
+        // Highlighted: the language's tokens are styled spans, not plain text.
+        await waitFor(editor, `document.querySelectorAll('.cm-line span').length > 3`, 'The Python program was not highlighted.');
+        const lintTimeout = 60000; // Pyodide's first load on the web, a Python interpreter on the desktop.
+        await waitFor(editor, `document.querySelector('#programEditorProblems').classList.contains('valid')`, 'The Python template was not reported free of problems.', lintTimeout);
+
+        await setEditorSource(editor, 'from konjugate.v2 import Relationship\n\n\ndef broken(:\n    pass\n');
+        await waitFor(editor, `document.querySelector('#programEditorProblems').classList.contains('invalid')`, 'A Python syntax error was not found.', lintTimeout);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorProblems').textContent`), '1 problem');
+        // On its line: the underline sits on line 4, and the problem count moves the cursor there.
+        await waitFor(editor, `(() => { const mark = document.querySelector('.cm-lintRange-error'); return Boolean(mark && mark.closest('.cm-line') === document.querySelectorAll('.cm-content .cm-line')[3]); })()`,
+            'The syntax error was not underlined on its line.');
+        await evaluate(editor, `document.querySelector('#programEditorProblems').click()`);
+        assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number`), 4);
+
+        // An older program says so and converts, before anything changes; undo takes the conversion back in one step.
+        const older = olderProviderSource('python', [{ key: 'gradient' }], 'flow', 'Older');
+        await setEditorSource(editor, older);
+        await waitFor(editor, `!document.querySelector('#programEditorFormatNotice').hidden`, 'An older program was not marked as the older format.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorFormat').textContent`), 'Python · older format');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), true, 'Check program is offered only after conversion.');
+        await evaluate(editor, `document.querySelector('#programEditorConvert').click()`);
+        await waitFor(editor, `!document.querySelector('#programEditorConvertPanel').hidden`, 'Convert did not show the conversion.');
+        await evaluate(editor, `document.querySelector('#programEditorConvertAccept').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorFormat').textContent === 'Python · version 2'`, 'The converted program is not in the current format.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), false, 'Check program is offered once converted.');
+
+        // Cancel closes without asking, and the card keeps what it had.
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), original);
+    });
+
+    await run('the code editor\'s Check program passes on a Python program, through the engine a run uses', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('python'));
+        const editor = await openProgramEditor();
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), false, 'Check program is offered for a program in the current format.');
+        await evaluate(editor, `document.querySelector('#programEditorCheck').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorCheckPanel').classList.contains('passed') || document.querySelector('#programEditorCheckPanel').classList.contains('failed')`,
+            'Check program did not answer.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheckPanel').classList.contains('passed')`), true,
+            `Check program did not pass: ${await evaluate(editor, `document.querySelector('#programEditorCheckPanel').textContent`)}`);
+        assert.match(await evaluate(editor, `document.querySelector('#programEditorCheckSummary').textContent`), /every check passed\.$/);
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('equation'));
+    });
+
+    await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
+        await freshRelationshipEditor();
+        await evaluate(window, writeRelationshipAs('python'));
+        const original = await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`);
+        let editor = await openProgramEditor();
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorApply').disabled`), true, 'Nothing to apply yet.');
+        await setEditorSource(editor, `${original}\n# first edit\n`);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorApply').disabled`), false);
+
+        // Closing asks; Keep editing stays.
+        await closeProgramEditor(editor);
+        await waitFor(editor, leaveQuestionShown, 'Closing with unsaved changes did not ask.');
+        assert.match(await evaluate(editor, `document.querySelector('#programEditorLeaveQuestion').textContent`), /^Apply your changes to .+’s program\?$/);
+        await evaluate(editor, `document.querySelector('#programEditorLeaveKeep').click()`);
+        assert.equal(await evaluate(editor, leaveQuestionShown), false);
+        if (programEditorWeb) assert.equal(await evaluate(window, programEditorShown), true, 'Keep editing closed the panel.');
+        else assert.ok(driver.allHandles().includes(editor), 'Keep editing closed the window.');
+
+        // The project window closing asks the editor first (desktop): Keep editing keeps both open.
+        if (!programEditorWeb) {
+            await evaluate(window, `(() => { window.__programEditorMayClose = 'pending'; window.providerEditor.confirmClose().then((answer) => { window.__programEditorMayClose = answer; }); })()`);
+            await waitFor(editor, leaveQuestionShown, 'The project window closing did not ask the code editor first.');
+            await evaluate(editor, `document.querySelector('#programEditorLeaveKeep').click()`);
+            await waitFor(window, `window.__programEditorMayClose === false`, 'Keep editing did not stop the project window closing.');
+        }
+
+        // Don't apply closes and leaves the model unchanged.
+        await closeProgramEditor(editor);
+        await waitFor(editor, leaveQuestionShown, 'Closing with unsaved changes did not ask.');
+        await evaluate(editor, `document.querySelector('#programEditorLeaveDiscard').click()`);
+        await programEditorClosed(editor);
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSource').value`), original, 'Don\'t apply changed the model.');
+
+        // Apply from the question applies, then closes; the card has it.
+        editor = await openProgramEditor();
+        const edited = `${original}\n# applied on leaving\n`;
+        await setEditorSource(editor, edited);
+        await closeProgramEditor(editor);
+        await waitFor(editor, leaveQuestionShown, 'Closing with unsaved changes did not ask.');
+        await evaluate(editor, `document.querySelector('#programEditorLeaveApply').click()`);
+        await programEditorClosed(editor);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(edited)}`, 'Apply on leaving did not reach the card.');
+
+        // Apply keeps the editor open, with nothing left to apply.
+        editor = await openProgramEditor();
+        await setEditorSource(editor, original);
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSource').value === ${JSON.stringify(original)}`, 'Apply did not reach the card.');
+        await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'Apply left something to apply.');
+        await closeProgramEditor(editor);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('equation'));
     });
 
     await run('C++ validation rejects unknown equation symbols while typing', async () => {

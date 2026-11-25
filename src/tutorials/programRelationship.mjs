@@ -54,7 +54,7 @@ const steps = Object.freeze([
     {
         id: 'bind',
         title: 'Bind the two temperatures',
-        text: `Press ＋ beside Bindings twice. Give the first the key "${values.bindings[0].key}" and the reference ${values.bindings[0].reference}, the second "${values.bindings[1].key}" and ${values.bindings[1].reference}. The program under Provider source is written again from its template as you go, so it declares the keys you give.`,
+        text: `Press ＋ beside Bindings twice. Give the first the key "${values.bindings[0].key}" and the reference ${values.bindings[0].reference}, the second "${values.bindings[1].key}" and ${values.bindings[1].reference}. The program under Program is written again from its template as you go, so it declares the keys you give.`,
         target: () => '#editAddProviderBinding', skip: 'setProgramBindings', relationship: values.relationship, bindings: values.bindings,
         done: ({ document }) => bound(document)
     },

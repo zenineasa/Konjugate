@@ -12,6 +12,9 @@ contextBridge.exposeInMainWorld('windowControls', Object.freeze({
 contextBridge.exposeInMainWorld('providerEditorWindow', Object.freeze({
     onContent: (callback) => ipcRenderer.on('providerEditorContent', (_event, payload) => callback(payload)),
     validate: (source, kind) => ipcRenderer.invoke('providerEditorValidate', { source, kind }),
-    apply: (source) => ipcRenderer.invoke('providerEditorApply', { source }),
-    check: (source, kind, inputs) => ipcRenderer.invoke('providerEditorCheck', { source, kind, inputs })
+    apply: (source, target) => ipcRenderer.invoke('providerEditorApply', { source, target }),
+    check: (source, kind, inputs) => ipcRenderer.invoke('providerEditorCheck', { source, kind, inputs }),
+    setDirty: (dirty) => ipcRenderer.send('providerEditorDirty', Boolean(dirty)),
+    onCloseRequest: (callback) => ipcRenderer.on('providerEditorCloseRequest', (_event, requestId) => callback(requestId)),
+    answerCloseRequest: (requestId, closed) => ipcRenderer.send('providerEditorCloseAnswer', { requestId, closed: Boolean(closed) })
 }));

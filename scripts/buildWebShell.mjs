@@ -92,6 +92,8 @@ await cp(join(srcDirectory, 'renderer', 'webShims'), join(outputDirectory, 'rend
 await cp(join(srcDirectory, 'renderer', 'styles.css'), join(outputDirectory, 'renderer', 'styles.css'));
 // The guide's own stylesheet, shared with the desktop's guide window, which webShims/guidePanel.mjs loads.
 await cp(join(srcDirectory, 'exampleGuide', 'guideContent.css'), join(outputDirectory, 'exampleGuide', 'guideContent.css'));
+// The code editor's own stylesheet, shared with the desktop's editor window, which webShims/providerEditor.mjs loads.
+await cp(join(srcDirectory, 'providerEditor', 'editorCore.css'), join(outputDirectory, 'providerEditor', 'editorCore.css'));
 // The registry as this site carries it, for Discover and installing from it (docs/proposals/webEditionPackages.md, stage 4). Packages are
 // downloaded from their releases only when KONJUGATE_MIRROR_PACKAGES=1 (the release workflow); a local build writes the entries and
 // images alone and needs no network.
@@ -135,10 +137,19 @@ html = html.replace(
     '    <script src="../../node_modules/scrypt-js/scrypt.js"></script>\n' +
     '    <script src="../../node_modules/occt-import-js/dist/occt-import-js.js"></script>'
 );
+// The code editor (docs/proposals/codeEditor.md): the web edition's panel holds the same editor as the desktop's window, so its page gets
+// the window's CodeMirror import map entries (src/providerEditor/index.html), and those packages are vendored below.
+const editorImportMap = JSON.parse(/<script type="importmap">([\s\S]*?)<\/script>/.exec(
+    await readFile(join(srcDirectory, 'providerEditor', 'index.html'), 'utf8'))[1]).imports;
+const editorPackages = [...new Set(Object.values(editorImportMap).map((path) => {
+    const parts = path.replace('../../node_modules/', '').split('/');
+    return parts[0].startsWith('@') ? join(parts[0], parts[1]) : parts[0];
+}))];
 html = html.replace(
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js"',
     '"@cortex-js/compute-engine": "../../node_modules/@cortex-js/compute-engine/dist/esm-min/compute-engine.js",\n' +
-    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs"'
+    '                "protobufjs/minimal.js": "./webShims/protobufjsMinimalShim.mjs"' +
+    Object.entries(editorImportMap).map(([name, path]) => `,\n                ${JSON.stringify(name)}: ${JSON.stringify(path)}`).join('')
 );
 html = html.replace(
     '<script type="module" src="renderer.mjs"></script>',
@@ -297,10 +308,14 @@ await cp(join(rootDirectory, 'engine', 'include', 'konjugate', 'relationshipProv
     join(outputDirectory, 'cppProviderSdk', 'konjugate', 'relationshipProvider.hpp'));
 await cp(join(rootDirectory, 'engine', 'include', 'konjugate', 'providerSharedMemoryChannel.hpp'),
     join(outputDirectory, 'cppProviderSdk', 'konjugate', 'providerSharedMemoryChannel.hpp'));
+// Version 2 of the program SDK, so the code editor's in-browser C++ check finds the header a version 2 program includes.
+await mkdir(join(outputDirectory, 'cppProviderSdk', 'konjugate', 'sdk', 'v2'), { recursive: true });
+await cp(join(rootDirectory, 'engine', 'include', 'konjugate', 'sdk', 'v2', 'program.hpp'),
+    join(outputDirectory, 'cppProviderSdk', 'konjugate', 'sdk', 'v2', 'program.hpp'));
 
 const vendoredPackages = [
     'three', 'mathlive', join('@cortex-js', 'compute-engine'), 'occt-import-js', 'plotly.js-dist-min', 'protobufjs', 'pyodide', 'scrypt-js',
-    join('@wasmer', 'sdk'), 'fflate'
+    join('@wasmer', 'sdk'), 'fflate', ...editorPackages
 ];
 for (const packageName of vendoredPackages) {
     await cp(join(rootDirectory, 'node_modules', packageName), join(outputDirectory, 'node_modules', packageName), { recursive: true });

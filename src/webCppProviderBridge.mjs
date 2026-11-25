@@ -43,7 +43,8 @@
 const sdkFiles = [
     ['providerWorker.cpp', 'providerWorker.cpp'],
     ['konjugate/relationshipProvider.hpp', 'include/konjugate/relationshipProvider.hpp'],
-    ['konjugate/providerSharedMemoryChannel.hpp', 'include/konjugate/providerSharedMemoryChannel.hpp']
+    ['konjugate/providerSharedMemoryChannel.hpp', 'include/konjugate/providerSharedMemoryChannel.hpp'],
+    ['konjugate/sdk/v2/program.hpp', 'include/konjugate/sdk/v2/program.hpp']
 ];
 
 // Where the clang sandbox comes from: @wasmer/sdk and the SDK files, beside this module in the web shell (scripts/buildWebShell.mjs

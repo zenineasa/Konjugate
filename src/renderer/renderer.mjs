@@ -889,6 +889,8 @@ function initializeWindowControls() {
     $('#maximizeButton').dataset.tooltip = isMac ? 'Enter full screen' : 'Maximize';
     $('#maximizeButton').addEventListener('click', () => window.windowControls.toggleMaximize());
     $('#closeButton').addEventListener('click', async () => {
+        // The code editor asks first whether to apply its unsaved changes.
+        if (window.providerEditor.confirmClose && !await window.providerEditor.confirmClose()) return;
         if ((documentController.dirty || (activeResult && !activeResultPersistedInProject) || addonDataUnsaved) &&
             !await window.projectFiles.confirmDiscard()) return;
         window.windowControls.close();
@@ -12250,7 +12252,7 @@ $('#parameterTuningProgramSource').addEventListener('input', () => refreshParame
 $('#parameterTuningProgramEditor').addEventListener('click', () => {
     if (!parameterTuningProgram.language) return;
     providerEditTarget = { type: 'objective' };
-    window.providerEditor.openWindow({ source: $('#parameterTuningProgramSource').value, kind: parameterTuningProgram.language, title: 'Tuning objective' });
+    window.providerEditor.openWindow({ target: providerEditTarget, source: $('#parameterTuningProgramSource').value, kind: parameterTuningProgram.language, title: 'Tuning objective' });
 });
 
 // Same reasoning as window.__debugCausalInference above: a real OS file-picker dialog can't be
@@ -13968,7 +13970,7 @@ $('#editNodeProgramOpenEditor').addEventListener('click', () => {
     const implementation = selectedNode?.userData.definition.implementation;
     if (!implementation || implementation.kind === 'fmi') return;
     providerEditTarget = { type: 'node', nodeId: selectedNode.userData.id };
-    window.providerEditor.openWindow({
+    window.providerEditor.openWindow({ target: providerEditTarget,
         source: $('#editNodeProgramSource').value,
         kind: implementation.kind,
         title: selectedNode.userData.definition.title,
@@ -14289,7 +14291,7 @@ edgeProgramSection.onReset(() => {
     if (!selectedRelationship?.implementation) return;
     const { kind, bindings, output } = selectedRelationship.implementation;
     if (edgeProgramSection.source.trim() &&
-        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
     changeEdgeModel(selectedRelationship, (snapshot) => {
         snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title);
     });
@@ -14297,7 +14299,7 @@ edgeProgramSection.onReset(() => {
 edgeProgramSection.onOpenEditor(() => {
     if (!selectedRelationship?.implementation) return;
     providerEditTarget = { type: 'editor', relationshipId: selectedRelationship.id };
-    window.providerEditor.openWindow({
+    window.providerEditor.openWindow({ target: providerEditTarget,
         source: edgeProgramSection.source,
         kind: selectedRelationship.implementation.kind,
         title: selectedRelationship.title,
@@ -14322,7 +14324,7 @@ function openProgramConversion(target) {
         const relationship = model.relationships.find((candidate) => candidate.id === target.edgeId && !candidate.deleted);
         if (!relationship?.implementation) return;
         providerEditTarget = { type: 'editor', relationshipId: relationship.id };
-        window.providerEditor.openWindow({ source: relationship.implementation.source ?? '', kind: relationship.implementation.kind, title: relationship.title,
+        window.providerEditor.openWindow({ target: providerEditTarget, source: relationship.implementation.source ?? '', kind: relationship.implementation.kind, title: relationship.title,
             ...programEditorContext(relationship.implementation, relationship.parameters), convert: true });
         return;
     }
@@ -14332,56 +14334,58 @@ function openProgramConversion(target) {
     if (target.type === 'node') {
         if (!definition.implementation) return;
         providerEditTarget = { type: 'node', nodeId: target.nodeId };
-        window.providerEditor.openWindow({ source: definition.implementation.source ?? '', kind: definition.implementation.kind, title: definition.title,
+        window.providerEditor.openWindow({ target: providerEditTarget, source: definition.implementation.source ?? '', kind: definition.implementation.kind, title: definition.title,
             ...programEditorContext(definition.implementation), convert: true });
         return;
     }
     const term = definition.sourceTerms.find((candidate) => candidate.id === target.termId);
     if (!term?.implementation) return;
     providerEditTarget = { type: 'sourceTerm', nodeId: target.nodeId, termId: term.id };
-    window.providerEditor.openWindow({ source: term.implementation.source ?? '', kind: term.implementation.kind, title: definition.title,
+    window.providerEditor.openWindow({ target: providerEditTarget, source: term.implementation.source ?? '', kind: term.implementation.kind, title: definition.title,
         ...programEditorContext(term.implementation, term.parameters), convert: true });
 }
 
-window.providerEditor.onApplied(({ source }) => {
+window.providerEditor.onApplied(({ source, target }) => {
+    // The program the editor was opened on, which it sends back: another program may have been opened in the card since.
+    const editTarget = target ?? providerEditTarget;
     const fail = (error) => window.providerEditor.reportApplied({ applied: false, error });
     const succeed = () => window.providerEditor.reportApplied({ applied: true });
-    if (!providerEditTarget) return fail('Nothing is being edited anymore.');
-    if (providerEditTarget.type === 'editor') {
+    if (!editTarget) return fail('Nothing is being edited anymore.');
+    if (editTarget.type === 'editor') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
-        const relationship = model.relationships.find((candidate) => candidate.id === providerEditTarget.relationshipId);
+        const relationship = model.relationships.find((candidate) => candidate.id === editTarget.relationshipId);
         if (!relationship?.implementation || relationship.deleted) return fail('This relationship no longer exists.');
         changeEdgeModel(relationship, (snapshot) => {
             snapshot.implementation.source = source;
         });
         return succeed();
     }
-    if (providerEditTarget.type === 'objective') {
+    if (editTarget.type === 'objective') {
         if (!parameterTuningProgram.language || $('#parameterTuning').classList.contains('hidden')) return fail('The tuning card is no longer showing an objective program.');
         $('#parameterTuningProgramSource').value = source;
         refreshParameterTuningRunnable();
         return succeed();
     }
-    if (providerEditTarget.type === 'sourceTerm') {
+    if (editTarget.type === 'sourceTerm') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
-        const node = nodeObjects.get(providerEditTarget.nodeId);
-        const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === providerEditTarget.termId);
+        const node = nodeObjects.get(editTarget.nodeId);
+        const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === editTarget.termId);
         if (!node || node.userData.definition.deleted || !term?.implementation) return fail('This part no longer exists.');
-        changeSourceTermModel(node, providerEditTarget.termId, (snapshotTerm) => {
+        changeSourceTermModel(node, editTarget.termId, (snapshotTerm) => {
             snapshotTerm.implementation.source = source;
         });
         return succeed();
     }
-    if (providerEditTarget.type === 'node') {
+    if (editTarget.type === 'node') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
-        const node = nodeObjects.get(providerEditTarget.nodeId);
+        const node = nodeObjects.get(editTarget.nodeId);
         if (!node || node.userData.definition.deleted || !node.userData.definition.implementation) return fail('This node no longer has a program.');
         changeNodeModel(node, (snapshot) => { snapshot.implementation.source = source; });
         return succeed();
     }
-    if (providerEditTarget.type === 'group') {
+    if (editTarget.type === 'group') {
         if (activeResult) return fail('Results are locked — close them to apply changes.');
-        const group = model.edgeGroups.find((candidate) => candidate.id === providerEditTarget.groupId && !candidate.deleted);
+        const group = model.edgeGroups.find((candidate) => candidate.id === editTarget.groupId && !candidate.deleted);
         if (!group?.definition.implementation) return fail('This relationship group no longer exists.');
         changeEdgeGroupModel(group, (snapshot) => { snapshot.definition.implementation.source = source; });
         return succeed();
@@ -14448,7 +14452,7 @@ termProgramSection.onReset(() => {
     const term = node.userData.definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
     if (!term?.implementation) return;
     if (termProgramSection.source.trim() &&
-        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
     changeSourceTermModel(node, selectedSourceTermId, (snapshotTerm) => {
         snapshotTerm.implementation.source = defaultProviderSource(
             snapshotTerm.implementation.kind, snapshotTerm.implementation.bindings,
@@ -14472,7 +14476,7 @@ termProgramSection.onOpenEditor(() => {
     const term = definition.sourceTerms.find((candidate) => candidate.id === selectedSourceTermId);
     if (!term?.implementation) return;
     providerEditTarget = { type: 'sourceTerm', nodeId: node.userData.id, termId: term.id };
-    window.providerEditor.openWindow({
+    window.providerEditor.openWindow({ target: providerEditTarget,
         source: termProgramSection.source,
         kind: term.implementation.kind,
         title: definition.title,
@@ -20377,7 +20381,7 @@ groupProgramSection.onReset(() => {
     if (!group?.definition.implementation) return;
     const { kind, bindings, output } = group.definition.implementation;
     if (groupProgramSection.source.trim() &&
-        !window.confirm('Replace the current provider source with a freshly generated template?')) return;
+        !window.confirm('Replace the program with a freshly generated template? (Undo brings it back.)')) return;
     changeEdgeGroupModel(group, (snapshot) => {
         snapshot.definition.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.name);
     });
@@ -20396,7 +20400,7 @@ groupProgramSection.onOpenEditor(() => {
     const group = currentEdgeGroup();
     if (!group) return;
     providerEditTarget = { type: 'group', groupId: group.id };
-    window.providerEditor.openWindow({
+    window.providerEditor.openWindow({ target: providerEditTarget,
         source: groupProgramSection.source,
         kind: $('#groupImplementationKind').value,
         title: group.name

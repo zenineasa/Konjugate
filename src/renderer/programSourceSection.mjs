@@ -29,7 +29,7 @@ export class ProgramSourceSection {
         };
         const id = (name) => attributes(name);
         const code = `
-            <div class="equationHeading"><h3>Provider source</h3><div class="templateButtonGroup">
+            <div class="equationHeading"><h3>Program</h3><div class="templateButtonGroup">
                 <button${attributes('open', 'templateButton')} type="button">Open code editor</button>
                 <button${attributes('reset', 'templateButton')} type="button" hidden>Reset template</button>
             </div></div>

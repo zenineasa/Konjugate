@@ -5,7 +5,8 @@
     <meta charset="UTF-8">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'sha256-untAeGWUP80mQXL3TW0v3tOgjF/uWYTTdRt3TClt2A8='; img-src 'self' data:">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Provider source</title>
+    <title>Program</title>
+    <link rel="stylesheet" href="editorCore.css">
     <link rel="stylesheet" href="styles.css">
     <script type="importmap">
         {
@@ -36,51 +37,10 @@
 </head>
 <body>
     <header class="titleBar">
-        <div class="title"><img src="../../assets/icon.svg" alt=""><strong>Konjugate</strong><span id="editorTitle">Provider source</span></div>
+        <div class="title"><img src="../../assets/icon.svg" alt=""><strong>Konjugate</strong><span id="editorTitle">Program</span></div>
         <div class="windowControls"><button id="minimize" type="button" aria-label="Minimize">−</button><button id="maximize" type="button" aria-label="Maximize">□</button><button id="close" class="close" type="button" aria-label="Close">×</button></div>
     </header>
-    <div class="editorToolbar">
-        <span id="editorKindLabel" class="kindBadge"></span>
-        <span id="editorStatus" class="editorStatus" role="status">Checking…</span>
-        <select id="editorThemeSelect" class="editorThemeSelect" aria-label="Editor color theme"></select>
-        <button id="checkProgramButton" class="secondaryButton" type="button" hidden title="Runs the program's standard checks: its ports, its outputs, purity and its memory">Check program</button>
-        <button id="applyButton" class="applyButton" type="button">Apply</button>
-    </div>
-    <div id="editorFormatNotice" class="editorNotice" hidden>
-        <span id="editorFormatNoticeText"></span>
-        <button id="convertButton" class="linkButton" type="button">Convert to version 2 ›</button>
-    </div>
-    <div id="editorConvertPanel" class="editorConvertPanel" hidden>
-        <p id="convertSummary" class="convertSummary"></p>
-        <ul id="convertNotes" class="convertNotes"></ul>
-        <div class="convertColumns">
-            <div><h3>As it is</h3><pre id="convertBefore"></pre></div>
-            <div><h3>Converted</h3><pre id="convertAfter"></pre></div>
-        </div>
-        <div class="convertActions">
-            <button id="convertCancel" class="secondaryButton" type="button">Keep it as it is</button>
-            <button id="convertAccept" class="applyButton" type="button">Use the converted program</button>
-        </div>
-    </div>
-    <div id="editorCheckPanel" class="editorCheckPanel" hidden role="status">
-        <p id="checkSummary"></p>
-        <ul id="checkProblems"></ul>
-        <p id="checkDetails" class="checkDetails"></p>
-    </div>
-    <div id="editorThemePanel" class="editorThemePanel" hidden>
-        <label><span>Background</span><input id="themeColor-background" type="color" data-theme-field="background"></label>
-        <label><span>Text</span><input id="themeColor-foreground" type="color" data-theme-field="foreground"></label>
-        <label><span>Gutter</span><input id="themeColor-gutterBackground" type="color" data-theme-field="gutterBackground"></label>
-        <label><span>Line numbers</span><input id="themeColor-gutterForeground" type="color" data-theme-field="gutterForeground"></label>
-        <label><span>Cursor &amp; accent</span><input id="themeColor-caret" type="color" data-theme-field="caret"></label>
-        <label><span>Comment</span><input id="themeColor-comment" type="color" data-theme-field="comment"></label>
-        <label><span>Keyword</span><input id="themeColor-keyword" type="color" data-theme-field="keyword"></label>
-        <label><span>String</span><input id="themeColor-string" type="color" data-theme-field="string"></label>
-        <label><span>Number</span><input id="themeColor-number" type="color" data-theme-field="number"></label>
-        <label><span>Function</span><input id="themeColor-function" type="color" data-theme-field="function"></label>
-        <label><span>Type</span><input id="themeColor-typeName" type="color" data-theme-field="typeName"></label>
-    </div>
-    <div id="editorHost"></div>
+    <main id="programEditorRoot"></main>
     <script type="module" src="renderer.mjs"></script>
 </body>
 </html>

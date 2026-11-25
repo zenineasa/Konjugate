@@ -196,7 +196,7 @@ const projectWindowState = new WeakMap();
 function createProjectWindowState() {
     return {
         exampleGuideWindow: null, exampleGuideBounds: null,
-        providerEditorWindow: null, providerEditorBounds: null, providerEditorOwner: null, pendingProviderApply: null,
+        providerEditorWindow: null, providerEditorBounds: null, providerEditorOwner: null, pendingProviderApply: null, providerEditorDirty: false,
         analysisWindow: null, analysisAddonId: null, visualizerManifest: null, visualizerSession: null,
         currentProjectPath: null
     };
@@ -845,7 +845,7 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
             minHeight: 360,
             frame: false,
             backgroundColor: '#09131b',
-            title: 'Provider source',
+            title: 'Program',
             webPreferences: {
                 preload: join(currentDir, 'providerEditor', 'preload.cjs'),
                 contextIsolation: true,
@@ -855,9 +855,22 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
         });
         state.providerEditorWindow = createdWindow;
         installCustomWindowState(createdWindow);
-        createdWindow.on('close', () => { state.providerEditorBounds = createdWindow.isDestroyed() ? state.providerEditorBounds : createdWindow.getBounds(); });
+        createdWindow.on('close', (event) => {
+            // Closed from outside its own × (the keyboard's Close Window) with unsaved changes: the window asks first, and closes itself
+            // if it may. Quitting the app does not wait for it.
+            if (state.providerEditorDirty && !applicationShutdownPromise && !createdWindow.isDestroyed()) {
+                event.preventDefault();
+                askProviderEditorToClose(state);
+                return;
+            }
+            state.providerEditorBounds = createdWindow.isDestroyed() ? state.providerEditorBounds : createdWindow.getBounds();
+        });
         createdWindow.on('closed', () => {
-            if (state.providerEditorWindow === createdWindow) { state.providerEditorWindow = null; state.providerEditorOwner = null; }
+            if (state.providerEditorWindow === createdWindow) {
+                state.providerEditorWindow = null; state.providerEditorOwner = null; state.providerEditorDirty = false;
+                state.pendingProviderEditorClose?.(true);
+                state.pendingProviderEditorClose = null;
+            }
         });
         createdWindow.webContents.once('did-finish-load', () => { if (!createdWindow.isDestroyed()) createdWindow.webContents.send('providerEditorContent', payload); });
         createdWindow.loadFile(join(currentDir, 'providerEditor', 'index.html'));
@@ -867,6 +880,25 @@ function openProviderEditorWindow(projectWindow, ownerWebContents, payload) {
         state.providerEditorWindow.focus();
     }
 }
+
+// Asks the code editor to close, which asks "Apply your changes to …?" when it has unsaved changes. Answers whether it closed.
+function askProviderEditorToClose(state) {
+    const editorWindow = state.providerEditorWindow;
+    if (!editorWindow || editorWindow.isDestroyed()) return Promise.resolve(true);
+    if (!state.providerEditorDirty) return Promise.resolve(true);
+    if (state.pendingProviderEditorCloseAnswer) return state.pendingProviderEditorCloseAnswer;
+    if (editorWindow.isMinimized()) editorWindow.restore();
+    editorWindow.show();
+    editorWindow.focus();
+    const requestId = ++providerEditorCloseRequestCount;
+    state.pendingProviderEditorCloseAnswer = new Promise((resolve) => {
+        state.pendingProviderEditorClose = (closed) => { if (state.pendingProviderEditorCloseId === requestId) resolve(closed); };
+        state.pendingProviderEditorCloseId = requestId;
+        editorWindow.webContents.send('providerEditorCloseRequest', requestId);
+    }).finally(() => { state.pendingProviderEditorCloseAnswer = null; state.pendingProviderEditorClose = null; });
+    return state.pendingProviderEditorCloseAnswer;
+}
+let providerEditorCloseRequestCount = 0;
 
 // The twin's own window (docs/proposals/controlRoom.md): one for each project window, opened by its Live twin button with the
 // project's model and the twin's saved setup, maximized in the workspace, and free to move to another screen. It runs its twin
@@ -2810,7 +2842,7 @@ ipcMain.handle('providerEditorCheck', async (_event, { source, kind, inputs }) =
     checkProgramWithEngine({ kind, source, inputs: inputs ?? {} }, await engineOptions())
 ));
 
-ipcMain.handle('providerEditorApply', (event, { source }) => {
+ipcMain.handle('providerEditorApply', (event, { source, target }) => {
     // This call comes from the provider-editor window itself, not a project window -- find
     // which project window owns it (each can have its own provider editor open now).
     const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
@@ -2824,8 +2856,25 @@ ipcMain.handle('providerEditorApply', (event, { source }) => {
     state.pendingProviderApply?.({ applied: false, error: 'Superseded by a newer apply.' });
     return new Promise((resolve) => {
         state.pendingProviderApply = resolve;
-        state.providerEditorOwner.send('providerEditorApplied', { source });
+        state.providerEditorOwner.send('providerEditorApplied', { source, target: target ?? null });
     });
+});
+
+// Whether the code editor has unsaved changes, told by the editor whenever that changes.
+ipcMain.on('providerEditorDirty', (event, dirty) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (state) state.providerEditorDirty = Boolean(dirty);
+});
+ipcMain.on('providerEditorCloseAnswer', (event, { requestId, closed }) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (state?.pendingProviderEditorCloseId === requestId) state.pendingProviderEditorClose?.(Boolean(closed));
+});
+// The project window closing: its code editor asks first about unsaved changes. True when the project window may close.
+ipcMain.handle('providerEditorConfirmClose', (event) => {
+    requireProjectWindow(event);
+    return askProviderEditorToClose(projectWindowState.get(getWindowFromEvent(event)));
 });
 
 ipcMain.on('providerEditorApplyResult', (event, result) => {

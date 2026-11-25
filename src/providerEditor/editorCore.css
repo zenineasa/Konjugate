@@ -1,0 +1,68 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+/* The code editor's own look (editorCore.mjs), shared by the desktop window and the web edition's panel. Everything is under .programEditor
+   so the web page's own styles and these never meet. */
+
+.programEditor { position: relative; display: flex; flex-direction: column; min-height: 0; color: #9eb0b9; background: #09131b; font-family: Inter, ui-sans-serif, system-ui, sans-serif; color-scheme: dark; }
+.programEditor *, .programEditor *::before, .programEditor *::after { box-sizing: border-box; }
+.programEditor [hidden] { display: none !important; }
+.programEditor button { font-family: inherit; cursor: pointer; }
+.programEditor button:disabled { cursor: default; }
+
+.programEditorToolbar { position: relative; display: flex; flex: none; align-items: center; gap: 10px; padding: 8px 12px; background: #0a151d; border-bottom: 1px solid #253944; -webkit-app-region: no-drag; }
+.programEditor .toolbarSpacer { flex: 1; }
+.programEditor .kindBadge { padding: 3px 8px; color: #83d7cf; background: rgb(66 201 188 / 10%); border: 1px solid #2b4a4a; border-radius: 10px; font-size: 9px; font-weight: 600; letter-spacing: .04em; white-space: nowrap; }
+.programEditor .problemCount { padding: 0; color: #778d98; background: transparent; border: 0; font-size: 10px; white-space: nowrap; }
+.programEditor .problemCount.valid { color: #6ce0d5; }
+.programEditor .problemCount.invalid { color: #e0838a; }
+.programEditor .problemCount.invalid:hover { text-decoration: underline; }
+.programEditor .applyButton { height: 27px; padding: 0 14px; color: #09201e; background: var(--accent, #42c9bc); border: 0; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.programEditor .applyButton:hover { background: #57d6ca; }
+.programEditor .applyButton:disabled { color: #566a6c; background: #1c2c2c; }
+.programEditor .applyButton.applyFailed { color: #2a0d10; background: #d96f78; }
+.programEditor .applyButton.applyFailed:hover { background: #e0838a; }
+.programEditor .secondaryButton { height: 27px; padding: 0 12px; color: #c7d4d9; background: #101d25; border: 1px solid #2f4855; border-radius: 5px; font-size: 10px; font-weight: 600; }
+.programEditor .secondaryButton:hover { color: #edf5f6; border-color: #42c9bc; }
+.programEditor .secondaryButton:disabled { color: #566a6c; border-color: #1c2c2c; }
+.programEditor .linkButton { padding: 0; color: #6ce0d5; background: transparent; border: 0; font-size: 10px; font-weight: 600; white-space: nowrap; }
+.programEditor .linkButton:hover { text-decoration: underline; }
+.programEditor .moreButton { width: 27px; height: 27px; padding: 0; color: #8499a3; background: transparent; border: 1px solid transparent; border-radius: 5px; font-size: 14px; line-height: 1; }
+.programEditor .moreButton:hover { color: #edf5f6; border-color: #2f4855; }
+
+.programEditorMenu { position: absolute; z-index: 5; top: calc(100% + 2px); right: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 220px; padding: 10px 12px; background: #0d1a22; border: 1px solid #2f4855; border-radius: 6px; box-shadow: 0 8px 24px rgb(0 0 0 / 45%); font-size: 10px; }
+.programEditorMenu > label { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #9eb0b9; }
+.programEditorMenu select { height: 25px; padding: 0 6px; color: #c7d4d9; background: #101d25; border: 1px solid #253944; border-radius: 5px; font-size: 10px; }
+.programEditor .themeColors { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.programEditor .themeColors label { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #778d98; font-size: 9px; }
+.programEditor .themeColors input[type="color"] { width: 22px; height: 22px; padding: 0; background: transparent; border: 1px solid #253944; border-radius: 4px; }
+
+.programEditor .editorNotice { display: flex; flex: none; align-items: center; gap: 10px; padding: 7px 12px; color: #d9c58a; background: #17160d; border-bottom: 1px solid #3a3620; font-size: 10px; }
+.programEditor .editorNotice.failure { color: #e0b0b4; background: #1d1012; border-bottom-color: #4a2328; }
+
+.programEditor .editorConvertPanel { display: flex; flex: none; flex-direction: column; gap: 8px; max-height: 62%; padding: 10px 12px; background: #0a151d; border-bottom: 1px solid #253944; font-size: 10px; }
+.programEditor .convertSummary { margin: 0; color: #c7d4d9; }
+.programEditor .convertNotes { margin: 0; padding-left: 18px; color: #d9c58a; }
+.programEditor .convertNotes:empty { display: none; }
+.programEditor .convertColumns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; min-height: 0; overflow: hidden; }
+.programEditor .convertColumns > div { display: flex; flex-direction: column; min-height: 0; }
+.programEditor .convertColumns h3 { margin: 0 0 4px; color: #778d98; font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.programEditor .convertColumns pre { flex: 1; min-height: 0; max-height: 44vh; margin: 0; padding: 8px; overflow: auto; color: #c7d4d9; background: #070f15; border: 1px solid #1c2f3a; border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; user-select: text; }
+.programEditor .convertActions { display: flex; justify-content: flex-end; gap: 8px; }
+
+.programEditor .editorCheckPanel { flex: none; max-height: 30%; padding: 8px 12px; overflow: auto; background: #0a151d; border-bottom: 1px solid #253944; font-size: 10px; user-select: text; }
+.programEditor .editorCheckPanel p { margin: 0; }
+.programEditor .editorCheckPanel.passed .checkSummary { color: #6ce0d5; }
+.programEditor .editorCheckPanel.failed .checkSummary { color: #e0838a; }
+.programEditor .checkProblems { margin: 6px 0 0; padding-left: 18px; color: #e0b0b4; }
+.programEditor .checkProblems:empty { display: none; }
+.programEditor .checkDetails { margin-top: 4px !important; color: #778d98; }
+
+.programEditorHost { flex: 1; min-height: 0; overflow: hidden; user-select: text; }
+.programEditorHost * { user-select: text; }
+.programEditorHost .cm-editor { height: 100%; }
+.programEditorHost .cm-scroller { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.55; }
+
+.programEditorLeave { position: absolute; z-index: 10; inset: 0; display: flex; align-items: center; justify-content: center; background: rgb(4 9 13 / 62%); }
+.programEditor .leaveCard { max-width: 420px; padding: 16px 18px; color: #c7d4d9; background: #0d1a22; border: 1px solid #2f4855; border-radius: 8px; box-shadow: 0 12px 32px rgb(0 0 0 / 50%); }
+.programEditor .leaveCard p { margin: 0 0 14px; color: #edf5f6; font-size: 12px; font-weight: 600; }
+.programEditor .leaveActions { display: flex; justify-content: flex-end; gap: 8px; }

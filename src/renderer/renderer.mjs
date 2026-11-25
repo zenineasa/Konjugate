@@ -3456,7 +3456,7 @@ function renderNodeProgram(node) {
                 groups.set(candidate.group, group);
                 reads.appendChild(group);
             }
-            groups.get(candidate.group).appendChild(new Option(candidate.label, candidate.value));
+            groups.get(candidate.group).appendChild(new Option(candidate.unit ? `${candidate.label} (${candidate.unit})` : candidate.label, candidate.value));
         });
         reads.value = isFmu && binding.kind === 'value' ? 'value' : nodeProgramInputValue(binding, definition);
         reads.addEventListener('change', () => {

@@ -227,12 +227,12 @@ test('a row says what an FMU\'s parameter or input is, and About this FMU says w
     assert.deepEqual(fmuAboutLines(null), []);
 });
 
-test('the Connect to… picker groups what an input can read and gives units; a row says a unit that differs and that another node is read a step late', () => {
+test('the Connect to… picker groups what an input can read and gives units (the label itself carries none, for the code editor\'s Ports); a row says a unit that differs and that another node is read a step late', () => {
     const source = { id: 7, title: 'Dahlquist A', states: [{ id: 8, symbol: 'x', unit: 'm' }, { id: 9, symbol: 'v', unit: '' }] };
     const reader = { id: 1, title: 'Feedthrough', states: [{ id: 2, symbol: 'y', unit: 'm/s' }] };
     const candidates = nodeProgramInputCandidates(reader, [reader, source], [{ id: 3, name: 'Gain', symbol: 'gain', unit: 'W' }]);
     assert.deepEqual(candidates.map(({ label, group, unit }) => [label, group, unit]), [
-        ['this.y (m/s)', 'This node', 'm/s'], ['Dahlquist A.x (m)', 'Dahlquist A', 'm'], ['Dahlquist A.v', 'Dahlquist A', ''], ['shared Gain (gain) (W)', 'Shared parameters', 'W']
+        ['this.y', 'This node', 'm/s'], ['Dahlquist A.x', 'Dahlquist A', 'm'], ['Dahlquist A.v', 'Dahlquist A', ''], ['shared Gain (gain)', 'Shared parameters', 'W']
     ]);
     const port = { key: 'u', name: 'Float64_continuous_input', unit: 'm/s' };
     assert.deepEqual(fmuConnectionNotes({ key: 'u', kind: 'state', nodeId: 7, stateId: 8 }, port, reader, [reader, source]),

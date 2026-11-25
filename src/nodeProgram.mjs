@@ -8,23 +8,23 @@ export const nodeProgramKeyPattern = /^[a-z][A-Za-z0-9]*$/;
 
 // What an input may read, each as { value, label, binding } where `value` is the dropdown's text: this node's states,
 // every other node's states (read from the step's synchronisation snapshot), and every shared parameter.
-// Each candidate also says its unit (in its label too, after the name, when it has one) and its group, by whose it is: "This
-// node", another node's name, or "Shared parameters" (the Connect to… picker, docs/proposals/fmuImportWorkflow.md stage 5).
+// Each candidate also says its unit and its group, by whose it is: "This node", another node's name, or "Shared parameters" (the
+// Connect to… picker, docs/proposals/fmuImportWorkflow.md stage 5, which shows the unit after the label; the code editor's Ports shows
+// units in a column of their own, so the label carries none).
 export function nodeProgramInputCandidates(node, nodes, sharedParameters) {
     const candidates = [];
-    const withUnit = (label, unit) => (unit ? `${label} (${unit})` : label);
     for (const state of node.states ?? []) {
-        candidates.push({ value: `state:${node.id}:${state.id}`, label: withUnit(`this.${state.symbol}`, state.unit), unit: state.unit ?? '', group: 'This node', binding: { kind: 'state', stateId: state.id } });
+        candidates.push({ value: `state:${node.id}:${state.id}`, label: `this.${state.symbol}`, unit: state.unit ?? '', group: 'This node', binding: { kind: 'state', stateId: state.id } });
     }
     for (const other of nodes) {
         if (other.id === node.id) continue;
         const name = other.title ?? other.name;
         for (const state of other.states ?? []) {
-            candidates.push({ value: `state:${other.id}:${state.id}`, label: withUnit(`${name}.${state.symbol}`, state.unit), unit: state.unit ?? '', group: name, binding: { kind: 'state', nodeId: other.id, stateId: state.id } });
+            candidates.push({ value: `state:${other.id}:${state.id}`, label: `${name}.${state.symbol}`, unit: state.unit ?? '', group: name, binding: { kind: 'state', nodeId: other.id, stateId: state.id } });
         }
     }
     for (const shared of sharedParameters) {
-        candidates.push({ value: `shared:${shared.id}`, label: withUnit(`shared ${shared.name} (${shared.symbol})`, shared.unit), unit: shared.unit ?? '', group: 'Shared parameters', binding: { kind: 'parameter', sharedParameterId: shared.id } });
+        candidates.push({ value: `shared:${shared.id}`, label: `shared ${shared.name} (${shared.symbol})`, unit: shared.unit ?? '', group: 'Shared parameters', binding: { kind: 'parameter', sharedParameterId: shared.id } });
     }
     return candidates;
 }

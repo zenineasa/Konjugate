@@ -1,0 +1,227 @@
+---
+type: Proposal
+title: Ports at the top level
+description: "Proposed, design only: input and output ports at the top level of a project, as a subsystem's component has them today, so a component is authored from scratch and saved as one, a component file opened as a project shows and edits its ports, FMU export uses the declared ports as the FMU's inputs and outputs, an FMU node shows its inputs and outputs as ports connected like a component instance's, and SSP has a natural mapping later. A root port is the project's own component block: a state offered outside, with nothing new for the engine. In ports alone stay at their start value, said plainly, with test signals later; live parameters stay knobs and exposed parameters stay settings; projects without ports and their FMUs are byte-identical. Eight stages, ending with an example and tutorial bringing in a PID controller built from Modelica.Blocks in OpenModelica as an FMU."
+tags: [proposals, components, subsystems, ports, fmi, fmu, export, import, ssp, tutorials]
+status: draft
+implementation: none
+---
+
+<!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
+
+# Ports at the top level
+
+**Status: proposed, design only, 26 November 2026. Nothing here is built. The numbered [Open questions](#open-questions) each carry a recommendation; the design below follows the recommendations. Docker was not running while this was written, so the OpenModelica facts under [The controller example](#the-controller-example-bring-in-a-controller-from-another-tool) come from its documentation and are marked where they remain to be verified.**
+
+## In short
+
+- **A root port is a component port at the top level.** A component file is already a project with a `component` block naming its ports (`{ key, stateId, name?, direction? }`, [Subsystems](../subsystems.md#components)). A project's top-level ports are exactly that block: the first port declared makes the project a component of its own; nothing new is stored and the engine is not touched.
+- **On the canvas, root ports are terminals**, drawn at the sides of the top-level view as a subsystem's inside view draws them, so the top of a component file and the inside of its instance look the same. Add › **Input port** and Add › **Output port** make a port in one step; any state can also be made a port.
+- **An in port with nothing connected stays at its start value**, and the terminal says so: "nothing connected · stays at 20 °C". A test signal for running a component on its own is a later stage.
+- **One concept each.** Ports are the signals a model offers (FMI inputs and outputs); exposed parameters are its settings (FMI parameters); live parameters stay a person's knobs during a run. A project that declares ports exports exactly that interface as an FMU; a project that declares none exports byte-identically to today.
+- **An FMU node is a box with ports**, like a component instance: its inputs are terminals on its left edge and its outputs on its right, connected by dragging, with **Connect to…** kept. A model exported with ports and imported back gives the same ports, named the same.
+- **SSP maps on directly** later: system connectors are root ports, component connectors are FMU and instance ports, connections are what is drawn.
+- **The last stage is an example and tutorial, "Bring in a controller from another tool"**: a PID controller built from `Modelica.Blocks` in OpenModelica (the pinned Docker image the benchmarks already use), exported as a Co-Simulation FMU with setpoint and measurement inputs and a command output, compiled for macOS arm64 from the FMU's own C sources, imported into Konjugate and connected to a heated room.
+
+## Today
+
+### What a component's ports are
+
+A port is one state of a component offered outside, named by a key that never changes (`src/components.mjs`, `declarePort`, `componentPorts`, `componentInterface`). Its direction is `in`, `out` or absent (in and out). Something outside reaches an in port the way it reaches any state: a relationship from outside adds to it, a rate for a Rate state and a value for an Update ([Project schema](../projectSchema.md), Rates and updates). Saving a component to a file declares every port it has, "since a file has no outside to find them from"; such a file "opens as a project like any other and runs on its own, with nothing connected to its ports; a bar says it is a component, and saving it keeps its component block" ([Subsystems](../subsystems.md#component-files)). Exposed parameters are shared parameters with `exposed: true`, one value per instance. Linked instances compare a new version's ports and parameters by key: compatible changes are taken in, interface changes asked about.
+
+So the data model for ports at the top level already exists, and component files written by 2.0.x already use it. What is missing:
+
+1. **No way to make one at the top.** Ports are declared from a subsystem's card. A component is made by drawing nodes, folding them into a subsystem, declaring ports on it and saving the subsystem as a file. Authoring a component from scratch means a subsystem made only to be saved.
+2. **A component file opened as a project hides its interface.** The bar says it is a component; the ports are not drawn and cannot be edited at the top, because ports are edited on an instance's card and the file has no instance.
+3. **FMU export ignores the interface.** `assignValueReferences` in `src/fmiCodeGen.mjs` makes **every state an output** (`causality="output"`), **every live parameter an input** (`causality="input"`, `variability="continuous"`) and **every constant parameter a tunable parameter**; a scheduled parameter is computed inside and not exposed. A component exported as an FMU therefore has no inputs unless a live parameter stands in for one, and as many outputs as it has states.
+4. **An FMU node is not drawn as a box with ports.** After the [FMU round trip](fmuImportWorkflow.md) (built in nine stages), an FMU node's outputs are states "set by FMU ›", and an input is bound by **Connect to…** to a state elsewhere, drawn as a dashed arrow. That works, but it is a different gesture from connecting a component instance, which is a relationship drawn to a port state; the two boxes that mean the same thing (a part with inputs and outputs) look and connect differently.
+
+### What the engine sees
+
+`executionProjectDocument` strips subsystems, definitions, component blocks and keys (`stripComponents`), so the engine runs the same flat graph whatever the hierarchy. An FMU node is resolved by `src/fmiResolver.mjs` into a generated C++ node program before validation. Every 2.0.x engine refuses a document whose `requires` names a feature it does not know (`checkRequiredFeatures`, `engine/src/wholeModelIntegration.cpp`, present since `v2.0.0`), and the host takes off the requirements it handles itself (`fmuStartValues`, `fmuAttachments`) before the engine sees them.
+
+## Proposed: what a root port is
+
+**A root port is an entry of the project's own `component.ports`.** The first port declared at the top writes `component: { name: <the project's name>, ports: [...] }`; removing the last one removes the block again only if the project was not a component before (a component file keeps its block, as today). The shape is the component port's, unchanged: `key` (a positive whole number never reused), `stateId` (a state of the project), `name` (only when given), `direction` (`in`, `out`, absent for in and out).
+
+- **It is a state, as component ports are.** Not a new kind of entity: a component's port and a root port must be the same thing, since a root port becomes an instance's port the moment the file is placed somewhere. A port needs a state to hold its value; Add › Input port makes a small node for it (below), so a person never has to make one first.
+- **An in port is reached from outside as any state is.** In an instance, a relationship from outside sets it (an Update) or adds a rate to it (a Rate). When the project runs on its own, nothing is outside.
+- **Nothing connected is said plainly.** An in port with nothing reaching it from outside holds its start value, as every state nothing changes does ("stays at 0 rad", [One editor](unifiedEntityEditors.md)). Its terminal says "nothing connected · stays at 20 °C", and the project card's Ports list says the same, with the start value editable in place. A run is never refused for an unconnected port: running a component on its own is how it is tested.
+- **A test signal, later.** To step-test a controller on its own, an in port may carry a signal used only when the project runs at the top: a constant other than the start, or a schedule (the shared-parameter schedule's shape, `{ interpolation, samples }`). The host turns it into a value-setting part on the port's state only when the document is the one being run, never in an instance (where outside drives the port) and never in an FMU export (where the host drives it). It changes numbers an older version would compute differently, so a document using one says `"rootPortSignals"` in `requires`, which the host takes off as it does `fmuStartValues` ([question 3](#open-questions)).
+- **Out ports** are any state offered outside, Rate or Update. "In and out" stays for a physical coupling between components (a heat flow both ways), as today.
+
+### Relation to live and exposed parameters
+
+Three things a person can already change from outside a model's equations, each with one job:
+
+| | What it is for | In an instance | In an FMU export with ports declared | In an FMU export with none declared |
+|---|---|---|---|---|
+| **Port** (state) | a signal crossing the boundary while running | connected by relationships | in: input (`causality="input"`); out: output | n/a |
+| **Exposed parameter** (shared, `exposed: true`) | a setting chosen per use | a value per instance | parameter (`causality="parameter"`, tunable) | as today |
+| **Live parameter** (`mode: "live"`) | a person's knob during a run, the twin's control room | as in any project | baked at its value (or computed from its schedule), not an input | input, as today |
+
+**Ports win for signals.** Today a live parameter stands in as an FMU input because nothing else could; it is a scalar a person moves, not a signal another part produces, and it cannot be connected inside Konjugate. With ports declared, the export takes the interface the person declared and nothing else ([question 4](#open-questions)). Constant parameters that are not exposed are baked too ([question 5](#open-questions)); the export dialog says how many and offers **Expose them** in one click, so a host that wants every gain tunable gets it on purpose.
+
+**Migration of saved files: none needed.** A file without ports keeps today's meaning everywhere, its FMU export included, byte for byte. A file with a component block (every component file 2.0.x wrote) already has ports; its FMU export changes from "every state an output, live parameters inputs" to its declared interface, which is the point, and the export dialog says so the first time ("This component's FMU now offers its 2 ports and 1 exposed parameter; before, every state and live parameter"). Nothing in a saved file is rewritten. A live parameter a person wants as an input is moved by **Make it an input port** on its row in the Parameters table, which adds an input port node holding the parameter's value as its start and points the parameter's uses at the port's state, as one undoable step that leaves the numbers unchanged while nothing is connected.
+
+## Proposed: the canvas
+
+### Root ports as terminals
+
+```
+ Model · PID controller (component · 3 ports)
+┌───────────────────────────────────────────────────────────────────────────┐
+│ ◆ setpoint  → In            ┌ Error ─────┐      ┌ Controller ┐    Out → ◆ │
+│   nothing connected ········▶ e = r − y  ├─────▶ u = …      ├──▶ command │
+│   stays at 20 °C            └────────────┘      └────────────┘    0..1   │
+│ ◆ measurement → In ·········┘                                            │
+│   nothing connected · stays at 20 °C                                     │
+└───────────────────────────────────────────────────────────────────────────┘
+```
+
+- **The same terminals as inside a subsystem**: in ports on the left, out ports on the right, in-and-out marked "⇄ Both", each a diamond naming the port, its unit and, for an in port with nothing connected, "nothing connected · stays at …". A dotted line runs from the terminal to the node holding the port's state, so it is clear which state is offered. Terminals are laid out by the height of their node and can be dragged; where they are put is kept as a subsystem's `terminalPositions` are, in the component block (`terminalPositions`, keyed by port `key`), written only when moved. A component file and an instance's inside view then look alike, and moving a terminal in one moves it in the other.
+- **Add › Input port** and **Add › Output port** (beside Node, Relationship, Component from file…, FMU…) ask for a name and a unit, and place a small node at the left or right edge holding one Update state of that name, start value 0, declared as the port. An output port's node starts with its state's equation open, ready for "= …" to be typed. This is the short path for authoring from scratch, and it is what a Simulink user expects (an Inport and an Outport block).
+- **Make a state a port** on any state's line in a node's Equations tab and on its right-click menu: "Offer outside as… In · Out · In and out". The project card gets a **Ports** section listing every root port (name, state, unit, direction, connected or not), with rename, direction and remove, as a subsystem's card has.
+- **Results** list root ports first, under "Ports", so a component's run is read by its interface.
+- **The web edition** has all of it: ports are model editing, not FMI.
+
+### Opening a component file
+
+The bar that says a file is a component stays and adds its interface: "PID controller is a component: 2 in ports, 1 out port, 3 exposed parameters." The terminals are drawn and edited at the top, as above. Saving keeps the block; every project linking the file takes the new version in by the rules already built (compatible changes at once, interface changes asked). A port removed or its direction changed here is an interface change for every project linking the file, and the bar says so before saving ("2 projects linked to this file will be asked about removing 'measurement'") when the desktop knows of them (open windows; it does not search the disk).
+
+### Saving as a component
+
+- A project with ports **is** a component: **Save** writes it with its block, and **Component from file…** in another project places it, linked, through the review card already built.
+- **Save to my library** gains a whole-project form, on the File menu ("Save this model to my library as a component"), offered when the project has ports, since a component without ports cannot be connected to.
+- **Place in another model…** (File menu, desktop) saves if needed and opens a picker of open windows, placing it there linked: the short path from "I made a controller" to "it controls my plant".
+
+## Proposed: FMU export uses the ports
+
+When the project declares root ports, the FMU's model variables are its interface:
+
+- **In ports** become inputs, `causality="input"`, `variability="continuous"`, named by the port's name (the node and state names when it has none), with the state's unit, start value and description. An input's value set by the host (`fmi2SetReal`, `fmi3SetFloat64`) is held over the communication step and is the value of the port's state: what reaches it from outside, as a relationship setting it would. So an in port exported must be an **Update with nothing inside setting it**; a Rate in port, or an Update in port also set from inside, is refused by the export dialog naming it, with why ([question 7](#open-questions)).
+- **Out ports** become outputs, `causality="output"`. **In-and-out ports** become outputs, and the dialog says so ([question 8](#open-questions)).
+- **Exposed parameters** become parameters (tunable when not fixed), named by their symbol, with their unit and default.
+- **Every other state** becomes `causality="local"`, so a host can still plot it (FMPy lists local variables) without it being part of the interface ([question 6](#open-questions)), and Compare with original (stage 7 of the round trip) still matches every state by name.
+- **Value references** follow port keys (in ports, then out ports, then exposed parameters, then locals, each by key or id), so renaming a port changes the FMU's `modelDescription.xml` only, never a value reference, and a host's saved connections survive.
+- **The dialog's summary** says what the host gets in the interface's own words: "Inputs: setpoint (°C), measurement (°C) · Outputs: command · Parameters: kp, ti, td (tunable) · 4 other states observable · Steps: whole multiples of 0.01 s".
+
+**With no ports declared, nothing changes**: `assignValueReferences` takes today's path, and every committed fidelity fixture (`test:fmiExportFidelity`, `test:fmi3ExportFidelity`, `test:fmiRoundTrip`) is checked byte for byte against its FMU before this stage. The generated C++ changes only in how an input is applied (set the state rather than the parameter), so the engine and every other export are untouched.
+
+## Proposed: an FMU node is a box with ports
+
+An FMU node and a component instance are both a part with inputs and outputs, so they are drawn and connected alike:
+
+```
+┌ Room ────────────┐             ┌ PidController ─────── FMU ┐            ┌ Room ──────────┐
+│ T  20 °C        ◆├────────────▶◆ measurement   °C          │            │                │
+└──────────────────┘   ┌────────▶◆ setpoint      °C          │            │                │
+┌ Setpoint ────────┐   │         │                  command ◆├───────────▶◆ heater  0..1   │
+│ r  21 °C        ◆├───┘         └───────────────────────────┘            └────────────────┘
+└──────────────────┘
+```
+
+- **Inputs are terminals on the node's left edge, outputs on its right**, each named with its unit; an input that reads nothing shows "the FMU's own start · 20 °C" in place of a line. They are drawn from what the node already holds (its bindings and its output states), so the file does not change.
+- **Connecting by dragging.** Dragging from a state (or an output terminal) to an FMU input terminal writes the same `{ key, kind: "state", nodeId, stateId }` binding Connect to… writes, and the existing dashed arrow becomes a line ending at that terminal. Dragging from an FMU output to an in port of a component instance or to a Konjugate state makes a one-way relationship that sets it ("= PidController.command"), the ordinary way a value crosses into a port. **Connect to…** stays on the input's row for a keyboard and for long lists. This refines stages 3 and 5 of the [round trip](fmuImportWorkflow.md): the arrows stay bindings (its decision 3, no schema change), and the canvas gains the drag and the terminals.
+- **Component instances** get the same terminals on their box edges for their declared ports (today a box lists them in its detail line), and the same drag: dragging to an instance's in port makes the setting relationship. The two boxes then connect with one gesture.
+- **The round trip gives back the same ports.** A component exported with ports and imported back is a box whose inputs and outputs are the component's ports, under the same names and units, in key order. **Replace with its FMU** on an instance's card (later, [question 10](#open-questions)) would place the FMU and move each connection to the terminal of the same name, which is the round trip's comparison done in place.
+- **Timing, said where it applies.** A binding reads its state at the start of each step (the round trip's Jacobi rule), and a relationship setting an in port's Update is worked out at the end of the step from the Rate states there. For a connection from a Rate state the two give the same numbers; from an Update state the setting relationship adds a step unless the node settles. The terminal's tooltip says "read at the start of each step: one step late", as Connect to… says today.
+
+## SSP, later
+
+An SSP system description (SSD) has **connectors** on the system and on each component, each with a kind (`input`, `output`, `inout`, `parameter`, …), and **connections** between them ([SSP specification](https://ssp-standard.org/docs/main/)). With this proposal each has a home: the system's connectors are the root ports (with in-and-out as `inout`) and exposed parameters, a component's connectors are an FMU node's terminals or an instance's ports, and connections are what is drawn. SSP import, decided as the next FMI step after the round trip ([decision 9](fmuImportWorkflow.md#decisions)), places FMUs, connects them and gives the project the system's own connectors as root ports, so the result can itself be exported as one FMU or placed as a component.
+
+## Backwards compatibility
+
+- **A project without root ports is byte-identical**: nothing is written, and its FMU export takes today's path.
+- **A project with root ports needs no `requires`.** Ports change no numbers; a 2.0.x Konjugate reads the block as it reads any component file's (a bar saying it is a component), runs the same numbers, and keeps the block on save. It does not show the terminals, and its FMU export of that file gives today's interface; this is the one place an older version does something different with a newer file, and it is in an export, not a run.
+- **`terminalPositions` in the block** is a new optional field an older version ignores and drops on save (layout only).
+- **Test signals on in ports** change numbers, so a document using one says `"rootPortSignals"` in `requires`; 2.0.x refuses to run it by name ("This model requires "rootPortSignals"…"). The host takes it off before the engine sees it.
+- **An FMU exported with ports** is an ordinary FMI 2.0 or 3.0 Co-Simulation FMU; older Konjugate versions import it as any FMU.
+
+## Engine impact
+
+None. Root ports are metadata stripped with the component block; a test signal is turned by the host into a value-setting part on the port's state; an FMU input setting a port's state is in the generated FMU source, not the engine. The engine is given the same flat graph as ever, and every engine check stays as it is.
+
+## Staged plan
+
+Each stage ships with its entry point and tests; desktop and web interaction tests where there is canvas work; the FMI fidelity checks (`test:fmiImportFidelity`, `test:fmi3ImportFidelity`, `test:fmiExportFidelity`, `test:fmi3ExportFidelity`, `test:fmiRoundTrip`) unchanged in every stage.
+
+1. **Root ports in the document.** Pure functions in `src/components.mjs`: declare, rename, redirect and remove a port on the project's own block (`declareRootPort`, `removeRootPort`, reusing the key rules of `declarePort`), `rootPorts(document)` describing each with its state, unit, direction and whether something reaches it, and the block made and removed as above. Tests: unit tests; every shipped example round-trips byte-identically through load and save; a component file written by `v2.0.4` (a committed fixture) keeps its block, keys and ports.
+2. **Terminals at the top and the Ports list.** The top-level view draws root ports as terminals (the inside view's code, fed by `rootPorts`), with "nothing connected · stays at …", dragging and `terminalPositions`; the project card's Ports section; Make a state a port; Add › Input port and Output port; results led by Ports. Tests: desktop interaction (Add › Input port, type a name, run, the terminal says it stays at its start, the result lists it under Ports); web interaction for the same; unit tests for the layout.
+3. **Component files at the top, and saving as a component.** The bar's interface line, editing ports in the file, the warning naming linked projects in open windows, Save to my library for a whole project, Place in another model…. Tests: desktop: author a component from scratch, save it, place it into a second window, connect it, run; edit a port in the file and see the second window ask (interface change) or take it in (compatible); web: save to and place from My library.
+4. **FMU export uses the ports.** `assignValueReferences` with a declared interface; inputs setting port states; locals; value references by key; the dialog's summary, refusals (Rate in port) and first-time notice; Expose them. Tests: byte-identical FMUs for every existing fixture; a new fixture with two in ports, one out port and an exposed parameter validated by FMPy (both FMI versions) and run there against Konjugate's own run of the project with the same inputs, to the bit; unit tests of the variable list.
+5. **FMU nodes and instances as boxes with ports.** Terminals on both kinds of box, dragging to connect (binding or setting relationship), the timing tooltip; Connect to… kept. Tests: desktop interaction: export the stage 4 fixture, Try it as a node, connect by dragging, run, Compare with original gives the same numbers for a Rate-driven input; web interaction for instance terminals and dragging.
+6. **Test signals for in ports.** The port row's "When run on its own: stays at its start · a constant · a schedule…", the host's part, `requires: ["rootPortSignals"]`. Tests: unit tests of the host transform (applied at the top only, never in an instance or an export); engine check that 2.0.x's `checkRequiredFeatures` refuses the document; desktop interaction: a controller step-tested on its own.
+7. **The controller example.** `examples/fmi/PidController/` with the Modelica source, the reproducible generation script, the FMU, licences, and a Konjugate project connecting it to a heated room (next section). Tests: an engine check (beside `test:fmiImportFidelity`) running the committed FMU on its own with FMPy and in Konjugate for fixed input series, to the bit, and the closed loop against the Konjugate PID twin within a stated tolerance.
+8. **Tutorial: "Bring in a controller from another tool".** Below. Desktop only, listed on the web as desktop-only, as the round trip's tutorial is. Tests: its skip-through and full interaction tests.
+
+Stages 1–3 are useful without FMI and can ship first; 4 and 5 need 1; 6 is independent after 2; 7 needs nothing from this proposal to generate the FMU but its project uses stage 5's terminals; 8 needs 5 and 7.
+
+## The controller example: "Bring in a controller from another tool"
+
+### What the person does
+
+The tutorial starts from a shipped project, **Heated room**, with a room (a Rate state `T` in °C, losing heat to the outside and gaining it from a heater whose power is a state `heater` from 0 to 1) and a setpoint node (`r`, a schedule stepping from 18 °C to 21 °C at one hour). The steps:
+
+1. **Add › FMU…** and choose `PidController.fmu` (shipped beside the example, so the file picker opens there). The box appears with inputs `setpoint` and `measurement` on its left and output `command` on its right, and its parameters (`k`, `Ti`, `Td`, `yMax`, `yMin`, …) at OpenModelica's own values.
+2. **Drag** from the room's `T` to `measurement`, from the setpoint's `r` to `setpoint`, and from `command` to the room's `heater`.
+3. **Run.** The plot shows the room following the step, the heater saturating and coming back.
+4. **Compare** with the same controller written in Konjugate (a second copy of the room driven by Konjugate's own PID relationship, already in the project and hidden until this step): the two room temperatures overlay, and the tutorial says the largest difference and why there is one (the FMU reads its inputs at the start of each step, one step late, and integrates inside with its own method).
+5. **Change a gain** on the FMU's card (`k` from 0.5 to 2) and run again: the parameters an FMU exposes are tuned in place.
+
+### Which open-source tool makes the FMU
+
+| Tool | Block diagram of a PID | Co-Simulation FMU with inputs and outputs | A binary for macOS arm64 | Reproducible | Verdict |
+|---|---|---|---|---|---|
+| **OpenModelica** (OMEdit / `omc`), 1.27.1 | yes: `Modelica.Blocks.Continuous.LimPID` with `RealInput` and `RealOutput` connectors, drawn in OMEdit as blocks | yes: `buildModelFMU(…, version="2.0", fmuType="cs")`; top-level `RealInput` and `RealOutput` connectors become the FMU's inputs and outputs; FMI 2.0.5 supported, FMI 3.0.2 experimental ([users guide, FMI](https://openmodelica.org/doc/OpenModelicaUsersGuide/latest/fmitlm.html)) | **not directly**: OpenModelica has no macOS build (as `benchmarks/comparisons/openmodelica/openmodelica.mjs` notes), and Docker gives Linux binaries. But the FMU carries its C sources and a `CMakeLists.txt` "that can be used to re-compile the FMU for a different host" (`cmake -S . -B build_cmake -D RUNTIME_DEPENDENCIES_LEVEL=modelica`, then the `create_fmu` target) ([users guide, FMI](https://openmodelica.org/doc/OpenModelicaUsersGuide/latest/fmitlm.html), [source of that page](https://github.com/OpenModelica/OpenModelica/blob/293bdb85f72932e9c6f364d765efff70acd514e4/doc/UsersGuide/source/fmitlm.rst)) | yes: the image the benchmarks already pin by digest, `openmodelica/openmodelica:v1.27.1-minimal@sha256:ac9a0223…` (`benchmarks/comparisons/tools.mjs`) | **decided** |
+| **Scilab Xcos** with the `fmu_wrapper` ATOMS toolbox | yes: an Xcos superblock | the July 2025 release for Scilab 2025.1 lists export of Xcos models for Model Exchange or Co-Simulation, FMI 1.0, 2.0 and 3.0 ([ATOMS fmu_wrapper](https://atoms.scilab.org/toolboxes/fmu_wrapper)); earlier releases exported FMI 1.0 only ([0.7.1](https://atoms.scilab.org/toolboxes/fmu_wrapper/0.7.1)) | users reported exported binaries depending on Scilab's own libraries, failing to load in other tools ([scilab-users, 2015](https://lists.scilab.org/pipermail/users/2015-November/010521.html)); whether the current release is self-contained is not documented | a GUI toolbox installed from ATOMS; no pinned headless route found | not chosen |
+| **PythonFMU3** | no: an FMU written as a Python class, not a block diagram | yes, FMI 3.0, not all of it ([GitHub](https://github.com/StephenSmith25/PythonFMU3), [docs](https://pythonfmu3.readthedocs.io)) | runs Python inside the FMU; dependencies are set up on the host with `pythonfmu3 deploy`, so it needs a Python environment on the user's computer | yes, pip-pinned | not for this: not a block diagram, and a Python dependency the user must have |
+
+**Decided by the user on 26 November 2026: OpenModelica** ([question 11](#open-questions)), for four reasons: the controller is drawn from the standard library's blocks (the "Simulink-like" diagram the tutorial promises, and a library every Modelica user knows); the export's inputs and outputs are exactly its top-level connectors, which is what this proposal makes Konjugate's root ports; Konjugate's benchmarks already run it reproducibly in a pinned image; and its FMU carries its own C sources, so the binary for a platform OpenModelica does not run on is built from that FMU, not from a second tool.
+
+### Making it reproducible
+
+`examples/fmi/PidController/generate.mjs` (run by hand, like `npm run benchmark:openmodelica`; never in CI, never by the app):
+
+1. **Refuses to start Docker.** It checks `docker info`, as `benchmarks/openModelica.mjs` does, and says to start it and quit it afterwards; it labels its container and removes it at the end.
+2. **In the pinned image**, it installs the Modelica Standard Library at a pinned version (the minimal image carries no libraries; `installPackage(Modelica, "4.0.0", exactMatch=true)` or the version 1.27.1 ships, to verify), loads `PidController.mo`, and runs `buildModelFMU(PidController, version="2.0", fmuType="cs", platforms={"static"})` with `--fmiFlags=s:euler`. Forward Euler inside the FMU is chosen deliberately: a CVODE source FMU would need the SUNDIALS sources added by hand ("the user needs to add all sources for SUNDIALS manually and create a build script", [users guide 1.25](https://openmodelica.org/doc/OpenModelicaUsersGuide/1.25/fmitlm.html)), and Euler matches Konjugate's own default. The result carries `binaries/aarch64-linux` (and `x86_64-linux` when run with `--platform linux/amd64`) and `sources/`.
+3. **On the Mac**, it builds `binaries/aarch64-darwin` from the FMU's `sources/` with CMake and Apple clang (`cmake -S sources -B build -D RUNTIME_DEPENDENCIES_LEVEL=modelica`, then `create_fmu`), and merges the platforms into one archive with the same zip rule as Merge platform FMUs… (`mergeFmuPackages`, `src/fmiExport.mjs`).
+4. **Checks the result**: FMPy (the version the FMI fidelity tests already use, [Code export](../codeExport.md)) validates `modelDescription.xml`, simulates the FMU against fixed setpoint and measurement series, and compares with OpenModelica's own simulation of the same model in the container; then Konjugate imports it.
+5. **Records** the image digest, the library version, the compiler and CMake versions and the SHA-256 of the FMU in `examples/fmi/PidController/README.md`.
+
+Committed: `PidController.mo`, `generate.mjs`, `PidController.fmu` (binaries for `aarch64-darwin` at least, and the Linux binaries the container gives), the comparison series, and the licences: the Modelica Standard Library is BSD-3-Clause; the OpenModelica runtime compiled into the FMU is under the OSMC Public License with the conditions OpenModelica states for generated code, which must be read and recorded before committing (to verify); both are added to `thirdPartyLicenses/`. `x86_64-darwin` and `x86_64-windows` binaries are added when the script is run on those machines; until then the example's project says which platforms the FMU runs on and the tutorial offers the Konjugate-only comparison on others.
+
+### What remains to verify (Docker was not running)
+
+- That 1.27.1's `buildModelFMU` gives `RealInput`/`RealOutput` connectors of the top-level model as inputs and output with the expected names (`setpoint`, `measurement`, `command`), and which `LimPID` parameters it exposes as tunable.
+- That a source FMU with `RUNTIME_DEPENDENCIES_LEVEL=modelica` and `s:euler` compiles with Apple clang on arm64: OpenModelica's runtime is not tested on macOS by its makers, so this is the largest risk. If it fails, the way forward stays within OpenModelica: patch only the build (compiler flags, a CMake toolchain file) in the script, keeping the sources as generated; failing that, ship the platforms that build and say on the others where the FMU does not run.
+- The licence text OpenModelica attaches to generated code and its runtime, and whether the FMU's `documentation/` carries it.
+- Whether `platforms={"static"}` is the 1.27.1 spelling (the documentation fetched lists an empty list for a source-only FMU and `"native"` for the exporting system; the full list was not retrieved).
+
+## Risks
+
+- **The meaning of an exported in port.** An FMU input is a value; a Konjugate in port is a state reached by summed parts. Requiring an Update with nothing inside setting it (question 7) keeps the two the same; a Rate in port is refused rather than given a meaning a person might not expect.
+- **Timing between a binding and a setting relationship** differs for Update sources (above). Stage 5's test measures it, and the tooltip says it.
+- **A component file's FMU changes interface** after stage 4. It is what declaring ports means, but a person who exported one before sees different variables; the first-time notice says so.
+- **2.0.x exports a file with root ports by the old rule.** Said under Backwards compatibility; harmless to runs.
+- **Busy canvases.** Terminals on every instance and FMU box add marks; they follow the Nodes label setting as terminals do.
+- **The macOS build of an OpenModelica FMU** (above) and **licences** of a third-party runtime in the repository: stage 7 does not ship until both are checked.
+- **Cost**: stages 1, 6 small; 2, 3, 4, 5 medium; 7 medium, mostly the script and the macOS build; 8 small.
+
+## Open questions
+
+1. **Where root ports are kept.** (a) The project's own `component` block: a project with ports is a component; (b) a new top-level `ports` field beside it; (c) on each state (`port: { direction }`). **Recommendation: (a).** It is the shape component files already have, so a root port becomes an instance's port with no conversion, 2.0.x reads it, and there is one list to keep.
+2. **What a port is.** (a) A state offered outside, as component ports are, with Add › Input port and Output port making a small node for it; (b) a new kind of entity (a port block holding a value, like Simulink's Inport); (c) a state, with no Add entries. **Recommendation: (a).** One concept for components, files and FMUs; the Add entries give the Inport's directness without a second concept, and the engine sees nothing new.
+3. **An in port when the project runs on its own.** (a) Stays at its start value, said plainly, nothing more; (b) (a) now, and a test signal (constant or schedule) on the port later, used only at the top, with `requires`; (c) refuse to run with unconnected in ports. **Recommendation: (b).** Running a component alone must work at once (a), and a controller is tested by a step, which (b) gives without a fake setpoint node to delete before placing it.
+4. **Which variables are FMU inputs when ports are declared.** (a) In ports only; live parameters baked, with Make it an input port; (b) in ports and live parameters; (c) live parameters only, as today. **Recommendation: (a).** The interface a person declares is the interface they get; (b) keeps the confusion this proposal removes.
+5. **Which variables are FMU parameters when ports are declared.** (a) Exposed parameters only, with Expose them in the dialog; (b) every constant parameter, as today. **Recommendation: (a)**, for the same reason, with the one-click way back to (b).
+6. **The other states in an FMU with ports.** (a) `causality="local"`, observable; (b) left out; (c) outputs, as today. **Recommendation: (a).** A host can still plot and check them, Compare with original still works, and they are not part of the interface a host connects.
+7. **A Rate in port, or an Update in port also set inside, at FMU export.** (a) Refused by the dialog, naming it and why; (b) exported as an input added to its rate (or its value); (c) converted on export. **Recommendation: (a) now**, (b) later if components with physical in ports (a heat flow in) need exporting: an added rate is faithful but not what a host expects of an input.
+8. **An in-and-out port at FMU export.** (a) An output, said in the dialog; (b) refused; (c) an output and an input pair. **Recommendation: (a)**: FMI Co-Simulation has no two-way variable, the value is still offered, and the dialog names each one so nobody is surprised.
+9. **How FMU inputs are connected on the canvas.** (a) Terminals on the box and dragging, writing today's bindings, with Connect to… kept; (b) inputs as states on the FMU node set by relationships, so an FMU and an instance are connected by exactly the same file entries; (c) Connect to… only, as now. **Recommendation: (a).** It gives the same gesture without changing what the file holds or the round trip's decided Jacobi reading (its decision 3 and 4); (b) adds an Update between every connection and its FMU, a step late from Update sources.
+10. **Replace with its FMU** on a component instance (moving each connection to the terminal of the same name). (a) Later, after stage 5; (b) in stage 5; (c) never. **Recommendation: (a)**: it is the natural end of the round trip, but stages 4 and 5 must show the names and numbers match first.
+11. **The tool for the controller example.** (a) OpenModelica in the pinned Docker image, macOS binary compiled from the FMU's sources; (b) Scilab Xcos with `fmu_wrapper`; (c) PythonFMU3. **Decided by the user on 26 November 2026: (a)** (see [above](#which-open-source-tool-makes-the-fmu)); the open work is producing it reproducibly for each platform.
+12. **Importing a source-only FMU.** Konjugate refuses an FMU with no `binaries/` ("there is nothing to load", `src/fmuPackage.mjs`), though the desktop already compiles C++ for programs and FMU export. (a) A separate proposal later: compile an FMU's `sources/` on import (FMI 3.0's `buildDescription.xml`, FMI 2.0 by convention), so any source FMU runs on any platform Konjugate does; (b) in this proposal; (c) never. **Recommendation: (a)**: it is worth having, but it is a compiler-and-trust question of its own, and the example needs only its committed binaries.
+13. **Platforms committed for the example.** (a) `aarch64-darwin` and the Linux binaries from the container, others when a machine runs the script; (b) every platform Konjugate ships, before it ships; (c) `aarch64-darwin` only. **Recommendation: (a)**, with the tutorial saying where the FMU does not run and offering the Konjugate-only part there.
+14. **What the tutorial compares with.** (a) The same controller written in Konjugate, in the same project; (b) OpenModelica's own closed-loop result as a shipped CSV, through a new Compare with a results CSV… (the round trip's later decision 5b); (c) nothing. **Recommendation: (a)** in the tutorial, and (b)'s series kept as the stage 7 check: it needs no new feature, and it teaches that an FMU and a Konjugate model of the same thing can be put side by side.

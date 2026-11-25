@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('providerEditorWindow', Object.freeze({
     onContent: (callback) => ipcRenderer.on('providerEditorContent', (_event, payload) => callback(payload)),
     validate: (source, kind) => ipcRenderer.invoke('providerEditorValidate', { source, kind }),
     apply: (source, target) => ipcRenderer.invoke('providerEditorApply', { source, target }),
-    check: (source, kind, inputs) => ipcRenderer.invoke('providerEditorCheck', { source, kind, inputs }),
+    test: (source, kind, request) => ipcRenderer.invoke('providerEditorTest', { source, kind, request }),
     describe: (source, kind, inputs) => ipcRenderer.invoke('providerEditorDescribe', { source, kind, inputs }),
     request: (action, target, payload) => ipcRenderer.invoke('providerEditorRequest', { action, target, payload }),
     setDirty: (dirty) => ipcRenderer.send('providerEditorDirty', Boolean(dirty)),

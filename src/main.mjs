@@ -10,7 +10,7 @@ import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
 import { createLintScheduler, lintHash } from './lintScheduler.mjs';
-import { checkObjectiveWithEngine, checkProgramWithEngine, describeProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
@@ -2889,8 +2889,11 @@ ipcMain.handle('providerEditorValidate', async (event, { source, kind }) => {
 });
 
 // Check program, from the code editor: the program's standard checks, run by the engine (docs/programs.md, "Testing a program").
-ipcMain.handle('providerEditorCheck', async (_event, { source, kind, inputs }) => (
-    checkProgramWithEngine({ kind, source, inputs: inputs ?? {} }, await engineOptions())
+ipcMain.handle('providerEditorTest', async (_event, { source, kind, request }) => (
+    testProgramWithEngine({
+        kind, source, inputs: request?.inputs ?? {}, time: Number(request?.time) || 0,
+        steps: Math.max(0, Math.min(10000, Math.round(Number(request?.steps) || 0))), stepSize: Math.max(0, Number(request?.stepSize) || 0)
+    }, await engineOptions())
 ));
 
 // The code editor's Ports: the engine's description of a version 2 program (describeProgram). One at a time for each editor window, the

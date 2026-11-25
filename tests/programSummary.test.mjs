@@ -48,7 +48,7 @@ test('the one status: older format, a problem at its line, Check passed, or noth
     assert.deepEqual(programStatus('python', olderProviderSource('python', [{ key: 'a' }], 'flow', 'Pipe'), null), { kind: 'older', text: 'older format · Convert to version 2 ›' });
     assert.deepEqual(programStatus('python', current, { problems: [{ line: null, message: 'a' }, { line: 17, message: 'b' }] }), { kind: 'problem', text: '2 problems · line 17 ›', line: 17 });
     assert.deepEqual(programStatus('python', current, { problems: [{ line: null, message: 'a' }] }), { kind: 'problem', text: '1 problem ›', line: null });
-    assert.deepEqual(programStatus('python', current, { problems: [], checkPassed: true }), { kind: 'passed', text: '✓ passed Check' });
+    assert.deepEqual(programStatus('python', current, { problems: [], checkPassed: true }), { kind: 'passed', text: '✓ passed Test' });
     assert.equal(programStatus('python', '', { checkPassed: true }), null);
     assert.notEqual(programStatusKey('python', current), programStatusKey('cpp', current), 'a status belongs to one language and one exact source');
 });

@@ -80,7 +80,7 @@ export function bindingsLine(entries) {
 }
 
 // The one status a card shows of a program, at most: an older program's way out, a problem the last lint or Check found on this exact
-// source (with its line), or that Check passed on it. null when nothing is known. `record`: what the editor last said of this source,
+// source (with its line), or that Test passed on it. null when nothing is known. `record`: what the editor last said of this source,
 // { problems: [{ line, message }], checkPassed }, or null.
 export function programStatus(kind, source, record) {
     if (!String(source ?? '').trim()) return null;
@@ -91,7 +91,7 @@ export function programStatus(kind, source, record) {
         const count = `${problems.length} ${problems.length === 1 ? 'problem' : 'problems'}`;
         return { kind: 'problem', text: line ? `${count} · line ${line} ›` : `${count} ›`, line };
     }
-    if (record?.checkPassed) return { kind: 'passed', text: '✓ passed Check' };
+    if (record?.checkPassed) return { kind: 'passed', text: '✓ passed Test' };
     return null;
 }
 

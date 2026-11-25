@@ -14426,6 +14426,8 @@ function openProgramEditor(target, { line, port, convert = false, write = false,
         title: found.title,
         ...programContext,
         ...(found.program ? { ports: programPortContext(target, found, programContext.checkInputs) } : {}),
+        // Test steps a program with no clock at the model's step.
+        modelStep: Number(activeRunConfiguration()?.globalTimeStep) || 0.01,
         templateSource: template,
         ...(write && !source.trim() ? { startWith: template } : {}),
         ...(line ? { line } : {}),

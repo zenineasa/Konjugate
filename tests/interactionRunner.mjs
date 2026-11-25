@@ -2594,12 +2594,12 @@ export async function runInteractionTests(driver) {
         await setEditorSource(editor, older);
         await waitFor(editor, `!document.querySelector('#programEditorFormatNotice').hidden`, 'An older program was not marked as the older format.');
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorFormat').textContent`), 'Python · older format');
-        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), true, 'Check program is offered only after conversion.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTest').hidden`), true, 'Test is offered only after conversion.');
         await evaluate(editor, `document.querySelector('#programEditorConvert').click()`);
         await waitFor(editor, `!document.querySelector('#programEditorConvertPanel').hidden`, 'Convert did not show the conversion.');
         await evaluate(editor, `document.querySelector('#programEditorConvertAccept').click()`);
         await waitFor(editor, `document.querySelector('#programEditorFormat').textContent === 'Python · version 2'`, 'The converted program is not in the current format.');
-        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), false, 'Check program is offered once converted.');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTest').hidden`), false, 'Test is offered once converted.');
 
         // Cancel closes without asking, and the card keeps what it had.
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
@@ -2607,20 +2607,73 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `window.__debugProgramCards.edge()`), original);
     });
 
-    await run('the code editor\'s Check program passes on a Python program, through the engine a run uses', async () => {
+    await run('the code editor\'s Test passes on a Python program, through the engine a run uses', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));
         const editor = await openProgramEditor();
-        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheck').hidden`), false, 'Check program is offered for a program in the current format.');
-        await evaluate(editor, `document.querySelector('#programEditorCheck').click()`);
-        await waitFor(editor, `document.querySelector('#programEditorCheckPanel').classList.contains('passed') || document.querySelector('#programEditorCheckPanel').classList.contains('failed')`,
-            'Check program did not answer.', 90000);
-        assert.equal(await evaluate(editor, `document.querySelector('#programEditorCheckPanel').classList.contains('passed')`), true,
-            `Check program did not pass: ${await evaluate(editor, `document.querySelector('#programEditorCheckPanel').textContent`)}`);
-        assert.match(await evaluate(editor, `document.querySelector('#programEditorCheckSummary').textContent`), /every check passed\.$/);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTest').hidden`), false, 'Test is offered for a program in the current format.');
+        await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(editor, `/passed|failed/.test(document.querySelector('#programEditorTestSummary').className)`, 'Test did not answer.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTestSummary').classList.contains('passed')`), true,
+            `Test did not pass: ${await evaluate(editor, `document.querySelector('#programEditorTestPanel').textContent`)}`);
+        assert.equal(await evaluate(editor, `document.querySelector('[data-side-tab="test"]').classList.contains('active')`), true, 'Test did not show its tab.');
+        assert.deepEqual(await evaluate(editor, `[...document.querySelectorAll('#programEditorTestChecks li')].map((check) => check.textContent)`),
+            ['✓ ports', '✓ outputs', '✓ purity'], 'A program with no memory has no memory round trip to check.');
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
+    });
+
+    await run('Test steps a controller with editable inputs, as a table and a plot, and a program giving NaN shows its line', async () => {
+        const project = JSON.parse(await readFile(join(process.cwd(), 'examples', 'providers', 'piControlledTank.json'), 'utf8'));
+        await evaluate(window, `(async () => {
+            document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'));
+            await window.__debugProject.load(${JSON.stringify(project)}, 'piControlledTank.kjt');
+        })()`);
+        const tankLabel = `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Tank'))`;
+        await waitFor(window, `Boolean(${tankLabel})`, 'The tank was not on the canvas.');
+        await evaluate(window, `${tankLabel}.click()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && !document.querySelector('#nodeProgramFields').hidden`, 'The tank\'s program did not show.');
+        const editor = await openProgramEditor('#editNodeProgramOpenEditor');
+        // Its clock is known once the engine has read it: Step then goes at its period.
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorPortsList .portRow.clock'))`, 'The program was not read.', 90000).catch(async (error) => {
+            throw new Error(`${error.message} Ports said: ${await evaluate(editor, `document.querySelector('#programEditorPorts').textContent`)}`);
+        });
+        await evaluate(editor, `document.querySelector('[data-side-tab="test"]').click()`);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorStepSize').value`), '0.05');
+        // The inputs, from the model now, editable: the level held at 4 m.
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorTestInputs [data-test-input="level"]'))`, 'Test did not list the level.');
+        await evaluate(editor, `(() => { const input = document.querySelector('#programEditorTestInputs [data-test-input="level"]'); input.value = '4'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(editor, `(() => { const steps = document.querySelector('#programEditorSteps'); steps.value = '10'; document.querySelector('#programEditorStep').click(); })()`);
+        await waitFor(editor, `/passed|failed/.test(document.querySelector('#programEditorTestSummary').className)`, 'Step did not answer.', 90000);
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorTestSummary').classList.contains('passed')`), true,
+            `Step 10 did not pass: ${await evaluate(editor, `document.querySelector('#programEditorTestPanel').textContent`)}`);
+        assert.equal(await evaluate(editor, `document.querySelectorAll('#programEditorTestTable tbody tr').length`), 11, 'Step 10 gives the start and ten steps.');
+        const header = await evaluate(editor, `[...document.querySelectorAll('#programEditorTestTable th')].map((cell) => cell.textContent)`);
+        assert.deepEqual(header.slice(0, 4), ['step', 't', 'levelRate', 'effortRateSquared']);
+        assert.ok(header.includes('integral'), `Its memory is in the table: ${header.join(', ')}`);
+        assert.equal(await evaluate(editor, `document.querySelectorAll('#programEditorTestTable tbody tr')[10].cells[1].textContent`), '0.45', 'Ten steps of the clock’s 0.05 s after the start.');
+        assert.match(await evaluate(editor, `document.querySelector('#programEditorTestPlot path').getAttribute('d')`), /^M[\d.]+ [\d.]+ L/, 'The small plot has no line.');
+        // Copying gives every digit.
+        assert.match(await evaluate(editor, `document.querySelector('#programEditorTestTable').dataset.text.split('\\n')[0]`), /^step\tt\tlevelRate/);
+        // The card says it passed, for this exact source.
+        await waitFor(window, `document.querySelector('#nodeProgramSummary .programStatus').textContent === '✓ passed Test'`, 'The card did not say Test passed.');
+
+        // A program whose output is not a number: Test points at its line, which is underlined.
+        const broken = (await evaluate(editor, `window.__providerEditorView.state.doc.toString()`)).replace('level_rate=x.effort,', 'level_rate=float("nan"),');
+        assert.notEqual(broken, await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), 'The program was not changed to give NaN.');
+        await setEditorSource(editor, broken);
+        await evaluate(editor, `document.querySelector('#programEditorRunOnce').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorTestSummary').classList.contains('failed')`, 'A NaN output did not fail Test.', 90000);
+        await waitFor(editor, `Boolean(document.querySelector('#programEditorTestProblems .testLineLink'))`,
+            `The problem has no line: ${await evaluate(editor, `document.querySelector('#programEditorTestProblems').textContent`)}`);
+        const line = await evaluate(editor, `Number(document.querySelector('#programEditorTestProblems .testLineLink').dataset.line)`);
+        await evaluate(editor, `document.querySelector('#programEditorTestProblems .testLineLink').click()`);
+        assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number`), line);
+        await waitFor(editor, `[...document.querySelectorAll('.cm-lintRange-error')].some((mark) => mark.closest('.cm-line') === document.querySelectorAll('.cm-content .cm-line')[${line - 1}])`,
+            'Test\'s problem was not underlined on its line.');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
     });
 
     await run('the card shows a program read-only; a preview line opens the editor there, and its status follows lint and Check', async () => {
@@ -2652,8 +2705,8 @@ export async function runInteractionTests(driver) {
         // Put right and checked: the card says it passed.
         await setEditorSource(editor, original);
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
-        await evaluate(editor, `document.querySelector('#programEditorCheck').click()`);
-        await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent === '✓ passed Check'`, 'The card did not say Check passed.', 90000);
+        await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
+        await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent === '✓ passed Test'`, 'The card did not say Test passed.', 90000);
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));

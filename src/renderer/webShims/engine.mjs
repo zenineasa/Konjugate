@@ -6,7 +6,7 @@
 
 import { resolvePluginReferences } from './packages.mjs';
 import {
-    checkProgramWithWebEngine, describeProgramWithWebEngine, fitWithWebEngine, getWebEngineCapabilities, checkSubstepConvergenceWithWebEngine,
+    describeProgramWithWebEngine, testProgramWithWebEngine, fitWithWebEngine, getWebEngineCapabilities, checkSubstepConvergenceWithWebEngine,
     inferWithWebEngine, runWithWebEngine, validateWithWebEngine
 } from '../../webEngineAdapter.mjs';
 import {
@@ -32,7 +32,8 @@ export default {
     stopFit: async () => false,
     checkObjective: async () => ({ available: false }),
     // Check program, from the code editor (docs/programs.md, "Testing a program"): the same engine code the desktop runs, in WebAssembly.
-    checkProgram: ({ kind, source, inputs, time }) => checkProgramWithWebEngine(engineModuleUrl, { kind, source, inputs: inputs ?? {}, time: time ?? 0 }),
+    // The code editor's Test: the program's standard checks and a trace of its steps, the same engine code the desktop runs.
+    testProgram: ({ kind, source, inputs, time, steps, stepSize }) => testProgramWithWebEngine(engineModuleUrl, { kind, source, inputs: inputs ?? {}, time: time ?? 0, steps: steps ?? 0, stepSize: stepSize ?? 0 }),
     // The code editor's Ports: the program's ports, memory and clock as the engine reads them.
     describeProgram: ({ kind, source, inputs }) => describeProgramWithWebEngine(engineModuleUrl, { kind, source, inputs: inputs ?? {} }),
     // A web page cannot start a program of its own: an objective written as a program is a desktop feature.

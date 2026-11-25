@@ -7,7 +7,8 @@
 //   validate(source, kind)        → { valid, diagnostics: [{ line, column, severity, message }] }, { valid: null, message } when
 //                                    the program cannot be checked here (or its check took too long), or { superseded: true } when a
 //                                    newer check took its place (src/lintScheduler.mjs)
-//   check(source, kind, inputs)   → the engine's Check program answer, { available, ok, program, problems, outputs, memory, reason? }
+//   test(source, kind, request)   → the engine's Test (testProgram) at request { inputs, time, steps, stepSize }: { available, ok,
+//                                    program, problems, problemDetails, checks, trace, reason? }
 //   apply(source, target)         → { applied, error? } from the project
 //   close()                       → closes the window or hides the panel (the editor has already decided it may)
 //   setTitle(text)                → "Heater · Program"
@@ -25,7 +26,7 @@ import { EditorView, basicSetup } from 'codemirror';
 import { Compartment, EditorSelection, EditorState } from '@codemirror/state';
 import { cpp } from '@codemirror/lang-cpp';
 import { python } from '@codemirror/lang-python';
-import { linter, lintGutter } from '@codemirror/lint';
+import { forceLinting, linter, lintGutter } from '@codemirror/lint';
 import {
     buildThemeExtensions, customThemeFields, customTokenFields, defaultThemeId, themeFromCustomColors, themePresets
 } from './themes.mjs';
@@ -34,6 +35,7 @@ import { programSourceVersion } from '../providerTemplate.mjs';
 import { formatPortValue, portsTable } from './portsTable.mjs';
 import { portBindingChoices } from '../programBinding.mjs';
 import { sourcePorts } from './sourcePorts.mjs';
+import { formatCell, plotPath, tableText, testInputs, testSummary, traceTable } from './testTable.mjs';
 import { lintHash } from '../lintScheduler.mjs';
 import {
     confirmLeave, createEditorSession, formatLabel, leaveQuestion, portDeclarationLine, problemCountText, programEditorTitle, sameTarget
@@ -49,7 +51,7 @@ const markup = `
         <button id="programEditorProblems" class="problemCount" type="button" role="status">Checking…</button>
         <span class="toolbarSpacer"></span>
         <button id="programEditorTemplate" class="secondaryButton" type="button" hidden title="Write the template again from the program's bindings (undo brings it back)">Reset template</button>
-        <button id="programEditorCheck" class="secondaryButton" type="button" hidden title="Runs the program's standard checks: its ports, its outputs, purity and its memory">Check program</button>
+        <button id="programEditorTest" class="secondaryButton" type="button" hidden title="Runs the program once at the model's values, with its standard checks: its ports, its outputs, purity and its memory">Test</button>
         <button id="programEditorCancel" class="secondaryButton" type="button" title="Close without applying">Cancel</button>
         <button id="programEditorApply" class="applyButton" type="button" title="Apply to the model (Ctrl+S)">Apply</button>
         <button id="programEditorMore" class="moreButton" type="button" aria-label="More" aria-haspopup="true" aria-expanded="false">⋯</button>
@@ -75,23 +77,38 @@ const markup = `
             <button id="programEditorConvertAccept" class="applyButton" type="button">Use the converted program</button>
         </div>
     </div>
-    <div id="programEditorCheckPanel" class="editorCheckPanel" hidden role="status">
-        <p id="programEditorCheckSummary" class="checkSummary"></p>
-        <ul id="programEditorCheckProblems" class="checkProblems"></ul>
-        <p id="programEditorCheckDetails" class="checkDetails"></p>
-    </div>
     <div class="programEditorBody">
         <div id="programEditorHost" class="programEditorHost"></div>
         <aside id="programEditorSide" class="programEditorSide" hidden>
             <div id="programEditorSideResize" class="sideResize" title="Drag to resize"></div>
             <div class="sideTabs">
                 <button class="sideTab active" type="button" data-side-tab="ports">Ports</button>
+                <button class="sideTab" type="button" data-side-tab="test" hidden>Test</button>
                 <span class="toolbarSpacer"></span>
                 <button id="programEditorFold" class="foldButton" type="button" title="Fold the panel away" aria-label="Fold the panel away">›</button>
             </div>
             <div id="programEditorPorts" class="portsPanel" data-side-panel="ports">
                 <p id="programEditorPortsNote" class="portsNote" hidden></p>
                 <div id="programEditorPortsList" class="portsList" role="list"></div>
+            </div>
+            <div id="programEditorTestPanel" class="testPanel" data-side-panel="test" hidden>
+                <div class="testHead"><span>Inputs</span><small>from the model now, editable</small><button id="programEditorTestReset" class="linkButton" type="button" title="The model's values again">Reset</button></div>
+                <div id="programEditorTestInputs" class="testInputs"></div>
+                <div class="testControls">
+                    <button id="programEditorRunOnce" class="secondaryButton" type="button">Run once</button>
+                    <button id="programEditorStep" class="secondaryButton" type="button">Step</button>
+                    <input id="programEditorSteps" class="testSteps" type="number" min="1" max="10000" step="1" value="10" aria-label="Steps">
+                    <label class="testStepSize"><span>Δt</span><input id="programEditorStepSize" type="number" min="0" step="any" aria-label="Step size in seconds"><span>s</span></label>
+                </div>
+                <p id="programEditorTestHold" class="testHold"></p>
+                <p id="programEditorTestSummary" class="testSummary" role="status"></p>
+                <ul id="programEditorTestChecks" class="testChecks"></ul>
+                <ul id="programEditorTestProblems" class="testProblems"></ul>
+                <div id="programEditorTestResults" class="testResults" hidden>
+                    <div class="testHead"><span>Results</span><button id="programEditorTestCopy" class="linkButton" type="button" title="Copy the table at full precision">Copy</button></div>
+                    <div class="testTableWrap"><table id="programEditorTestTable"></table></div>
+                    <div class="testPlot"><svg id="programEditorTestPlot" viewBox="0 0 240 48" preserveAspectRatio="none" aria-hidden="true"><path></path></svg><select id="programEditorTestPlotColumn" aria-label="The column the plot shows"></select></div>
+                </div>
             </div>
         </aside>
         <button id="programEditorUnfold" class="unfoldButton" type="button" hidden title="Show the Ports panel">‹ Ports</button>
@@ -128,14 +145,15 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     let templateSource = '';
     // What lint and Check last found, each for the source it looked at; reported to the card together.
     let lintResult = { source: null, problems: [] };
-    let checkResult = { source: null, ok: false, problems: [] };
+    // What Test last found, for the source it ran: whether it passed, and its problems with their lines.
+    let testResult = { source: null, ok: false, problems: [] };
     function reportStatus() {
         const source = session.source;
         const problems = [
             ...(lintResult.source === source ? lintResult.problems : []),
-            ...(checkResult.source === source && !checkResult.ok ? checkResult.problems.map((message) => ({ line: null, message })) : [])
+            ...(testResult.source === source && !testResult.ok ? testResult.problems.map(({ line, message }) => ({ line, message })) : [])
         ];
-        host.reportStatus?.({ kind, source, problems, checkPassed: checkResult.source === source && checkResult.ok && !problems.length });
+        host.reportStatus?.({ kind, source, problems, checkPassed: testResult.source === source && testResult.ok && !problems.length });
     }
 
     // ---- Theme (kept in the app's settings under the existing konjugate.providerEditor.* keys) --------------------------------------
@@ -522,24 +540,31 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         let result;
         try { result = await host.validate(source, kind); } catch (error) { result = { valid: null, message: `Could not check: ${error?.message ?? error}` }; }
         if (sequence !== validationSequence || result?.superseded) return []; // A newer keystroke superseded this request.
+        const lineCount = editorView.state.doc.lines;
+        // Test's problems for this exact source, underlined where they are.
+        const fromTest = (testResult.source === source ? testDiagnostics : [])
+            .filter((problem) => problem.line >= 1 && problem.line <= lineCount)
+            .map((problem) => {
+                const line = editorView.state.doc.line(problem.line);
+                return { from: line.from + (line.text.length - line.text.trimStart().length), to: line.to, severity: 'error', message: `Test: ${problem.message}` };
+            });
         if (result?.valid === null || result?.valid === undefined) {
             diagnostics = [];
             showProblemCount(result?.message ?? '', 'unknown');
-            return [];
+            return fromTest;
         }
         diagnostics = result.diagnostics ?? [];
         lintResult = { source, problems: result.valid ? [] : (diagnostics.length ? diagnostics.filter((diagnostic) => diagnostic.severity !== 'info' && diagnostic.severity !== 'warning') : [{ line: null, message: 'The program has a problem.' }]).map((diagnostic) => ({ line: diagnostic.line ?? null, message: diagnostic.message })) };
         reportStatus();
         const errors = diagnostics.length || (result.valid ? 0 : 1);
         showProblemCount(result.valid ? 'No problems' : problemCountText(errors), result.valid ? 'valid' : 'invalid');
-        const lineCount = editorView.state.doc.lines;
-        return diagnostics
+        return [...diagnostics
             .filter((diagnostic) => diagnostic.line >= 1 && diagnostic.line <= lineCount)
             .map((diagnostic) => {
                 const line = editorView.state.doc.line(diagnostic.line);
                 const from = Math.min(line.to, line.from + Math.max(0, (diagnostic.column ?? 1) - 1));
                 return { from, to: line.to, severity: diagnostic.severity ?? 'error', message: diagnostic.message };
-            });
+            }), ...fromTest];
     }
     // The problem count moves the cursor to the first problem.
     $('#programEditorProblems').addEventListener('click', () => {
@@ -564,7 +589,10 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         $('#programEditorConvert').hidden = !older;
         $('#programEditorFormatNotice').hidden = !older;
         $('#programEditorFormatNoticeText').textContent = older ? olderFormatNotice : '';
-        $('#programEditorCheck').hidden = !context.program || older;
+        const testable = context.program && !older && Boolean(host.test);
+        $('#programEditorTest').hidden = !testable;
+        root.querySelector('[data-side-tab="test"]').hidden = !testable;
+        if (!testable && activeSideTab === 'test') showSideTab('ports');
     }
     function showConversion() {
         if (!view) return;
@@ -577,7 +605,6 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
             : 'Converted as far as its ports. It is not finished: each place that needs a decision is marked in the code. Until it compiles, the model cannot run.';
         $('#programEditorConvertNotes').replaceChildren(...pendingConversion.notes.map((note) => Object.assign(document.createElement('li'), { textContent: note })));
         $('#programEditorConvertPanel').hidden = false;
-        $('#programEditorCheckPanel').hidden = true;
     }
     $('#programEditorConvert').addEventListener('click', showConversion);
     $('#programEditorNoticeConvert').addEventListener('click', showConversion);
@@ -598,49 +625,172 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         view.focus();
     });
 
-    // ---- Check program -------------------------------------------------------------------------------------------------------------
-    $('#programEditorCheck').addEventListener('click', async () => {
-        if (!view) return;
-        const button = $('#programEditorCheck');
-        const panel = $('#programEditorCheckPanel');
-        button.disabled = true;
-        button.textContent = 'Checking…';
-        panel.hidden = false;
-        panel.classList.remove('passed', 'failed');
-        $('#programEditorCheckSummary').textContent = 'Checking the program…';
-        $('#programEditorCheckProblems').replaceChildren();
-        $('#programEditorCheckDetails').textContent = '';
+    // ---- Test (docs/proposals/codeEditor.md, "Test: run it where you write it") --------------------------------------------------------
+    // The inputs are the model's values now, editable and not saved; Reset brings the model's back. Run once evaluates once after
+    // initialize(), with the standard checks; Step N then advances and evaluates N times, the inputs held, at the clock's period or the
+    // model's step.
+    let activeSideTab = 'ports';
+    let testValues = {};
+    let testTime = 0;
+    let stepSizeTouched = false;
+    let lastTrace = null;
+    let testDiagnostics = [];
+    function showSideTab(tab) {
+        activeSideTab = tab;
+        for (const button of root.querySelectorAll('[data-side-tab]')) button.classList.toggle('active', button.dataset.sideTab === tab);
+        for (const panel of root.querySelectorAll('[data-side-panel]')) panel.hidden = panel.dataset.sidePanel !== tab;
+        if (tab === 'test') renderTestInputs();
+    }
+    for (const button of root.querySelectorAll('[data-side-tab]')) button.addEventListener('click', () => showSideTab(button.dataset.sideTab));
+
+    const declaredForTest = () => (lastGoodDescription ?? sourcePorts(kind, session.source)).inputs ?? [];
+    const clockOf = () => lastGoodDescription?.clock ?? null;
+    function defaultStepSize() {
+        const clock = clockOf();
+        if (clock?.period) return clock.period;
+        return context.modelStep ?? 0.01;
+    }
+    function renderTestInputs() {
+        const rows = testInputs(declaredForTest(), context.checkInputs ?? {});
+        const container = $('#programEditorTestInputs');
+        const field = (key, label, unit, value, title) => {
+            const row = document.createElement('label');
+            row.className = 'testInput';
+            row.title = title;
+            const input = Object.assign(document.createElement('input'), { type: 'number', step: 'any', value: String(value) });
+            input.dataset.testInput = key;
+            row.append(Object.assign(document.createElement('span'), { className: 'testInputKey', textContent: label }), input,
+                Object.assign(document.createElement('span'), { className: 'testInputUnit', textContent: unit }));
+            return row;
+        };
+        container.replaceChildren(
+            ...rows.map((row) => field(row.key, row.key, row.unit, row.key in testValues ? testValues[row.key] : row.value,
+                row.fromModel ? 'Its value in the model now' : 'Not bound: its default')),
+            field('__time', 't', 's', testTime, 'The time Test starts at'));
+        if (!stepSizeTouched) $('#programEditorStepSize').value = String(defaultStepSize());
+        const clock = clockOf();
+        $('#programEditorTestHold').textContent = clock
+            ? `Inputs held where they are; Step advances at the clock's period${clock.period ? ` (${formatCell(clock.period)} s)` : ''} unless Δt says otherwise.`
+            : 'Inputs held where they are; Step advances by Δt, the model\'s step unless changed.';
+    }
+    $('#programEditorTestInputs').addEventListener('input', (event) => {
+        const key = event.target.dataset.testInput;
+        if (!key) return;
+        const value = Number(event.target.value);
+        if (!Number.isFinite(value)) return;
+        if (key === '__time') testTime = value;
+        else testValues[key] = value;
+    });
+    $('#programEditorStepSize').addEventListener('input', () => { stepSizeTouched = true; });
+    $('#programEditorTestReset').addEventListener('click', () => {
+        testValues = {};
+        testTime = 0;
+        stepSizeTouched = false;
+        renderTestInputs();
+    });
+
+    function renderTestTable() {
+        const results = $('#programEditorTestResults');
+        if (!lastTrace?.rows?.length) { results.hidden = true; return; }
+        results.hidden = false;
+        const hiddenMemory = (lastGoodDescription?.memory ?? []).filter((memory) => memory.type === 'random').map((memory) => memory.name);
+        const table = traceTable(lastTrace, { hiddenMemory });
+        const element = $('#programEditorTestTable');
+        const head = document.createElement('tr');
+        head.append(...table.columns.map((column) => Object.assign(document.createElement('th'), { textContent: column.label, className: column.kind })));
+        element.replaceChildren(Object.assign(document.createElement('thead'), {}), document.createElement('tbody'));
+        element.tHead.append(head);
+        element.tBodies[0].append(...table.rows.map((row) => {
+            const line = document.createElement('tr');
+            line.append(...row.map((value, index) => Object.assign(document.createElement('td'), { textContent: formatCell(value), className: table.columns[index].kind })));
+            return line;
+        }));
+        element.dataset.text = tableText(table);
+        const select = $('#programEditorTestPlotColumn');
+        const plottable = table.columns.filter((column) => column.kind === 'output' || column.kind === 'memory');
+        const chosen = plottable.some((column) => column.key === select.value) ? select.value : plottable[0]?.key ?? '';
+        select.replaceChildren(...plottable.map((column) => new Option(column.label, column.key)));
+        select.value = chosen;
+        const index = table.columns.findIndex((column) => column.key === chosen);
+        $('#programEditorTestPlot path').setAttribute('d', index >= 0 ? plotPath(table.rows.map((row) => row[index])) : '');
+    }
+    $('#programEditorTestPlotColumn').addEventListener('change', () => renderTestTable());
+    // Copying the table, by the button or from the table itself, copies every digit.
+    $('#programEditorTestCopy').addEventListener('click', async () => {
+        const text = $('#programEditorTestTable').dataset.text ?? '';
+        try { await navigator.clipboard.writeText(text); $('#programEditorTestCopy').textContent = 'Copied'; } catch { $('#programEditorTestCopy').textContent = 'Copy failed'; }
+        setTimeout(() => { $('#programEditorTestCopy').textContent = 'Copy'; }, 1500);
+    });
+    $('#programEditorTestTable').addEventListener('copy', (event) => {
+        event.clipboardData?.setData('text/plain', $('#programEditorTestTable').dataset.text ?? '');
+        event.preventDefault();
+    });
+
+    async function runTest(steps) {
+        if (!view || !host.test) return;
+        showSide(true);
+        if (sideFolded) { sideFolded = false; write('konjugate.providerEditor.sideFolded', '0'); showSide(sideShown()); }
+        showSideTab('test');
+        const source = view.state.doc.toString();
+        const inputs = Object.fromEntries(testInputs(declaredForTest(), context.checkInputs ?? {})
+            .map((row) => [row.key, row.key in testValues ? testValues[row.key] : row.value]));
+        const clocked = Boolean(clockOf());
+        const typed = Number($('#programEditorStepSize').value);
+        const stepSize = stepSizeTouched || !clocked ? (Number.isFinite(typed) && typed > 0 ? typed : defaultStepSize()) : 0;
+        const buttons = [$('#programEditorTest'), $('#programEditorRunOnce'), $('#programEditorStep')];
+        buttons.forEach((button) => { button.disabled = true; });
+        $('#programEditorTestSummary').textContent = steps ? `Stepping ${steps} times…` : 'Running once…';
+        $('#programEditorTestSummary').className = 'testSummary';
+        $('#programEditorTestChecks').replaceChildren();
+        $('#programEditorTestProblems').replaceChildren();
+        let answer;
         try {
-            const checkedSource = view.state.doc.toString();
-            const answer = await host.check(checkedSource, kind, context.checkInputs);
-            if (answer?.available) {
-                checkResult = { source: checkedSource, ok: Boolean(answer.ok), problems: answer.ok ? [] : (answer.problems?.length ? answer.problems : ['Check program found a problem.']) };
-                reportStatus();
-            }
-            if (!answer?.available) {
-                $('#programEditorCheckSummary').textContent = answer?.reason ?? 'The simulation engine is not available, so the program cannot be checked here.';
-                panel.classList.add('failed');
-                return;
-            }
-            const name = answer.program || 'The program';
-            const problems = answer.problems ?? [];
-            panel.classList.add(answer.ok ? 'passed' : 'failed');
-            $('#programEditorCheckSummary').textContent = answer.ok ? `${name}: every check passed.` : `${name}: ${problemCountText(problems.length || 1)}.`;
-            $('#programEditorCheckProblems').replaceChildren(...problems.map((problem) => Object.assign(document.createElement('li'), { textContent: problem })));
-            const number = (value) => (Number.isFinite(value) ? Number(value.toPrecision(6)).toString() : String(value));
-            const outputs = Object.entries(answer.outputs ?? {}).map(([key, value]) => `${key} = ${number(value)}`);
-            const memory = Object.entries(answer.memory ?? {}).map(([key, values]) => `${key} = ${[].concat(values).map(number).join(', ')}`);
-            $('#programEditorCheckDetails').textContent = [
-                outputs.length ? `Outputs at the model's values: ${outputs.join('; ')}.` : '',
-                memory.length ? `Memory after three steps: ${memory.join('; ')}.` : ''
-            ].filter(Boolean).join(' ');
+            answer = await host.test(source, kind, { inputs, time: testTime, steps, stepSize });
         } catch (error) {
-            panel.classList.add('failed');
-            $('#programEditorCheckSummary').textContent = `The check could not run: ${error?.message ?? error}`;
+            answer = { available: false, reason: `Test could not run: ${error?.message ?? error}` };
         } finally {
-            button.disabled = false;
-            button.textContent = 'Check program';
+            buttons.forEach((button) => { button.disabled = false; });
         }
+        if (!answer?.available) {
+            $('#programEditorTestSummary').textContent = answer?.reason ?? 'The simulation engine is not available, so the program cannot be tested here.';
+            $('#programEditorTestSummary').className = 'testSummary failed';
+            return;
+        }
+        const summary = testSummary(answer);
+        const name = answer.program || 'The program';
+        $('#programEditorTestSummary').textContent = summary.passed ? `${name}: passed.` : `${name}: ${problemCountText(summary.problems.length || 1)}.`;
+        $('#programEditorTestSummary').className = `testSummary ${summary.passed ? 'passed' : 'failed'}`;
+        $('#programEditorTestChecks').replaceChildren(...summary.checks.map((check) => Object.assign(document.createElement('li'), {
+            className: check.passed ? 'passed' : 'failed', textContent: `${check.passed ? '✓' : '✗'} ${check.label}`
+        })));
+        $('#programEditorTestProblems').replaceChildren(...summary.problems.map((problem) => {
+            const item = document.createElement('li');
+            const where = problem.step !== null ? ` at step ${problem.step}` : '';
+            item.append(document.createTextNode(`✗ ${problem.message}${where}`));
+            if (problem.line) {
+                const link = Object.assign(document.createElement('button'), { type: 'button', className: 'linkButton testLineLink', textContent: `line ${problem.line} ›` });
+                link.dataset.line = String(problem.line);
+                item.append(document.createTextNode(' '), link);
+            }
+            return item;
+        }));
+        lastTrace = answer.trace ?? null;
+        renderTestTable();
+        testResult = { source, ok: summary.passed, problems: summary.problems.length ? summary.problems.map(({ line, message }) => ({ line, message })) : (summary.passed ? [] : [{ line: null, message: 'Test found a problem.' }]) };
+        // The same problems, underlined in the code.
+        testDiagnostics = summary.problems.filter((problem) => problem.line);
+        if (view) forceLinting(view);
+        reportStatus();
+    }
+    $('#programEditorTestProblems').addEventListener('click', (event) => {
+        const link = event.target.closest('[data-line]');
+        if (link) goToLine(Number(link.dataset.line));
+    });
+    $('#programEditorTest').addEventListener('click', () => runTest(0));
+    $('#programEditorRunOnce').addEventListener('click', () => runTest(0));
+    $('#programEditorStep').addEventListener('click', () => {
+        const steps = Math.round(Number($('#programEditorSteps').value));
+        runTest(Number.isFinite(steps) && steps >= 1 ? Math.min(steps, 10000) : 10);
     });
 
     // ---- Opening -------------------------------------------------------------------------------------------------------------------
@@ -672,7 +822,7 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         kind = payload.kind === 'python' ? 'python' : 'cpp';
         title = payload.title ?? '';
         target = payload.target ?? null;
-        context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {} };
+        context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {}, modelStep: Number(payload.modelStep) > 0 ? Number(payload.modelStep) : null };
         portContext = { bindings: payload.ports?.bindings ?? [], outputs: payload.ports?.outputs ?? [], candidates: payload.ports?.candidates };
         pickerPort = null;
         bindingNote = '';
@@ -688,14 +838,22 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         templateSource = payload.templateSource ?? '';
         $('#programEditorTemplate').hidden = !templateSource;
         lintResult = { source: null, problems: [] };
-        checkResult = { source: null, ok: false, problems: [] };
+        testResult = { source: null, ok: false, problems: [] };
+        testValues = {};
+        testTime = 0;
+        stepSizeTouched = false;
+        lastTrace = null;
+        testDiagnostics = [];
+        $('#programEditorTestResults').hidden = true;
+        $('#programEditorTestSummary').textContent = '';
+        $('#programEditorTestChecks').replaceChildren();
+        $('#programEditorTestProblems').replaceChildren();
         diagnostics = [];
         showProblemCount('Checking…', 'unknown');
         host.setTitle(programEditorTitle(title));
         createView(session.source);
         refreshApplyState();
         $('#programEditorConvertPanel').hidden = true;
-        $('#programEditorCheckPanel').hidden = true;
         pendingConversion = null;
         refreshFormat();
         applyActiveTheme();

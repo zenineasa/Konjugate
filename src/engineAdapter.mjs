@@ -135,14 +135,8 @@ async function programCommand(command, { kind, source, ...configuration }, optio
     }
 }
 
-// Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run by the engine through the transport a
-// run uses (a C++ program compiled and loaded in-process, a Python one in its worker), with its inputs by key. { available: false } when
-// there is no engine; otherwise the engine's answer, { ok, program, kind, inputs, problems, outputs, memory }.
-export async function checkProgramWithEngine({ kind, source, inputs = {}, time = 0 }, options) {
-    return programCommand('checkProgram', { kind, source, inputs, time }, options);
-}
-
-// Test (the code editor's Test; docs/engineCli.md, testProgram): Check program's standard checks, and a trace of `steps` steps of
+// Test (the code editor's Test; docs/engineCli.md, testProgram): a version 2 program's standard checks (checkProgram's), run by the engine
+// through the transport a run uses (a C++ program compiled and loaded in-process, a Python one in its worker), with its inputs by key, and a trace of `steps` steps of
 // `stepSize` seconds (0: the clock's period, else 0.01 s) with the inputs held, through the backend and transport a run uses.
 // { available: false } when there is no engine; otherwise Check program's answer and { checks: [{ name, passed }], problemDetails:
 // [{ message, line, check, step, time }], trace: { stepSize, clocked, rows: [{ step, time, outputs, memory }] } }.

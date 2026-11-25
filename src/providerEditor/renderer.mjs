@@ -19,7 +19,7 @@ const editor = createProgramEditor({
             window.__programLintStats = answer?.stats; // Debug/test hook only: how many checks ran, were kept, or ran at once.
             return answer;
         },
-        check: (source, kind, inputs) => bridge.check(source, kind, inputs),
+        test: (source, kind, request) => bridge.test(source, kind, request),
         describe: (source, kind, inputs) => bridge.describe(source, kind, inputs),
         bind: (key, value, target) => bridge.request('bind', target, { key, value }),
         apply: (source, target) => bridge.apply(source, target),

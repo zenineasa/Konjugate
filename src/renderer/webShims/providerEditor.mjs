@@ -112,11 +112,11 @@ async function validate(source, kind) {
     return answer;
 }
 
-async function check(source, kind, inputs) {
-    // A version 2 C++ program cannot run in the web engine: it is checked in the desktop app.
-    if (kind === 'cpp') return { available: false, reason: 'Check this C++ program in the desktop app.' };
-    if (!window.engine?.checkProgram) return { available: false, reason: 'Check program runs in the desktop app.' };
-    return window.engine.checkProgram({ kind, source, inputs: inputs ?? {}, time: 0 });
+// Test, through the web engine. A version 2 C++ program cannot run in the web engine: it is tested in the desktop app.
+async function test(source, kind, request) {
+    if (kind === 'cpp') return { available: false, reason: 'Test this C++ program in the desktop app.' };
+    if (!window.engine?.testProgram) return { available: false, reason: 'Test runs in the desktop app.' };
+    return window.engine.testProgram({ kind, source, ...request });
 }
 
 // The program's ports as the web engine reads them. A version 2 C++ program cannot run in the web engine, so it is read on the desktop.
@@ -149,7 +149,7 @@ function ensureEditor() {
             root: panel.querySelector('.webProgramEditorBody'),
             host: {
                 validate,
-                check,
+                test,
                 describe,
                 bind: async (key, value, target) => (requestHandler
                     ? requestHandler({ action: 'bind', target, payload: { key, value } })

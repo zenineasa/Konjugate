@@ -112,3 +112,33 @@
 .programEditor .portChoice:disabled { color: #5b6f78; cursor: not-allowed; }
 .programEditor .portChoiceNote { color: #778d98; font-size: 9px; }
 .programEditor .portChoice:disabled .portChoiceNote { color: #7a5a5e; }
+
+/* Test: the inputs it runs at, its checks and problems, and its results as a table and a small plot. */
+.programEditor .testPanel { flex: 1; min-height: 0; padding: 8px 10px; overflow: auto; font-size: 10px; user-select: text; }
+.programEditor .testHead { display: flex; align-items: baseline; gap: 6px; margin: 4px 0; color: #c7d4d9; font-weight: 600; }
+.programEditor .testHead small { flex: 1; color: #778d98; font-weight: 400; }
+.programEditor .testInputs { display: flex; flex-direction: column; gap: 3px; }
+.programEditor .testInput { display: grid; grid-template-columns: minmax(70px, 1fr) minmax(70px, 110px) 52px; align-items: center; gap: 6px; }
+.programEditor .testInputKey { overflow: hidden; color: #dce8ec; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+.programEditor .testInput input, .programEditor .testSteps, .programEditor .testStepSize input { width: 100%; height: 22px; padding: 0 5px; color: #dce8ec; background: #070f15; border: 1px solid #253944; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+.programEditor .testInputUnit { overflow: hidden; color: #83d7cf; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+.programEditor .testControls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 4px; }
+.programEditor .testSteps { width: 58px; }
+.programEditor .testStepSize { display: flex; align-items: center; gap: 4px; color: #9eb0b9; }
+.programEditor .testStepSize input { width: 70px; }
+.programEditor .testHold { margin: 0 0 6px; color: #778d98; font-size: 9px; }
+.programEditor .testSummary { margin: 4px 0; color: #c7d4d9; font-weight: 600; }
+.programEditor .testSummary.passed { color: #6ce0d5; }
+.programEditor .testSummary.failed { color: #e0838a; }
+.programEditor .testChecks, .programEditor .testProblems { margin: 0 0 6px; padding: 0; list-style: none; }
+.programEditor .testChecks li.passed { color: #6ce0d5; }
+.programEditor .testChecks li.failed, .programEditor .testProblems li { color: #e0838a; }
+.programEditor .testTableWrap { max-height: 220px; overflow: auto; border: 1px solid #1c2f3a; border-radius: 4px; }
+.programEditor .testTableWrap table { width: 100%; border-collapse: collapse; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }
+.programEditor .testTableWrap th { position: sticky; top: 0; padding: 3px 6px; color: #9eb0b9; background: #0d1a22; font-weight: 600; text-align: right; white-space: nowrap; }
+.programEditor .testTableWrap td { padding: 2px 6px; color: #c7d4d9; text-align: right; white-space: nowrap; }
+.programEditor .testTableWrap tr:nth-child(even) td { background: rgb(255 255 255 / 2%); }
+.programEditor .testPlot { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+.programEditor .testPlot svg { flex: 1; height: 48px; background: #070f15; border: 1px solid #1c2f3a; border-radius: 4px; }
+.programEditor .testPlot path { fill: none; stroke: #42c9bc; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.programEditor .testPlot select { height: 22px; color: #c7d4d9; background: #101d25; border: 1px solid #253944; border-radius: 4px; font-size: 9px; }

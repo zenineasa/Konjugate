@@ -985,8 +985,9 @@
                     <div id="nodeProgramSourceFields"><div id="nodeProgramSummary"></div></div>
                     <div id="nodeProgramFmuFields" hidden>
                         <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
-                        <p class="builderHint">Its inputs and outputs are the FMU's own; wire each below. Every output sets its state to the value the FMU reports. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
+                        <p class="builderHint">Each of its outputs is a state of this node, set by the FMU. Its parameters and inputs keep the FMU's own values unless you give one a value of its own, share it, or have it read a state. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
                         <p id="nodeProgramFmuNotes" class="builderHint" hidden></p>
+                        <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul></details>
                     </div>
                     <h3>Inputs <button id="editAddNodeProgramInput" type="button" title="Add an input">＋</button></h3>
                     <div id="nodeProgramInputs"></div>

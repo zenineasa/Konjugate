@@ -281,12 +281,18 @@ test('resolveInstalledFmus walks node implementations and leaves non-fmi kinds u
 
 test('an installed FMU\'s ports are described under the keys a node\'s implementation uses, for the node editor to wire', async () => {
     await withInstalledFmu(async (directory, installed) => {
-        const ports = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
+        const { about, ...ports } = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
         const binaryDirectory = process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64';
+        // What the node's card shows of the FMU (docs/proposals/fmuImportWorkflow.md, stage 3).
+        assert.deepEqual(about, {
+            modelName: 'Decay', fmiVersion: '2.0', generationTool: 'Test',
+            coSimulation: { canHandleVariableCommunicationStepSize: false, canSerializeFMUState: false, canBeInstantiatedOnlyOncePerProcess: false, needsExecutionTool: false },
+            canGetAndSetFMUState: false, platforms: [binaryDirectory], runsHere: true
+        });
         assert.deepEqual(ports, {
             name: 'Decay', fmiVersion: '2.0',
             inputs: [{ key: 'k', name: 'k', causality: 'input', type: 'Real', variability: 'continuous', start: 0.3 }],
-            outputs: [{ key: 'decayLevel', name: 'Decay.Level', type: 'Real' }],
+            outputs: [{ key: 'decayLevel', name: 'Decay.Level', type: 'Real', start: 10 }],
             notExposed: [],
             binary: `Runs binaries/${binaryDirectory}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}.`
         });

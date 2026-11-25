@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    documentRequires, fmiImplementation, fmuPortNotes, fmuUsesStartValues, freeKey, implementationForFile, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+    documentRequires, fmiImplementation, fmiNodeFromPorts, fmuAboutLines, fmuPortHint, fmuPortNotes, fmuPortRole, fmuUsesStartValues, freeKey, implementationForFile,
+    nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../src/nodeProgram.mjs';
 import { defaultNodeProviderSource, olderNodeProviderSource } from '../src/providerTemplate.mjs';
 
@@ -140,4 +141,88 @@ test('an installed plugin\'s relationship providers are offered, pinned to the i
     ]);
     assert.equal(pluginProviderValue({ kind: 'plugin', ...choices[0].reference }), choices[0].value);
     assert.equal(pluginProviderValue({ kind: 'plugin', pluginId: '' }), '');
+});
+
+// The node an FMU becomes (docs/proposals/fmuImportWorkflow.md, stage 3): the springMassDamper FMU, Konjugate's own export.
+const springPorts = {
+    name: 'springMassDamper',
+    inputs: [
+        { key: 'stiffness', name: 'stiffness', causality: 'parameter', variability: 'tunable', start: 4, unit: 'N/m' },
+        { key: 'springForceMass', name: 'Spring force.mass', causality: 'parameter', variability: 'tunable', start: 1, unit: 'kg' }
+    ],
+    outputs: [
+        { key: 'suspendedMassDisplacement', name: 'Suspended mass.Displacement', start: 0.1, unit: 'm' },
+        { key: 'suspendedMassVelocity', name: 'Suspended mass.Velocity', start: 0, unit: 'm/s' }
+    ]
+};
+
+test('choosing an FMU builds the node: a state per output with its name, unit and start, every parameter at the FMU\'s value, the new node\'s x gone', () => {
+    let next = 50;
+    const fresh = { id: 2, name: 'New node', states: [{ id: 3, name: 'x', symbol: 'x', initialValue: 0, unit: '' }], implementation: null };
+    const built = fmiNodeFromPorts(fresh, { guid: 'g', version: '1.0.0', ports: springPorts, newId: () => next++, removableStateIds: [3] });
+    assert.equal(built.name, 'springMassDamper', 'A new node is named after the FMU.');
+    assert.deepEqual(built.states, [
+        { id: 50, name: 'Suspended mass.Displacement', symbol: 'suspendedMassDisplacement', initialValue: 0.1, unit: 'm' },
+        { id: 51, name: 'Suspended mass.Velocity', symbol: 'suspendedMassVelocity', initialValue: 0, unit: 'm/s' }
+    ]);
+    assert.deepEqual(built.implementation, {
+        kind: 'fmi', fmuId: 'g', fmuVersion: '1.0.0',
+        bindings: [{ key: 'stiffness', kind: 'state', stateId: null }, { key: 'springForceMass', kind: 'state', stateId: null }],
+        outputs: [{ key: 'suspendedMassDisplacement', stateId: 50, setsValue: true }, { key: 'suspendedMassVelocity', stateId: 51, setsValue: true }]
+    });
+    assert.equal(fmuUsesStartValues(built.implementation), true, 'It runs on the FMU\'s own values.');
+    // The new node's x is not taken for an FMU's output called x (Dahlquist's): that output's state starts where the FMU does.
+    const dahlquist = fmiNodeFromPorts(fresh, { guid: 'g', version: '1', ports: { name: 'Dahlquist', inputs: [], outputs: [{ key: 'x', name: 'x', start: 1 }] }, newId: () => 60, removableStateIds: [3] });
+    assert.deepEqual(dahlquist.states, [{ id: 60, name: 'x', symbol: 'x', initialValue: 1, unit: '' }]);
+});
+
+test('choosing an FMU again keeps the states and wiring a person made, and a node of their own name keeps it', () => {
+    let next = 80;
+    const wired = {
+        id: 2, name: 'Suspension',
+        states: [
+            { id: 10, name: 'Height', symbol: 'height', initialValue: 0.2, unit: 'm' },
+            { id: 11, name: 'Other', symbol: 'suspendedMassVelocity', initialValue: 5, unit: 'm/s' },
+            { id: 12, name: 'Kept', symbol: 'kept', initialValue: 1, unit: '' }
+        ],
+        implementation: {
+            kind: 'fmi', fmuId: 'g', fmuVersion: '1.0.0',
+            bindings: [{ key: 'stiffness', kind: 'value', value: 8 }],
+            outputs: [{ key: 'suspendedMassDisplacement', stateId: 10, setsValue: true }]
+        }
+    };
+    const built = fmiNodeFromPorts(wired, { guid: 'g', version: '1.1.0', ports: springPorts, newId: () => next++ });
+    assert.equal(built.name, 'Suspension');
+    assert.deepEqual(built.states.map((state) => state.id), [10, 11, 12], 'The earlier output\'s state and a state already named for an output are used; no state is made or removed.');
+    assert.deepEqual(built.implementation.outputs.map((output) => output.stateId), [10, 11]);
+    assert.deepEqual(built.implementation.bindings, [{ key: 'stiffness', kind: 'value', value: 8 }, { key: 'springForceMass', kind: 'state', stateId: null }]);
+    // A symbol taken by a state that is not that output's gets a suffix.
+    const clash = fmiNodeFromPorts({ id: 2, name: 'N', states: [{ id: 1, name: 'mine', symbol: 'suspendedMassDisplacement2', initialValue: 0 }], implementation: { kind: 'fmi', outputs: [{ key: 'suspendedMassDisplacement', stateId: 1 }] } },
+        { guid: 'g', version: '1', ports: { name: 'M', inputs: [], outputs: [{ key: 'suspendedMassDisplacement', name: 'a' }, { key: 'suspendedMassDisplacement2', name: 'b' }] }, newId: () => 7 });
+    assert.deepEqual(clash.states.map((state) => state.symbol), ['suspendedMassDisplacement2', 'suspendedMassDisplacement22']);
+});
+
+test('a row says what an FMU\'s parameter or input is, and About this FMU says what the FMU is and how it runs here', () => {
+    assert.equal(fmuPortRole({ causality: 'parameter', variability: 'tunable' }), 'parameter · tunable');
+    assert.equal(fmuPortRole({ causality: 'parameter', variability: 'fixed' }), 'parameter · fixed');
+    assert.equal(fmuPortRole({ causality: 'input' }), 'input');
+    assert.equal(fmuPortHint({ causality: 'parameter', variability: 'tunable', description: 'Coefficient of restitution', min: 0.5, max: 1 }), 'Coefficient of restitution · from 0.5 to 1');
+    assert.equal(fmuPortHint({ causality: 'parameter', variability: 'fixed', unit: 'm/s2', min: -20 }), 'from -20 to ∞ m/s2 · set once, when the run starts');
+    assert.deepEqual(fmuAboutLines({
+        fmiVersion: '3.0', generationTool: 'Reference FMUs (v0.0.42)', description: 'A ball dropped from 1 m',
+        platforms: ['aarch64-darwin', 'x86_64-linux'], runsHere: true, defaultExperiment: { startTime: 0, stopTime: 3, stepSize: 0.01 },
+        coSimulation: { canHandleVariableCommunicationStepSize: true, fixedInternalStepSize: 0.001, canBeInstantiatedOnlyOncePerProcess: false }, canGetAndSetFMUState: true
+    }), [
+        'FMI 3.0 Co-Simulation · generated by Reference FMUs (v0.0.42)',
+        'A ball dropped from 1 m',
+        'Binaries for aarch64-darwin, x86_64-linux',
+        'Steps: its own step is 0.001 s',
+        'Suggested run: to 3 s, in steps of 0.01 s',
+        'Can save and restore its state (checkpoints, forks, rewinding a twin)'
+    ]);
+    assert.deepEqual(fmuAboutLines({ fmiVersion: '2.0', author: 'Ada', version: '2', platforms: ['win64'], runsHere: false, coSimulation: { canHandleVariableCommunicationStepSize: false, canBeInstantiatedOnlyOncePerProcess: true } }), [
+        'FMI 2.0 Co-Simulation', 'by Ada · version 2', 'Binaries for win64 (none for this computer)', 'Steps: it needs every step the same length',
+        'Cannot save its state: checkpoints, forks and rewinding are not available with it', 'Only one copy of it can run at a time'
+    ]);
+    assert.deepEqual(fmuAboutLines(null), []);
 });

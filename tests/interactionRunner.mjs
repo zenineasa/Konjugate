@@ -10800,7 +10800,7 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Dahlquist')).click()`);
             await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length === 1`, 'The FMU\'s parameter was not listed.', 10000);
             const kRow = '#nodeProgramInputs .nodeProgramRow select';
-            assert.equal(await evaluate(window, `document.querySelector('${kRow}').selectedOptions[0].textContent`), 'The FMU\'s own start value');
+            await waitFor(window, `document.querySelector('${kRow}').selectedOptions[0].textContent === 'The FMU\\'s own start value, 1'`, 'k does not say it keeps the FMU\'s own value.');
             assert.equal(await evaluate(window, `document.querySelector('#nodeProgramInputs .nodeProgramRowError').textContent`), '');
             let saved = await evaluate(window, `window.__debugProject.serialize()`);
             assert.deepEqual(saved.nodes[0].implementation.bindings, [], 'k is left out of the file.');
@@ -10821,6 +10821,75 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
 
+    // The node an FMU becomes (docs/proposals/fmuImportWorkflow.md, stage 3): Add › Node, Program › Installed FMU, and the node
+    // is the FMU, named after it, a state per output set by the FMU, every parameter at the FMU's own value, ready to run with no
+    // wiring at all, and plotted; the numbers are FMPy's, bit for bit.
+    await run('a node built from an FMU runs and is plotted with no wiring at all', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Dahlquist.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
+        let guid = null;
+        let version = null;
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);
+            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
+            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-tab="fmu"]').click()`);
+            await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
+                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                await waitFor(window, `window.extensions.list().then((entries) => entries.some((entry) => entry.packageType === 'fmu' && entry.name === 'Dahlquist'))`, 'The FMU was not installed.', 15000);
+            });
+            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            ({ guid, version } = await evaluate(window, `window.extensions.list().then((entries) => { const entry = entries.find((item) => item.packageType === 'fmu' && item.name === 'Dahlquist'); return { guid: entry.packageId, version: entry.version }; })`));
+
+            await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden')`, 'The new node\'s editor did not open.');
+            await evaluate(window, `(() => { const element = document.querySelector('#editNodeProgramKind'); element.value = 'fmi'; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            // The only installed FMU is chosen, and the node is built from it.
+            await waitFor(window, `window.__debugProject.serialize().nodes[0]?.implementation?.fmuId === ${JSON.stringify(guid)}`, 'The FMU was not chosen.', 10000);
+            const saved = await evaluate(window, `window.__debugProject.serialize()`);
+            const node = saved.nodes[0];
+            assert.equal(node.name, 'Dahlquist', 'The new node is named after the FMU.');
+            assert.deepEqual(node.states.map(({ name, symbol, initialValue }) => ({ name, symbol, initialValue })), [{ name: 'x', symbol: 'x', initialValue: 1 }],
+                'One state, the FMU\'s output x, starting where the FMU starts it; the new node\'s own x is gone.');
+            assert.deepEqual(node.implementation.bindings, [], 'k keeps the FMU\'s own value.');
+            assert.deepEqual(node.implementation.outputs, [{ key: 'x', stateId: node.states[0].id, setsValue: true }]);
+            assert.deepEqual(saved.requires, ['fmuStartValues']);
+            assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`) !== '1 model error', true);
+            // The card: k by its FMU name and role, at the FMU's own value; About this FMU; x set by the FMU.
+            await waitFor(window, `document.querySelector('#nodeProgramInputs .fmuPortRow select')?.selectedOptions[0]?.textContent === 'The FMU\\'s own start value, 1'`, 'k\'s row does not give the FMU\'s value.', 10000);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramInputs .fmuPortRow [data-field="key"]').value`), 'k');
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramInputs .fmuPortAbout').textContent`), 'parameter · fixed · set once, when the run starts');
+            assert.match(await evaluate(window, `document.querySelector('#nodeProgramFmuAboutLines').textContent`), /FMI 3\.0 Co-Simulation · generated by Reference FMUs/);
+            assert.match(await evaluate(window, `document.querySelector('#nodeEditor .setByProgram').textContent`), /^set by FMU x ›$/);
+            assert.equal(await evaluate(window, `[...document.querySelectorAll('#nodeProgramInputs .nodeProgramRowError, #nodeProgramOutputs .nodeProgramRowError')].map((element) => element.textContent).join('')`), '');
+
+            await openRunDialog(window);
+            await evaluate(window, `(() => {
+                for (const [id, value] of [['#runTargetTime', '1'], ['#runGlobalTimeStep', '0.1'], ['#runOutputInterval', '0.1']]) {
+                    const field = document.querySelector(id); field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); field.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU node did not run.', 180000);
+            const fmpy = JSON.parse(await readFile(join(import.meta.dirname, 'engine', 'fixtures', 'referenceFmus', 'fmpyReference.json'), 'utf8'))
+                .runs.find((entry) => entry.fmiVersion === '3.0' && entry.name === 'Dahlquist').outputs.x;
+            const samples = await evaluate(window, `window.__debugSteering.result().samples.map((sample) => sample.states[0].value)`);
+            assert.equal(samples.length, 11);
+            for (let index = 1; index < samples.length; index += 1) assert.ok(Object.is(samples[index], fmpy[index]), `x at step ${index} is ${samples[index]}, not FMPy's ${fmpy[index]}.`);
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.textContent.includes('Dahlquist')).click()`);
+            await waitFor(window, `document.querySelector('.nodeResultsPanel').classList.contains('hasResults') && document.querySelector('#nodeResultPlot').data?.length > 0`, 'The FMU node\'s result was not plotted.', 10000);
+            await evaluate(window, `(() => {
+                document.querySelector('#closeResults').click();
+                document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click();
+            })()`);
+        } finally {
+            if (guid) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.
         await evaluate(window, `(() => {
@@ -10833,9 +10902,16 @@ export async function runInteractionTests(driver) {
             await openNode('Mass');
             await evaluate(window, `(() => { const element = document.querySelector('#editNodeProgramKind'); element.value = 'fmi'; element.dispatchEvent(new Event('change', { bubbles: true })); })()`);
             await waitFor(window, `document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length === 1`, 'The FMU\'s input was not listed.');
-            let implementation = (await savedProject()).nodes[0].implementation;
-            // An input that reads nothing yet keeps the FMU's own start value: the file leaves it out and says it relies on that.
-            assert.deepEqual(implementation, { kind: 'fmi', fmuId: 'guid-1', fmuVersion: '1.0', bindings: [], outputs: [{ key: 'temperature', stateId: null, setsValue: true }] });
+            let node = (await savedProject()).nodes[0];
+            let implementation = node.implementation;
+            // The node is built from the FMU (stage 3): its output gets a state of its own, named by the FMU, and its node keeps the
+            // name a person gave it. An input that reads nothing yet keeps the FMU's own start value: the file leaves it out and
+            // says it relies on that.
+            const made = node.states.find((state) => state.symbol === 'temperature');
+            assert.ok(made, 'The FMU\'s output has a state.');
+            assert.equal(made.name, 'temperature');
+            assert.equal(node.name, 'Mass');
+            assert.deepEqual(implementation, { kind: 'fmi', fmuId: 'guid-1', fmuVersion: '1.0', bindings: [], outputs: [{ key: 'temperature', stateId: made.id, setsValue: true }] });
             assert.deepEqual((await savedProject()).requires, ['fmuStartValues']);
             assert.equal(await evaluate(window, `document.querySelector('#nodeProgramInputs [data-field="key"]').readOnly`), true, 'The FMU\'s keys are its own.');
             assert.equal(await evaluate(window, `document.querySelector('#editAddNodeProgramInput').hidden`), true);

@@ -40,7 +40,9 @@ import { recordAsCommands } from '../interventionSchedules.mjs';
 import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
-import { documentRequires, fmiImplementation, fmuPortNotes, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue } from '../nodeProgram.mjs';
+import {
+    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+} from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
 import { pluginProviderChoices, pluginProviderValue } from '../pluginProviders.mjs';
@@ -2720,7 +2722,11 @@ function setByProgramLine(entry, node) {
     line.dataset.navigation = '';
     line.dataset.outputKey = entry.outputKey;
     const which = outputs.length > 1 ? ` · output ${position + 1} of ${outputs.length}` : '';
-    line.innerHTML = `set by program <small>${escapeHtml(`${programLanguage(program?.kind)}${which}`)} ›</small>`;
+    // An FMU's output is named by the FMU's own variable ("set by FMU · Suspended mass.Displacement ›").
+    const fmuName = program?.kind === 'fmi' ? fmuPortsFor(program)?.outputs?.find((port) => port.key === entry.outputKey)?.name : null;
+    line.innerHTML = program?.kind === 'fmi'
+        ? `set by FMU <small>${escapeHtml(fmuName ?? `output ${position + 1} of ${outputs.length}`)} ›</small>`
+        : `set by program <small>${escapeHtml(`${programLanguage(program?.kind)}${which}`)} ›</small>`;
     // It opens the program's code editor with this output's port; an installed FMU, which has no source, its section.
     line.addEventListener('click', () => (program && program.kind !== 'fmi'
         ? openProgramEditor({ type: 'node', nodeId: node.userData.id }, { port: entry.outputKey })
@@ -3250,6 +3256,17 @@ function nodeProgramContext(node) {
 
 // The installed FMUs, cached while the node editor is open; null until read.
 let installedFmus = null;
+// Each installed FMU's ports as describeInstalledFmuPorts gives them (src/fmiResolver.mjs), by id and version, for the card
+// to name, describe and give the start value of each row without waiting; read when the card shows the FMU.
+const fmuPortsCache = new Map();
+const fmuPortsKey = (implementation) => `${implementation?.fmuId}@${implementation?.fmuVersion}`;
+function fmuPortsFor(implementation) {
+    const ports = fmuPortsCache.get(fmuPortsKey(implementation));
+    return ports && !ports.error ? ports : null;
+}
+function fmuValueText(value, unit) {
+    return `${Number.isFinite(value) ? Number(value.toPrecision(12)) : value}${unit ? ` ${unit}` : ''}`;
+}
 
 async function refreshInstalledFmus() {
     try {
@@ -3275,6 +3292,11 @@ function renderNodeProgram(node) {
     $('#editAddNodeProgramInput').closest('h3').hidden = !isFmu;
     $('#nodeProgramInputs').hidden = !isFmu;
     $('#editAddNodeProgramOutput').hidden = isFmu;
+    // An FMU's rows are its parameters and inputs, and its outputs, each a state of the node (stage 3 of
+    // docs/proposals/fmuImportWorkflow.md).
+    $('#editAddNodeProgramInput').closest('h3').firstChild.textContent = isFmu ? 'Parameters and inputs ' : 'Inputs ';
+    $('#editAddNodeProgramOutput').closest('h3').firstChild.textContent = isFmu ? 'Outputs, each a state of this node ' : 'Outputs ';
+    const fmuPorts = isFmu ? fmuPortsFor(implementation) : null;
     if (!isFmu) nodeProgramSummary.render({ kind, source: implementation.source ?? '', ...nodeProgramBindingsSummary(node), record: programRecord(kind, implementation.source ?? '') });
     if (isFmu) renderNodeProgramFmus(node);
     const errors = nodeProgramErrors(implementation, definition, nodes, model.sharedParameters);
@@ -3310,19 +3332,24 @@ function renderNodeProgram(node) {
     if (!(implementation.bindings ?? []).length) inputs.innerHTML = '<p class="emptyEditorState">No inputs</p>';
     (implementation.bindings ?? []).forEach((binding, index) => {
         const row = document.createElement('div');
-        row.className = 'nodeProgramRow';
+        row.className = isFmu ? 'nodeProgramRow fmuPortRow' : 'nodeProgramRow';
         row.dataset.index = String(index);
+        const port = fmuPorts?.inputs?.find((candidate) => candidate.key === binding.key) ?? null;
         const reads = document.createElement('select');
         reads.dataset.field = 'reads';
         reads.setAttribute('aria-label', `What input ${binding.key} reads`);
         // An FMU's input that reads nothing keeps the FMU's own start value (docs/proposals/fmuImportWorkflow.md, stage 2), and
         // one given a value in the file keeps that; a program's input must read something.
-        reads.add(new Option(isFmu ? 'The FMU\'s own start value' : 'Choose…', ''));
-        if (isFmu && binding.kind === 'value') reads.add(new Option(`The value ${binding.value}`, 'value'));
+        reads.add(new Option(isFmu ? `The FMU's own start value${Number.isFinite(port?.start) ? `, ${fmuValueText(port.start, port.unit)}` : ''}` : 'Choose…', ''));
+        if (isFmu) reads.add(new Option('A value of its own…', 'value'));
         candidates.forEach((candidate) => reads.add(new Option(candidate.label, candidate.value)));
         reads.value = isFmu && binding.kind === 'value' ? 'value' : nodeProgramInputValue(binding, definition);
         reads.addEventListener('change', () => {
-            if (reads.value === 'value') return;
+            if (isFmu && reads.value === 'value') {
+                const value = Number.isFinite(port?.start) ? port.start : 0;
+                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'value', value }; });
+                return;
+            }
             if (isFmu && !reads.value) {
                 changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'state', stateId: null }; });
                 return;
@@ -3331,12 +3358,52 @@ function renderNodeProgram(node) {
             if (!candidate) return;
             changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, ...candidate.binding }; });
         });
-        row.append(
-            keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index].key = key; })),
-            reads,
-            removeButton('Remove this input', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings.splice(index, 1); })),
-            rowError(errors.inputs[index] ?? [])
-        );
+        if (isFmu) {
+            // The FMU's own name for it, its role, unit and description; a value typed in place; Share for a project parameter.
+            const name = keyInput(port?.name ?? binding.key, 'Input key', () => {});
+            name.title = port ? [port.name, fmuPortRole(port), port.unit, fmuPortHint(port)].filter(Boolean).join(' · ') : binding.key;
+            const about = document.createElement('small');
+            about.className = 'fmuPortAbout';
+            about.textContent = port ? [fmuPortRole(port), port.unit, fmuPortHint(port)].filter(Boolean).join(' · ') : '';
+            const value = document.createElement('input');
+            value.type = 'number';
+            value.step = 'any';
+            value.dataset.field = 'value';
+            value.hidden = binding.kind !== 'value';
+            value.value = binding.kind === 'value' ? String(binding.value) : '';
+            value.setAttribute('aria-label', `The value given to ${port?.name ?? binding.key}`);
+            value.disabled = Boolean(activeResult);
+            value.addEventListener('change', () => {
+                const number = Number(value.value);
+                if (value.value.trim() === '' || !Number.isFinite(number)) return;
+                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'value', value: number }; });
+            });
+            const share = document.createElement('button');
+            share.type = 'button';
+            share.className = 'fmuPortShare';
+            share.dataset.field = 'share';
+            share.textContent = 'Share';
+            share.title = 'Make it a shared parameter of the project: it can then be made live, fitted by Parameter tuning, and read by other nodes.';
+            share.hidden = binding.kind === 'parameter' && binding.sharedParameterId !== undefined && binding.sharedParameterId !== null;
+            share.disabled = Boolean(activeResult);
+            share.addEventListener('click', () => changeNodeModel(node, (snapshot) => {
+                const start = binding.kind === 'value' ? binding.value : Number.isFinite(port?.start) ? port.start : 0;
+                const taken = new Set(snapshot.sharedParameters.map((shared) => shared.symbol));
+                let symbol = binding.key;
+                for (let suffix = 2; taken.has(symbol); suffix += 1) symbol = `${binding.key}${suffix}`;
+                const created = { id: allocateModelEntityId(), name: port?.name ?? binding.key, symbol, value: start, unit: port?.unit ?? '', mode: 'constant' };
+                snapshot.sharedParameters.push(created);
+                snapshot.implementation.bindings[index] = { key: binding.key, kind: 'parameter', sharedParameterId: created.id };
+            }));
+            row.append(name, reads, value, share, about, rowError(errors.inputs[index] ?? []));
+        } else {
+            row.append(
+                keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index].key = key; })),
+                reads,
+                removeButton('Remove this input', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings.splice(index, 1); })),
+                rowError(errors.inputs[index] ?? [])
+            );
+        }
         inputs.appendChild(row);
     });
 
@@ -3345,8 +3412,9 @@ function renderNodeProgram(node) {
     if (!(implementation.outputs ?? []).length) outputs.innerHTML = '<p class="emptyEditorState">No outputs</p>';
     (implementation.outputs ?? []).forEach((output, index) => {
         const row = document.createElement('div');
-        row.className = 'nodeProgramRow';
+        row.className = isFmu ? 'nodeProgramRow fmuPortRow fmuOutputRow' : 'nodeProgramRow';
         row.dataset.index = String(index);
+        const outputPort = fmuPorts?.outputs?.find((candidate) => candidate.key === output.key) ?? null;
         const state = document.createElement('select');
         state.dataset.field = 'state';
         state.setAttribute('aria-label', `State output ${output.key} changes`);
@@ -3376,8 +3444,12 @@ function renderNodeProgram(node) {
             else delete snapshot.implementation.outputs[index].setsValue;
         }));
         setsLabel.append(sets, document.createTextNode(chosen ? ` sets ${chosen.symbol}, rather than adding to d${chosen.symbol}/dt` : ' sets its state, rather than adding to its rate'));
+        // An FMU's output always sets its state (it reports values), so the choice is not offered.
+        setsLabel.hidden = isFmu;
+        const outputName = keyInput(isFmu ? outputPort?.name ?? output.key : output.key, 'Output key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].key = key; }));
+        if (isFmu && outputPort) outputName.title = [outputPort.name, outputPort.unit, outputPort.description].filter(Boolean).join(' · ');
         row.append(
-            keyInput(output.key, 'Output key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].key = key; })),
+            outputName,
             state,
             setsLabel,
             removeButton('Remove this output', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs.splice(index, 1); })),
@@ -3401,8 +3473,19 @@ async function renderNodeProgramFmus(node) {
         select.add(new Option(`${implementation.fmuId} ${implementation.fmuVersion} (not installed here)`, current));
     }
     select.value = current;
+    const known = fmuPortsCache.has(fmuPortsKey(implementation));
     const ports = implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null;
+    if (ports) fmuPortsCache.set(fmuPortsKey(implementation), ports);
     await showFmuNotes(ports);
+    const aboutLines = fmuAboutLines(ports && !ports.error ? ports.about : null);
+    $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
+    $('#nodeProgramFmuAboutLines').replaceChildren(...aboutLines.map((line) => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        return item;
+    }));
+    // The rows were drawn before the ports were known: drawn again, with the FMU's names, units and start values.
+    if (!known && ports && !ports.error && selectedNode === node) renderNodeProgram(node);
     // An input or parameter the file leaves to the FMU has no binding there (src/nodeProgram.mjs, implementationForFile): it is
     // given its row here, reading nothing, so the card lists every port. Only in memory: the file leaves it out all the same.
     const live = node.userData.definition.implementation;
@@ -3433,8 +3516,24 @@ async function useFmuForNode(node, guid, version) {
         $('#nodeProgramError').textContent = ports?.error ?? 'The FMU could not be read.';
         return;
     }
+    fmuPortsCache.set(`${guid}@${version}`, ports);
+    // The node is built from the FMU: a state per output, every parameter and input listed at the FMU's own value, the
+    // untouched state a new node starts with gone, and the node named after the FMU while it has a new node's name.
+    const definition = node.userData.definition;
+    const untouched = (definition.states ?? []).length === 1 && !(definition.sourceTerms ?? []).length
+        && !model.relationships.some((edge) => !edge.deleted && (edge.source === definition.id || edge.target === definition.id))
+        && definition.states[0].symbol === 'x' && !definition.states[0].unit && Number(definition.states[0].initialValue ?? 0) === 0;
     changeNodeModel(node, (snapshot) => {
-        snapshot.implementation = fmiImplementation(guid, version, ports, snapshot.implementation);
+        const built = fmiNodeFromPorts(snapshot, {
+            guid, version, ports, newId: allocateModelEntityId, removableStateIds: untouched ? [definition.states[0].id] : [],
+            makeState: ({ name, ...state }) => {
+                const shown = stateValueText(state.initialValue, state.unit);
+                return { ...state, label: name, value: shown.text, exactValue: shown.exact, className: '' };
+            }
+        });
+        snapshot.states = built.states;
+        snapshot.implementation = built.implementation;
+        snapshot.title = built.name;
     });
     await showFmuNotes(ports);
 }

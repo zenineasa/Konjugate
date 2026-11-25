@@ -67,6 +67,56 @@ function modelExchangeOnly(root) {
         : 'This FMU declares no Co-Simulation, which is how Konjugate runs FMUs.';
 }
 
+// ---- What the node's card says of an FMU (docs/proposals/fmuImportWorkflow.md, stage 3) ----------------------------------
+function asArray(value) {
+    if (value === undefined || value === null) return [];
+    return Array.isArray(value) ? value : [value];
+}
+
+// A number written in an attribute, or undefined when there is none or it is not one number.
+function numberAttribute(text) {
+    if (text === undefined || text === null) return undefined;
+    const trimmed = String(text).trim();
+    return /^[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?$/.test(trimmed) ? Number(trimmed) : undefined;
+}
+
+function textAttribute(text) {
+    const trimmed = text === undefined || text === null ? '' : String(text).trim();
+    return trimmed || undefined;
+}
+
+function flag(text) {
+    return text === 'true';
+}
+
+// The model's own description, who made it and with what, and how it would be run by default: the card's "About this FMU".
+function modelInformation(root) {
+    const experiment = asArray(root.DefaultExperiment)[0];
+    const defaultExperiment = experiment ? Object.fromEntries(
+        ['startTime', 'stopTime', 'stepSize', 'tolerance'].map((name) => [name, numberAttribute(experiment[`@_${name}`])]).filter(([, value]) => value !== undefined)
+    ) : null;
+    return Object.fromEntries(Object.entries({
+        description: textAttribute(root['@_description']),
+        author: textAttribute(root['@_author']),
+        version: textAttribute(root['@_version']),
+        copyright: textAttribute(root['@_copyright']),
+        license: textAttribute(root['@_license']),
+        generationTool: textAttribute(root['@_generationTool']),
+        generationDateAndTime: textAttribute(root['@_generationDateAndTime']),
+        defaultExperiment: defaultExperiment && Object.keys(defaultExperiment).length ? defaultExperiment : undefined
+    }).filter(([, value]) => value !== undefined));
+}
+
+// What a variable says of itself beyond its type: its description, unit (its own, or its declared type's) and bounds.
+function variableDetails({ description, unit, declaredType, min, max }, unitsByType) {
+    return Object.fromEntries(Object.entries({
+        description: textAttribute(description),
+        unit: textAttribute(unit) ?? (declaredType ? unitsByType.get(declaredType) : undefined),
+        min: numberAttribute(min),
+        max: numberAttribute(max)
+    }).filter(([, value]) => value !== undefined));
+}
+
 // document must already be the parsed <fmiModelDescription> root object.
 function parseFmi2(root) {
     if (!root.CoSimulation) {
@@ -78,6 +128,8 @@ function parseFmi2(root) {
     if (!modelIdentifier) throw new FmiModelDescriptionError('modelDescription.xml\'s <CoSimulation> element has no modelIdentifier.');
 
     const rawVariables = root.ModelVariables?.ScalarVariable ?? [];
+    const unitsByType = new Map(asArray(root.TypeDefinitions?.SimpleType)
+        .map((type) => [type['@_name'], textAttribute(asArray(type.Real)[0]?.['@_unit'])]).filter(([name, unit]) => name && unit));
     const variables = [];
     const notExposed = [];
     for (const rawVariable of rawVariables) {
@@ -102,7 +154,10 @@ function parseFmi2(root) {
         variables.push({
             name, valueReference, causality, type,
             variability: rawVariable['@_variability'] || 'continuous',
-            start: startValue(startText, type)
+            start: startValue(startText, type),
+            ...variableDetails({
+                description: rawVariable['@_description'], unit: typed?.['@_unit'], declaredType: typed?.['@_declaredType'], min: typed?.['@_min'], max: typed?.['@_max']
+            }, unitsByType)
         });
     }
 
@@ -114,7 +169,14 @@ function parseFmi2(root) {
         canGetAndSetFMUState: root.CoSimulation['@_canGetAndSetFMUstate'] === 'true',
         modelExchange: root.ModelExchange !== undefined,
         variables,
-        notExposed
+        notExposed,
+        ...modelInformation(root),
+        coSimulation: {
+            canHandleVariableCommunicationStepSize: flag(root.CoSimulation['@_canHandleVariableCommunicationStepSize']),
+            canSerializeFMUState: flag(root.CoSimulation['@_canSerializeFMUstate']),
+            canBeInstantiatedOnlyOncePerProcess: flag(root.CoSimulation['@_canBeInstantiatedOnlyOncePerProcess']),
+            needsExecutionTool: flag(root.CoSimulation['@_needsExecutionTool'])
+        }
     };
 }
 
@@ -133,6 +195,10 @@ function parseFmi3(root) {
     if (!modelIdentifier) throw new FmiModelDescriptionError('modelDescription.xml\'s <CoSimulation> element has no modelIdentifier.');
 
     const modelVariables = root.ModelVariables ?? {};
+    const unitsByType = new Map(Object.entries(root.TypeDefinitions ?? {})
+        .filter(([element]) => element.endsWith('Type'))
+        .flatMap(([, types]) => asArray(types))
+        .map((type) => [type['@_name'], textAttribute(type['@_unit'])]).filter(([name, unit]) => name && unit));
     const variables = [];
     const notExposed = [];
     for (const typeName of fmi3TypeElementNames) {
@@ -155,7 +221,10 @@ function parseFmi3(root) {
             variables.push({
                 name, valueReference, causality, type: typeName,
                 variability: rawVariable['@_variability'] || (typeName.startsWith('Float') ? 'continuous' : 'discrete'),
-                start: startValue(startText, typeName)
+                start: startValue(startText, typeName),
+                ...variableDetails({
+                    description: rawVariable['@_description'], unit: rawVariable['@_unit'], declaredType: rawVariable['@_declaredType'], min: rawVariable['@_min'], max: rawVariable['@_max']
+                }, unitsByType)
             });
         }
     }
@@ -168,13 +237,25 @@ function parseFmi3(root) {
         canGetAndSetFMUState: root.CoSimulation['@_canGetAndSetFMUState'] === 'true',
         modelExchange: root.ModelExchange !== undefined,
         variables,
-        notExposed
+        notExposed,
+        ...modelInformation(root),
+        coSimulation: {
+            canHandleVariableCommunicationStepSize: flag(root.CoSimulation['@_canHandleVariableCommunicationStepSize']),
+            fixedInternalStepSize: numberAttribute(root.CoSimulation['@_fixedInternalStepSize']),
+            canSerializeFMUState: flag(root.CoSimulation['@_canSerializeFMUState']),
+            canBeInstantiatedOnlyOncePerProcess: flag(root.CoSimulation['@_canBeInstantiatedOnlyOncePerProcess']),
+            needsExecutionTool: flag(root.CoSimulation['@_needsExecutionTool'])
+        }
     };
 }
 
 // Given the raw bytes/text of one FMU's modelDescription.xml, returns
-// { fmiVersion, guid, modelName, modelIdentifier, canGetAndSetFMUState, modelExchange, variables, notExposed }, where
-// each variable is { name, valueReference, causality, type, variability, start } (type the FMI version's own name:
+// { fmiVersion, guid, modelName, modelIdentifier, canGetAndSetFMUState, modelExchange, variables, notExposed, coSimulation } and,
+// where the FMU says them, description, author, version, copyright, license, generationTool, generationDateAndTime and
+// defaultExperiment ({ startTime, stopTime, stepSize, tolerance }); coSimulation is the capability flags the card shows
+// (canHandleVariableCommunicationStepSize, fixedInternalStepSize for FMI 3.0, canSerializeFMUState,
+// canBeInstantiatedOnlyOncePerProcess, needsExecutionTool). Each variable is { name, valueReference, causality, type,
+// variability, start } and, where it says them, its description, unit (its own or its declared type's), min and max (type the FMI version's own name:
 // Real, Float64, Int32, Boolean, ...) and each of notExposed is { name, causality, type } for an input, output or
 // parameter that is not a number Konjugate can bind (see numericFmi2Types above). Throws FmiModelDescriptionError on
 // malformed XML or an FMU without Co-Simulation (Konjugate runs FMUs in Co-Simulation only: Model Exchange would need

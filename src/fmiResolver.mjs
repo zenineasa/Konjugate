@@ -24,7 +24,7 @@
 // -- before being replaced with this one.
 
 import { createHash } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
@@ -267,6 +267,37 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
     };
 }
 
+// What a variable says of itself, for the node's card: its start value, unit, description and bounds, where it says them.
+function variableExtras(variable) {
+    return Object.fromEntries(['start', 'unit', 'description', 'min', 'max'].filter((name) => variable[name] !== undefined).map((name) => [name, variable[name]]));
+}
+
+// The binaries an installed FMU carries, by its binaries/ directory names.
+async function installedPlatforms(fmuRoot) {
+    const entries = await readdir(resolve(fmuRoot, 'binaries'), { withFileTypes: true }).catch(() => []);
+    return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+}
+
+// The card's "About this FMU" (docs/proposals/fmuImportWorkflow.md, stage 3): what the FMU says of itself and how it runs here.
+function fmuAbout(description, platforms, chosen) {
+    return Object.fromEntries(Object.entries({
+        modelName: description.modelName,
+        fmiVersion: description.fmiVersion,
+        description: description.description,
+        author: description.author,
+        version: description.version,
+        copyright: description.copyright,
+        license: description.license,
+        generationTool: description.generationTool,
+        generationDateAndTime: description.generationDateAndTime,
+        defaultExperiment: description.defaultExperiment,
+        coSimulation: description.coSimulation,
+        canGetAndSetFMUState: description.canGetAndSetFMUState,
+        platforms,
+        runsHere: !chosen.error
+    }).filter(([, value]) => value !== undefined));
+}
+
 // An installed FMU's ports as a node's implementation names them: each input or parameter, which the node must bind
 // to a state or a shared parameter, and each output, which sets a state of the node. For the canvas, so a user can wire
 // an FMU into a node without writing the keys by hand, and to say how it runs here. Returns { name, fmiVersion,
@@ -296,11 +327,12 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
         name: description.modelName, fmiVersion: description.fmiVersion,
         inputs: inputVariables.map((variable) => ({
             key: inputKeys.get(variable.name), name: variable.name, causality: variable.causality, type: variable.type, variability: variable.variability,
-            ...(variable.start === undefined ? {} : { start: variable.start })
+            ...variableExtras(variable)
         })),
-        outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type })),
+        outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type, ...variableExtras(variable) })),
         notExposed: description.notExposed,
-        binary: describeChosenBinary(chosen, description.fmiVersion)
+        binary: describeChosenBinary(chosen, description.fmiVersion),
+        about: fmuAbout(description, await installedPlatforms(fmuRoot), chosen)
     };
 }
 

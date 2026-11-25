@@ -4,8 +4,9 @@
 // and the unsaved-changes guard. Neither host owns it. The desktop's window (src/providerEditor/renderer.mjs) and the web edition's
 // in-page panel (src/renderer/webShims/providerEditor.mjs) each hand it an element to fill and a host:
 //
-//   validate(source, kind)        → { valid, diagnostics: [{ line, column, severity, message }] }, or { valid: null, message } when
-//                                    the program cannot be checked here
+//   validate(source, kind)        → { valid, diagnostics: [{ line, column, severity, message }] }, { valid: null, message } when
+//                                    the program cannot be checked here (or its check took too long), or { superseded: true } when a
+//                                    newer check took its place (src/lintScheduler.mjs)
 //   check(source, kind, inputs)   → the engine's Check program answer, { available, ok, program, problems, outputs, memory, reason? }
 //   apply(source, target)         → { applied, error? } from the project
 //   close()                       → closes the window or hides the panel (the editor has already decided it may)
@@ -273,7 +274,7 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         const sequence = ++validationSequence;
         let result;
         try { result = await host.validate(source, kind); } catch (error) { result = { valid: null, message: `Could not check: ${error?.message ?? error}` }; }
-        if (sequence !== validationSequence) return []; // A newer keystroke superseded this request.
+        if (sequence !== validationSequence || result?.superseded) return []; // A newer keystroke superseded this request.
         if (result?.valid === null || result?.valid === undefined) {
             diagnostics = [];
             showProblemCount(result?.message ?? '', 'unknown');
@@ -405,7 +406,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
                 kind === 'python' ? python() : cpp(),
                 themeCompartment.of(buildThemeExtensions(activeTheme())),
                 lintGutter(),
-                linter(sourceLinter, { delay: 500 }),
+                // C++ waits longer for a pause than Python: its check starts a compiler.
+                linter(sourceLinter, { delay: kind === 'cpp' ? 800 : 500 }),
                 EditorView.updateListener.of((update) => {
                     if (!update.docChanged) return;
                     session.edit(update.state.doc.toString());

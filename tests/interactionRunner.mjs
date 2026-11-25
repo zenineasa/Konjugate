@@ -2667,6 +2667,56 @@ export async function runInteractionTests(driver) {
         await evaluate(window, writeRelationshipAs('equation'));
     });
 
+    await run('the code editor checks as you type one at a time, stops a superseded check, and keeps its answers', async () => {
+        await freshRelationshipEditor();
+        // The compiler on the desktop; on the web, Pyodide (the in-browser clang needs the threads build's download).
+        const kind = programEditorWeb ? 'python' : 'cpp';
+        const comment = kind === 'python' ? '#' : '//';
+        await evaluate(window, writeRelationshipAs(kind));
+        const original = await evaluate(window, edgeCardSource);
+        const editor = await openProgramEditor();
+        const lintTimeout = 60000;
+        await waitFor(editor, `document.querySelector('#programEditorProblems').classList.contains('valid')`, 'The template was not checked.', lintTimeout);
+        const stats = () => evaluate(editor, `({ ...window.__programLintStats })`);
+        const settled = async () => {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            await waitFor(editor, `window.__programLintStats.active === 0`, 'A check was left running.', lintTimeout);
+        };
+        await settled();
+
+        // Edits a little longer apart than the pause the check waits for: each starts a check, and the next edit stops it.
+        // One check is one temporary folder, whatever processes the compiler runs in it (Apple's clang runs its compiler as a child).
+        const checkProcesses = () => {
+            const listed = spawnSync('pgrep', ['-fl', 'konjugateProviderCheck-'], { encoding: 'utf8' }).stdout ?? '';
+            return new Set(listed.match(/konjugateProviderCheck-[A-Za-z0-9]+/g) ?? []).size;
+        };
+        let mostProcesses = 0;
+        const sampler = programEditorWeb ? null : setInterval(() => { mostProcesses = Math.max(mostProcesses, checkProcesses()); }, 50);
+        try {
+            for (let edit = 0; edit < 6; edit += 1) {
+                await setEditorSource(editor, `${original}\n${comment} edit ${edit}\n`);
+                await new Promise((resolve) => setTimeout(resolve, kind === 'cpp' ? 900 : 550));
+            }
+            await settled();
+        } finally {
+            if (sampler) clearInterval(sampler);
+        }
+        const afterTyping = await stats();
+        assert.equal(afterTyping.maxActive, 1, `Checks ran at once: ${JSON.stringify(afterTyping)}`);
+        if (!programEditorWeb) assert.ok(mostProcesses <= 1, `${mostProcesses} compiler checks ran at once.`);
+        await waitFor(editor, `document.querySelector('#programEditorProblems').classList.contains('valid')`, 'The last edit was not checked.', lintTimeout);
+
+        // Back to the source already checked: answered from what was kept, with no new process.
+        const beforeReturn = await stats();
+        await setEditorSource(editor, original);
+        await waitFor(editor, `window.__programLintStats.cacheHits > ${beforeReturn.cacheHits}`, 'Going back to a checked source did not use the kept answer.', lintTimeout);
+        assert.equal((await stats()).started, beforeReturn.started, 'A check was started for a source already checked.');
+
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+        await evaluate(window, writeRelationshipAs('equation'));
+    });
+
     await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));

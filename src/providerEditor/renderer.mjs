@@ -14,7 +14,11 @@ $('#maximize').addEventListener('click', () => window.windowControls.toggleMaxim
 const editor = createProgramEditor({
     root: $('#programEditorRoot'),
     host: {
-        validate: (source, kind) => bridge.validate(source, kind),
+        validate: async (source, kind) => {
+            const answer = await bridge.validate(source, kind);
+            window.__programLintStats = answer?.stats; // Debug/test hook only: how many checks ran, were kept, or ran at once.
+            return answer;
+        },
         check: (source, kind, inputs) => bridge.check(source, kind, inputs),
         apply: (source, target) => bridge.apply(source, target),
         close: () => window.windowControls.close(),

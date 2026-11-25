@@ -48,6 +48,7 @@ const { stubProvider, failingProvider, skip: needsProviders = false } = await bu
 
 // What clang is asked to do, and the answers it gives: by the source, a provider that starts, one that does not, or errors.
 const compiles = [];
+const kills = [];
 let sandboxFailures = 0;
 let syntaxAnswer = { exitCode: 0, stderr: '' };
 setCppProviderSources({
@@ -61,10 +62,15 @@ setCppProviderSources({
                 return {
                     async spawn(options) {
                         let source = '';
+                        let killed = null;
+                        const gone = new Promise((resolve) => { killed = resolve; });
                         return {
                             stdin: { write: async (bytes) => { source += new TextDecoder().decode(bytes); }, close: async () => {} },
+                            // A check that never ends on its own (a compiler stuck on a large program) ends only when killed.
+                            async kill() { kills.push(source); killed({ exitCode: 137, stdout: { bytes: new Uint8Array(0) }, stderr: { text: () => 'killed' } }); },
                             async wait() {
                                 compiles.push({ program, args, options, source });
+                                if (source === 'never ends') return gone;
                                 if (args.includes('-fsyntax-only')) return { exitCode: syntaxAnswer.exitCode, stdout: { bytes: new Uint8Array(0) }, stderr: { text: () => syntaxAnswer.stderr } };
                                 if (source.includes('does not compile')) return { exitCode: 1, stdout: { bytes: new Uint8Array(0) }, stderr: { text: () => '<stdin>:1:1: error: unknown type name \'does\'' } };
                                 return { exitCode: 0, stdout: { bytes: source.includes('fails to start') ? failingProvider : stubProvider }, stderr: { text: () => '' } };
@@ -179,4 +185,15 @@ test('the provider editor\'s syntax check reports clang\'s diagnostics, each whe
     assert.deepEqual(await runCppSyntaxCheck('broken'), { valid: false, diagnostics: [{ line: 1, column: 1, severity: 'error', message: 'clang: error: unable to execute command' }] });
     syntaxAnswer = { exitCode: 1, stderr: '' };
     assert.deepEqual((await runCppSyntaxCheck('broken')).diagnostics, [{ line: 1, column: 1, severity: 'error', message: 'Compilation failed.' }]);
+});
+
+test('the editor\'s check kills its compiler when it is superseded or past its time limit', async () => {
+    kills.length = 0;
+    const controller = new AbortController();
+    const checking = runCppSyntaxCheck('never ends', { signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    await assert.rejects(checking, { name: 'AbortError' });
+    assert.deepEqual(kills, ['never ends']);
+    await assert.rejects(runCppSyntaxCheck('int x;', { signal: AbortSignal.abort() }), { name: 'AbortError' }, 'An aborted check starts no compiler.');
 });

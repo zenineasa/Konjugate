@@ -299,13 +299,25 @@ export async function ensureCppProvidersReady(Module, content) {
 // return, parsed from clang's `file:line:col: severity: message` diagnostic format.
 const diagnosticPattern = /^[^:]*:(\d+):(\d+):\s*(error|warning|note):\s*(.*)$/gm;
 
-export async function runCppSyntaxCheck(source) {
+const cppSyntaxCheckFlags = ['-x', 'c++', '-', '-fsyntax-only', '-std=c++20', '-Iinclude'];
+
+// `signal`, when given, kills the compiler when it aborts (the code editor's check, superseded or past its time limit).
+export async function runCppSyntaxCheck(source, { signal } = {}) {
     const sandbox = await ensureSandbox();
-    const check = sandbox.command('clang', ['-x', 'c++', '-', '-fsyntax-only', '-std=c++20', '-Iinclude']);
+    signal?.throwIfAborted();
+    const check = sandbox.command('clang', cppSyntaxCheckFlags);
     const proc = await check.spawn({ stdin: 'pipe', stdout: 'capture', stderr: 'capture' });
-    await proc.stdin.write(new TextEncoder().encode(source));
-    await proc.stdin.close();
-    const output = await proc.wait({ check: false });
+    const kill = () => { proc.kill?.().catch?.(() => {}); };
+    signal?.addEventListener('abort', kill, { once: true });
+    let output;
+    try {
+        await proc.stdin.write(new TextEncoder().encode(source));
+        await proc.stdin.close();
+        output = await proc.wait({ check: false });
+    } finally {
+        signal?.removeEventListener('abort', kill);
+    }
+    signal?.throwIfAborted();
     if (output.exitCode === 0) return { valid: true, diagnostics: [] };
 
     const diagnostics = [];

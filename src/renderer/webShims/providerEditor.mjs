@@ -11,6 +11,7 @@
 
 import { runPythonSyntaxCheck } from '../../webPythonProviderBridge.mjs';
 import { threads } from './buildInfo.mjs';
+import { createLintScheduler, lintHash } from '../../lintScheduler.mjs';
 
 export const cppNeedsDesktopMessage = 'C++ programs are checked and run in the desktop app, or in a browser that allows the faster web build.';
 const boundsKey = 'konjugate.providerEditor.panelBounds';
@@ -93,11 +94,21 @@ function ensurePanel() {
     panel.querySelector('.webProgramEditorClose').addEventListener('click', () => editorPromise?.then((editor) => editor.requestClose()));
 }
 
+// The check as you type, one at a time, stopped when superseded or after 10 s, answers kept by source (src/lintScheduler.mjs), as on the
+// desktop. Pyodide's check runs to its end once started (it is quick); the in-browser clang is killed.
+const lint = createLintScheduler({
+    key: (request) => `${request.kind}|${lintHash(request.source)}`,
+    run: async (request, signal) => (request.kind === 'python'
+        ? runPythonSyntaxCheck(request.source)
+        : (await import('../../webCppProviderBridge.mjs')).runCppSyntaxCheck(request.source, { signal }))
+});
+
 async function validate(source, kind) {
-    if (kind === 'python') return runPythonSyntaxCheck(source);
-    if (kind === 'cpp' && threads) return (await import('../../webCppProviderBridge.mjs')).runCppSyntaxCheck(source);
-    if (kind === 'cpp') return { valid: null, message: cppNeedsDesktopMessage };
-    return { valid: null, message: '' };
+    if (kind === 'cpp' && !threads) return { valid: null, message: cppNeedsDesktopMessage };
+    if (kind !== 'python' && kind !== 'cpp') return { valid: null, message: '' };
+    const answer = await lint.schedule({ kind, source });
+    window.__programLintStats = { ...lint.stats }; // Debug/test hook only: how many checks ran, were kept, or ran at once.
+    return answer;
 }
 
 async function check(source, kind, inputs) {

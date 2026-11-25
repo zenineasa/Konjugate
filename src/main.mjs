@@ -9,6 +9,7 @@ import { release as osRelease, tmpdir, totalmem } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './projectFile.mjs';
+import { createLintScheduler, lintHash } from './lintScheduler.mjs';
 import { checkObjectiveWithEngine, checkProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
@@ -2584,11 +2585,29 @@ ipcMain.handle('projectConfirmDiscard', async (event) => {
     return result.response === 1;
 });
 
-function runProcess(command, args, { input } = {}) {
+// `signal`, when given, stops the process when it aborts (the code editor's check, superseded or past its time limit), and everything
+// it started: Apple's clang runs its compiler (clang -cc1) as a child of its own, which outlives the driver it was started by. So such a
+// process starts a process group of its own, and the whole group is stopped (the whole tree on Windows).
+function stopProcessTree(child) {
+    try {
+        if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F']);
+        else process.kill(-child.pid, 'SIGKILL');
+    } catch {
+        child.kill('SIGKILL');
+    }
+}
+
+function runProcess(command, args, { input, signal } = {}) {
     return new Promise((resolve) => {
         let child;
         try {
-            child = spawn(command, args);
+            child = spawn(command, args, signal && process.platform !== 'win32' ? { detached: true } : {});
+            if (signal) {
+                const stop = () => stopProcessTree(child);
+                if (signal.aborted) stop();
+                else signal.addEventListener('abort', stop, { once: true });
+                child.once('close', () => signal.removeEventListener('abort', stop));
+            }
         } catch (error) {
             resolve({ code: -1, stdout: '', stderr: error.message });
             return;
@@ -2763,36 +2782,35 @@ function findMsvcIncludeDirs() {
     return includeDirs;
 }
 
+// The compiler and flags the code editor's C++ check uses: what its answers are kept under (src/lintScheduler.mjs) besides the source.
+async function cppLintSetup() {
+    const { compiler, flavor } = await resolveCppCompiler();
+    const includePath = join(cppProviderSdkPath({
+        applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged
+    }), 'include');
+    if (flavor === 'msvc') {
+        const msvcIncs = findMsvcIncludeDirs();
+        if (!process.env.INCLUDE && msvcIncs.length) {
+            process.env.INCLUDE = msvcIncs.join(';');
+        }
+        return { compiler, flavor, flags: ['/std:c++20', '/EHsc', '/Zs', '/nologo', '/I' + includePath, ...msvcIncs.map((dir) => '/I' + dir)] };
+    }
+    const flags = ['-std=c++20', '-fsyntax-only', '-I' + includePath];
+    if (process.platform === 'darwin') {
+        const sysroot = await resolveAppleSdkSysroot();
+        if (sysroot) flags.push('-isysroot', sysroot);
+    }
+    return { compiler, flavor, flags };
+}
+
 // Runs syntax checking (-fsyntax-only on Clang/GCC, /zs on MSVC), a parse/type-check pass that never produces or runs a binary.
-async function validateCppSource(source) {
+async function validateCppSource(source, { signal, setup } = {}) {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateProviderCheck-'));
     try {
         const filePath = join(directory, 'relationship.cpp');
         await writeFile(filePath, source ?? '', 'utf8');
-        const { compiler, flavor } = await resolveCppCompiler();
-        const includePath = join(cppProviderSdkPath({
-            applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged
-        }), 'include');
-        let args;
-        if (flavor === 'msvc') {
-            const msvcIncs = findMsvcIncludeDirs();
-            if (!process.env.INCLUDE && msvcIncs.length) {
-                process.env.INCLUDE = msvcIncs.join(';');
-            }
-            args = ['/std:c++20', '/EHsc', '/Zs', '/nologo', '/I' + includePath];
-            for (const dir of msvcIncs) {
-                args.push('/I' + dir);
-            }
-            args.push(filePath);
-        } else {
-            args = ['-std=c++20', '-fsyntax-only', '-I' + includePath];
-            if (process.platform === 'darwin') {
-                const sysroot = await resolveAppleSdkSysroot();
-                if (sysroot) args.push('-isysroot', sysroot);
-            }
-            args.push(filePath);
-        }
-        const result = await runProcess(compiler, args);
+        const { compiler, flags } = setup ?? await cppLintSetup();
+        const result = await runProcess(compiler, [...flags, filePath], { signal });
         const output = (result.stderr + '\n' + result.stdout).trim();
         const diagnostics = parseCompilerDiagnostics(output, filePath);
         if (result.code !== 0 && diagnostics.length === 0) {
@@ -2818,9 +2836,9 @@ const PYTHON_SYNTAX_CHECK_SCRIPT = 'import ast, sys\n'
     + '    print(f"{error.lineno or 1}:{error.offset or 1}: {error.msg}", file=sys.stderr)\n'
     + '    sys.exit(1)\n';
 
-async function validatePythonSource(source) {
-    const interpreter = await resolvePythonInterpreter();
-    const result = await runProcess(interpreter, ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '' });
+async function validatePythonSource(source, { signal, interpreter } = {}) {
+    interpreter ??= await resolvePythonInterpreter();
+    const result = await runProcess(interpreter, ['-c', PYTHON_SYNTAX_CHECK_SCRIPT], { input: source ?? '', signal });
     if (result.code === 0) return { valid: true, diagnostics: [] };
     const match = result.stderr.trim().match(/^(\d+):(\d+):\s*(.*)$/);
     if (!match) {
@@ -2833,9 +2851,42 @@ ipcMain.handle('providerEditorOpenWindow', (event, payload) => {
     openProviderEditorWindow(getWindowFromEvent(event), event.sender, payload);
 });
 
-ipcMain.handle('providerEditorValidate', async (_event, { source, kind }) => (
-    kind === 'python' ? validatePythonSource(source) : validateCppSource(source)
-));
+// The code editor's check as you type: one process per editor window at a time, killed when a newer keystroke supersedes it, stopped
+// after 10 s, and its answers kept by source, compiler and flags (src/lintScheduler.mjs). The toolchain is looked up again at most every
+// 30 s, so a changed compiler setting is picked up.
+function createProviderEditorLint() {
+    let toolchain = null;
+    const toolchainFor = (kind) => {
+        if (!toolchain || toolchain.at < Date.now() - 30000) {
+            toolchain = { at: Date.now(), cpp: cppLintSetup(), python: resolvePythonInterpreter() };
+            toolchain.cpp.catch(() => { toolchain = null; });
+        }
+        return kind === 'python' ? toolchain.python : toolchain.cpp;
+    };
+    return createLintScheduler({
+        key: async (request) => {
+            if (request.kind === 'python') {
+                request.interpreter = await toolchainFor('python');
+                return `python|${request.interpreter}|${lintHash(request.source)}`;
+            }
+            request.setup = await toolchainFor('cpp');
+            return `cpp|${request.setup.compiler}|${request.setup.flags.join(' ')}|${lintHash(request.source)}`;
+        },
+        run: (request, signal) => (request.kind === 'python'
+            ? validatePythonSource(request.source, { signal, interpreter: request.interpreter })
+            : validateCppSource(request.source, { signal, setup: request.setup }))
+    });
+}
+const sharedProviderEditorLint = createProviderEditorLint();
+
+ipcMain.handle('providerEditorValidate', async (event, { source, kind }) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const state = projectWindow && projectWindowState.get(projectWindow);
+    if (state && !state.providerEditorLint) state.providerEditorLint = createProviderEditorLint();
+    const lint = state?.providerEditorLint ?? sharedProviderEditorLint;
+    const answer = await lint.schedule({ kind: kind === 'python' ? 'python' : 'cpp', source: source ?? '' });
+    return { ...answer, stats: { ...lint.stats } };
+});
 
 // Check program, from the code editor: the program's standard checks, run by the engine (docs/programs.md, "Testing a program").
 ipcMain.handle('providerEditorCheck', async (_event, { source, kind, inputs }) => (

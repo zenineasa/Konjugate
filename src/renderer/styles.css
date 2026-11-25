@@ -1016,6 +1016,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .programPreviewLine .token-number { color: #6ce0d5; }
 .programPreviewLine .token-comment, .programPreviewLine .token-preprocessor { color: #5b7285; }
 .programEmpty { margin: 0; color: #7d939c; font-size: 8px; }
+.programBindLink { align-self: flex-start; padding: 0; color: #80d9d1; background: none; border: 0; font-size: 8px; cursor: pointer; }
+.programBindLink[hidden] { display: none; }
+.programBindLink:hover { text-decoration: underline; }
 .programEditButton { align-self: flex-start; height: 23px; padding: 0 12px; color: #07161a; background: var(--accent); border: 0; border-radius: 5px; font-size: 8px; font-weight: 700; cursor: pointer; }
 .programEditButton:hover { background: #57d6ca; }
 .templateButton { height: 21px; padding: 0 8px; color: #80d9d1; background: rgb(66 201 188 / 8%); border: 1px solid #31525a; border-radius: 4px; font-size: 7px; }

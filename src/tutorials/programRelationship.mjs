@@ -1,7 +1,8 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // "Write a relationship as a program" (docs/proposals/tutorials.md), starting from the Thermal Equilibrium example: its Conduction
-// relationship written again as a Python program, its two temperatures bound to keys the program reads, its contribution added in code.
+// relationship written again as a Python program that declares the two temperatures it reads, bound to them in the code editor's Ports,
+// its contribution added in code.
 // With 0.05 (the example's conductance of 50 W/K over its capacitance of 1000 J/K) the program gives exactly the equation's result, the
 // two bodies at 320.07 and 319.93 K after 60 s, acting both ways as the equation did. A program runs in a process of its own, with Python
 // (or a C++ compiler, for C++) on the computer, so this tutorial is for the desktop app.
@@ -21,8 +22,8 @@ const bound = (document) => {
     const bindings = conduction(document)?.implementation?.bindings ?? [];
     return values.bindings.every(({ key, reference }) => bindings.some((binding) => binding.key === key && binding.kind === 'state' && binding.role === reference.split('.')[0]));
 };
-// The program declares both keys as inputs (as the template writes them, hot = Input()), and returns something computed from both
-// (the template's own line that mentions them is a comment): one that reads a key it does not declare fails when it is run.
+// The program declares both keys as inputs (hot = Input()), and returns something computed from both (a comment that mentions them is
+// not enough): one that reads a key it does not declare fails when it is run.
 const written = (document) => {
     const lines = String(conduction(document)?.implementation?.source ?? '').split('\n').filter((line) => !line.trim().startsWith('#'));
     const declares = (key) => lines.some((line) => new RegExp(`^\\s*${key}\\s*=\\s*Input\\(`).test(line));
@@ -47,23 +48,23 @@ const steps = Object.freeze([
     {
         id: 'switch',
         title: 'Make it a Python program',
-        text: 'Press "{ } Program" at the top of its equation, with Python chosen beside it. The equation gives way to a program, a list of bindings and an output key: the program reads what the bindings give it, by their keys, and adds its result to the output.',
+        text: 'Press "{ } Program" at the top of its equation, with Python chosen beside it. The equation gives way to the program\'s summary and Edit program: the program declares the inputs it reads, each bound in the code editor\'s Ports to a state or parameter, and adds its result to its output.',
         target: '#editEdgeWrittenAs', skip: 'setImplementation', relationship: values.relationship, kind: 'python',
         done: ({ document }) => isPython(document)
     },
     {
-        id: 'bind',
-        title: 'Bind the two temperatures',
-        text: `Press ＋ beside Bindings twice. Give the first the key "${values.bindings[0].key}" and the reference ${values.bindings[0].reference}, the second "${values.bindings[1].key}" and ${values.bindings[1].reference}. The program under Program is written again from its template as you go, so it declares the keys you give.`,
-        target: () => '#editAddProviderBinding', skip: 'setProgramBindings', relationship: values.relationship, bindings: values.bindings,
-        done: ({ document }) => bound(document)
-    },
-    {
         id: 'write',
         title: 'Write the program',
-        text: 'Press Edit program. The program already declares both keys as inputs, hot and cold. In its evaluate method, replace return 0.0 with return 0.05 * (x.hot - x.cold): the conductance over the capacitance, times the difference. The editor checks it as you type; Apply puts it in the model. "Reset template" there writes the template again, from the bindings as they are.',
+        text: 'Press Edit program. The program reads the two temperatures as inputs, so declare them: replace the line "No inputs declared yet" with hot = Input() and, on the next line, cold = Input(). Then, in its evaluate method, replace return 0.0 with return 0.05 * (x.hot - x.cold): the conductance over the capacitance, times the difference. The editor checks it as you type; Apply puts it in the model.',
         target: () => '#editOpenProviderEditor', skip: 'writeProgram', relationship: values.relationship, line: values.line,
         done: ({ document }) => written(document)
+    },
+    {
+        id: 'bind',
+        title: 'Bind the two temperatures',
+        text: `In the editor's Ports, beside the code, hot and cold say "not bound". Click hot's, and choose ${values.bindings[0].reference}; then cold's, and choose ${values.bindings[1].reference}. Ports lists what each input reads, its value now, and the conversion at the port when the units differ.`,
+        target: () => '#editEdgeProviderSection .programBindLink', skip: 'setProgramBindings', relationship: values.relationship, bindings: values.bindings,
+        done: ({ document }) => bound(document)
     },
     {
         id: 'run',

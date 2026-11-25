@@ -21,6 +21,7 @@ const editor = createProgramEditor({
         },
         check: (source, kind, inputs) => bridge.check(source, kind, inputs),
         describe: (source, kind, inputs) => bridge.describe(source, kind, inputs),
+        bind: (key, value, target) => bridge.request('bind', target, { key, value }),
         apply: (source, target) => bridge.apply(source, target),
         close: () => window.windowControls.close(),
         setTitle: (text) => { $('#editorTitle').textContent = text; document.title = text; },

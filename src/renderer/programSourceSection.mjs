@@ -20,13 +20,15 @@ const escapeHtml = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '
 // opens the editor at that line) and one button, Edit program, or, with no program yet, "No program yet." and Write program.
 export class ProgramSummaryView {
     // container: where it is drawn. openId / openClass: the button's id or class, kept as the owner's tests and tours find it.
-    constructor({ container, openId = '', openClass = '' }) {
+    // bindsInPorts: the program's inputs are bound in the code editor's Ports, which a link under its reads line opens.
+    constructor({ container, openId = '', openClass = '', bindsInPorts = false }) {
         container.classList.add('programSummary');
         container.innerHTML = `
             <div class="equationHeading programSummaryHeading"><h3>Program</h3><button class="programStatus" type="button" hidden></button></div>
             <p class="programIdentity" hidden></p>
             <p class="programBindingsLine programReads" hidden><span class="programLineLabel">reads</span><span class="programLineItems"></span></p>
             <p class="programBindingsLine programSets" hidden><span class="programLineLabel">sets</span><span class="programLineItems"></span></p>
+            ${bindsInPorts ? '<button class="programBindLink linkButton" type="button" hidden>Bind its inputs in Ports ›</button>' : ''}
             <div class="programPreview" hidden aria-label="The program's first lines; click one to edit the program there"></div>
             <p class="programEmpty" hidden>No program yet.</p>
             <button${openId ? ` id="${escapeHtml(openId)}"` : ''} class="programEditButton${openClass ? ` ${escapeHtml(openClass)}` : ''}" type="button">Edit program</button>`;
@@ -38,6 +40,7 @@ export class ProgramSummaryView {
         this.summary = null;
         this.details = null;
         this.openButton.addEventListener('click', () => this.open(this.summary?.empty ? { write: true } : {}));
+        container.querySelector('.programBindLink')?.addEventListener('click', () => this.open({ showPorts: true }));
         // The status opens the editor where it points: an older program on its conversion, a problem at its line.
         this.statusButton.addEventListener('click', () => {
             if (this.status?.kind === 'older') this.open({ convert: true });
@@ -77,6 +80,8 @@ export class ProgramSummaryView {
                 Object.assign(document.createElement('span'), { className: entry.unbound ? 'unbound' : '', textContent: entry.text })
             ]));
         }
+        const bindLink = $('.programBindLink');
+        if (bindLink) bindLink.hidden = summary.empty;
         const preview = $('.programPreview');
         preview.hidden = summary.empty;
         preview.replaceChildren(...summary.preview.map((line) => {
@@ -101,8 +106,9 @@ export class ProgramSourceSection {
     // container: the element the section is drawn into (its own visibility stays the owner's). ids: { code, open, pluginFields,
     // pluginSelect, addBinding, bindings, outputKey }; `code`, `pluginFields` and `pluginSelect` only for an owner that offers installed
     // plugin providers. classes: the same names, for an owner drawn more than once, each part found by its class inside the container.
-    // bindingHint, pluginHint, outputPlaceholder: the owner's words. bindingsClass: a class for the rows' container.
-    constructor({ container, ids = {}, classes = {}, bindingHint, pluginHint = null, outputPlaceholder, bindingsClass = '' }) {
+    // bindingHint, pluginHint, outputPlaceholder: the owner's words. bindingsClass: a class for the rows' container. bindingRows: the
+    // owner's own binding rows (an edge group's, which has no Ports); otherwise its inputs are bound in the code editor's Ports.
+    constructor({ container, ids = {}, classes = {}, bindingHint = '', pluginHint = null, outputPlaceholder, bindingsClass = '', bindingRows = false }) {
         const names = { ...ids, ...classes };
         // A part's id or its own class, with the classes it always has.
         const attributes = (name, always = '') => {
@@ -116,9 +122,9 @@ export class ProgramSourceSection {
                 <label class="editorField"><span>Provider</span><select${id('pluginSelect')}></select></label>
                 <p class="builderHint">${escapeHtml(pluginHint ?? '')}</p>
             </div>` : ''}
-            <h3>Bindings <button${id('addBinding')} type="button">＋</button></h3>
+            ${bindingRows ? `<h3>Bindings <button${id('addBinding')} type="button">＋</button></h3>
             <p class="builderHint">${escapeHtml(bindingHint)}</p>
-            <div${attributes('bindings', bindingsClass)}></div>
+            <div${attributes('bindings', bindingsClass)}></div>` : ''}
             <label class="editorField programSingleOutput"><span>Output key</span><input${id('outputKey')} autocomplete="off" placeholder="${escapeHtml(outputPlaceholder)}"></label>
             <div class="programOutputRows" hidden></div>
             <button class="addProgramOutput" type="button" hidden title="A program in the current format can give this relationship several outputs, each reaching a state of either end">＋ Another output</button>`;
@@ -128,7 +134,7 @@ export class ProgramSourceSection {
         };
         this.container = container;
         this.code = container.querySelector('.programSummaryHost');
-        this.summary = new ProgramSummaryView({ container: this.code, openId: ids.open ?? '', openClass: classes.open ?? '' });
+        this.summary = new ProgramSummaryView({ container: this.code, openId: ids.open ?? '', openClass: classes.open ?? '', bindsInPorts: !bindingRows });
         this.openButton = this.summary.openButton;
         this.pluginFields = find('pluginFields');
         this.pluginSelect = find('pluginSelect');
@@ -161,6 +167,6 @@ export class ProgramSourceSection {
 
     // handler({ line, convert, write }): Edit program (or Write program), a preview line, or the status.
     onOpenEditor(handler) { this.summary.onOpen(handler); }
-    onAddBinding(handler) { this.addBindingButton.addEventListener('click', handler); }
+    onAddBinding(handler) { this.addBindingButton?.addEventListener('click', handler); }
     onOutputKeyChange(handler) { this.outputKeyField.addEventListener('change', handler); }
 }

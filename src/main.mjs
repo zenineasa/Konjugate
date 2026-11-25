@@ -2933,6 +2933,29 @@ ipcMain.handle('providerEditorApply', (event, { source, target }) => {
     });
 });
 
+// What the code editor asks of its project window besides Apply (binding a port from Ports), and the project window's answer. Each request
+// has its own id; one the project window does not answer in half a minute fails.
+const providerEditorRequests = new Map();
+let providerEditorRequestCount = 0;
+ipcMain.handle('providerEditorRequest', (event, { action, target, payload }) => {
+    const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');
+    const owner = projectWindow && projectWindowState.get(projectWindow)?.providerEditorOwner;
+    if (!owner || owner.isDestroyed()) return { applied: false, error: 'The originating window is no longer available.' };
+    const id = ++providerEditorRequestCount;
+    return new Promise((resolve) => {
+        const timer = setTimeout(() => { providerEditorRequests.delete(id); resolve({ applied: false, error: 'The project window did not answer.' }); }, 30000);
+        providerEditorRequests.set(id, { resolve, timer, owner: owner.id });
+        owner.send('providerEditorRequest', { id, action: String(action ?? ''), target: target ?? null, payload: payload ?? null });
+    });
+});
+ipcMain.on('providerEditorReply', (event, id, result) => {
+    const request = providerEditorRequests.get(id);
+    if (!request || request.owner !== event.sender.id) return;
+    providerEditorRequests.delete(id);
+    clearTimeout(request.timer);
+    request.resolve(result ?? { applied: false });
+});
+
 // Whether the code editor has unsaved changes, told by the editor whenever that changes.
 ipcMain.on('providerEditorDirty', (event, dirty) => {
     const projectWindow = projectWindowForAuxSender(event, 'providerEditorWindow');

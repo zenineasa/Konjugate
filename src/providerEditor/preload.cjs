@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('providerEditorWindow', Object.freeze({
     apply: (source, target) => ipcRenderer.invoke('providerEditorApply', { source, target }),
     check: (source, kind, inputs) => ipcRenderer.invoke('providerEditorCheck', { source, kind, inputs }),
     describe: (source, kind, inputs) => ipcRenderer.invoke('providerEditorDescribe', { source, kind, inputs }),
+    request: (action, target, payload) => ipcRenderer.invoke('providerEditorRequest', { action, target, payload }),
     setDirty: (dirty) => ipcRenderer.send('providerEditorDirty', Boolean(dirty)),
     reportStatus: (status) => ipcRenderer.send('providerEditorStatus', status),
     onCloseRequest: (callback) => ipcRenderer.on('providerEditorCloseRequest', (_event, requestId) => callback(requestId)),

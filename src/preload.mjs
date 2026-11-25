@@ -185,7 +185,12 @@ contextBridge.exposeInMainWorld('providerEditor', {
     onApplied: (callback) => ipcRenderer.on('providerEditorApplied', (_event, payload) => callback(payload)),
     reportApplied: (result) => ipcRenderer.send('providerEditorApplyResult', result),
     confirmClose: () => ipcRenderer.invoke('providerEditorConfirmClose'),
-    onStatus: (callback) => ipcRenderer.on('providerEditorStatus', (_event, status) => callback(status))
+    onStatus: (callback) => ipcRenderer.on('providerEditorStatus', (_event, status) => callback(status)),
+    onRequest: (callback) => ipcRenderer.on('providerEditorRequest', async (_event, { id, ...request }) => {
+        let result;
+        try { result = await callback(request); } catch (error) { result = { applied: false, error: error?.message ?? String(error) }; }
+        ipcRenderer.send('providerEditorReply', id, result);
+    })
 });
 
 // The defaults for the ownership block of new projects (docs/proposals/modelOwnership.md), kept in the user's own data folder.

@@ -15,6 +15,7 @@ import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection, ProgramSummaryView } from './programSourceSection.mjs';
 import { programStatusKey } from './programSummary.mjs';
+import { bindPort, referenceToProviderBinding, sourceTermReferenceToBinding } from '../programBinding.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
 import { normalizeTuningSetup, sameTuningSetup, tuningSetupFromRun } from '../tuningSetup.mjs';
@@ -132,21 +133,21 @@ import {
 const relationshipPluginHint = 'A relationship provider an installed plugin contributes, pinned to that installed version so an update never changes the results silently. Its bindings and output key are named as the plugin documents them.';
 const termProgramSection = new ProgramSourceSection({
     container: document.querySelector('#termProviderSection'),
-    ids: { code: 'termProviderCode', open: 'termOpenProviderEditor', pluginFields: 'termPluginProviderFields', pluginSelect: 'termPluginProvider', addBinding: 'termAddProviderBinding', bindings: 'termProviderBindings', outputKey: 'termProviderOutputKey' },
-    bindingHint: 'Each binding exposes one state of this node to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. rateGradient'
+    ids: { code: 'termProviderCode', open: 'termOpenProviderEditor', pluginFields: 'termPluginProviderFields', pluginSelect: 'termPluginProvider', outputKey: 'termProviderOutputKey' },
+    pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. rateGradient'
 });
 const edgeProgramSection = new ProgramSourceSection({
     container: document.querySelector('#editEdgeProviderSection'),
-    ids: { code: 'editEdgeProviderCode', open: 'editOpenProviderEditor', pluginFields: 'editEdgePluginProviderFields', pluginSelect: 'editEdgePluginProvider', addBinding: 'editAddProviderBinding', bindings: 'editEdgeProviderBindings', outputKey: 'editProviderOutputKey' },
-    bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. targetTemperatureGradient'
+    ids: { code: 'editEdgeProviderCode', open: 'editOpenProviderEditor', pluginFields: 'editEdgePluginProviderFields', pluginSelect: 'editEdgePluginProvider', outputKey: 'editProviderOutputKey' },
+    pluginHint: relationshipPluginHint, outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
 const groupProgramSection = new ProgramSourceSection({
-    container: document.querySelector('#groupProviderSection'), bindingsClass: 'builderRows',
+    container: document.querySelector('#groupProviderSection'), bindingsClass: 'builderRows', bindingRows: true,
     ids: { code: 'groupProviderCode', open: 'groupOpenProviderEditor', pluginFields: 'groupPluginProviderFields', pluginSelect: 'groupPluginProvider', addBinding: 'groupAddProviderBinding', bindings: 'groupProviderBindingRows', outputKey: 'groupProviderOutputKey' },
     bindingHint: 'Each binding exposes one state or parameter to the provider under a stable key.', pluginHint: 'A relationship provider an installed plugin contributes, pinned to that installed version, used by every relationship of the group.', outputPlaceholder: 'e.g. targetTemperatureGradient'
 });
 // A node's own program (its Program section): the same summary and Edit program.
-const nodeProgramSummary = new ProgramSummaryView({ container: document.querySelector('#nodeProgramSummary'), openId: 'editNodeProgramOpenEditor' });
+const nodeProgramSummary = new ProgramSummaryView({ container: document.querySelector('#nodeProgramSummary'), openId: 'editNodeProgramOpenEditor', bindsInPorts: true });
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -3266,7 +3267,10 @@ function renderNodeProgram(node) {
     const isFmu = kind === 'fmi';
     $('#nodeProgramSourceFields').hidden = isFmu;
     $('#nodeProgramFmuFields').hidden = !isFmu;
+    // A program's inputs are bound in the code editor's Ports; an installed FMU's, which has no source, here.
     $('#editAddNodeProgramInput').hidden = isFmu;
+    $('#editAddNodeProgramInput').closest('h3').hidden = !isFmu;
+    $('#nodeProgramInputs').hidden = !isFmu;
     $('#editAddNodeProgramOutput').hidden = isFmu;
     if (!isFmu) nodeProgramSummary.render({ kind, source: implementation.source ?? '', ...nodeProgramBindingsSummary(node), record: programRecord(kind, implementation.source ?? '') });
     if (isFmu) renderNodeProgramFmus(node);
@@ -3554,49 +3558,6 @@ function sourceTermReferenceValue(reference) {
     return reference.kind === 'parameter' ? `parameter:${reference.parameterId}` : `state:${reference.stateId}`;
 }
 
-function sourceTermReferenceToBinding(key, reference) {
-    return reference.kind === 'parameter'
-        ? { key, kind: 'parameter', parameterId: reference.parameterId }
-        : { key, kind: 'state', stateId: reference.stateId };
-}
-
-function renderSourceTermProviderBindingRows(node, term) {
-    const definition = node.userData.definition;
-    const container = $('#termProviderBindings');
-    container.replaceChildren();
-    const bindings = term.implementation?.bindings ?? [];
-    const candidates = sourceTermExpressionBindingCandidates(definition, term);
-    if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
-    bindings.forEach((binding, index) => {
-        const row = document.createElement('div');
-        row.className = 'providerBindingRow';
-        row.innerHTML = `
-            <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(binding.key ?? '')}"></label>
-            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
-            <button type="button" title="Remove binding">×</button>
-        `;
-        const select = $('[data-field="reference"]', row);
-        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, sourceTermReferenceValue(candidate))));
-        select.value = sourceTermReferenceValue(binding);
-        $('[data-field="key"]', row).addEventListener('change', (event) => {
-            changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
-                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
-            }));
-        });
-        select.addEventListener('change', (event) => {
-            const candidate = candidates.find((option) => sourceTermReferenceValue(option) === event.target.value);
-            if (!candidate) return;
-            changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
-                implementation.bindings[index] = sourceTermReferenceToBinding(implementation.bindings[index].key, candidate);
-            }));
-        });
-        $(':scope > button', row).addEventListener('click', () => changeSourceTermModel(node, term.id, (snapshotTerm) => changeProgramBindings(snapshotTerm.implementation, node.userData.definition.title, (implementation) => {
-            implementation.bindings.splice(index, 1);
-        })));
-        container.appendChild(row);
-    });
-}
-
 // A term's parameter rows, in `container`, with their errors in `error`: the node's Parameters tab draws one group per own
 // part with them, the source term card (for a program part) its own.
 function renderSourceTermParameters(node, term, container = $('#termParameters'), error = $('#termParameterError')) {
@@ -3803,7 +3764,6 @@ function renderSourceTermEditor(node, term) {
         termProgramSection.show({ kind: term.implementation.kind, source: term.implementation.source ?? '', ...sourceTermProgramBindingsSummary(node, term),
             record: programRecord(term.implementation.kind, term.implementation.source ?? '') });
         termProgramSection.outputKey = term.implementation.output?.key;
-        renderSourceTermProviderBindingRows(node, term);
     }
 }
 
@@ -4424,7 +4384,6 @@ function renderEdgeEditor(definition) {
         edgeProgramSection.show({ kind: definition.implementation.kind, source: definition.implementation.source ?? '', ...edgeProgramBindingsSummary(definition),
             record: programRecord(definition.implementation.kind, definition.implementation.source ?? '') });
         edgeProgramSection.outputKey = definition.implementation.output?.key;
-        renderProviderBindingRows(definition);
         renderProgramOutputRows(definition);
     }
     renderRelationshipRows(definition);
@@ -4800,48 +4759,6 @@ function providerBindingToReference(binding) {
         stateId: binding.stateId,
         parameterId: binding.parameterId
     };
-}
-
-function referenceToProviderBinding(key, reference) {
-    return reference.kind === 'parameter'
-        ? { key, kind: 'parameter', parameterId: reference.parameterId }
-        : { key, kind: 'state', role: reference.role, nodeId: reference.nodeId, stateId: reference.stateId };
-}
-
-function renderProviderBindingRows(definition) {
-    const container = $('#editEdgeProviderBindings');
-    container.replaceChildren();
-    const bindings = definition.implementation?.bindings ?? [];
-    const candidates = providerReferenceCandidates(definition);
-    if (!bindings.length) container.innerHTML = '<p class="emptyEditorState">No bindings defined</p>';
-    bindings.forEach((binding, index) => {
-        const row = document.createElement('div');
-        row.className = 'providerBindingRow';
-        row.innerHTML = `
-            <label class="parameterField"><span>Key</span><input data-field="key" value="${escapeHtml(binding.key ?? '')}"></label>
-            <label class="parameterField"><span>Reference</span><select data-field="reference"></select></label>
-            <button type="button" title="Remove binding">×</button>
-        `;
-        const select = $('[data-field="reference"]', row);
-        select.replaceChildren(...candidates.map((candidate) => new Option(candidate.label, providerReferenceValue(candidate))));
-        select.value = providerReferenceValue(providerBindingToReference(binding));
-        $('[data-field="key"]', row).addEventListener('change', (event) => {
-            changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
-                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
-            }));
-        });
-        select.addEventListener('change', (event) => {
-            const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
-            if (!candidate) return;
-            changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
-                implementation.bindings[index] = referenceToProviderBinding(implementation.bindings[index].key, candidate);
-            }));
-        });
-        $(':scope > button', row).addEventListener('click', () => changeEdgeModel(definition, (snapshot) => changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => {
-            implementation.bindings.splice(index, 1);
-        })));
-        container.appendChild(row);
-    });
 }
 
 // A group-member edge is never edited on its own -- no override without detaching, per
@@ -14420,15 +14337,82 @@ function programPortContext(target, found, checkInputs = {}) {
         reads = nodeProgramBindingsSummary(nodeObjects.get(target.nodeId)).reads;
         outputs = (implementation.outputs ?? []).map((entry) => output(entry.key, entry.stateId));
     }
+    const choices = programBindingCandidates(target);
     const bindings = (implementation.bindings ?? []).map((binding, index) => ({
-        key: binding.key ?? '', label: reads[index]?.label ?? '', unit: bindingUnit(binding), value: checkInputs[binding.key] ?? null
+        key: binding.key ?? '', label: reads[index]?.label ?? '', unit: bindingUnit(binding), value: checkInputs[binding.key] ?? null,
+        choice: choices.find((choice) => choice.matches(binding))?.value ?? null
     }));
-    return { bindings, outputs };
+    return { bindings, outputs, candidates: choices.map(({ value, label, binding }) => ({ value, label, unit: bindingUnit(binding) })) };
 }
+
+// What a program's input can be bound to, as the card's binding rows offered it (time is not one: a program has its own clock), each
+// with the binding it writes (without its key) and a test of whether a binding is this one.
+function programBindingCandidates(target) {
+    const withoutKey = ({ key, ...rest }) => rest;
+    if (target.type === 'editor') {
+        const relationship = model.relationships.find((candidate) => candidate.id === target.relationshipId);
+        if (!relationship) return [];
+        return providerReferenceCandidates(relationship).map((candidate) => ({
+            value: providerReferenceValue(candidate), label: candidate.label, binding: withoutKey(referenceToProviderBinding('', candidate)),
+            matches: (binding) => providerReferenceValue(providerBindingToReference(binding)) === providerReferenceValue(candidate)
+        }));
+    }
+    if (target.type === 'sourceTerm') {
+        const node = nodeObjects.get(target.nodeId);
+        const term = node?.userData.definition.sourceTerms.find((candidate) => candidate.id === target.termId);
+        if (!term) return [];
+        return sourceTermExpressionBindingCandidates(node.userData.definition, term).filter((candidate) => candidate.kind !== 'time').map((candidate) => ({
+            value: sourceTermReferenceValue(candidate), label: candidate.label, binding: withoutKey(sourceTermReferenceToBinding('', candidate)),
+            matches: (binding) => sourceTermReferenceValue(binding) === sourceTermReferenceValue(candidate)
+        }));
+    }
+    if (target.type === 'node') {
+        const node = nodeObjects.get(target.nodeId);
+        if (!node) return [];
+        const { definition, candidates } = nodeProgramContext(node);
+        return candidates.map((candidate) => ({
+            value: candidate.value, label: candidate.label, binding: candidate.binding,
+            matches: (binding) => nodeProgramInputValue(binding, definition) === candidate.value
+        }));
+    }
+    return [];
+}
+
+// Binding a port from the code editor's Ports panel: the input `key` bound to the candidate `value`, or to nothing (null), one undoable
+// change, written as the card's rows wrote it. Answers with the program's ports as they are now.
+function bindProgramPort(target, { key, value }) {
+    if (activeResult) return { applied: false, error: 'Results are locked — close them to bind a port.' };
+    const found = programOfTarget(target);
+    if (!found || typeof key !== 'string' || !key) return { applied: false, error: 'This program no longer exists.' };
+    let binding = null;
+    if (value !== null && value !== undefined) {
+        binding = programBindingCandidates(target).find((candidate) => candidate.value === value)?.binding ?? null;
+        if (!binding) return { applied: false, error: 'That is no longer in the model.' };
+    }
+    const rebind = (implementation) => { implementation.bindings = bindPort(implementation.bindings, key, binding); };
+    if (target.type === 'editor') {
+        const relationship = model.relationships.find((candidate) => candidate.id === target.relationshipId);
+        changeEdgeModel(relationship, (snapshot) => rebind(snapshot.implementation));
+    } else if (target.type === 'sourceTerm') {
+        changeSourceTermModel(nodeObjects.get(target.nodeId), target.termId, (term) => rebind(term.implementation));
+    } else if (target.type === 'node') {
+        changeNodeModel(nodeObjects.get(target.nodeId), (snapshot) => rebind(snapshot.implementation));
+    } else {
+        return { applied: false, error: 'This program\'s inputs are bound on its card.' };
+    }
+    const now = programOfTarget(target);
+    const checkInputs = programEditorContext(now.implementation, now.parameters).checkInputs;
+    return { applied: true, checkInputs, ports: programPortContext(target, now, checkInputs) };
+}
+// What the code editor asks of the project besides Apply.
+window.providerEditor.onRequest?.(({ action, target, payload }) => {
+    if (action === 'bind') return bindProgramPort(target, payload ?? {});
+    return { applied: false, error: `Unknown request: ${action}` };
+});
 
 // Opens a program in the code editor, from any entry point: Edit program, a preview line (`line`), "set by program ›" or a program chip
 // (`port`), the card's status or the Run dialog (`convert`), or Write program (`write`, starting from its template).
-function openProgramEditor(target, { line, port, convert = false, write = false } = {}) {
+function openProgramEditor(target, { line, port, convert = false, write = false, showPorts = false } = {}) {
     const found = programOfTarget(target);
     if (!found) return;
     providerEditTarget = target;
@@ -14446,6 +14430,7 @@ function openProgramEditor(target, { line, port, convert = false, write = false 
         ...(write && !source.trim() ? { startWith: template } : {}),
         ...(line ? { line } : {}),
         ...(port ? { port } : {}),
+        ...(showPorts ? { showPorts: true } : {}),
         convert
     });
 }
@@ -14455,7 +14440,9 @@ window.__debugProgramCards = {
     edge: () => edgeProgramSection.source,
     term: () => termProgramSection.source,
     group: () => groupProgramSection.source,
-    node: () => nodeProgramSummary.details?.source ?? ''
+    node: () => nodeProgramSummary.details?.source ?? '',
+    // What the selected relationship's program inputs can be bound to in Ports, by label.
+    edgeChoices: () => (selectedRelationship ? programBindingCandidates({ type: 'editor', relationshipId: selectedRelationship.id }).map((candidate) => candidate.label) : [])
 };
 
 // "Convert to version 2 ›" beside a program the Run dialog names as held (docs/proposals/programSdkV2.md, Migration): its code editor,
@@ -14519,15 +14506,6 @@ edgeProgramSection.onOutputKeyChange((event) => {
         implementation.output = { ...implementation.output, key: event.target.value.trim() };
     }));
 });
-edgeProgramSection.onAddBinding(() => {
-    if (!selectedRelationship) return;
-    changeEdgeModel(selectedRelationship, (snapshot) => {
-        const candidates = providerReferenceCandidates(snapshot);
-        if (!candidates.length) return;
-        changeProgramBindings(snapshot.implementation, snapshot.title, (implementation) => implementation.bindings.push(
-            referenceToProviderBinding(`input${implementation.bindings.length + 1}`, candidates[0])));
-    });
-});
 $('#termOutputState').addEventListener('change', (event) => {
     if (!selectedSourceTermNodeId) return;
     const node = nodeObjects.get(selectedSourceTermNodeId);
@@ -14559,16 +14537,6 @@ $('#termImplementationKind').addEventListener('change', (event) => {
         const bindings = term.implementation?.bindings ?? [];
         const output = term.implementation?.output ?? { key: 'output', stateId };
         term.implementation = pluginOrProgram(kind, term.implementation, bindings, output, node.userData.definition.title);
-    });
-});
-termProgramSection.onAddBinding(() => {
-    if (!selectedSourceTermNodeId) return;
-    const node = nodeObjects.get(selectedSourceTermNodeId);
-    changeSourceTermModel(node, selectedSourceTermId, (term) => {
-        const candidates = sourceTermBindingCandidates(node.userData.definition);
-        if (!candidates.length) return;
-        changeProgramBindings(term.implementation, node.userData.definition.title, (implementation) => implementation.bindings.push(
-            sourceTermReferenceToBinding(`input${implementation.bindings.length + 1}`, candidates[0])));
     });
 });
 termProgramSection.onOpenEditor((options) => {
@@ -15659,35 +15627,25 @@ const tour = createTour({
             if (language && $('#editEdgeProgramLanguage').value !== step.kind) setField('#editEdgeProgramLanguage', step.kind, 'change');
         },
         // A program's bindings as the + and each row's key and reference set them.
+        // Each key bound in Ports to the reference the step names, as choosing it there does.
         setProgramBindings: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
-            for (const [index, { key, reference }] of step.bindings.entries()) {
-                if (document.querySelectorAll('#editEdgeProviderBindings .providerBindingRow').length <= index) {
-                    $('#editAddProviderBinding').click();
-                    await waitUntil(() => document.querySelectorAll('#editEdgeProviderBindings .providerBindingRow').length > index, 3000);
-                }
-                const row = document.querySelectorAll('#editEdgeProviderBindings .providerBindingRow')[index];
-                const keyInput = row.querySelector('[data-field="key"]');
-                keyInput.value = key;
-                keyInput.dispatchEvent(new Event('change', { bubbles: true }));
-                await new Promise((resolve) => setTimeout(resolve, 50));
-                const select = document.querySelectorAll('#editEdgeProviderBindings .providerBindingRow')[index].querySelector('[data-field="reference"]');
-                const option = [...select.options].find((candidate) => candidate.textContent === reference);
-                if (option) {
-                    select.value = option.value;
-                    select.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                await new Promise((resolve) => setTimeout(resolve, 50));
+            const target = { type: 'editor', relationshipId: selectedRelationship.id };
+            for (const { key, reference } of step.bindings) {
+                const choice = programBindingCandidates(target).find((candidate) => candidate.label === reference);
+                if (choice) bindProgramPort(target, { key, value: choice.value });
             }
         },
-        // The template written again from the bindings, its placeholder line replaced with the step's, as Edit program and Apply would.
+        // The program written as the step asks, its inputs declared and its line in place, as Edit program and Apply would.
         writeProgram: async (step) => {
             if (!openTutorialRelationship(step.relationship)) return;
             const relationship = selectedRelationship;
             if (!relationship?.implementation) return;
             changeEdgeModel(relationship, (snapshot) => {
                 const { kind, bindings, output } = snapshot.implementation;
-                snapshot.implementation.source = defaultProviderSource(kind, bindings, output?.key, snapshot.title).replace('        return 0.0', step.line);
+                // The template with the step's inputs declared and its line written, as the step asks.
+                const declared = [...(bindings ?? []), { key: 'hot' }, { key: 'cold' }].filter((binding, index, all) => all.findIndex((other) => other.key === binding.key) === index);
+                snapshot.implementation.source = defaultProviderSource(kind, declared, output?.key, snapshot.title).replace('        return 0.0', step.line);
             });
         },
         openReplay: async () => {

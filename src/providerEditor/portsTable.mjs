@@ -7,7 +7,8 @@
 //
 // description: the engine's answer, { inputs, outputs, memory, clock } (null when there is none: a version 1 program, or no engine).
 // context: what the project says of the program's bindings,
-//   bindings: [{ key, label, unit, value }]   each binding of an input; label '' when it reads nothing, unit null when not known
+//   bindings: [{ key, label, unit, value, choice }]   each binding of an input; label '' when it reads nothing, unit null when not
+//                                             known, choice the candidate it is (programBinding.mjs) when the project says
 //   outputs:  [{ key, label, unit, rate }]    where each output goes; rate true for a Rate state (which takes unit/s)
 
 import { inputPortConversion, outputPortConversion } from '../programPortUnits.mjs';
@@ -45,7 +46,7 @@ export function portsTable(description, context = {}) {
     for (const port of description.inputs ?? []) {
         const binding = bindings.find((candidate) => candidate.key === port.key && candidate.label);
         const row = { group: 'input', tag: tags[port.kind] ?? 'IN', key: port.key, unit: port.unit ?? '', bound: binding?.label ?? null,
-            value: binding ? binding.value ?? null : port.default ?? null, line: port.line ?? null, note: '', state: 'ok' };
+            value: binding ? binding.value ?? null : port.default ?? null, line: port.line ?? null, note: '', state: 'ok', choice: binding?.choice ?? null };
         if (binding) {
             Object.assign(row, conversionNote(inputPortConversion(binding.unit ?? '', port.unit ?? '')));
         } else if (port.default === undefined || port.default === null) {
@@ -76,7 +77,7 @@ export function portsTable(description, context = {}) {
     for (const binding of bindings) {
         if (binding.label && !declaredInputs.has(binding.key)) {
             rows.push({ group: 'stale', tag: 'IN', key: binding.key, unit: '', bound: binding.label, value: binding.value ?? null, line: null,
-                note: 'not a port of this program', state: 'stale' });
+                note: 'not a port of this program', state: 'stale', choice: binding.choice ?? null });
         }
     }
     for (const output of outputs) {

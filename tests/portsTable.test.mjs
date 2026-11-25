@@ -30,7 +30,7 @@ test('each port beside what it is bound to, with its value now and the conversio
     });
     assert.equal(described, true);
     const row = (key) => rows.find((candidate) => candidate.key === key);
-    assert.deepEqual(row('measurement'), { group: 'input', tag: 'IN', key: 'measurement', unit: 'K', bound: 'Room · Temperature', value: 20, line: 12, note: '°C → K at the port', state: 'ok' });
+    assert.deepEqual(row('measurement'), { group: 'input', tag: 'IN', key: 'measurement', unit: 'K', bound: 'Room · Temperature', value: 20, line: 12, note: '°C → K at the port', state: 'ok', choice: null });
     assert.equal(row('setpoint').tag, 'PAR');
     assert.equal(row('setpoint').note, '', 'Nothing is converted between equal units.');
     assert.equal(row('kp').state, 'problem', 'An incompatible unit is shown, with the reason.');

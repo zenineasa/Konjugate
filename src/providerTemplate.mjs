@@ -356,7 +356,7 @@ class ${className}(Relationship):
 
     # Each input, bound to a state, a parameter or the time. Give a unit, Input("K"), to have it checked against what it is bound to
     # when the run starts, and converted where it can be.
-${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # No bindings declared yet: add one, and it appears here.'}
+${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # No inputs declared yet: declare one here, as name = Input("unit"), and bind it in the code editor\'s Ports.'}
     ${out.attribute} = ${out.declaration}
 
     def evaluate(self, t, x):
@@ -379,7 +379,7 @@ class ${className} final : public k::Relationship {
 public:
     // Each input, bound to a state, a parameter or the time; the quoted key is what the project file binds. Give a unit,
     // {this, "key", "K"}, to have it checked against what it is bound to when the run starts, and converted where it can be.
-${members.length ? members.join('\n') : '    // No bindings declared yet: add one, and it appears here.'}
+${members.length ? members.join('\n') : '    // No inputs declared yet: declare one here, as k::Input name{this, "name", "unit"};, and bind it in the code editor\'s Ports.'}
     k::Output ${cppMember(output)}{this, "${output}"};
 
     double evaluate(double t, const k::Inputs& x) const override {
@@ -413,7 +413,7 @@ class ${className}(Node):
 
     # Each input, bound to one of this node's states, another node's or a shared parameter. Give a unit, Input("K"), to have it checked
     # against what it is bound to when the run starts, and converted where it can be.
-${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # None declared yet.'}
+${ports.length ? ports.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # No inputs declared yet: declare one here, as name = Input("unit"), and bind it in the code editor\'s Ports.'}
     # Each output: a rate into a Rate state, or the value of an Update state.
 ${outs.length ? outs.map((port) => `    ${port.attribute} = ${port.declaration}`).join('\n') : '    # None declared yet.'}
 
@@ -436,7 +436,7 @@ class ${className} final : public k::Node {
 public:
     // Each input, bound to one of this node's states, another node's or a shared parameter; the quoted key is what the project
     // file binds. Give a unit, {this, "key", "K"}, to have it checked when the run starts, and converted where it can be.
-${inputKeys.length ? inputKeys.map((key) => `    k::Input ${cppMember(key)}{this, "${key}"};`).join('\n') : '    // None declared yet.'}
+${inputKeys.length ? inputKeys.map((key) => `    k::Input ${cppMember(key)}{this, "${key}"};`).join('\n') : '    // No inputs declared yet: declare one here, as k::Input name{this, "name", "unit"};, and bind it in the code editor\'s Ports.'}
     // Each output: a rate into a Rate state, or the value of an Update state.
 ${outputKeys.length ? outputKeys.map((key) => `    k::Output ${cppMember(key)}{this, "${key}"};`).join('\n') : '    // None declared yet.'}
 

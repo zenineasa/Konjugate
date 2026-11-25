@@ -42,7 +42,7 @@ test('the templates say where memory belongs and that a continuous quantity is a
 test('omits undeclared or invalid binding keys and falls back to a generic output name', () => {
     const source = defaultProviderSource('cpp', [{ key: '' }, { key: 'Invalid Key' }], '', '');
     assert.doesNotMatch(source, /Invalid Key/);
-    assert.match(source, /No bindings declared yet/);
+    assert.match(source, /No inputs declared yet: declare one here, as k::Input name\{this, "name", "unit"\};, and bind it in the code editor's Ports\./);
     assert.match(source, /k::Output output\{this, "output"\};/);
     assert.match(source, /class Relationship final/);
 });

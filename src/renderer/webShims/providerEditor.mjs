@@ -21,6 +21,7 @@ let titleElement = null;
 let editorPromise = null;
 const appliedListeners = [];
 const statusListeners = [];
+let requestHandler = null;
 let pendingApply = null;
 
 function savedBounds() {
@@ -120,8 +121,8 @@ async function check(source, kind, inputs) {
 
 // The program's ports as the web engine reads them. A version 2 C++ program cannot run in the web engine, so it is read on the desktop.
 async function describe(source, kind, inputs) {
-    if (kind === 'cpp') return { available: false, reason: 'The ports of a C++ program are read in the desktop app: here, its bindings only.' };
-    if (!window.engine?.describeProgram) return { available: false, reason: 'The ports are read in the desktop app: here, its bindings only.' };
+    if (kind === 'cpp') return { available: false, reason: 'The engine reads a C++ program’s memory and clock in the desktop app.' };
+    if (!window.engine?.describeProgram) return { available: false, reason: 'The engine reads a program’s memory and clock in the desktop app.' };
     return window.engine.describeProgram({ kind, source, inputs: inputs ?? {} });
 }
 
@@ -150,6 +151,9 @@ function ensureEditor() {
                 validate,
                 check,
                 describe,
+                bind: async (key, value, target) => (requestHandler
+                    ? requestHandler({ action: 'bind', target, payload: { key, value } })
+                    : { applied: false, error: 'The project is not listening.' }),
                 apply,
                 close: () => { panel.hidden = true; },
                 setTitle: (text) => { titleElement.textContent = text; panel.setAttribute('aria-label', text); },
@@ -176,6 +180,11 @@ function onApplied(callback) {
     appliedListeners.push(callback);
 }
 
+// What the editor asks of the project besides Apply (binding a port from Ports).
+function onRequest(callback) {
+    requestHandler = callback;
+}
+
 // What lint and Check found, for the card's status line.
 function onStatus(callback) {
     statusListeners.push(callback);
@@ -199,5 +208,6 @@ export default {
     onApplied,
     reportApplied,
     confirmClose,
-    onStatus
+    onStatus,
+    onRequest
 };

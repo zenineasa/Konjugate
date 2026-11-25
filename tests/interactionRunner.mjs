@@ -2470,16 +2470,9 @@ export async function runInteractionTests(driver) {
         await programEditorClosed(editor);
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programPreviewLine code').textContent`), source);
 
-        const bindingCountBefore = await evaluate(window, `document.querySelectorAll('.providerBindingRow').length`);
-        await evaluate(window, `document.querySelector('#editAddProviderBinding').click()`);
-        assert.equal(await evaluate(window, `document.querySelectorAll('.providerBindingRow').length`), bindingCountBefore + 1);
-
-        await evaluate(window, `(() => {
-            const key = document.querySelector('.providerBindingRow:last-child [data-field="key"]');
-            key.value = 'delta';
-            key.dispatchEvent(new Event('change', { bubbles: true }));
-        })()`);
-        assert.equal(await evaluate(window, `document.querySelector('.providerBindingRow:last-child [data-field="key"]').value`), 'delta');
+        // Its inputs are bound in the code editor's Ports, which the card links to; it has no binding rows of its own.
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .providerBindingRow, #editAddProviderBinding')`), null);
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection .programBindLink'), true);
 
         await evaluate(window, `(() => {
             const outputKey = document.querySelector('#editProviderOutputKey');
@@ -2488,7 +2481,7 @@ export async function runInteractionTests(driver) {
         })()`);
         assert.equal(await evaluate(window, `document.querySelector('#editProviderOutputKey').value`), 'gradient');
 
-        // Reset template, in the editor: the program written again from the bindings as they are now.
+        // Reset template, in the editor: the program written again from its bindings and output as they are now.
         editor = await openProgramEditor();
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorTemplate').hidden`), false);
         await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
@@ -2497,7 +2490,6 @@ export async function runInteractionTests(driver) {
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         const regeneratedSource = await evaluate(window, edgeCardSource);
-        assert.match(regeneratedSource, /k::Input delta\{this, "delta"\};/);
         assert.match(regeneratedSource, /k::Output gradient\{this, "gradient"\};/);
 
         // Switch back to Equation so the following equation-editor tests see their expected state.
@@ -2717,6 +2709,82 @@ export async function runInteractionTests(driver) {
         await evaluate(window, writeRelationshipAs('equation'));
     });
 
+    await run('a port is bound from the code editor\'s Ports, the card\'s reads line follows, and the run reads it', async () => {
+        await freshExample('thermalEquilibrium');
+        await evaluate(window, `(() => { const edge = window.__debugProject.serialize().edges.find((item) => item.name === 'Conduction'); document.querySelector('.relationshipRow[data-relationship="' + edge.id + '"]').click(); })()`);
+        await waitFor(window, `!document.querySelector('#edgeEditor').classList.contains('hidden') && document.querySelector('#editEdgeName').value === 'Conduction'`, 'Conduction did not open.');
+        await evaluate(window, writeRelationshipAs('python'));
+        // The card binds nothing itself any more: its inputs are bound in Ports, which it links to.
+        assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .providerBindingRow, #editAddProviderBinding')`), null);
+        assert.equal(await isRenderedVisible(window, '#editEdgeProviderSection .programBindLink'), true);
+        const editor = await openProgramEditor('#editEdgeProviderSection .programBindLink');
+        assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), false, 'Bind its inputs in Ports did not show Ports.');
+        await setEditorSource(editor, [
+            'from konjugate.v2 import Input, Output, Relationship',
+            '',
+            '',
+            'class Conduction(Relationship):',
+            '    hot = Input("K")',
+            '    cold = Input("K")',
+            '    output = Output()',
+            '',
+            '    def evaluate(self, t, x):',
+            '        return 0.05 * (x.hot - x.cold)',
+            ''
+        ].join('\n'));
+        await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'The program was not applied.');
+        const row = (key) => `document.querySelector('#programEditorPortsList .portRow[data-port="${key}"]')`;
+        await waitFor(editor, `Boolean(${row('cold')}?.querySelector('.portBindButton.unbound'))`, 'Ports did not offer to bind cold.', 90000);
+        assert.equal(await evaluate(editor, `${row('hot')}.querySelector('.portBindButton').textContent`), 'not bound');
+        const bind = async (key, label) => {
+            await evaluate(editor, `${row(key)}.querySelector('.portBindButton').click()`);
+            await waitFor(editor, `Boolean(${row(key)}?.querySelector('.portPicker'))`, `The choices for ${key} did not open.`);
+            const choices = await evaluate(editor, `[...${row(key)}.querySelectorAll('.portChoice')].map((choice) => ({ label: choice.querySelector('.portChoiceLabel').textContent, enabled: !choice.disabled }))`);
+            const index = choices.findIndex((choice) => choice.label.startsWith(label));
+            assert.ok(index >= 0, `${label} is not among the choices: ${JSON.stringify(choices)}`);
+            assert.equal(choices[index].enabled, true);
+            // What converts to the port's unit comes first; what does not is listed but not offered.
+            const firstDisabled = choices.findIndex((choice) => !choice.enabled);
+            if (firstDisabled >= 0) assert.ok(choices.slice(firstDisabled).every((choice) => !choice.enabled), 'An incompatible choice came before a compatible one.');
+            await evaluate(editor, `${row(key)}.querySelectorAll('.portChoice')[${index}].click()`);
+            await waitFor(editor, `${row(key)}?.querySelector('.portBindButton')?.textContent.startsWith(${JSON.stringify(label)})`, `${key} was not bound to ${label}.`);
+        };
+        await bind('hot', 'source.temperature');
+        await bind('cold', 'target.temperature');
+        // Written as the card's rows wrote it.
+        const conduction = () => evaluate(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Conduction').implementation`);
+        assert.deepEqual((await conduction()).bindings.map(({ key, kind, role }) => ({ key, kind, role })),
+            [{ key: 'hot', kind: 'state', role: 'source' }, { key: 'cold', kind: 'state', role: 'target' }]);
+        assert.equal(await evaluate(editor, `${row('hot')}.querySelector('.portValue').textContent`), '350', 'Its value now follows the binding.');
+        // The card's reads line follows.
+        await waitFor(window, `document.querySelector('#editEdgeProviderSection .programReads .programLineItems')?.textContent === 'source.temperature, target.temperature'`,
+            'The card\'s reads line did not follow the binding.');
+        // Unbinding and binding again are each one undoable change.
+        await evaluate(editor, `${row('cold')}.querySelector('.portBindButton').click()`);
+        await evaluate(editor, `${row('cold')}.querySelector('.portChoice[data-choice=""]').click()`);
+        await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Conduction').implementation.bindings.length === 1`, 'Not bound did not unbind.');
+        await waitFor(editor, `Boolean(${row('cold')}?.querySelector('.portBindButton.unbound'))`, 'Ports did not show cold unbound.');
+        await bind('cold', 'target.temperature');
+        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(editor);
+
+        // The run reads what Ports bound: the equation's answer, the cold body at 319.93 K after 60 s.
+        await openRunDialog(window);
+        await evaluate(window, `(() => {
+            const box = document.querySelector('#runOnlineMode'); box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true }));
+            const field = document.querySelector('#runTargetTime'); field.value = '60'; field.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#startRun').click();
+        })()`);
+        await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`,
+            `The run did not finish. ${await evaluate(window, `document.querySelector('#runLaunchError').textContent`)}`, 120000);
+        const cold = await evaluate(window, `(() => {
+            const id = window.__debugProject.serialize().nodes.find((node) => node.name === 'Cold body').id;
+            return Number.parseFloat(document.querySelector('.node-label-container[data-node="' + id + '"] dd').textContent);
+        })()`);
+        assert.ok(Math.abs(cold - 319.93) < 0.01, `The cold body ended at ${cold} K, not 319.93 K.`);
+    });
+
     await run('the code editor asks before closing with unsaved changes, and Apply reaches the card', async () => {
         await freshRelationshipEditor();
         await evaluate(window, writeRelationshipAs('python'));
@@ -2878,23 +2946,30 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#termOpenProviderEditor').textContent`), 'Write program');
 
         await evaluate(window, `(() => {
-            document.querySelector('#termAddProviderBinding').click();
-        })()`);
-        assert.equal(await evaluate(window, `[...document.querySelectorAll('#termProviderBindings option')].some((option) => option.textContent === 'sourceGain')`), true, 'The program\'s own parameter is not offered to its bindings.');
-        await evaluate(window, `(() => {
-            const key = document.querySelector('#termProviderBindings .providerBindingRow [data-field="key"]');
-            key.value = 'temperature';
-            key.dispatchEvent(new Event('change', { bubbles: true }));
             const outputKey = document.querySelector('#termProviderOutputKey');
             outputKey.value = 'heatRate';
             outputKey.dispatchEvent(new Event('change', { bubbles: true }));
         })()`);
 
-        // Written in the editor from its template, which names the bindings as they are, and applied.
+        // Write program: the editor on its template, naming its output; an input declared, applied, and bound in Ports.
         const editor = await openProgramEditor('#termOpenProviderEditor');
-        await evaluate(editor, `document.querySelector('#programEditorTemplate').click()`);
+        await waitFor(editor, `window.__providerEditorView.state.doc.toString().includes('heatRate')`, 'Write program did not start from the template.');
+        await evaluate(editor, `(() => {
+            const view = window.__providerEditorView;
+            const text = view.state.doc.toString();
+            const line = text.split('\\n').find((candidate) => candidate.includes('No inputs declared yet'));
+            view.dispatch({ changes: { from: 0, to: text.length, insert: text.replace(line, '    k::Input temperature{this, "temperature"};') } });
+        })()`);
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
-        await waitFor(window, `window.__debugProgramCards.term().includes('heatRate')`, 'The template did not reach the card.');
+        await waitFor(window, `window.__debugProgramCards.term().includes('k::Input temperature')`, 'The program did not reach the card.');
+        const temperature = `document.querySelector('#programEditorPortsList .portRow[data-port="temperature"]')`;
+        await waitFor(editor, `Boolean(${temperature}?.querySelector('.portBindButton'))`, 'Ports did not offer to bind temperature.', 90000);
+        await evaluate(editor, `${temperature}.querySelector('.portBindButton').click()`);
+        const choices = await evaluate(editor, `[...${temperature}.querySelectorAll('.portChoice .portChoiceLabel')].map((label) => label.textContent)`);
+        assert.ok(choices.includes('sourceGain'), `The program's own parameter is not offered to its inputs: ${choices.join(', ')}`);
+        await evaluate(editor, `[...${temperature}.querySelectorAll('.portChoice')].find((choice) => choice.querySelector('.portChoiceLabel').textContent === 'sourceGain').click()`);
+        await waitFor(window, `JSON.stringify(window.__debugProject.serialize().nodes.find((node) => node.name === 'Enclosed air').sourceTerms.find((term) => term.id === 9001).implementation.bindings) === ${JSON.stringify(JSON.stringify([{ key: 'temperature', kind: 'parameter', parameterId: 9002 }]))}`,
+            'Binding from Ports did not write the part\'s binding.');
         await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
         await programEditorClosed(editor);
         const regenerated = await evaluate(window, `window.__debugProgramCards.term()`);
@@ -5909,11 +5984,10 @@ export async function runInteractionTests(driver) {
         await waitFor(opened, `document.querySelector('#validationSummary').dataset.validationSource === 'engine' && !document.querySelector('#validationSummary').classList.contains('error')`,
             'The engine must accept a cases expression using t.');
 
-        // Providers get time from their evaluation context, so t is not offered as a provider binding.
+        // Providers get time from their evaluation context, so t is not offered to bind a program's input to in Ports.
         await evaluate(opened, writeRelationshipAs('cpp'));
-        await evaluate(opened, `document.querySelector('#editAddProviderBinding').click()`);
-        const referenceOptions = await evaluate(opened, `[...document.querySelectorAll('#edgeEditor .providerBindingRow [data-field="reference"] option')].map((option) => option.textContent)`);
-        assert.ok(referenceOptions.length > 0, 'The provider binding row must list references.');
+        const referenceOptions = await evaluate(opened, `window.__debugProgramCards.edgeChoices()`);
+        assert.ok(referenceOptions.length > 0, 'Ports must offer references to bind to.');
         assert.ok(!referenceOptions.some((label) => label.includes('time')), `Provider bindings must not offer t (got ${referenceOptions.join(', ')}).`);
         await evaluate(opened, writeRelationshipAs('equation'));
         await waitFor(opened, `!document.querySelector('#editEdgeMathField').hidden || !document.querySelector('#editEdgeEquation').hidden`, 'The edge editor did not return to equation mode.');
@@ -10145,14 +10219,30 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#nodeProgramFields').hidden`, 'The program fields did not open.');
         assert.match((await program()).source, /class Mass\(Node\)/, 'A new program starts from a template.');
         assert.match(await evaluate(window, `document.querySelector('#nodeProgramError').textContent`), /Add an output/);
-        // An input reading another node's state, one reading a shared parameter, and an output setting a value.
-        await evaluate(window, `document.querySelector('#editAddNodeProgramInput').click()`);
-        await select(`document.querySelector('#nodeProgramInputs .nodeProgramRow select')`, 'state:4:6');
-        await evaluate(window, `document.querySelector('#editAddNodeProgramInput').click()`);
-        await select(`document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')[1].querySelector('select')`, 'shared:100');
-        await typeInto(`document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')[1].querySelector('[data-field="key"]')`, 'setpoint');
+        // An output setting a value; its inputs are bound in the code editor's Ports, not on the card.
+        assert.equal(await isRenderedVisible(window, '#nodeProgramInputs'), false, 'A program\'s inputs have rows on the card.');
         await evaluate(window, `document.querySelector('#editAddNodeProgramOutput').click()`);
         await evaluate(window, `(() => { const box = document.querySelector('#nodeProgramOutputs [data-field="setsValue"]'); box.checked = true; box.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        // An input reading another node's state, and one reading a shared parameter: declared in the code, bound in Ports.
+        const portsEditor = await openProgramEditor('#nodeProgramSummary .programBindLink');
+        await evaluate(portsEditor, `(() => {
+            const view = window.__providerEditorView;
+            const text = view.state.doc.toString();
+            const line = text.split('\\n').find((candidate) => candidate.includes('No inputs declared yet'));
+            view.dispatch({ changes: { from: 0, to: text.length, insert: text.replace(line, '    input = Input()\\n    setpoint = Input()') } });
+        })()`);
+        await evaluate(portsEditor, `document.querySelector('#programEditorApply').click()`);
+        await waitFor(portsEditor, `document.querySelector('#programEditorApply').disabled`, 'The inputs were not applied.');
+        for (const [key, choice] of [['input', 'state:4:6'], ['setpoint', 'shared:100']]) {
+            const port = `document.querySelector('#programEditorPortsList .portRow[data-port="${key}"]')`;
+            await waitFor(portsEditor, `Boolean(${port}?.querySelector('.portBindButton'))`, `Ports did not offer to bind ${key}.`, 90000);
+            await evaluate(portsEditor, `${port}.querySelector('.portBindButton').click()`);
+            await waitFor(portsEditor, `Boolean(${port}?.querySelector('.portChoice[data-choice="${choice}"]'))`, `${choice} was not offered for ${key}.`);
+            await evaluate(portsEditor, `${port}.querySelector('.portChoice[data-choice="${choice}"]').click()`);
+            await waitFor(portsEditor, `!${port}?.querySelector('.portBindButton')?.classList.contains('unbound')`, `${key} was not bound.`);
+        }
+        await evaluate(portsEditor, `document.querySelector('#programEditorCancel').click()`);
+        await programEditorClosed(portsEditor);
         let implementation = await program();
         assert.deepEqual(implementation.bindings, [{ key: 'input', kind: 'state', nodeId: 4, stateId: 6 }, { key: 'setpoint', kind: 'parameter', sharedParameterId: 100 }]);
         assert.deepEqual(implementation.outputs, [{ key: 'output', stateId: 2, setsValue: true }]);

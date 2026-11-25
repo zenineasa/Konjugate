@@ -14,6 +14,8 @@
 //   dirtyChanged(dirty)           → optional: told whenever there come to be, or stop being, unsaved changes
 //   describe(source, kind, inputs) → optional: the engine's description of a version 2 program (describeProgram: its ports, memory and
 //                                    clock with their lines), or { available: false, reason } where it cannot be read
+//   bind(key, value, target)      → optional: binds the input `key` to the candidate `value` (null: to nothing) in the project, and
+//                                    answers { applied, error?, ports, checkInputs } with the program's bindings as they are now
 //   reportStatus(status)          → optional: what lint and Check found on a source, { kind, source, problems: [{ line, message }],
 //                                    checkPassed }, for the card's status line
 //
@@ -30,6 +32,8 @@ import {
 import { convertProgramToVersion2, olderFormatNotice } from '../programConversion.mjs';
 import { programSourceVersion } from '../providerTemplate.mjs';
 import { formatPortValue, portsTable } from './portsTable.mjs';
+import { portBindingChoices } from '../programBinding.mjs';
+import { sourcePorts } from './sourcePorts.mjs';
 import { lintHash } from '../lintScheduler.mjs';
 import {
     confirmLeave, createEditorSession, formatLabel, leaveQuestion, portDeclarationLine, problemCountText, programEditorTitle, sameTarget
@@ -202,6 +206,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     let selectedPort = null;
     let revealPortOnDescription = false;
     let describeSequence = 0;
+    let pickerPort = null;
+    let bindingNote = '';
     let describeTimer = null;
     const describeCache = new Map();
     const side = $('#programEditorSide');
@@ -237,11 +243,13 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
     const sideShown = () => context.program;
 
     function renderPorts() {
-        const shown = description ?? (portsStale ? lastGoodDescription : null);
+        const shown = description ?? (portsStale ? lastGoodDescription ?? sourcePorts(kind, session.source) : null);
         const { rows } = portsTable(shown, portContext);
         const note = $('#programEditorPortsNote');
-        note.hidden = !portsNote;
-        note.textContent = portsNote;
+        const noteText = [bindingNote, portsNote].filter(Boolean).join(' ');
+        note.hidden = !noteText;
+        note.textContent = noteText;
+        const canBind = Boolean(host.bind) && Array.isArray(portContext.candidates);
         const list = $('#programEditorPortsList');
         list.classList.toggle('stale', Boolean(portsStale && shown));
         list.replaceChildren(...rows.map((row) => {
@@ -263,21 +271,88 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
             item.append(head);
             const boundText = row.group === 'output' ? (row.bound ? `→ ${row.bound}${row.part ? ` · ${row.part}` : ''}` : '') : (row.bound ?? '');
             const value = formatPortValue(row.value);
-            if (boundText || value) {
+            const bindable = canBind && row.group === 'input';
+            if (boundText || value || bindable) {
                 const detail = document.createElement('div');
                 detail.className = 'portDetail';
-                detail.append(Object.assign(document.createElement('span'), { className: 'portBound', textContent: boundText }),
-                    Object.assign(document.createElement('span'), { className: 'portValue', textContent: value }));
+                // An input's binding is chosen here: its "bound to" opens the choices.
+                const bound = bindable
+                    ? Object.assign(document.createElement('button'), { type: 'button', className: `portBound portBindButton${row.bound ? '' : ' unbound'}${!row.bound && row.state === 'problem' ? ' missing' : ''}`,
+                        textContent: row.bound ?? 'not bound', title: `Choose what ${row.key} reads` })
+                    : Object.assign(document.createElement('span'), { className: 'portBound', textContent: boundText });
+                if (bindable) { bound.dataset.bindPort = row.key; bound.setAttribute('aria-expanded', String(pickerPort === row.key)); }
+                detail.append(bound, Object.assign(document.createElement('span'), { className: 'portValue', textContent: value }));
                 item.append(detail);
             }
             if (row.note) item.append(Object.assign(document.createElement('div'), { className: 'portNote', textContent: row.note }));
+            if (canBind && row.group === 'stale' && row.tag === 'IN') {
+                const remove = Object.assign(document.createElement('button'), { type: 'button', className: 'portUnbindButton linkButton', textContent: 'Remove this binding' });
+                remove.dataset.unbindPort = row.key;
+                item.append(remove);
+            }
+            if (bindable && pickerPort === row.key) item.append(portPicker(row));
             return item;
         }));
         if (!rows.length && !portsNote) list.append(Object.assign(document.createElement('p'), { className: 'portsEmpty', textContent: 'The program declares no ports yet.' }));
         list.querySelector('.portRow.selected')?.scrollIntoView({ block: 'nearest' });
     }
-    // A click on a port goes to the line that declares it.
+    // The choices for an input: what converts to its unit first, what does not listed but not offered (with the reason), and, when it is
+    // bound, Not bound.
+    function portPicker(row) {
+        const picker = document.createElement('div');
+        picker.className = 'portPicker';
+        picker.setAttribute('role', 'listbox');
+        picker.setAttribute('aria-label', `What ${row.key} reads`);
+        const option = (value, label, note, { enabled = true, current = false } = {}) => {
+            const button = Object.assign(document.createElement('button'), { type: 'button', className: `portChoice${current ? ' current' : ''}`, disabled: !enabled });
+            button.dataset.choice = value;
+            button.setAttribute('role', 'option');
+            button.setAttribute('aria-selected', String(current));
+            button.append(Object.assign(document.createElement('span'), { className: 'portChoiceLabel', textContent: label }));
+            if (note) button.append(Object.assign(document.createElement('span'), { className: 'portChoiceNote', textContent: note }));
+            if (!enabled) button.title = note;
+            return button;
+        };
+        const choices = portBindingChoices(row.unit, portContext.candidates);
+        if (row.bound) picker.append(option('', 'Not bound', 'reads nothing'));
+        picker.append(...choices.map((choice) => option(choice.value, `${choice.label}${choice.unit ? ` · ${choice.unit}` : ''}`, choice.note,
+            { enabled: choice.compatible, current: choice.value === row.choice })));
+        if (!choices.length) picker.append(Object.assign(document.createElement('p'), { className: 'portsEmpty', textContent: 'Nothing in the model to bind it to.' }));
+        return picker;
+    }
+    async function bindPort(key, value) {
+        pickerPort = null;
+        bindingNote = 'Binding…';
+        renderPorts();
+        let answer;
+        try { answer = await host.bind(key, value, target); } catch (error) { answer = { applied: false, error: error?.message ?? String(error) }; }
+        if (answer?.applied) {
+            portContext = { bindings: answer.ports?.bindings ?? [], outputs: answer.ports?.outputs ?? [], candidates: answer.ports?.candidates ?? [] };
+            if (answer.checkInputs) context = { ...context, checkInputs: answer.checkInputs };
+            bindingNote = '';
+        } else {
+            bindingNote = `Not bound: ${answer?.error ?? 'the project did not take it.'}`;
+        }
+        renderPorts();
+    }
+
+    // A click on a port goes to the line that declares it; its "bound to" opens its choices.
     $('#programEditorPortsList').addEventListener('click', (event) => {
+        const choice = event.target.closest('.portChoice');
+        if (choice) {
+            const key = choice.closest('.portRow').dataset.port;
+            bindPort(key, choice.dataset.choice || null);
+            return;
+        }
+        const bindButton = event.target.closest('.portBindButton');
+        if (bindButton) {
+            pickerPort = pickerPort === bindButton.dataset.bindPort ? null : bindButton.dataset.bindPort;
+            renderPorts();
+            return;
+        }
+        const unbind = event.target.closest('.portUnbindButton');
+        if (unbind) { bindPort(unbind.dataset.unbindPort, null); return; }
+        if (event.target.closest('.portPicker')) return;
         const row = event.target.closest('.portRow');
         if (!row) return;
         selectedPort = row.dataset.port;
@@ -308,7 +383,8 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         const cacheKey = `${kind}|${lintHash(source)}|${lintHash(JSON.stringify(inputs))}`;
         let answer = describeCache.get(cacheKey);
         if (!answer) {
-            if (!lastGoodDescription) { portsNote = 'Reading the program’s ports…'; renderPorts(); }
+            // Until the engine answers, the ports as the code declares them.
+            if (!lastGoodDescription) { description = sourcePorts(kind, source); portsNote = ''; renderPorts(); }
             try { answer = await host.describe(source, kind, inputs); } catch (error) { answer = { available: false, reason: `The ports could not be read: ${error?.message ?? error}` }; }
             if (answer?.available && (answer.ok || answer.problems?.length)) {
                 describeCache.set(cacheKey, answer);
@@ -317,9 +393,10 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         }
         if (answer?.superseded || sequence !== describeSequence || source !== session.source) return;
         if (!answer?.available) {
-            description = null;
+            // No engine to read it here: its ports as the code declares them, without its memory and clock.
+            description = sourcePorts(kind, source);
             portsStale = false;
-            portsNote = answer?.reason ?? 'The ports are read by the simulation engine, which is not available here: its bindings only.';
+            portsNote = `${answer?.reason ?? 'The simulation engine is not available here.'} Its ports are read from the code as written.`;
         } else if (answer.ok) {
             description = answer;
             lastGoodDescription = answer;
@@ -596,7 +673,10 @@ export function createProgramEditor({ root, host, storage = globalThis.localStor
         title = payload.title ?? '';
         target = payload.target ?? null;
         context = { program: Boolean(payload.program), checkInputs: payload.checkInputs ?? {} };
-        portContext = { bindings: payload.ports?.bindings ?? [], outputs: payload.ports?.outputs ?? [] };
+        portContext = { bindings: payload.ports?.bindings ?? [], outputs: payload.ports?.outputs ?? [], candidates: payload.ports?.candidates };
+        pickerPort = null;
+        bindingNote = '';
+        if (payload.showPorts && sideFolded) { sideFolded = false; write('konjugate.providerEditor.sideFolded', '0'); }
         description = null;
         lastGoodDescription = null;
         portsStale = false;

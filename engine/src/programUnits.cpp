@@ -272,7 +272,10 @@ UnitConversion unitConversion(const std::string& from, const std::string& to, bo
 
 std::string perSecond(const std::string& unit) {
     if (unit.empty()) return "Hz";
-    if (unit.find_first_of("/*· ") == std::string::npos) return unit + "/s";
+    // Searched as strings: "·" is two bytes in UTF-8, and one of them is also the first byte of "°".
+    bool compound = false;
+    for (const char* separator : {"/", "*", "·", " "}) compound = compound || unit.find(separator) != std::string::npos;
+    if (!compound) return unit + "/s";
     return "(" + unit + ")/s";
 }
 

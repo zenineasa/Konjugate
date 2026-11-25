@@ -112,27 +112,42 @@ export async function checkObjectiveWithEngine(objective, options) {
     }
 }
 
-// Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run by the engine through the transport a
-// run uses (a C++ program compiled and loaded in-process, a Python one in its worker), with its inputs by key. { available: false } when
-// there is no engine; otherwise the engine's answer, { ok, program, kind, inputs, problems, outputs, memory }.
-export async function checkProgramWithEngine({ kind, source, inputs = {}, time = 0 }, options) {
+// A version 2 program's command (checkProgram, describeProgram): the source and a configuration file the engine reads, its answer the JSON
+// report it writes. { available: false } when there is no engine; { available: true, ok: false, problems: [why] } when it stops without
+// an answer.
+async function programCommand(command, { kind, source, ...configuration }, options) {
     const executable = await resolveEnginePath(options);
     if (!executable) return { available: false };
-    const directory = await mkdtemp(join(tmpdir(), 'konjugateCheckProgram-'));
+    const directory = await mkdtemp(join(tmpdir(), `konjugate${command[0].toUpperCase()}${command.slice(1)}-`));
     try {
         const sourcePath = join(directory, kind === 'python' ? 'program.py' : 'program.cpp');
         const configurationPath = join(directory, 'check.json');
         const reportPath = join(directory, 'report.json');
         await writeFile(sourcePath, source, 'utf8');
         const providers = buildProvidersConfiguration({}, options, { nodes: [] });
-        await writeFile(configurationPath, JSON.stringify({ kind, providers, inputs, time }), 'utf8');
-        const { code, diagnostics } = await runEngine(executable, ['checkProgram', sourcePath, '--configuration', configurationPath, '--report', reportPath],
+        await writeFile(configurationPath, JSON.stringify({ kind, providers, ...configuration }), 'utf8');
+        const { code, diagnostics } = await runEngine(executable, [command, sourcePath, '--configuration', configurationPath, '--report', reportPath],
             {}, options.signal ?? null);
         if (code !== 0) return { available: true, ok: false, problems: [diagnostics || `The engine exited with code ${code}.`] };
         return { available: true, ...JSON.parse(await readFile(reportPath, 'utf8')) };
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run by the engine through the transport a
+// run uses (a C++ program compiled and loaded in-process, a Python one in its worker), with its inputs by key. { available: false } when
+// there is no engine; otherwise the engine's answer, { ok, program, kind, inputs, problems, outputs, memory }.
+export async function checkProgramWithEngine({ kind, source, inputs = {}, time = 0 }, options) {
+    return programCommand('checkProgram', { kind, source, inputs, time }, options);
+}
+
+// Describe program (the code editor's Ports; docs/engineCli.md, describeProgram): a version 2 program's ports, memory and clock, each with
+// the line that declares it, its memory after initialize() at `inputs`, and, for the ports `ports` says are bound
+// ({ inputs: { key: unit }, outputs: { key: { unit, rate } } }), the conversion a run applies. { available: false } when there is no
+// engine; otherwise { ok, language, program, kind, inputs, outputs, memory, clock, problems: [{ message, line }] }.
+export async function describeProgramWithEngine({ kind, source, inputs = {}, ports = {} }, options) {
+    return programCommand('describeProgram', { kind, source, inputs, ports }, options);
 }
 
 export async function validateWithEngine(content, options) {

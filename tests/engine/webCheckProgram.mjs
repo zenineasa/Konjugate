@@ -93,7 +93,7 @@ try {
     for (const [file, inputs] of [['pidController.cpp', pidInputs], ['conduction.cpp', conductionInputs]]) {
         assert.ok((await nativeCheck({ kind: 'cpp', source: await example(file), inputs, time: 0 })).ok, `The desktop passes ${file}.`);
         const web = await webCheck({ kind: 'cpp', source: await example(file), inputs, time: 0 });
-        assert.ok(!web.ok && /A C\+\+ program cannot run in the web edition/.test(web.problems[0]), `The web engine says why it cannot check ${file}: ${web.problems}`);
+        assert.ok(!web.ok && /The web edition cannot compile a C\+\+ program\. Check this C\+\+ program in the desktop app\./.test(web.problems[0]), `The web engine says why it cannot check ${file}: ${web.problems}`);
     }
     console.log('Check program in the web engine gives the desktop engine\'s answer.');
 } finally {

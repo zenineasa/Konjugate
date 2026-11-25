@@ -1460,6 +1460,7 @@ struct ProgramPortDescription {
     std::string unit;
     bool hasDefault = false;
     double defaultValue = 0;
+    std::size_t line = 0;   // the declaration's line in the source, when the SDK says (0: not said)
 };
 
 struct ProgramOutputDescription {
@@ -1467,6 +1468,7 @@ struct ProgramOutputDescription {
     std::string unit;
     bool declaresDependencies = false;
     std::vector<std::string> dependsOn;
+    std::size_t line = 0;
 };
 
 struct ProgramFieldDescription {
@@ -1475,6 +1477,7 @@ struct ProgramFieldDescription {
     std::size_t count = 1;
     std::size_t offset = 0;
     std::string unit;
+    std::size_t line = 0;
 };
 
 struct ProgramDescription {
@@ -1486,6 +1489,7 @@ struct ProgramDescription {
     std::size_t memorySize = 0;
     double clockPeriod = 0;
     std::string clockConstant;
+    std::size_t clockLine = 0;
 };
 
 ProgramDescription parseProgramDescription(const std::string& json) {
@@ -1509,6 +1513,7 @@ ProgramDescription parseProgramDescription(const std::string& json) {
             port.hasDefault = true;
             port.defaultValue = *fallback;
         }
+        port.line = item.get<std::size_t>("line", 0);
         description.inputs.push_back(std::move(port));
     }
     if (const auto outputs = tree.get_child_optional("outputs")) for (const auto& [unused, item] : *outputs) {
@@ -1520,6 +1525,7 @@ ProgramDescription parseProgramDescription(const std::string& json) {
             port.declaresDependencies = true;
             for (const auto& entry : *depends) port.dependsOn.push_back(entry.second.get_value<std::string>());
         }
+        port.line = item.get<std::size_t>("line", 0);
         description.outputs.push_back(std::move(port));
     }
     if (const auto memory = tree.get_child_optional("memory")) for (const auto& [unused, item] : *memory) {
@@ -1530,11 +1536,13 @@ ProgramDescription parseProgramDescription(const std::string& json) {
         field.count = item.get<std::size_t>("count", 1);
         field.offset = item.get<std::size_t>("offset", 0);
         field.unit = item.get<std::string>("unit", "");
+        field.line = item.get<std::size_t>("line", 0);
         description.memory.push_back(std::move(field));
     }
     description.memorySize = tree.get<std::size_t>("memorySize", 0);
     description.clockPeriod = tree.get<double>("clockPeriod", 0);
     description.clockConstant = tree.get<std::string>("clockConstant", "");
+    description.clockLine = tree.get<std::size_t>("clockLine", 0);
     return description;
 }
 
@@ -3048,6 +3056,85 @@ std::string jsonNumber(double value) {
     return stream.str();
 }
 
+// The source's lines with comments blanked (strings and characters kept), so a declaration written in a comment is not found.
+std::vector<std::string> codeLines(const std::string& source) {
+    std::vector<std::string> lines(1);
+    enum class In { code, line, block, string, character } state = In::code;
+    for (std::size_t at = 0; at < source.size(); ++at) {
+        const char character = source[at];
+        const char next = at + 1 < source.size() ? source[at + 1] : '\0';
+        if (character == '\n') {
+            lines.emplace_back();
+            if (state == In::line) state = In::code;
+            continue;
+        }
+        auto& line = lines.back();
+        switch (state) {
+        case In::code:
+            if (character == '/' && next == '/') { state = In::line; line += ' '; continue; }
+            if (character == '/' && next == '*') { state = In::block; line += "  "; ++at; continue; }
+            if (character == '"') state = In::string;
+            if (character == '\'') state = In::character;
+            line += character;
+            break;
+        case In::line: line += ' '; break;
+        case In::block:
+            if (character == '*' && next == '/') { state = In::code; line += "  "; ++at; continue; }
+            line += ' ';
+            break;
+        case In::string:
+        case In::character:
+            line += character;
+            if (character == '\\' && next != '\n' && next != '\0') { line += next; ++at; continue; }
+            if (character == (state == In::string ? '"' : '\'')) state = In::code;
+            break;
+        }
+    }
+    return lines;
+}
+
+std::string regexEscaped(const std::string& text) {
+    static const std::regex special(R"([.^$|()\[\]{}*+?\\])");
+    return std::regex_replace(text, special, R"(\$&)");
+}
+
+// The 1-based line of the first line of code matching `pattern`, or 0.
+std::size_t firstLineMatching(const std::vector<std::string>& lines, const std::regex& pattern) {
+    for (std::size_t index = 0; index < lines.size(); ++index) if (std::regex_search(lines[index], pattern)) return index + 1;
+    return 0;
+}
+
+// A C++ declaration's line: its key or name, the first argument after `this` (k::Input setpoint{this, "setpoint", "K"}).
+std::size_t cppDeclarationLine(const std::vector<std::string>& lines, const std::string& key) {
+    return firstLineMatching(lines, std::regex(R"([({]\s*this\s*,\s*")" + regexEscaped(key) + "\""));
+}
+
+// The line a problem names: a compiler's "file.cpp:41:32: error", a program's "(line 18)" or "Line 18."; 0 when it names none.
+std::size_t problemLine(const std::string& message) {
+    static const std::regex compiler(R"(\.(?:cpp|cc|cxx|hpp|h):(\d+):\d+:\s*(?:fatal\s+)?error)");
+    static const std::regex said(R"([(\s][Ll]ine (\d+)[).])");
+    std::smatch match;
+    if (std::regex_search(message, match, compiler) || std::regex_search(message, match, said)) return std::stoul(match[1].str());
+    return 0;
+}
+
+std::string jsonLine(std::size_t line) { return line ? std::to_string(line) : std::string("null"); }
+
+std::string conversionJson(const UnitConversion& conversion, const std::string& from, const std::string& to) {
+    if (!conversion.error.empty()) return "{\"error\":" + jsonString(conversion.error) + "}";
+    return "{\"scale\":" + jsonNumber(conversion.scale) + ",\"offset\":" + jsonNumber(conversion.offset) + ",\"identity\":" +
+        (conversion.identity ? "true" : "false") + ",\"text\":" + (conversion.identity ? std::string("null") : jsonString(from + " → " + to + " at the port")) + "}";
+}
+
+// The code editor's Check, Describe and Test in the web edition, which cannot compile a C++ program: refused with the way forward.
+void refuseCppProgramOnWeb([[maybe_unused]] const std::string& kind) {
+#ifdef __EMSCRIPTEN__
+    if (kind == "cpp") throw std::runtime_error("The web edition cannot compile a C++ program. Check this C++ program in the desktop app.");
+#endif
+}
+
+const std::string identityConversion = "{\"scale\":1,\"offset\":0,\"identity\":true,\"text\":null}";
+
 }
 
 std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
@@ -3067,6 +3154,7 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
     const auto implementation = kind == "cpp" ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
     std::unique_ptr<ProgramBackend> backend;
     try {
+        refuseCppProgramOnWeb(kind);
         backend = createProgramBackend((kind == "cpp" ? "cpp2:" : "py2:") + source, implementation, source, configuration);
     } catch (const std::exception& error) {
         problems.emplace_back(error.what());
@@ -3200,6 +3288,122 @@ std::string checkProgram(const std::string& kind, const std::string& source, con
         }
     } catch (const std::exception& error) {
         problems.emplace_back(error.what());
+    }
+    return finish();
+}
+
+
+std::string describeProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration, const ProgramPortUnits& ports,
+                            const std::unordered_map<std::string, double>& givenInputs) {
+    std::vector<std::string> problems;
+    std::string body;
+    const auto finish = [&] {
+        std::string json = "{\"ok\":" + std::string(problems.empty() ? "true" : "false") + ",\"language\":" + jsonString(kind == "cpp" ? "cpp" : "python") + body +
+            ",\"problems\":[";
+        for (std::size_t index = 0; index < problems.size(); ++index) {
+            json += std::string(index ? "," : "") + "{\"message\":" + jsonString(problems[index]) + ",\"line\":" + jsonLine(problemLine(problems[index])) + "}";
+        }
+        return json + "]}";
+    };
+    const auto implementation = kind == "cpp" ? ContributionImplementation::cppProvider : ContributionImplementation::pythonProvider;
+    std::unique_ptr<ProgramBackend> backend;
+    try {
+        refuseCppProgramOnWeb(kind);
+        backend = createProgramBackend((kind == "cpp" ? "cpp2:" : "py2:") + source, implementation, source, configuration);
+    } catch (const std::exception& error) {
+        problems.emplace_back(error.what());
+        body = ",\"program\":\"\",\"kind\":\"\",\"inputs\":[],\"outputs\":[],\"memory\":[],\"clock\":null";
+        return finish();
+    }
+    const auto& description = backend->description();
+    // C++ declarations are found in the source by their key; Python's SDK says where each was made.
+    const auto lines = codeLines(source);
+    const auto lineOf = [&](std::size_t said, const std::string& key) { return said ? said : kind == "cpp" ? cppDeclarationLine(lines, key) : 0; };
+    // The memory a run starts from: initialize() at these inputs (by key; one not given reads its default, or 0).
+    std::vector<double> values;
+    std::vector<CompiledBinding> bindings;
+    for (const auto& port : description.inputs) {
+        CompiledBinding binding;
+        binding.symbol = port.key;
+        bindings.push_back(binding);
+        const auto given = givenInputs.find(port.key);
+        values.push_back(given != givenInputs.end() ? given->second : port.hasDefault ? port.defaultValue : 0.0);
+    }
+    std::optional<ProgramMemoryState> start;
+    double clockPeriod = description.clockPeriod;
+    try {
+        ProgramInstanceSpec spec;
+        spec.instanceId = 1;
+        spec.ownerId = 1;
+        spec.owner = "the description";
+        spec.bindings = bindings;
+        spec.startValues = values;
+        for (const auto& port : description.outputs) spec.outputs.push_back({port.key, "", true, ""});
+        backend->addProgramInstance(std::move(spec));
+        backend->sendInitialization();
+        if (backend->hasMemory()) start = backend->memoryState(1);
+        clockPeriod = backend->clockPeriod(1);
+    } catch (const std::exception& error) {
+        problems.emplace_back(error.what());
+    }
+    body = ",\"program\":" + jsonString(description.name) + ",\"kind\":" + jsonString(description.node ? "node" : "relationship") + ",\"inputs\":[";
+    for (std::size_t index = 0; index < description.inputs.size(); ++index) {
+        const auto& port = description.inputs[index];
+        body += std::string(index ? "," : "") + "{\"key\":" + jsonString(port.key) + ",\"kind\":" + jsonString(port.kind) + ",\"unit\":" + jsonString(port.unit) +
+            (port.hasDefault ? ",\"default\":" + jsonNumber(port.defaultValue) : "") + ",\"line\":" + jsonLine(lineOf(port.line, port.key));
+        // As a run converts it: the bound value's unit onto the port's, nothing converted when either has none.
+        if (const auto bound = ports.inputs.find(port.key); bound != ports.inputs.end()) {
+            body += ",\"conversion\":" + (port.unit.empty() || bound->second.empty() ? identityConversion
+                : conversionJson(unitConversion(bound->second, port.unit, false), bound->second, port.unit));
+        }
+        body += "}";
+    }
+    body += "],\"outputs\":[";
+    for (std::size_t index = 0; index < description.outputs.size(); ++index) {
+        const auto& port = description.outputs[index];
+        body += std::string(index ? "," : "") + "{\"key\":" + jsonString(port.key) + ",\"unit\":" + jsonString(port.unit);
+        if (port.declaresDependencies) {
+            body += ",\"dependsOn\":[";
+            for (std::size_t at = 0; at < port.dependsOn.size(); ++at) body += std::string(at ? "," : "") + jsonString(port.dependsOn[at]);
+            body += "]";
+        }
+        body += ",\"line\":" + jsonLine(lineOf(port.line, port.key));
+        // As a run converts it: the port's unit onto its state's, per second for a Rate state, which never takes an offset.
+        if (const auto state = ports.outputs.find(port.key); state != ports.outputs.end()) {
+            const auto expected = state->second.rate ? perSecond(state->second.unit) : state->second.unit;
+            body += ",\"conversion\":" + (port.unit.empty() || state->second.unit.empty() ? identityConversion
+                : conversionJson(unitConversion(port.unit, expected, state->second.rate), port.unit, expected));
+        }
+        body += "}";
+    }
+    body += "],\"memory\":[";
+    for (std::size_t index = 0; index < description.memory.size(); ++index) {
+        const auto& field = description.memory[index];
+        body += std::string(index ? "," : "") + "{\"name\":" + jsonString(field.name) + ",\"type\":" + jsonString(field.type) + ",\"count\":" +
+            std::to_string(field.count) + ",\"unit\":" + jsonString(field.unit) + ",\"start\":";
+        // A random stream's start is its seed and counter, which are not numbers to show: null, as when initialize() failed.
+        const auto* saved = start && field.type != "random" && index < start->fields.size() ? &start->fields[index] : nullptr;
+        if (saved) {
+            body += "[";
+            for (std::size_t word = 0; word < saved->words.size(); ++word) {
+                const double shown = saved->type == 0 || saved->type == 3 ? std::bit_cast<double>(saved->words[word])
+                    : saved->type == 1 ? static_cast<double>(std::bit_cast<std::int64_t>(saved->words[word])) : static_cast<double>(saved->words[word]);
+                body += std::string(word ? "," : "") + jsonNumber(shown);
+            }
+            body += "]";
+        } else {
+            body += "null";
+        }
+        body += ",\"line\":" + jsonLine(lineOf(field.line, field.name)) + "}";
+    }
+    body += "],\"clock\":";
+    if (description.clockPeriod > 0 || !description.clockConstant.empty()) {
+        const auto line = description.clockLine ? description.clockLine
+            : kind == "cpp" ? firstLineMatching(lines, std::regex(R"(\bClock\b[^;]*[({]\s*this\s*,)")) : 0;
+        body += "{\"period\":" + (clockPeriod > 0 ? jsonNumber(clockPeriod) : std::string("null")) + ",\"constant\":" +
+            (description.clockConstant.empty() ? std::string("null") : jsonString(description.clockConstant)) + ",\"line\":" + jsonLine(line) + "}";
+    } else {
+        body += "null";
     }
     return finish();
 }

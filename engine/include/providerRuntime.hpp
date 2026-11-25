@@ -128,4 +128,22 @@ bool planRequiresProviders(const ExecutionPlan& plan);
 std::string checkProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration,
                          const std::unordered_map<std::string, double>& inputs, double time);
 
+// What the ports are bound to, for describeProgram's conversions: an input's bound unit by key; an output's state by key (its unit, and
+// whether it is a Rate state, which takes the unit per second).
+struct ProgramPortUnits {
+    struct State {
+        std::string unit;
+        bool rate = true;
+    };
+    std::unordered_map<std::string, std::string> inputs;
+    std::unordered_map<std::string, State> outputs;
+};
+
+// Describe program (the code editor's Ports, docs/engineCli.md): a version 2 program loaded as a run loads it and initialized at these
+// inputs (by key; one not given reads its default, or 0), nothing evaluated. The answer as JSON: { ok, language, program, kind, inputs,
+// outputs, memory, clock, problems }: each port with its unit, the line that declares it and, when `ports` says what it is bound to,
+// the conversion a run applies at it; each memory field with its value after initialize(); problems as { message, line }.
+std::string describeProgram(const std::string& kind, const std::string& source, const ProviderConfiguration& configuration, const ProgramPortUnits& ports,
+                            const std::unordered_map<std::string, double>& inputs);
+
 }

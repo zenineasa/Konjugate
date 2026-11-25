@@ -1,7 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 // Browser-side counterpart to src/engineAdapter.mjs's one-shot engine operations (capabilities,
-// validate, run, infer, fit, checkSubstepConvergence, checkProgram) -- see docs/proposals/webEdition.md, phase
+// validate, run, infer, fit, checkSubstepConvergence, checkProgram, describeProgram) -- see docs/proposals/webEdition.md, phase
 // 2. Talks directly to the WASM engine module (out/engineWeb/konjugateEngine.js) instead of
 // spawning a real OS subprocess and exchanging real temp files: writes inputs into the module's
 // own virtual filesystem, invokes main() with an argv array via callMain(), and reads outputs
@@ -286,12 +286,11 @@ export async function runWithWebEngine(engineModuleUrl, content, configuration) 
     return { available: true, result };
 }
 
-// Check program (docs/programs.md, "Testing a program"), the web engine's answer: the same engine code the desktop's
-// checkProgramWithEngine() runs, through the same command and configuration, so the JSON is the desktop's. A Python program is served
-// by the Pyodide bridge, as a run's is. A C++ program cannot be loaded in the web engine yet, and the engine says so as a problem.
-// Answers { available: true, ok, program, kind, inputs, problems, outputs, memory }, or { available: true, ok: false, problems: [why] }
+// A version 2 program's command (checkProgram, describeProgram) in the web engine: the same engine code the desktop's runs, through the
+// same command and configuration, so the JSON is the desktop's. A Python program is served by the Pyodide bridge, as a run's is. A C++
+// program cannot be loaded in the web engine yet, and the engine says so as a problem. { available: true, ok: false, problems: [why] }
 // when the engine stops without an answer, as the desktop does.
-export async function checkProgramWithWebEngine(engineModuleUrl, { kind, source, inputs = {}, time = 0 }) {
+async function programCommand(engineModuleUrl, command, { kind, source, ...configuration }) {
     const Module = await loadModule(engineModuleUrl);
     if (kind === 'python') {
         const { installPythonProviderBridge } = await import('./webPythonProviderBridge.mjs');
@@ -303,13 +302,25 @@ export async function checkProgramWithWebEngine(engineModuleUrl, { kind, source,
         const configurationPath = `${directory}/check.json`;
         const reportPath = `${directory}/report.json`;
         Module.FS.writeFile(sourcePath, source);
-        Module.FS.writeFile(configurationPath, JSON.stringify({ kind, inputs, time }));
+        Module.FS.writeFile(configurationPath, JSON.stringify({ kind, ...configuration }));
         stderrBuffer = [];
-        const code = Module.callMain(['checkProgram', sourcePath, '--configuration', configurationPath, '--report', reportPath]);
+        const code = Module.callMain([command, sourcePath, '--configuration', configurationPath, '--report', reportPath]);
         const diagnostics = stderrBuffer.join('\n').trim();
         if (code !== 0) return { available: true, ok: false, problems: [diagnostics || `The engine exited with code ${code}.`] };
         return { available: true, ...JSON.parse(Module.FS.readFile(reportPath, { encoding: 'utf8' })) };
     } finally {
         removeScratchDirectory(Module, directory);
     }
+}
+
+// Check program (docs/programs.md, "Testing a program"), the web engine's answer: { available: true, ok, program, kind, inputs, problems,
+// outputs, memory }, as src/engineAdapter.mjs's checkProgramWithEngine() answers.
+export async function checkProgramWithWebEngine(engineModuleUrl, { kind, source, inputs = {}, time = 0 }) {
+    return programCommand(engineModuleUrl, 'checkProgram', { kind, source, inputs, time });
+}
+
+// Describe program (the code editor's Ports), the web engine's answer: { available: true, ok, language, program, kind, inputs, outputs,
+// memory, clock, problems }, as src/engineAdapter.mjs's describeProgramWithEngine() answers.
+export async function describeProgramWithWebEngine(engineModuleUrl, { kind, source, inputs = {}, ports = {} }) {
+    return programCommand(engineModuleUrl, 'describeProgram', { kind, source, inputs, ports });
 }

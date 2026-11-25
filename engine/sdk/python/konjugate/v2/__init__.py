@@ -41,6 +41,7 @@ state that an output drives, not memory: the method then integrates it to its ow
 import math
 import re
 import struct
+import sys
 
 __all__ = [
     "Clock",
@@ -104,6 +105,11 @@ class _Declaration:
         _Declaration.order += 1
         self._order = _Declaration.order
         self.attribute = None
+        # The line of the program's own code that declared it (for the code editor's Ports): the first frame outside this module.
+        frame = sys._getframe(1)
+        while frame is not None and frame.f_globals.get("__name__") == __name__:
+            frame = frame.f_back
+        self.line = frame.f_lineno if frame is not None else None
 
     def __set_name__(self, owner, name):
         self.attribute = name
@@ -327,16 +333,25 @@ class _Description:
             entry = {"key": port.key, "kind": port.kind, "unit": port.unit}
             if port.default is not None:
                 entry["default"] = port.default
+            if port.line:
+                entry["line"] = port.line
             description["inputs"].append(entry)
         by_attribute = {port.attribute: port for port in self.inputs}
         for port in self.outputs:
             entry = {"key": port.key, "unit": port.unit}
             if port.depends_on is not None:
                 entry["dependsOn"] = [by_attribute[name].key if name in by_attribute else _camel(name) for name in port.depends_on]
+            if port.line:
+                entry["line"] = port.line
             description["outputs"].append(entry)
         for field in self.memory:
-            description["memory"].append({"name": field.name, "type": field.type, "count": field.count, "offset": field.offset, "unit": field.unit})
+            entry = {"name": field.name, "type": field.type, "count": field.count, "offset": field.offset, "unit": field.unit}
+            if field.line:
+                entry["line"] = field.line
+            description["memory"].append(entry)
         if self.clock is not None:
+            if self.clock.line:
+                description["clockLine"] = self.clock.line
             if isinstance(self.clock.period, Constant):
                 description["clockConstant"] = self.clock.period.key
             else:

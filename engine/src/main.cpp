@@ -323,6 +323,36 @@ int main(int argc, char** argv) {
         reportStream.close();
         std::_Exit(reportStream ? 0 : 1);
     }
+    // Describe program (docs/engineCli.md): a version 2 program's ports, memory and clock, with lines and conversions, for the code
+    // editor's Ports. --configuration holds { kind, providers, inputs, ports: { inputs: { key: unit }, outputs: { key: { unit, rate } } } }.
+    if (argc >= 3 && std::string(argv[1]) == "describeProgram") {
+        const auto configurationOption = optionPath(argc, argv, "--configuration").string();
+        const auto reportOption = optionPath(argc, argv, "--report").string();
+        if (configurationOption.empty() || reportOption.empty()) {
+            std::cerr << "describeProgram requires --configuration and --report.\n";
+            std::_Exit(64);
+        }
+        boost::property_tree::ptree check;
+        boost::property_tree::read_json(configurationOption, check);
+        konjugate::ProviderConfiguration providerConfig;
+        providerConfig.cppCompiler = check.get<std::string>("providers.cpp.compiler", "");
+        providerConfig.cppSdkPath = check.get<std::string>("providers.cpp.sdkPath", "");
+        providerConfig.pythonInterpreter = check.get<std::string>("providers.python.interpreter", "");
+        providerConfig.pythonSdkPath = check.get<std::string>("providers.python.sdkPath", "");
+        providerConfig.buildDirectory = check.get<std::string>("providers.buildDirectory", "");
+        std::unordered_map<std::string, double> inputs;
+        if (const auto given = check.get_child_optional("inputs")) for (const auto& [key, value] : *given) inputs[key] = value.get_value<double>();
+        konjugate::ProgramPortUnits ports;
+        if (const auto bound = check.get_child_optional("ports.inputs")) for (const auto& [key, value] : *bound) ports.inputs[key] = value.get_value<std::string>();
+        if (const auto states = check.get_child_optional("ports.outputs")) for (const auto& [key, value] : *states) {
+            ports.outputs[key] = {value.get<std::string>("unit", ""), value.get<bool>("rate", true)};
+        }
+        const auto answer = konjugate::describeProgram(check.get<std::string>("kind", "python"), readTextFile(argv[2]), providerConfig, ports, inputs);
+        std::ofstream reportStream(reportOption, std::ios::trunc);
+        reportStream << answer << '\n';
+        reportStream.close();
+        std::_Exit(reportStream ? 0 : 1);
+    }
     if (argc < 3) {
         std::cerr << "Usage: konjugateEngine capabilities | <inspect|validate|run> <project.kjt> [--report report.json] [--configuration run.json --output result.bin --control-stream protobuf]\n"
                       "       konjugateEngine session <project.kjt> --configuration session.json   (protobuf commands on stdin, events on stdout)\n"

@@ -46,6 +46,7 @@ import { suggestedTutorials, welcomeLinks, whatsNewFor } from './welcomeModel.mj
 import { createWelcomeStateStore, withEpisodeOpened, withHighlightShown, withLastSeenVersion, withTourCompleted, withTourOffered, withTutorialCompleted } from './welcomeStateStore.mjs';
 import { groupTutorials, tutorialById, tutorialDataFiles, tutorialModelFiles, tutorialsForExample } from './tutorials/index.mjs';
 import { fetchRecentBlogPosts } from './welcomeContent.mjs';
+import { launchGreeting } from './firstLaunchTour.mjs';
 import { shouldSkipWelcomeTrigger } from './welcomeTrigger.mjs';
 import { guideKindSuffix } from './exampleGuide/guideKind.mjs';
 import { auxiliaryWindowPresentation, auxiliaryWindowBounds } from './windowLifecycle.mjs';
@@ -744,19 +745,33 @@ async function rememberVideoOpened(videoId) {
     return true;
 }
 ipcMain.handle('welcomeEpisodeOpened', (_event, videoId) => rememberVideoOpened(videoId));
-// The first-model tour (docs/proposals/guidedTour.md). The first launch starts it in place of the Welcome window; the Welcome window's
-// card starts it again, in the window it was opened from, and closes itself so the tour has the screen.
-function startTourIn(projectWindow) {
-    if (!projectWindow || projectWindow.isDestroyed()) return;
-    const send = () => projectWindow.webContents.send('tourStart');
-    if (projectWindow.webContents.isLoading()) projectWindow.webContents.once('did-finish-load', send); else send();
-}
-async function openWelcomeOrOfferTour(projectWindow) {
-    if ((await welcomeState().get()).tourOffered) return openWelcomeWindow(projectWindow, { automatic: true });
-    await welcomeState().update(withTourOffered);
-    startTourIn(projectWindow);
+// The first-model tour (docs/proposals/guidedTour.md). The first launch offers it in place of the Welcome window; the Welcome window's
+// Learn by doing starts it again, as a tutorial, in the window it was opened from.
+// A launch's greeting (firstLaunchTour.mjs's launchGreeting): the tour only on a launch that never offered it and opened no project. The
+// window it is offered to takes it only while it still holds its new, empty project, and says whether it did: the offer is remembered
+// only then, so a project that got there first (an add-on's, say) keeps the screen, the Welcome window opens as on any other launch, and
+// the tour is offered again on the next launch that opens nothing.
+const tourOffersWaiting = new WeakSet();
+async function openWelcomeOrOfferTour(projectWindow, { projectOpened = false } = {}) {
+    const { tourOffered } = await welcomeState().get();
+    if (launchGreeting({ tourOffered, projectOpened }) === 'welcome') return openWelcomeWindow(projectWindow, { automatic: true });
+    if (!projectWindow || projectWindow.isDestroyed()) return false;
+    const contents = projectWindow.webContents;
+    tourOffersWaiting.add(contents);
+    const send = () => { if (!contents.isDestroyed()) contents.send('tourOffer'); };
+    if (contents.isLoading()) contents.once('did-finish-load', send); else send();
     return true;
 }
+ipcMain.handle('tourOfferAnswer', async (event, started) => {
+    if (!tourOffersWaiting.delete(event.sender)) return false;
+    if (started === true) {
+        await welcomeState().update(withTourOffered);
+        return true;
+    }
+    const projectWindow = BrowserWindow.fromWebContents(event.sender);
+    if (projectWindow && !projectWindow.isDestroyed()) await openWelcomeWindow(projectWindow, { automatic: true });
+    return true;
+});
 ipcMain.handle('tourRecordCompleted', async () => { await welcomeState().update(withTourCompleted); return true; });
 // The tutorials (docs/proposals/tutorials.md). A window reports a finished tutorial by id, checked against the shipped list, and reads
 // which ones are finished for the ticks in its Tutorials list; an example guide's "Take the tutorial" starts one in the window it belongs
@@ -4012,7 +4027,7 @@ app.whenReady().then(async () => {
             }
         });
     }
-    if (!shouldSkipWelcomeTrigger()) openWelcomeOrOfferTour(firstWindow);
+    if (!shouldSkipWelcomeTrigger()) openWelcomeOrOfferTour(firstWindow, { projectOpened: Boolean(initialPath) });
 
     app.on('activate', () => {
         if (projectWindows.size === 0) {

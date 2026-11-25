@@ -122,6 +122,7 @@ import { formatDataLog } from '../dataLogFormat.mjs';
 import { fitPlanFromLog } from '../dataLogFit.mjs';
 import { draftScenario, modelFingerprint, normalizeScenarios, withScenario } from '../scenarios.mjs';
 import { objectiveTemplate, objectiveTemplateIds, programBindingsProblem } from '../objectiveTemplates.mjs';
+import { mayTakeOfferedTour } from '../firstLaunchTour.mjs';
 import { clearInterfaceTimer, interfaceNow, setInterfaceTimer } from './interfaceClock.mjs';
 import { compareReplay, defaultTolerance, guessReplayMapping, latestReadings, replayPlan, replaySentence, replayTargets, suggestedReplayTimeStep } from '../dataLogReplay.mjs';
 import {
@@ -16147,6 +16148,7 @@ async function startTutorial(id, { resumeAt = null } = {}) {
         return false;
     }
     retireFirstSteps();
+    tourFromLaunchOffer = false;
     if (tutorial.start.from === 'example') {
         // An example is used as it is only while nothing has been done with it: no results, no change, and nothing loaded into Parameter
         // tuning or causal inference.
@@ -16193,7 +16195,31 @@ async function startTutorial(id, { resumeAt = null } = {}) {
     return true;
 }
 const startTour = () => startTutorial('firstModel');
-window.tour?.onStart(startTour);
+window.tour?.onStart?.(startTour);
+// The tour main offers on a first launch (src/firstLaunchTour.mjs's mayTakeOfferedTour): taken only once this window has looked for the
+// file it may have been opened for, and only while it still holds its new, empty project. A project there first, by any route, keeps the
+// screen; main is told, and opens the Welcome window instead, whose Learn by doing offers the tour first.
+let launchFileChecked;
+const launchFileCheck = new Promise((resolve) => { launchFileChecked = resolve; });
+let launchFileRequested = false;
+// Whether the tour running was the launch's offer: a project an add-on opens into this window then takes its place (see onOpenProject).
+let tourFromLaunchOffer = false;
+async function takeOfferedTour() {
+    await launchFileCheck;
+    let started = false;
+    try {
+        started = mayTakeOfferedTour({
+            fileRequested: launchFileRequested, projectPath: currentProjectPath, fileName: currentProjectFilename, exampleId: activeExampleId,
+            hasContent: model.nodes.some((node) => !node.deleted) || model.subsystems.some((subsystem) => !subsystem.deleted),
+            dirty: documentController.dirty || addonDataUnsaved, hasResult: Boolean(activeResult), addonProjectExpected: Boolean(launcherProjectsSettled),
+            tutorialActive: tour.active, tutorialResuming: tutorialResumePending
+        }) && await startTutorial('firstModel');
+        tourFromLaunchOffer = started;
+    } finally {
+        await window.tour.answerOffer(started);
+    }
+}
+window.tour?.onOffer?.(() => { takeOfferedTour().catch((error) => console.error('The first-model tour could not start.', error)); });
 window.tutorials?.onStart((id) => startTutorial(id));
 resumeTutorialAfterRestart();
 window.__debugTour = { blockers: () => ({ simulationRunning, hasResult: Boolean(activeResult), dirty: documentController.dirty, addonDataUnsaved, selected: selectedNode?.userData.definition.name ?? null, plotWidth: $('#nodeResultPlot').getBoundingClientRect().width, plotsSeen: [...tutorialPlotsSeen.keys()] }), start: startTour, startTutorial, tutorial: () => tour.tutorial?.id ?? null, step: () => tour.step, active: () => tour.active, stop: () => tour.stop(),
@@ -16235,6 +16261,7 @@ async function openProject() {
 async function checkPendingProjectOpen() {
     const pending = await window.projectFiles.pendingOpen();
     if (!pending) return;
+    launchFileRequested = true;
     if (pending.error) {
         $('#statusText').textContent = `Load failed · ${pending.error}`;
         return;
@@ -16554,7 +16581,11 @@ window.launcherHost?.onOpenProject(async (payload) => {
             embeddedResult: payload.embeddedResult,
             embeddedBranches: payload.embeddedBranches
         });
-        $('#statusText').textContent = payload.silent ? `Live-synced from ${payload.addonName ?? 'the toolbox'}` : 'Opened from the toolbox as an unsaved copy';
+        const opened = payload.silent ? `Live-synced from ${payload.addonName ?? 'the toolbox'}` : 'Opened from the toolbox as an unsaved copy';
+        // The tour the launch offered gives way to the project the add-on opened, and stays a click away in Tutorials.
+        const tourGivesWay = tour.active && tourFromLaunchOffer && tour.tutorial?.id === 'firstModel';
+        if (tourGivesWay) tour.stop();
+        $('#statusText').textContent = tourGivesWay ? `${opened} · the tour is in Tutorials whenever you want it` : opened;
     } catch (error) {
         console.error(error);
         $('#statusText').textContent = `Could not open the project · ${error.message}`;
@@ -20782,7 +20813,7 @@ setTool('select');
 setCameraView('orbit', false);
 updateModelStatus();
 initializeAddonRailContributions();
-checkPendingProjectOpen().then(restoreBrowserAutosave);
+checkPendingProjectOpen().finally(() => launchFileChecked()).then(restoreBrowserAutosave);
 $('#emptyCanvasTutorial').addEventListener('click', () => startTutorial('firstModel'));
 $('#emptyCanvasExample').addEventListener('click', openExamplesExplorer);
 $('#emptyCanvasLater').addEventListener('click', () => retireFirstSteps({ later: true }));

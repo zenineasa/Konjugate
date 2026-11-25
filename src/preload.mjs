@@ -50,10 +50,12 @@ contextBridge.exposeInMainWorld('applicationInfo', {
     restart: () => ipcRenderer.invoke('applicationRestart')
 });
 
-// The first-model tour (docs/proposals/guidedTour.md): main decides when to offer it (the first launch, and the Welcome window's card)
-// and tells the window; the window reports back only that it was completed.
+// The first-model tour (docs/proposals/guidedTour.md): main offers it on a first launch and the window says whether it took it; the window
+// reports back that it was completed.
 contextBridge.exposeInMainWorld('tour', {
-    onStart: (callback) => ipcRenderer.on('tourStart', () => callback()),
+    // The first launch's offer: the window answers whether it took it (it does not over a project already open).
+    onOffer: (callback) => ipcRenderer.on('tourOffer', () => callback()),
+    answerOffer: (started) => ipcRenderer.invoke('tourOfferAnswer', started === true),
     recordCompleted: () => ipcRenderer.invoke('tourRecordCompleted')
 });
 

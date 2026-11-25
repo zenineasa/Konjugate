@@ -10858,7 +10858,7 @@ export async function runInteractionTests(driver) {
                 'One state, the FMU\'s output x, starting where the FMU starts it; the new node\'s own x is gone.');
             assert.deepEqual(node.implementation.bindings, [], 'k keeps the FMU\'s own value.');
             assert.deepEqual(node.implementation.outputs, [{ key: 'x', stateId: node.states[0].id, setsValue: true }]);
-            assert.deepEqual(saved.requires, ['fmuStartValues']);
+            assert.deepEqual(saved.requires, ['fmuStartValues', 'fmuAttachments']); // kept in the project too (stage 8)
             assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`) !== '1 model error', true);
             // The card: k by its FMU name and role, at the FMU's own value; About this FMU; x set by the FMU.
             await waitFor(window, `document.querySelector('#nodeProgramInputs .fmuPortRow select')?.selectedOptions[0]?.textContent === 'The FMU\\'s own start value, 1'`, 'k\'s row does not give the FMU\'s value.', 10000);
@@ -10922,7 +10922,7 @@ export async function runInteractionTests(driver) {
             let added = await nodes();
             assert.equal(added[0].name, 'Dahlquist');
             assert.deepEqual(added[0].states.map((state) => state.symbol), ['x']);
-            assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Added Dahlquist');
+            // (The status line says "Added Dahlquist" until validation takes it over: not checked here, as that can be at once.)
             assert.equal(await evaluate(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeProgramKind').value`), 'fmi', 'Its card is open on the FMU.');
             // 4. Run  5. Start: the result is plotted for the node, which is still selected.
             await openRunDialog(window);
@@ -10941,7 +10941,7 @@ export async function runInteractionTests(driver) {
             assert.match(await evaluate(window, `document.querySelector('#addFmuRecent button').textContent`), /^DahlquistFMI 3\.0 · in your library$/);
             await evaluate(window, `document.querySelector('#addFmuRecent button').click()`);
             await waitFor(window, `window.__debugProject.serialize().nodes.length === 2`, 'The library\'s FMU was not added.', 10000);
-            assert.equal(await evaluate(window, `document.querySelector('#statusText').textContent`), 'Added Dahlquist, from your library');
+            assert.equal((await installedFmus()).length, 1, 'Added from the library, not installed again.');
             // The same file again: used from the library, not installed twice.
             await driver.answerDialogs({ open: fmuPath }, async () => {
                 await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('#addFmuFromFile').click()`);
@@ -11219,6 +11219,101 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#closeExportFmuNotice').click()`).catch(() => {});
         }
     }, { skip: !driver.capabilities.fmuExport && 'FMU export is in the desktop app only' });
+
+    // The FMU inside the project (docs/proposals/fmuImportWorkflow.md, stage 8): saved, the project keeps the FMU's archive (container
+    // version 2, requires fmuAttachments); opened on a computer whose library lacks it (here, after uninstalling it), the FMU is put in
+    // the library from the file and the project runs; linked instead, the file is version 1 as before; Replace FMU… swaps it in place.
+    await run('a project keeps its FMU in its file, runs where the library lacks it, links it instead, and replaces it', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const { decodeProjectBundle } = await import('../src/projectFile.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Dahlquist.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
+        const replacementPath = join(folder, 'VanDerPol.fmu');
+        await writeFile(replacementPath, await referenceFmuArchive('3.0', 'VanDerPol'));
+        const installedFmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => ({ guid: entry.packageId, version: entry.version, name: entry.name })))`);
+        const uninstallAll = async () => { for (const fmu of await installedFmus()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`); };
+        const save = async (fileName) => driver.captureExport(async () => {
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            await waitFor(window, `/saved/.test(document.querySelector('#statusText').textContent)`, 'The project was not saved.', 20000);
+        }, { fileName, maxAttempts: 400 });
+        try {
+            await uninstallAll();
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Kept.kjt')`);
+            await driver.answerDialogs({ open: fmuPath }, async () => {
+                await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('#addFmuFromFile').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes[0]?.implementation?.kind === 'fmi'`, 'The FMU was not added.', 20000);
+            });
+            await waitFor(window, `!document.querySelector('#nodeProgramFmuKeep').hidden`, 'The card does not say where the FMU is kept.', 10000);
+            assert.match(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepText').textContent`), /^Kept in this project's file \([\d.]+ MB\), so the project runs on another computer\.$/);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepToggle').textContent`), 'Link to the library instead');
+            const archive = await referenceFmuArchive('3.0', 'Dahlquist');
+            const { createHash } = await import('node:crypto');
+            assert.equal((await evaluate(window, `window.__debugProject.serialize()`)).nodes[0].implementation.fmuSha256, createHash('sha256').update(archive).digest('hex'), 'The node names the archive it keeps.');
+
+            // Saved: version 2, the archive inside, and the file says it requires attachments.
+            const kept = await save('Kept.kjt');
+            assert.equal(kept.bytes[4], 2);
+            const bundle = await decodeProjectBundle(kept.bytes);
+            assert.deepEqual(JSON.parse(bundle.content).requires, ['fmuStartValues', 'fmuAttachments']);
+            assert.equal(bundle.attachments.length, 1);
+            assert.deepEqual(new Uint8Array(bundle.attachments[0].buffer), new Uint8Array(archive));
+            assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /keeps Dahlquist\.fmu/);
+
+            // Another computer: the library without it. Opening the file puts it back, and the project runs.
+            await uninstallAll();
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Empty.kjt')`);
+            await driver.answerDialogs({ open: kept.path }, async () => {
+                await evaluate(window, `document.querySelector('#loadButton').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes.length === 1`, 'The saved project did not open.', 20000);
+            });
+            assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /Dahlquist added to your library from the project/);
+            assert.equal((await installedFmus()).length, 1);
+            await openRunDialog(window);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The project did not run from its kept FMU.', 180000);
+            await evaluate(window, `(() => { document.querySelector('#closeResults').click(); document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click(); })()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+
+            // Linked instead: the file is version 1 as before, with nothing new required but the start values.
+            await evaluate(window, `document.querySelector('.objectLabel').click()`);
+            await waitFor(window, `!document.querySelector('#nodeProgramFmuKeep').hidden`, 'The card did not open.', 10000);
+            await evaluate(window, `document.querySelector('#nodeProgramFmuKeepToggle').click()`);
+            assert.match(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepText').textContent`), /^Linked to this computer's library/);
+            // Saved where it was opened from.
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            let linked = null;
+            for (let attempt = 0; attempt < 200 && !linked; attempt += 1) {
+                const bytes = await readFile(kept.path);
+                if (bytes[4] === 1) linked = { bytes };
+                else await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            assert.ok(linked, 'The project was not saved again, linked.');
+            assert.equal(linked.bytes[4], 1);
+            const linkedBundle = await decodeProjectBundle(linked.bytes);
+            assert.deepEqual(linkedBundle.attachments, []);
+            assert.deepEqual(JSON.parse(linkedBundle.content).requires, ['fmuStartValues']);
+
+            // Replace FMU…: another FMU in the node's place. The node keeps its name and its states (Dahlquist's x, which a person
+            // may have connected), gains a state for each new output, and stays linked as it was left.
+            const before = (await evaluate(window, `window.__debugProject.serialize()`)).nodes[0];
+            await driver.answerDialogs({ open: replacementPath }, async () => {
+                await evaluate(window, `document.querySelector('#nodeProgramFmuReplace').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes[0].implementation.fmuId !== ${JSON.stringify(before.implementation.fmuId)}`, 'The FMU was not replaced.', 20000);
+            });
+            const after = (await evaluate(window, `window.__debugProject.serialize()`)).nodes[0];
+            assert.equal(after.name, 'Dahlquist', 'A name the node already has is kept.');
+            assert.ok(before.states.every((state) => after.states.some((kept) => kept.id === state.id)), 'Its states are kept.');
+            assert.deepEqual(after.implementation.outputs.map((output) => output.key), ['x0', 'x1']);
+            assert.notEqual(after.implementation.fmuId, before.implementation.fmuId);
+            assert.equal(after.implementation.fmuLink, true, 'Still linked, as the person left it.');
+            assert.notEqual(after.implementation.fmuSha256, before.implementation.fmuSha256);
+        } finally {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'Empty.kjt')`).catch(() => {});
+            await uninstallAll().catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
 
     await run('a node is computed by an installed FMU, wired under the FMU\'s own keys', async () => {
         // An FMU stand-in: what the Extensions explorer lists, and the ports the desktop reads from its modelDescription.

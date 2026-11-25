@@ -1014,6 +1014,9 @@
                         <p class="builderHint">Each of its outputs is a state of this node, set by the FMU. Its parameters and inputs keep the FMU's own values unless you give one a value of its own, share it, or have it read a state. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
                         <p id="nodeProgramFmuNotes" class="builderHint" hidden></p>
                         <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul></details>
+                        <!-- Where the FMU is kept: in the project's file, or linked to the library, and Replace FMU… (stage 8 of
+                             docs/proposals/fmuImportWorkflow.md). -->
+                        <p id="nodeProgramFmuKeep" class="builderHint fmuKeep" hidden><span id="nodeProgramFmuKeepText"></span> <button id="nodeProgramFmuKeepToggle" type="button"></button> <button id="nodeProgramFmuReplace" type="button">Replace FMU…</button></p>
                     </div>
                     <h3>Inputs <button id="editAddNodeProgramInput" type="button" title="Add an input">＋</button></h3>
                     <div id="nodeProgramInputs"></div>

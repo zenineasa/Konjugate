@@ -41,7 +41,7 @@ import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import {
-    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
@@ -3602,6 +3602,7 @@ async function renderNodeProgramFmus(node) {
         item.textContent = line;
         return item;
     }));
+    renderFmuKeep(node, ports && !ports.error ? ports : null);
     // The rows were drawn before the ports were known: drawn again, with the FMU's names, units and start values.
     if (!known && ports && !ports.error && selectedNode === node) renderNodeProgram(node);
     // An input or parameter the file leaves to the FMU has no binding there (src/nodeProgram.mjs, implementationForFile): it is
@@ -3618,6 +3619,57 @@ async function renderNodeProgramFmus(node) {
         }
     }
 }
+
+// Where the node's FMU is kept (stage 8 of docs/proposals/fmuImportWorkflow.md): in the project's file, so it runs on another computer,
+// or linked to this computer's library; switched here, and Replace FMU… swaps in another FMU (a newer export), keeping matching states,
+// values and connections.
+function megabytes(bytes) {
+    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+function renderFmuKeep(node, ports) {
+    const implementation = node.userData.definition.implementation;
+    const line = $('#nodeProgramFmuKeep');
+    line.hidden = implementation?.kind !== 'fmi' || !implementation.fmuId;
+    if (line.hidden) return;
+    const size = ports?.about?.archiveBytes;
+    const kept = fmuKeptInProject(implementation);
+    const over = Number.isFinite(size) && size > fmuKeepLimitBytes;
+    $('#nodeProgramFmuKeepText').textContent = kept
+        ? `Kept in this project's file${Number.isFinite(size) ? ` (${megabytes(size)})` : ''}, so the project runs on another computer.`
+        : `Linked to this computer's library: elsewhere the project needs the FMU installed to run${over ? ` (it is ${megabytes(size)}, over the ${megabytes(fmuKeepLimitBytes)} kept by default)` : ''}.`;
+    const toggle = $('#nodeProgramFmuKeepToggle');
+    toggle.textContent = kept ? 'Link to the library instead' : 'Keep it in the project';
+    toggle.hidden = !kept && !ports?.about?.archiveSha256;
+    toggle.disabled = Boolean(activeResult);
+    $('#nodeProgramFmuReplace').disabled = Boolean(activeResult);
+}
+$('#nodeProgramFmuKeepToggle').addEventListener('click', () => {
+    const node = selectedNode;
+    const implementation = node?.userData.definition.implementation;
+    if (implementation?.kind !== 'fmi') return;
+    const ports = fmuPortsFor(implementation);
+    changeNodeModel(node, (snapshot) => {
+        if (fmuKeptInProject(snapshot.implementation)) snapshot.implementation.fmuLink = true;
+        else {
+            delete snapshot.implementation.fmuLink;
+            if (ports?.about?.archiveSha256) snapshot.implementation.fmuSha256 = ports.about.archiveSha256;
+        }
+    });
+    renderFmuKeep(node, ports);
+});
+$('#nodeProgramFmuReplace').addEventListener('click', async () => {
+    const node = selectedNode;
+    if (node?.userData.definition.implementation?.kind !== 'fmi' || activeResult) return;
+    const added = await window.extensions.addFmu?.();
+    if (!added) return;
+    if (added.error) {
+        showFmuNotice('The FMU was not replaced.', [added.error], { desktopOnly: Boolean(added.desktopOnly) });
+        return;
+    }
+    installedFmus = null;
+    await useFmuForNode(node, added.guid, added.version);
+    $('#statusText').textContent = `Replaced with ${added.name}`;
+});
 
 // Which of the FMU's binaries runs here, and what about its ports the person wiring it should know (fmuPortNotes).
 async function showFmuNotes(ports) {
@@ -15398,6 +15450,8 @@ async function loadOpenedProjectFile(file) {
     activeExampleId = null;
     $('#exampleGuideButton').hidden = true;
     $('#statusText').textContent = file.embeddedResult ? 'Project and simulation results loaded' : 'Project loaded';
+    // FMUs the project keeps, put in this computer's library as it opened (stage 8).
+    if (file.installedFmus?.length) $('#statusText').textContent += ` · ${file.installedFmus.join(', ')} added to your library from the project`;
 }
 
 // ---- Tutorials (docs/proposals/tutorials.md; the first of them is the first-model tour, docs/proposals/guidedTour.md) --------------
@@ -17107,6 +17161,9 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         // An encrypted component kept in a project that is not: said, not refused (docs/subsystems.md#linked-components).
         const encryptedComponents = linkedDefinitionsInUse().filter((definition) => definition.link.encrypted).map((definition) => definition.link.fileName);
         if (encryptedComponents.length && !result.encrypted) $('#statusText').textContent += ` · ${encryptedComponents.join(', ')} ${encryptedComponents.length === 1 ? 'is' : 'are'} encrypted, and kept unencrypted in this project`;
+        // The FMUs the file keeps, and any it could not, as this computer's library lacks them (stage 8 of docs/proposals/fmuImportWorkflow.md).
+        if (result.keptFmus?.length) $('#statusText').textContent += ` · keeps ${result.keptFmus.join(', ')}`;
+        if (result.missingFmus?.length) $('#statusText').textContent += ` · ${result.missingFmus.join(', ')} not kept: its FMU is not in this computer's library`;
         if (result.includesResults && tour.active) tutorialSavedWithResults = true;
         return true;
     } catch (error) {

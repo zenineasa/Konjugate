@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-import { createCipheriv, createDecipheriv, randomBytes, scrypt as deriveKey } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt as deriveKey } from 'node:crypto';
 import { promisify } from 'node:util';
 import { gunzip, gzip } from 'node:zlib';
 import { normalizePublicNotice } from './ownership.mjs';
@@ -10,6 +10,11 @@ const gunzipAsync = promisify(gunzip);
 const scryptAsync = promisify(deriveKey);
 const magic = Buffer.from('KJTF');
 const version = 1;
+// Version 2 is version 1 with attachments after the results: files a project carries, an imported FMU's archive above all
+// (docs/proposals/fmuImportWorkflow.md, stage 8). It is written only when a project has an attachment, so every other file stays
+// version 1, byte for byte as before, and a Konjugate that predates attachments refuses a file that needs them by its version.
+const attachmentsVersion = 2;
+const supportedVersions = new Set([version, attachmentsVersion]);
 const gzipFlag = 1;
 const encryptedFlag = 2;
 const fixedHeaderLength = 10;
@@ -29,7 +34,7 @@ function parseHeader(buffer) {
     if (buffer.length < fixedHeaderLength || !buffer.subarray(0, 4).equals(magic)) {
         throw new ProjectFileError('This is not a Konjugate project file.', 'INVALID_FORMAT');
     }
-    if (buffer[4] !== version) {
+    if (!supportedVersions.has(buffer[4])) {
         throw new ProjectFileError(`Konjugate project version ${buffer[4]} is not supported.`, 'UNSUPPORTED_VERSION');
     }
     const flags = buffer[5];
@@ -72,7 +77,11 @@ export function inspectProjectFile(buffer) {
     const encrypted = Boolean(flags & encryptedFlag);
     // The owner's notice for an encrypted file, written in its header so it can be read before the password is given (docs/proposals/modelOwnership.md).
     const publicNotice = encrypted ? normalizePublicNotice(metadata?.publicNotice) : null;
-    return { format: 'kjt', encrypted, version, ...(publicNotice ? { publicNotice } : {}) };
+    return { format: 'kjt', encrypted, version: bytes[4], ...(publicNotice ? { publicNotice } : {}) };
+}
+
+export function sha256Hex(bytes) {
+    return createHash('sha256').update(bytes).digest('hex');
 }
 
 // resultBranches (an array of {buffer, branchUuid, parentBranchUuid, forkTime, label}) saves an
@@ -87,20 +96,26 @@ export function inspectProjectFile(buffer) {
 // or corrupting data -- deliberately not mirrored into a redundant legacy single-result section,
 // which would double the file's size on every multi-branch save just to support opening a
 // multi-branch file in a build that predates the concept entirely.
-export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null, resultBranches = null, publicNotice = null } = {}) {
+// attachments, when given, is [{ kind, name, buffer }]: each kept after the results, named in the header by its kind ("fmu"), a name to
+// show, its length and its SHA-256, by which the project's document refers to it. A file with any is container version 2.
+export async function encodeProjectFile(content, { password = null, scryptCost = 2 ** 17, result = null, resultBranches = null, publicNotice = null, attachments = null } = {}) {
     const compressed = await gzipAsync(Buffer.from(content, 'utf8'), { level: 9 });
     const branches = (resultBranches ?? (result ? [{ buffer: result }] : []))
         .map((branch) => ({ ...branch, buffer: Buffer.isBuffer(branch.buffer) ? branch.buffer : Buffer.from(branch.buffer) }));
     const isLegacyShape = branches.length <= 1 && !branches.some((branch) => branch.branchUuid);
     let flags = gzipFlag;
-    let payload = Buffer.concat([compressed, ...branches.map((branch) => branch.buffer)]);
+    const kept = (attachments ?? []).map((attachment) => ({ ...attachment, buffer: Buffer.isBuffer(attachment.buffer) ? attachment.buffer : Buffer.from(attachment.buffer) }));
+    let payload = Buffer.concat([compressed, ...branches.map((branch) => branch.buffer), ...kept.map((attachment) => attachment.buffer)]);
     const metadata = {
         compression: 'gzip',
         modelPayloadLength: compressed.length,
         resultPayloadLength: isLegacyShape ? (branches[0]?.buffer.length ?? 0) : 0,
         ...(isLegacyShape ? {} : {
             resultSections: branches.map(({ buffer, ...branchMetadata }) => ({ length: buffer.length, ...branchMetadata }))
-        })
+        }),
+        ...(kept.length ? {
+            attachments: kept.map(({ buffer, kind, name }) => ({ kind: String(kind), name: String(name ?? ''), length: buffer.length, sha256: sha256Hex(buffer) }))
+        } : {})
     };
 
     if (password) {
@@ -122,7 +137,7 @@ export async function encodeProjectFile(content, { password = null, scryptCost =
     const header = Buffer.from(JSON.stringify(metadata), 'utf8');
     const prefix = Buffer.alloc(fixedHeaderLength);
     magic.copy(prefix);
-    prefix[4] = version;
+    prefix[4] = kept.length ? attachmentsVersion : version;
     prefix[5] = flags;
     prefix.writeUInt32BE(header.length, 6);
     return Buffer.concat([prefix, header, payload]);
@@ -164,11 +179,25 @@ export async function decodeProjectBundle(buffer, { password = null } = {}) {
         : (metadata.resultPayloadLength ? [{ length: metadata.resultPayloadLength }] : []);
     const sectionLengths = sections.map((section) => Number(section.length));
     const totalResultLength = sectionLengths.reduce((total, length) => total + length, 0);
+    const attachmentEntries = Array.isArray(metadata.attachments) ? metadata.attachments : [];
+    const attachmentLengths = attachmentEntries.map((entry) => Number(entry?.length));
+    const totalAttachmentLength = attachmentLengths.reduce((total, length) => total + length, 0);
     if (!Number.isSafeInteger(modelPayloadLength) || modelPayloadLength <= 0 ||
         sectionLengths.some((length) => !Number.isSafeInteger(length) || length < 0) ||
-        modelPayloadLength + totalResultLength !== plaintext.length) {
+        attachmentLengths.some((length) => !Number.isSafeInteger(length) || length < 0) ||
+        modelPayloadLength + totalResultLength + totalAttachmentLength !== plaintext.length) {
         throw new ProjectFileError('The project payload sections are damaged.', 'CORRUPT_PAYLOAD');
     }
+    // Each attachment is checked against the SHA-256 the header gives it: the document refers to it by that.
+    let attachmentOffset = modelPayloadLength + totalResultLength;
+    const attachments = attachmentEntries.map((entry, index) => {
+        const buffer = Buffer.from(plaintext.subarray(attachmentOffset, attachmentOffset + attachmentLengths[index]));
+        attachmentOffset += attachmentLengths[index];
+        if (typeof entry.sha256 !== 'string' || sha256Hex(buffer) !== entry.sha256) {
+            throw new ProjectFileError(`The project's attachment ${entry?.name || index + 1} is damaged.`, 'CORRUPT_PAYLOAD');
+        }
+        return { kind: String(entry.kind ?? ''), name: String(entry.name ?? ''), sha256: entry.sha256, buffer };
+    });
     try {
         const content = (await gunzipAsync(plaintext.subarray(0, modelPayloadLength), { maxOutputLength })).toString('utf8');
         let offset = modelPayloadLength;
@@ -183,7 +212,8 @@ export async function decodeProjectBundle(buffer, { password = null } = {}) {
             // result stays the first (in a legacy/single-branch file, the only) branch's buffer,
             // so every existing caller reading .result alone keeps working unchanged.
             result: resultBranches[0]?.buffer ?? null,
-            resultBranches: resultBranches.length ? resultBranches : null
+            resultBranches: resultBranches.length ? resultBranches : null,
+            attachments
         };
     } catch {
         throw new ProjectFileError('The project payload is damaged.', 'CORRUPT_PAYLOAD');

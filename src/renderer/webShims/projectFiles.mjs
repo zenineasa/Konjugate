@@ -16,6 +16,7 @@ import { showGuidePanel } from './guidePanel.mjs';
 import { startTutorialInPage } from './misc.mjs';
 import { tutorialsForExample } from '../../tutorials/index.mjs';
 import { publicNoticeOf } from '../../ownership.mjs';
+import { fmuKeptInProject } from '../../nodeProgram.mjs';
 import { BrowserProjectFileError, decodeProjectContent, encodeProjectContent, inspectProjectContent } from '../../browserProjectCodec.mjs';
 import { rendererResultProjection } from '../../resultSession.mjs';
 import { registerCompletedResult } from '../../webEngineLiveShim.mjs';
@@ -50,6 +51,27 @@ const fileHandles = new Map(); // synthetic path id -> FileSystemFileHandle, so 
 // synthetic id since there's no path to re-read from in a browser).
 const pendingEncryptedFiles = new Map();
 
+// The FMUs files opened here keep (docs/proposals/fmuImportWorkflow.md, stage 8), by SHA-256: the web edition runs no FMU, but a
+// project saved here keeps the ones it came with, so opening and saving it in a browser never drops them.
+const openedAttachments = new Map();
+
+function attachmentsFor(content) {
+    let document;
+    try { document = JSON.parse(content); } catch { return { attachments: [], missing: [] }; }
+    const wanted = new Map();
+    for (const node of document.nodes ?? []) {
+        if (fmuKeptInProject(node.implementation) && !wanted.has(node.implementation.fmuSha256)) wanted.set(node.implementation.fmuSha256, node.name ?? node.implementation.fmuId);
+    }
+    const attachments = [];
+    const missing = [];
+    for (const [sha256, name] of wanted) {
+        const kept = openedAttachments.get(sha256);
+        if (kept) attachments.push(kept);
+        else missing.push(name);
+    }
+    return { attachments, missing };
+}
+
 async function fileFromBytes(bytes, fileName, handle = null, password = null) {
     const inspection = inspectProjectContent(bytes);
     if (!password && inspection.encrypted) {
@@ -58,6 +80,7 @@ async function fileFromBytes(bytes, fileName, handle = null, password = null) {
         return { path, fileName, encrypted: true, requiresPassword: true, ...(inspection.publicNotice ? { publicNotice: inspection.publicNotice } : {}) };
     }
     const decoded = await decodeProjectContent(bytes, { password });
+    for (const attachment of decoded.attachments ?? []) openedAttachments.set(attachment.sha256, attachment);
     const path = handle ? String(++handleCounter) : null;
     if (handle) fileHandles.set(path, handle);
     let embeddedResult = null;
@@ -118,7 +141,9 @@ async function save(path, content, suggestedFilename, password, resultBranches) 
         throw new Error("Saving simulation results with the project isn't supported in the web edition yet " +
             '-- export results as CSV separately, or save the model only.');
     }
-    const bytes = await encodeProjectContent(content, { password, publicNotice: publicNoticeOf(content) });
+    const { attachments, missing } = attachmentsFor(content);
+    const bytes = await encodeProjectContent(content, { password, publicNotice: publicNoticeOf(content), attachments: attachments.length ? attachments : null });
+    const kept = { keptFmus: attachments.map((attachment) => attachment.name), ...(missing.length ? { missingFmus: missing } : {}) };
     if (isFsaSupported()) {
         let handle = path ? fileHandles.get(path) : null;
         if (!handle) {
@@ -137,11 +162,11 @@ async function save(path, content, suggestedFilename, password, resultBranches) 
         await writable.close();
         const resolvedPath = path && fileHandles.get(path) === handle ? path : String(++handleCounter);
         fileHandles.set(resolvedPath, handle);
-        return { path: resolvedPath, fileName: handle.name, encrypted: Boolean(password), includesResults: false };
+        return { path: resolvedPath, fileName: handle.name, encrypted: Boolean(password), includesResults: false, ...kept };
     }
     const fileName = suggestedFilename || 'untitled.kjt';
     downloadBlob(bytes, fileName, 'application/octet-stream');
-    return { path: null, fileName, encrypted: Boolean(password), includesResults: false };
+    return { path: null, fileName, encrypted: Boolean(password), includesResults: false, ...kept };
 }
 
 async function bundledExamples() {

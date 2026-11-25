@@ -22,6 +22,8 @@ import { normalizePublicNotice } from './ownership.mjs';
 
 const magic = new TextEncoder().encode('KJTF');
 const version = 1;
+// Version 2 carries attachments after the results (src/projectFile.mjs, docs/kjtFormat.md): written only when there are any.
+const attachmentsVersion = 2;
 const gzipFlag = 1;
 const encryptedFlag = 2;
 const fixedHeaderLength = 10;
@@ -62,6 +64,11 @@ function base64ToBytes(base64) {
     return bytes;
 }
 
+export async function sha256Hex(bytes) {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return [...digest].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function deriveScryptKey(password, kdf) {
     if (!password) throw new BrowserProjectFileError('A password is required.', 'PASSWORD_REQUIRED');
     if (kdf?.name !== 'scrypt') throw new BrowserProjectFileError('The project uses an unsupported key derivation method.', 'UNSUPPORTED_KDF');
@@ -76,14 +83,19 @@ async function deriveScryptKey(password, kdf) {
     return crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['encrypt', 'decrypt']);
 }
 
-export async function encodeProjectContent(content, { result = null, password = null, scryptCost = 2 ** 17, publicNotice = null } = {}) {
+// attachments: [{ kind, name, buffer }], as src/projectFile.mjs writes them (the web edition writes back the ones a file it opened
+// carried, so saving there never drops an FMU kept in the project).
+export async function encodeProjectContent(content, { result = null, password = null, scryptCost = 2 ** 17, publicNotice = null, attachments = null } = {}) {
     const compressedStream = new Blob([new TextEncoder().encode(content)]).stream().pipeThrough(new CompressionStream('gzip'));
     const compressed = new Uint8Array(await new Response(compressedStream).arrayBuffer());
     const resultBytes = result ? (result instanceof Uint8Array ? result : new Uint8Array(result)) : new Uint8Array(0);
     let flags = gzipFlag;
     let payload = concatBytes(compressed, resultBytes);
+    const kept = (attachments ?? []).map((attachment) => ({ ...attachment, buffer: attachment.buffer instanceof Uint8Array ? attachment.buffer : new Uint8Array(attachment.buffer) }));
+    for (const attachment of kept) payload = concatBytes(payload, attachment.buffer);
     const metadata = {
-        compression: 'gzip', modelPayloadLength: compressed.length, resultPayloadLength: resultBytes.length
+        compression: 'gzip', modelPayloadLength: compressed.length, resultPayloadLength: resultBytes.length,
+        ...(kept.length ? { attachments: await Promise.all(kept.map(async ({ kind, name, buffer }) => ({ kind: String(kind), name: String(name ?? ''), length: buffer.length, sha256: await sha256Hex(buffer) }))) } : {})
     };
 
     if (password) {
@@ -107,7 +119,7 @@ export async function encodeProjectContent(content, { result = null, password = 
     const header = new TextEncoder().encode(JSON.stringify(metadata));
     const bytes = new Uint8Array(fixedHeaderLength + header.length + payload.length);
     bytes.set(magic, 0);
-    bytes[4] = version;
+    bytes[4] = kept.length ? attachmentsVersion : version;
     bytes[5] = flags;
     new DataView(bytes.buffer).setUint32(6, header.length, false);
     bytes.set(header, fixedHeaderLength);
@@ -119,7 +131,7 @@ export function inspectProjectContent(bytes) {
     if (bytes.length < fixedHeaderLength || !equalBytes(bytes.subarray(0, 4), magic)) {
         throw new BrowserProjectFileError('This is not a Konjugate project file.', 'INVALID_FORMAT');
     }
-    if (bytes[4] !== version) {
+    if (bytes[4] !== version && bytes[4] !== attachmentsVersion) {
         throw new BrowserProjectFileError(`Konjugate project version ${bytes[4]} is not supported.`, 'UNSUPPORTED_VERSION');
     }
     const encrypted = Boolean(bytes[5] & encryptedFlag);
@@ -132,7 +144,7 @@ export function inspectProjectContent(bytes) {
             }
         } catch { /* a damaged header is reported when the file is decoded */ }
     }
-    return { format: 'kjt', encrypted, version, ...(publicNotice ? { publicNotice } : {}) };
+    return { format: 'kjt', encrypted, version: bytes[4], ...(publicNotice ? { publicNotice } : {}) };
 }
 
 export async function decodeProjectContent(bytes, { password = null } = {}) {
@@ -171,15 +183,29 @@ export async function decodeProjectContent(bytes, { password = null } = {}) {
     }
     const modelPayloadLength = Number(metadata.modelPayloadLength ?? payload.length);
     const resultPayloadLength = Number(metadata.resultPayloadLength ?? 0);
+    const attachmentEntries = Array.isArray(metadata.attachments) ? metadata.attachments : [];
+    const attachmentLengths = attachmentEntries.map((entry) => Number(entry?.length));
+    const totalAttachmentLength = attachmentLengths.reduce((total, length) => total + length, 0);
     if (!Number.isSafeInteger(modelPayloadLength) || modelPayloadLength <= 0 ||
         !Number.isSafeInteger(resultPayloadLength) || resultPayloadLength < 0 ||
-        modelPayloadLength + resultPayloadLength !== payload.length) {
+        attachmentLengths.some((length) => !Number.isSafeInteger(length) || length < 0) ||
+        modelPayloadLength + resultPayloadLength + totalAttachmentLength !== payload.length) {
         throw new BrowserProjectFileError('The project payload sections are damaged.', 'CORRUPT_PAYLOAD');
+    }
+    let offset = modelPayloadLength + resultPayloadLength;
+    const attachments = [];
+    for (const [index, entry] of attachmentEntries.entries()) {
+        const buffer = payload.slice(offset, offset + attachmentLengths[index]);
+        offset += attachmentLengths[index];
+        if (typeof entry.sha256 !== 'string' || await sha256Hex(buffer) !== entry.sha256) {
+            throw new BrowserProjectFileError(`The project's attachment ${entry?.name || index + 1} is damaged.`, 'CORRUPT_PAYLOAD');
+        }
+        attachments.push({ kind: String(entry.kind ?? ''), name: String(entry.name ?? ''), sha256: entry.sha256, buffer });
     }
     try {
         const decompressedStream = new Blob([payload.subarray(0, modelPayloadLength)]).stream().pipeThrough(new DecompressionStream('gzip'));
         const content = new TextDecoder('utf-8').decode(await new Response(decompressedStream).arrayBuffer());
-        return { content, result: resultPayloadLength ? payload.subarray(modelPayloadLength) : null };
+        return { content, result: resultPayloadLength ? payload.subarray(modelPayloadLength, modelPayloadLength + resultPayloadLength) : null, attachments };
     } catch {
         throw new BrowserProjectFileError('The project payload is damaged.', 'CORRUPT_PAYLOAD');
     }

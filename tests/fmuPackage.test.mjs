@@ -6,7 +6,8 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
-import { installFmuArchive, listInstalledFmus, uninstallFmu, inspectFmuArchive, FmuPackageError } from '../src/fmuPackage.mjs';
+import { installFmuArchive, installedFmuArchive, installProjectAttachments, listInstalledFmus, sha256Hex, uninstallFmu, inspectFmuArchive, FmuPackageError } from '../src/fmuPackage.mjs';
+import { readFile as readBytes, unlink, writeFile as writeBytes } from 'node:fs/promises';
 
 function fmuBytes({ guid = 'guid-1', modelName = 'TestModel' } = {}) {
     const xml = `<?xml version="1.0"?>
@@ -99,4 +100,58 @@ test('an FMU with no binaries directory is rejected', () => {
 </fmiModelDescription>`;
     const archive = zipSync({ 'modelDescription.xml': new TextEncoder().encode(xml) }, { level: 0 });
     assert.throws(() => inspectFmuArchive(archive), /no binaries/);
+});
+
+// What a project keeps of an FMU (docs/proposals/fmuImportWorkflow.md, stage 8).
+test('an installed FMU keeps the archive it came from, and its SHA-256, for a project to keep', async () => {
+    await withScratchDirectory(async (directory) => {
+        const archive = fmuBytes();
+        const installed = await installFmuArchive(archive, { directory });
+        const kept = await installedFmuArchive(directory, installed.guid, installed.version);
+        assert.deepEqual(new Uint8Array(kept.buffer), archive);
+        assert.equal(kept.sha256, sha256Hex(archive));
+        assert.equal(kept.name, 'TestModel.fmu');
+        assert.equal((await listInstalledFmus(directory))[0].manifest.archiveSha256, sha256Hex(archive));
+        assert.equal(await installedFmuArchive(directory, 'nope', '1.0.0'), null);
+    });
+});
+
+test('an FMU installed before archives were kept gives the same zipped archive every time', async () => {
+    await withScratchDirectory(async (directory) => {
+        const installed = await installFmuArchive(fmuBytes(), { directory });
+        const root = join(directory, 'fmus', installed.guid, installed.version);
+        // As an install from before: no archive, no SHA-256.
+        await unlink(join(root, 'archive.fmu'));
+        const meta = JSON.parse(await readBytes(join(root, 'fmuMeta.json'), 'utf8'));
+        delete meta.archiveSha256;
+        await writeBytes(join(root, 'fmuMeta.json'), JSON.stringify(meta));
+        const first = await installedFmuArchive(directory, installed.guid, installed.version);
+        await unlink(join(root, 'archive.fmu'));
+        const second = await installedFmuArchive(directory, installed.guid, installed.version);
+        assert.equal(first.sha256, second.sha256, 'The same files zip to the same bytes.');
+        assert.ok(inspectFmuArchive(first.buffer).description.guid === 'guid-1', 'It is an FMU.');
+    });
+});
+
+test('opening a project installs the FMUs it keeps that this computer lacks, and uses the ones it has', async () => {
+    await withScratchDirectory(async (directory) => {
+        const archive = fmuBytes();
+        const sha256 = sha256Hex(archive);
+        const project = JSON.stringify({ nodes: [{ id: 1, name: 'Tank', implementation: { kind: 'fmi', fmuId: 'guid-1', fmuVersion: '1.0.0', fmuSha256: sha256 } }] });
+        const attachments = [{ kind: 'fmu', name: 'TestModel.fmu', sha256, buffer: Buffer.from(archive) }];
+        const first = await installProjectAttachments(directory, project, attachments);
+        assert.deepEqual(first, { content: project, installed: ['TestModel'] });
+        assert.equal((await listInstalledFmus(directory)).length, 1);
+        // Opened again: nothing to install.
+        assert.deepEqual(await installProjectAttachments(directory, project, attachments), { content: project, installed: [] });
+        // Another FMU with the same id and version installed here: the project's goes beside it, and its nodes refer to it.
+        const other = fmuBytes({ modelName: 'Changed' });
+        const otherSha = sha256Hex(other);
+        const otherProject = JSON.stringify({ nodes: [{ id: 2, name: 'Tank', implementation: { kind: 'fmi', fmuId: 'guid-1', fmuVersion: '1.0.0', fmuSha256: otherSha } }] });
+        const placed = await installProjectAttachments(directory, otherProject, [{ kind: 'fmu', name: 'Changed.fmu', sha256: otherSha, buffer: Buffer.from(other) }]);
+        assert.equal(JSON.parse(placed.content).nodes[0].implementation.fmuVersion, `1.0.0+${otherSha.slice(0, 8)}`);
+        assert.deepEqual((await listInstalledFmus(directory)).map((entry) => entry.version).sort(), ['1.0.0', `1.0.0+${otherSha.slice(0, 8)}`]);
+        // An attachment no node refers to is left alone.
+        assert.deepEqual(await installProjectAttachments(directory, JSON.stringify({ nodes: [] }), attachments), { content: JSON.stringify({ nodes: [] }), installed: [] });
+    });
 });

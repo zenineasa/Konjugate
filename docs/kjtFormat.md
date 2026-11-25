@@ -17,7 +17,7 @@ All integer fields are unsigned and big-endian. Limits are part of the format co
 | Offset | Size | Meaning |
 | --- | ---: | --- |
 | 0 | 4 | ASCII magic `KJTF` |
-| 4 | 1 | Container version, currently `1` |
+| 4 | 1 | Container version: `1`, or `2` for a file with attachments (below) |
 | 5 | 1 | Flags: bit 0 gzip, bit 1 AES-256-GCM |
 | 6 | 4 | UTF-8 JSON header length, maximum 65,536 bytes |
 | 10 | variable | JSON header |
@@ -32,5 +32,7 @@ For encrypted files, gzip is applied before encryption. The header additionally 
 - `kdf`: scrypt with a 16-byte Base64 salt, cost 2^14 through 2^18, block size 8, parallelization 1 through 4, and a 32-byte derived key.
 - `cipher`: AES-256-GCM with a 12-byte Base64 IV and 16-byte Base64 authentication tag.
 - `publicNotice`: optional, at most 300 characters of text the owner chose to show before the file is unlocked (for example who to ask for the password). It is the only part of the project's ownership details kept outside the encrypted payload, it is never written to an unencrypted file, and being in the header it is not covered by the authentication tag, so it is a notice and not a guarantee. See [Project document schema](projectSchema.md).
+
+**Attachments (version 2).** A project may keep files of its own after its results: an imported FMU's archive above all, so a project shared with another computer runs there ([The FMU round trip](proposals/fmuImportWorkflow.md), stage 8). The header lists them as `attachments: [{ kind, name, length, sha256 }]` (`kind` `"fmu"`, `name` the file's name to show, `length` in bytes, `sha256` its SHA-256 in hexadecimal, which the project's document refers to it by), and the payload holds their bytes, raw, after the model section and every result section, in that order; the section lengths must add up to the payload. A reader checks each attachment against its SHA-256 and refuses a file whose attachment does not match (`CORRUPT_PAYLOAD`). Encrypted, the attachments are inside the encryption. A file is written as version 2 only when it has an attachment, so every other file is version 1, byte for byte as before, and a Konjugate that predates attachments refuses a file that needs them by its version ("Konjugate project version 2 is not supported."). The engine is never given a version 2 file: the app installs the FMUs a project keeps in its library when it opens the project, and hands the engine the model alone.
 
 `.kjt` is the only supported project-file format. Readers reject every other extension and any `.kjt` file without a valid versioned `KJTF` container.

@@ -7,8 +7,9 @@
 // tests/engine/fmiImportFidelity.mjs.
 
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -281,7 +282,11 @@ test('resolveInstalledFmus walks node implementations and leaves non-fmi kinds u
 
 test('an installed FMU\'s ports are described under the keys a node\'s implementation uses, for the node editor to wire', async () => {
     await withInstalledFmu(async (directory, installed) => {
-        const { about, ...ports } = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
+        const { about: { archiveSha256, archiveBytes, ...about }, ...ports } = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
+        // The archive a project keeps of it (stage 8): the one it was installed from, by its SHA-256.
+        const archive = await readFile(join(directory, 'fmus', installed.guid, installed.version, 'archive.fmu'));
+        assert.equal(archiveBytes, archive.length);
+        assert.equal(archiveSha256, createHash('sha256').update(archive).digest('hex'));
         const binaryDirectory = process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64';
         // What the node's card shows of the FMU (docs/proposals/fmuImportWorkflow.md, stage 3).
         assert.deepEqual(about, {

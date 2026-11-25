@@ -30,7 +30,8 @@ import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { packageKey } from './packageArchive.mjs';
-import { fmuStartValuesRequirement } from './nodeProgram.mjs';
+import { fmuAttachmentsRequirement, fmuStartValuesRequirement } from './nodeProgram.mjs';
+import { installedFmuArchive } from './fmuPackage.mjs';
 
 export class FmiResolutionError extends Error {
     constructor(message, code = 'FMI_RESOLUTION_FAILED') {
@@ -284,6 +285,12 @@ async function installedPlatforms(fmuRoot) {
     return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 }
 
+// The installed FMU's archive, as a project keeps it (stage 8): its SHA-256 and size.
+async function archiveFacts(fmuDirectory, guid, version) {
+    const archive = await installedFmuArchive(fmuDirectory, guid, version).catch(() => null);
+    return archive ? { archiveSha256: archive.sha256, archiveBytes: archive.buffer.length } : {};
+}
+
 // The card's "About this FMU" (docs/proposals/fmuImportWorkflow.md, stage 3): what the FMU says of itself and how it runs here.
 function fmuAbout(description, platforms, chosen) {
     return Object.fromEntries(Object.entries({
@@ -338,7 +345,7 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
         outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type, ...variableExtras(variable) })),
         notExposed: description.notExposed,
         binary: describeChosenBinary(chosen, description.fmiVersion),
-        about: fmuAbout(description, await installedPlatforms(fmuRoot), chosen)
+        about: { ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen), ...await archiveFacts(fmuDirectory, guid, version) }
     };
 }
 
@@ -378,9 +385,11 @@ export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuK
         node.implementation = await resolveFmiSource(node.implementation, fmuDirectory, disabledFmuKeys);
     }
     // Start values are the host's to apply, here: the engine never sees the requirement (src/nodeProgram.mjs).
-    if (Array.isArray(document.requires) && document.requires.includes(fmuStartValuesRequirement)) {
+    // So are the FMUs a project keeps (stage 8): installed in the library when the project was opened.
+    const handled = new Set([fmuStartValuesRequirement, fmuAttachmentsRequirement]);
+    if (Array.isArray(document.requires) && document.requires.some((entry) => handled.has(entry))) {
         changed = true;
-        document.requires = document.requires.filter((entry) => entry !== fmuStartValuesRequirement);
+        document.requires = document.requires.filter((entry) => !handled.has(entry));
         if (!document.requires.length) delete document.requires;
     }
     return changed ? JSON.stringify(document) : (typeof content === 'string' ? content : JSON.stringify(document));

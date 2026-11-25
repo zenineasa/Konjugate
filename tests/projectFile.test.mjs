@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decodeProjectBundle, decodeProjectFile, encodeProjectFile, inspectProjectFile } from '../src/projectFile.mjs';
+import { decodeProjectBundle, decodeProjectFile, encodeProjectFile, inspectProjectFile, sha256Hex } from '../src/projectFile.mjs';
+import { decodeProjectContent, encodeProjectContent } from '../src/browserProjectCodec.mjs';
 
 const content = JSON.stringify({ format: 'konjugate', version: 1, nodes: [], edges: [] });
 const testCost = 2 ** 14;
@@ -170,4 +171,53 @@ test('rejects unsupported container versions', async () => {
         () => inspectProjectFile(encoded),
         (error) => error.code === 'UNSUPPORTED_VERSION'
     );
+});
+
+// Attachments (docs/proposals/fmuImportWorkflow.md, stage 8): an FMU's archive kept in the project, after the results.
+const fmuArchive = Buffer.from('PK fake fmu archive bytes');
+
+test('a project with attachments is container version 2, keeps them after the results, and gives them back checked by SHA-256', async () => {
+    const result = Buffer.from([1, 2, 3, 4]);
+    const encoded = await encodeProjectFile(content, { result, attachments: [{ kind: 'fmu', name: 'springMassDamper.fmu', buffer: fmuArchive }] });
+    assert.equal(encoded[4], 2, 'Version 2, so a Konjugate that predates attachments refuses it by its version.');
+    assert.deepEqual(inspectProjectFile(encoded), { format: 'kjt', encrypted: false, version: 2 });
+    const header = JSON.parse(encoded.subarray(10, 10 + encoded.readUInt32BE(6)).toString('utf8'));
+    assert.deepEqual(header.attachments, [{ kind: 'fmu', name: 'springMassDamper.fmu', length: fmuArchive.length, sha256: sha256Hex(fmuArchive) }]);
+    const bundle = await decodeProjectBundle(encoded);
+    assert.equal(bundle.content, content);
+    assert.deepEqual(bundle.result, result);
+    assert.equal(bundle.attachments.length, 1);
+    assert.deepEqual(bundle.attachments[0].buffer, fmuArchive);
+    assert.equal(bundle.attachments[0].sha256, sha256Hex(fmuArchive));
+    // Encrypted, the attachments are inside the encryption.
+    const encrypted = await encodeProjectFile(content, { password: 'secret', scryptCost: testCost, attachments: [{ kind: 'fmu', name: 'a.fmu', buffer: fmuArchive }] });
+    assert.equal(encrypted.includes(fmuArchive), false, 'Not readable without the password.');
+    assert.deepEqual((await decodeProjectBundle(encrypted, { password: 'secret' })).attachments[0].buffer, fmuArchive);
+});
+
+test('a project with no attachments is version 1 byte for byte as before, and has none', async () => {
+    const plain = await encodeProjectFile(content);
+    assert.equal(plain[4], 1);
+    assert.equal(JSON.parse(plain.subarray(10, 10 + plain.readUInt32BE(6)).toString('utf8')).attachments, undefined);
+    assert.deepEqual(plain, await encodeProjectFile(content, { attachments: [] }));
+    assert.deepEqual((await decodeProjectBundle(plain)).attachments, []);
+});
+
+test('an attachment that does not match its SHA-256, or a length that does not add up, is damage', async () => {
+    const encoded = await encodeProjectFile(content, { attachments: [{ kind: 'fmu', name: 'a.fmu', buffer: fmuArchive }] });
+    const tampered = Buffer.from(encoded);
+    tampered[tampered.length - 1] ^= 0xff;
+    await assert.rejects(decodeProjectBundle(tampered), (error) => error.code === 'CORRUPT_PAYLOAD' && /attachment a\.fmu is damaged/.test(error.message));
+    await assert.rejects(decodeProjectBundle(encoded.subarray(0, encoded.length - 1)), (error) => error.code === 'CORRUPT_PAYLOAD');
+});
+
+test('the web edition reads and writes the same attachments, so a project saved in a browser keeps its FMUs', async () => {
+    const fromDesktop = await encodeProjectFile(content, { attachments: [{ kind: 'fmu', name: 'a.fmu', buffer: fmuArchive }] });
+    const read = await decodeProjectContent(new Uint8Array(fromDesktop));
+    assert.equal(read.content, content);
+    assert.deepEqual(Buffer.from(read.attachments[0].buffer), fmuArchive);
+    const fromBrowser = await encodeProjectContent(content, { attachments: read.attachments });
+    assert.equal(fromBrowser[4], 2);
+    assert.deepEqual((await decodeProjectBundle(Buffer.from(fromBrowser))).attachments[0].buffer, fmuArchive);
+    assert.equal((await encodeProjectContent(content))[4], 1, 'None, version 1.');
 });

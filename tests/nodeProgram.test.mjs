@@ -243,3 +243,22 @@ test('the Connect to… picker groups what an input can read and gives units; a 
     assert.deepEqual(fmuConnectionNotes({ key: 'u', kind: 'state', nodeId: 7, stateId: 8 }, { key: 'u', name: 'u' }, reader, [reader, source]), ['Read at the start of each step, so one step late.'], 'An input with no unit warns of none.');
     assert.deepEqual(fmuConnectionNotes({ key: 'u', kind: 'value', value: 1 }, port, reader, [reader, source]), []);
 });
+
+test('a node keeps its FMU in the project by the archive\'s SHA-256, links it when it is over 16 MB, and the file says it requires attachments', () => {
+    const ports = { name: 'M', inputs: [], outputs: [], about: { archiveSha256: 'abc', archiveBytes: 1000 } };
+    const kept = fmiNodeFromPorts({ id: 1, name: 'New node', states: [] }, { guid: 'g', version: '1', ports, newId: () => 5 }).implementation;
+    assert.equal(kept.fmuSha256, 'abc');
+    assert.equal(kept.fmuLink, undefined);
+    assert.deepEqual(documentRequires([], [{ implementation: kept }]), ['fmuAttachments']);
+    const big = fmiNodeFromPorts({ id: 1, name: 'New node', states: [] }, { guid: 'g', version: '1', ports: { ...ports, about: { archiveSha256: 'def', archiveBytes: 20 * 1024 * 1024 } }, newId: () => 5 }).implementation;
+    assert.equal(big.fmuLink, true, 'Over the limit kept by default, it is linked.');
+    assert.deepEqual(documentRequires([], [{ implementation: big }]), [], 'A linked FMU requires nothing new.');
+    // Replaced or chosen again, a node keeps being linked or kept as it was.
+    const relinked = fmiNodeFromPorts({ id: 1, name: 'X', states: [], implementation: { kind: 'fmi', fmuSha256: 'abc', fmuLink: true, outputs: [] } }, { guid: 'g', version: '2', ports, newId: () => 5 }).implementation;
+    assert.equal(relinked.fmuLink, true);
+    const stillKept = fmiNodeFromPorts({ id: 1, name: 'X', states: [], implementation: { kind: 'fmi', fmuSha256: 'abc', outputs: [] } }, { guid: 'g', version: '2', ports: { ...ports, about: { archiveSha256: 'new', archiveBytes: 20 * 1024 * 1024 } }, newId: () => 5 }).implementation;
+    assert.equal(stillKept.fmuLink, undefined, 'A node kept in the project stays kept when its replacement is large.');
+    assert.equal(stillKept.fmuSha256, 'new');
+    // A project from before (no SHA-256 on its FMU node) stays linked, and its file stays readable by older versions.
+    assert.deepEqual(documentRequires([], [{ implementation: { kind: 'fmi', fmuId: 'g', fmuVersion: '1', bindings: [{ key: 'k', kind: 'state', stateId: 2 }], outputs: [] } }]), []);
+});

@@ -146,6 +146,15 @@ export function fmuPortNotes(ports) {
 // is set to that value once, when the run starts (src/fmiResolver.mjs). A file that relies on either says so with this entry in
 // its `requires`, so a Konjugate from before refuses it by name rather than running it differently.
 export const fmuStartValuesRequirement = 'fmuStartValues';
+// A project that keeps an FMU's archive in its file (container version 2, src/projectFile.mjs) says so too (stage 8).
+export const fmuAttachmentsRequirement = 'fmuAttachments';
+// The largest FMU archive kept in a project by default: a larger one is linked to the library instead, which its card can change.
+export const fmuKeepLimitBytes = 16 * 1024 * 1024;
+
+// Whether a node's FMU is kept in the project's file (its archive, by fmuSha256), rather than linked to the library.
+export function fmuKeptInProject(implementation) {
+    return implementation?.kind === 'fmi' && typeof implementation.fmuSha256 === 'string' && !implementation.fmuLink;
+}
 
 // Whether a binding of an FMU node reads something: a state, a shared parameter or a value of its own.
 function fmuBindingTargeted(binding) {
@@ -172,11 +181,12 @@ export function implementationForFile(implementation) {
 // a node's FMU takes a start value or a given value. A file opened with it keeps it while it still has an FMU node, since a
 // binding it left out is not known here without the FMU's ports.
 export function documentRequires(previous, nodes) {
-    const others = (previous ?? []).filter((entry) => entry !== fmuStartValuesRequirement);
+    const others = (previous ?? []).filter((entry) => entry !== fmuStartValuesRequirement && entry !== fmuAttachmentsRequirement);
     const fmuNodes = (nodes ?? []).filter((node) => node?.implementation?.kind === 'fmi');
     const needed = fmuNodes.some((node) => fmuUsesStartValues(node.implementation))
         || ((previous ?? []).includes(fmuStartValuesRequirement) && fmuNodes.length > 0);
-    return needed ? [...others, fmuStartValuesRequirement] : others;
+    const kept = fmuNodes.some((node) => fmuKeptInProject(node.implementation));
+    return [...others, ...(needed ? [fmuStartValuesRequirement] : []), ...(kept ? [fmuAttachmentsRequirement] : [])];
 }
 
 // ---- The node an FMU becomes (docs/proposals/fmuImportWorkflow.md, stage 3) -----------------------------------------------
@@ -192,6 +202,12 @@ export const newNodeName = 'New node';
 export function fmiNodeFromPorts(definition, { guid, version, ports, newId, removableStateIds = [], makeState = (state) => state }) {
     const previous = definition.implementation?.kind === 'fmi' ? definition.implementation : null;
     const implementation = fmiImplementation(guid, version, ports, previous);
+    // Kept in the project by its archive's SHA-256 (stage 8), unless the node was linked, or the archive is over the limit kept by
+    // default (then linked, which the card says and can change).
+    if (ports.about?.archiveSha256) {
+        implementation.fmuSha256 = ports.about.archiveSha256;
+        if (previous?.fmuLink || (!previous?.fmuSha256 && ports.about.archiveBytes > fmuKeepLimitBytes)) implementation.fmuLink = true;
+    }
     const removable = new Set(removableStateIds);
     // The untouched state a new node starts with is never taken for an output, even one of the same symbol (Dahlquist's x):
     // the output's state starts where the FMU starts it.

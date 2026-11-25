@@ -9,10 +9,10 @@
 // not packageArchive.mjs's manifest-format assumptions. See docs/projectSchema.md's "kind: fmi"
 // paragraph and docs/codeExport.md for the mirror-image export side.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 
 export class FmuPackageError extends Error {
@@ -119,6 +119,9 @@ export async function installFmuArchive(archive, { directory, displayName, versi
 
     const meta = {
         guid, version: fmuVersion,
+        // The archive as it was installed, kept beside it (archive.fmu), and its SHA-256: what a project keeps of the FMU and refers
+        // to it by (docs/proposals/fmuImportWorkflow.md, stage 8).
+        archiveSha256: sha256Hex(archive), archiveBytes: archive.length,
         displayName: displayName || description.modelName || guid,
         fmiVersion: description.fmiVersion,
         modelName: description.modelName,
@@ -137,6 +140,7 @@ export async function installFmuArchive(archive, { directory, displayName, versi
             await mkdir(dirname(output), { recursive: true });
             await writeFile(output, bytes);
         }
+        await writeFile(resolve(temporary, archiveFileName), archive);
         await writeFile(resolve(temporary, 'fmuMeta.json'), JSON.stringify(meta, null, 2));
         await mkdir(dirname(target), { recursive: true });
         if (overwrite) await rm(target, { recursive: true, force: true });
@@ -148,6 +152,75 @@ export async function installFmuArchive(archive, { directory, displayName, versi
     }
 
     return { description, platforms, guid, version: fmuVersion, displayName: meta.displayName, installPath: target };
+}
+
+const archiveFileName = 'archive.fmu';
+
+export function sha256Hex(bytes) {
+    return createHash('sha256').update(bytes).digest('hex');
+}
+
+// The installed FMU's archive, for a project to keep: the one it was installed from, or, for an FMU installed before archives were
+// kept, its files zipped again in a fixed order with a fixed time (so the same files always give the same bytes and SHA-256), then
+// kept beside it from then on. Returns { buffer, sha256, name } -- name what the archive is called in a project -- or null when the
+// FMU is not installed.
+export async function installedFmuArchive(directory, guid, version) {
+    const target = safeInstallPath(directory, guid, version);
+    let meta;
+    try {
+        meta = JSON.parse(await readFile(join(target, 'fmuMeta.json'), 'utf8'));
+    } catch {
+        return null;
+    }
+    const name = `${meta.modelName || meta.displayName || 'model'}.fmu`;
+    const kept = await readFile(join(target, archiveFileName)).catch(() => null);
+    if (kept) return { buffer: kept, sha256: meta.archiveSha256 ?? sha256Hex(kept), name };
+    const files = {};
+    const walk = async (folder, prefix) => {
+        for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
+            const path = `${prefix}${entry.name}`;
+            if (entry.isDirectory()) await walk(join(folder, entry.name), `${path}/`);
+            else if (path !== 'fmuMeta.json' && path !== archiveFileName) files[path] = [new Uint8Array(await readFile(join(folder, entry.name))), { mtime: new Date(Date.UTC(1980, 0, 1)) }];
+        }
+    };
+    await walk(target, '');
+    const buffer = Buffer.from(zipSync(files, { level: 6 }));
+    const sha256 = sha256Hex(buffer);
+    await writeFile(join(target, archiveFileName), buffer);
+    await writeFile(join(target, 'fmuMeta.json'), JSON.stringify({ ...meta, archiveSha256: sha256, archiveBytes: buffer.length }, null, 2));
+    return { buffer, sha256, name };
+}
+
+// A project's attachments made ready to run (src/projectFile.mjs): each FMU it keeps installed when this computer does not have it,
+// by its SHA-256. content is the project's document as text; each FMU node refers to its archive by implementation.fmuSha256. An FMU
+// whose id and version are installed with other contents is installed beside it, under the version with the hash's start after it,
+// and the nodes refer to that. Returns { content, installed: [names] } -- content changed only for such nodes.
+export async function installProjectAttachments(directory, content, attachments) {
+    const fmus = (attachments ?? []).filter((attachment) => attachment.kind === 'fmu');
+    if (!fmus.length) return { content, installed: [] };
+    const document = JSON.parse(content);
+    const nodes = (document.nodes ?? []).filter((node) => node.implementation?.kind === 'fmi' && node.implementation.fmuSha256);
+    const installedList = await listInstalledFmus(directory);
+    const installed = [];
+    let changed = false;
+    for (const attachment of fmus) {
+        const users = nodes.filter((node) => node.implementation.fmuSha256 === attachment.sha256);
+        if (!users.length) continue;
+        const { fmuId, fmuVersion } = users[0].implementation;
+        const same = installedList.find((entry) => entry.packageId === fmuId && entry.manifest?.archiveSha256 === attachment.sha256);
+        if (same) {
+            if (same.version !== fmuVersion) { users.forEach((node) => { node.implementation.fmuVersion = same.version; }); changed = true; }
+            continue;
+        }
+        const taken = installedList.some((entry) => entry.packageId === fmuId && entry.version === fmuVersion);
+        const version = taken ? `${fmuVersion}+${attachment.sha256.slice(0, 8)}` : fmuVersion;
+        const result = await installFmuArchive(attachment.buffer, { directory, version, sourceFileName: attachment.name, overwrite: taken && installedList.some((entry) => entry.packageId === fmuId && entry.version === version) });
+        if (result.guid !== fmuId) throw new FmuPackageError(`The project's FMU ${attachment.name} is not the FMU its node names.`, 'FMU_ATTACHMENT_MISMATCH');
+        if (version !== fmuVersion) { users.forEach((node) => { node.implementation.fmuVersion = version; }); changed = true; }
+        installedList.push({ packageId: fmuId, version, manifest: { archiveSha256: attachment.sha256 } });
+        installed.push(result.displayName);
+    }
+    return { content: changed ? JSON.stringify(document) : content, installed };
 }
 
 export async function listInstalledFmus(directory) {

@@ -1859,6 +1859,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .nodeProgramRow.fmuOutputRow select { grid-column: 1; }
 .fmuAbout { margin: 4px 0 8px; color: #8fa3ac; font-size: 8px; }
 .fmuAbout summary { cursor: pointer; color: #9fb4bd; }
+.fmuKeep[hidden] { display: none; }
+.fmuKeep button { margin: 2px 4px 0 0; padding: 2px 8px; color: #7cd9cc; background: #17262f; border: 1px solid #2f5850; border-radius: 4px; cursor: pointer; font-size: inherit; }
 .fmuAbout ul { margin: 4px 0 0; padding-left: 14px; line-height: 1.5; user-select: text; }
 /* What a program or an FMU reads from another node (stage 5): a small label on the dashed arrow, hidden with relationship labels. */
 .programReadLabel { padding: 1px 5px; color: #9fe3d9; background: rgb(13 24 32 / 88%); border: 1px dashed #2f5850; border-radius: 4px; font-size: 8px; white-space: nowrap; cursor: pointer; pointer-events: auto; }

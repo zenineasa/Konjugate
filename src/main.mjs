@@ -60,7 +60,7 @@ import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLo
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
-import { inspectFmuArchive, installFmuArchive, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
+import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
@@ -1205,9 +1205,49 @@ async function createEmbeddedResultSession(resultBytes, branchMetadata = {}) {
 // existing renderer code path that only knows about one embedded result keeps working unchanged.
 // embeddedBranches carries the rest (or, for a genuinely multi-branch save, all of them again --
 // see loadProjectDocument's own dedup-by-sessionId) for the renderer to rebuild its branch tree.
+// The FMUs a project keeps (docs/proposals/fmuImportWorkflow.md, stage 8): every FMU node's archive from the library, by the SHA-256
+// its node names (implementation.fmuSha256), unless the node is linked to the library instead (fmuLink). Returns { attachments,
+// missing } -- missing the FMUs this computer's library does not have, which the file then cannot keep.
+async function projectFmuAttachments(content) {
+    let document;
+    try { document = JSON.parse(content); } catch { return { attachments: [], missing: [] }; }
+    const directory = join(app.getPath('userData'), 'packages');
+    const wanted = new Map();
+    for (const node of document.nodes ?? []) {
+        const implementation = node.implementation;
+        if (implementation?.kind !== 'fmi' || !implementation.fmuSha256 || implementation.fmuLink) continue;
+        if (!wanted.has(implementation.fmuSha256)) wanted.set(implementation.fmuSha256, { implementation, name: node.name ?? implementation.fmuId });
+    }
+    if (!wanted.size) return { attachments: [], missing: [] };
+    const installed = await listInstalledFmus(directory);
+    const attachments = [];
+    const missing = [];
+    for (const [sha256, { implementation, name }] of wanted) {
+        const candidates = [
+            ...installed.filter((entry) => entry.manifest?.archiveSha256 === sha256),
+            ...installed.filter((entry) => entry.packageId === implementation.fmuId && entry.version === implementation.fmuVersion)
+        ];
+        let found = null;
+        for (const entry of candidates) {
+            const archive = await installedFmuArchive(directory, entry.packageId, entry.version);
+            if (archive?.sha256 === sha256) { found = archive; break; }
+        }
+        if (found) attachments.push({ kind: 'fmu', name: found.name, buffer: found.buffer });
+        else missing.push(name);
+    }
+    return { attachments, missing };
+}
+
 async function decodeProjectForRenderer(bytes, options = {}) {
     const bundle = await decodeProjectBundle(bytes, options);
     JSON.parse(bundle.content);
+    // The FMUs the project keeps, installed in this computer's library where it does not have them (stage 8).
+    let installedFromProject = [];
+    if (bundle.attachments?.length) {
+        const placed = await installProjectAttachments(join(app.getPath('userData'), 'packages'), bundle.content, bundle.attachments);
+        bundle.content = placed.content;
+        installedFromProject = placed.installed;
+    }
     const branchSessions = [];
     for (const { buffer, length, ...branchMetadata } of bundle.resultBranches ?? []) {
         branchSessions.push(await createEmbeddedResultSession(buffer, branchMetadata));
@@ -1215,7 +1255,8 @@ async function decodeProjectForRenderer(bytes, options = {}) {
     return {
         content: bundle.content,
         embeddedResult: branchSessions[0] ?? null,
-        embeddedBranches: branchSessions.length > 1 ? branchSessions : null
+        embeddedBranches: branchSessions.length > 1 ? branchSessions : null,
+        ...(installedFromProject.length ? { installedFmus: installedFromProject } : {})
     };
 }
 
@@ -2424,14 +2465,20 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         if (!stored) continue;
         resolvedBranches.push({ buffer: await readFile(stored.path), ...branchMetadata });
     }
-    const bytes = await encodeProjectFile(content, { password, resultBranches: resolvedBranches.length ? resolvedBranches : null, publicNotice: publicNoticeOf(content) });
+    const { attachments, missing } = await projectFmuAttachments(content);
+    const bytes = await encodeProjectFile(content, {
+        password, resultBranches: resolvedBranches.length ? resolvedBranches : null, publicNotice: publicNoticeOf(content), attachments: attachments.length ? attachments : null
+    });
     const verification = await decodeProjectBundle(bytes, { password });
-    if (verification.content !== content || Boolean(verification.result) !== Boolean(resolvedBranches.length)) {
+    if (verification.content !== content || Boolean(verification.result) !== Boolean(resolvedBranches.length) || verification.attachments.length !== attachments.length) {
         throw new Error('The saved project could not be verified.');
     }
     await atomicWriteFile(path, bytes);
     announceComponentFileChanged(path);
-    return { path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resolvedBranches.length) };
+    return {
+        path, fileName: basename(path), encrypted: Boolean(password), includesResults: Boolean(resolvedBranches.length),
+        keptFmus: attachments.map((attachment) => attachment.name), ...(missing.length ? { missingFmus: missing } : {})
+    };
 });
 
 // ---- Component files (docs/subsystems.md#component-files) -------------------------------------------------------------
@@ -3444,6 +3491,8 @@ async function runCliMode() {
         // KONJUGATE_PASSWORD, not a --password flag, matching the engine's own CLI convention
         // for the same input -- a password never belongs in shell history or a process list.
         bundle = await decodeProjectBundle(await readFile(inputPath), { password: process.env.KONJUGATE_PASSWORD });
+        // FMUs the project keeps, installed where this computer does not have them, so the run can resolve them (stage 8).
+        if (bundle.attachments?.length) bundle.content = (await installProjectAttachments(join(app.getPath('userData'), 'packages'), bundle.content, bundle.attachments)).content;
     } catch (error) {
         console.error(`Could not read or decode "${inputPath}": ${error.message}`);
         app.exit(1);
@@ -3509,7 +3558,7 @@ async function runCliMode() {
     try {
         if (flags['output-kjt']) {
             const resultBytes = await readFile(execution.resultPath);
-            await atomicWriteFile(flags['output-kjt'], await encodeProjectFile(stampProjectContent(bundle.content, { version: app.getVersion() }), { result: resultBytes }));
+            await atomicWriteFile(flags['output-kjt'], await encodeProjectFile(stampProjectContent(bundle.content, { version: app.getVersion() }), { result: resultBytes, attachments: bundle.attachments?.length ? bundle.attachments : null }));
             console.log(`Wrote ${flags['output-kjt']}`);
         }
         if (flags['output-csv']) {

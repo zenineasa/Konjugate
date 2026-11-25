@@ -352,7 +352,8 @@
                             <div><dt>Package ID</dt><dd id="extensionsDetailId"></dd></div>
                             <div><dt>Version</dt><dd id="extensionsDetailVersion"></dd></div>
                         </dl>
-                        <p class="extensionsDetailLabel">Permissions</p>
+                        <p id="extensionsDetailFmu" class="examplesExplorerDetailEmpty" hidden></p>
+                        <p class="extensionsDetailLabel" id="extensionsDetailPermissionsLabel">Permissions</p>
                         <ul id="extensionsDetailPermissions" class="extensionsPermissionList"></ul>
                         <!-- Cross-references a registry-declared bundle sibling (see the Multi-package
                              bundles section of docs/extensionsExplorer.md) -- only populated once the registry
@@ -370,6 +371,7 @@
                         <footer class="extensionsDetailFooter">
                             <button id="extensionsInstallCompatible" type="button" class="doneButton" hidden>Install compatible version</button>
                             <button id="extensionsUpdate" type="button" class="doneButton" hidden>Update</button>
+                            <button id="extensionsAddFmuToModel" type="button" class="doneButton" hidden>Add to model</button>
                             <button id="extensionsToggleEnabled" type="button" class="extensionsToggleButton">Disable</button>
                             <button id="extensionsUninstall" type="button" class="extensionsDangerButton">Uninstall</button>
                         </footer>
@@ -946,6 +948,13 @@
             <header><div><span class="contextKicker">Model validation</span><strong id="validationPanelTitle">No issues</strong></div><button id="closeValidationPanel" type="button" aria-label="Close issues">×</button></header>
             <div id="validationIssues"></div>
         </aside>
+        <!-- An FMU that could not be added, or the web edition's word that FMUs run in the desktop app (stage 4 of
+             docs/proposals/fmuImportWorkflow.md). -->
+        <aside id="fmuNotice" class="validationPanel runFailurePanel" role="alert" aria-label="Adding an FMU" hidden>
+            <header><div><span class="contextKicker">FMU</span><strong id="fmuNoticeTitle"></strong></div><button id="closeFmuNotice" type="button" aria-label="Close">×</button></header>
+            <ul id="fmuNoticeLines" class="runFailureLines"></ul>
+            <div class="runFailureActions"><a id="fmuNoticeDownload" href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" rel="noopener" hidden>Download the free desktop app ›</a></div>
+        </aside>
         <!-- Why the last run stopped, in words (src/runFailure.mjs): shown when a run fails, until it is closed or the next run starts. -->
         <aside id="runFailurePanel" class="validationPanel runFailurePanel" role="alert" aria-label="Why the run stopped" hidden>
             <header><div><span class="contextKicker">Run stopped</span><strong id="runFailureTitle"></strong></div><button id="closeRunFailurePanel" type="button" aria-label="Close">×</button></header>
@@ -1487,6 +1496,10 @@
             <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and their equations</small></span><b>›</b></button>
             <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Relationship</strong><small>Connect two nodes with an equation</small></span><b>›</b></button>
             <button id="addComponentFromFile" type="button"><i class="primitiveIcon">▤</i><span><strong>Component from file…</strong><small>Place a subsystem saved as a .kjt, or one from any project</small></span><b>›</b></button>
+            <!-- An FMU as a node (docs/proposals/fmuImportWorkflow.md, stage 4): one picked here or dropped on the canvas, and the FMUs
+                 already in the library below it. In the web edition it says FMUs run in the desktop app. -->
+            <button id="addFmuFromFile" type="button"><i class="primitiveIcon">⧉</i><span><strong>FMU…</strong><small>A model from another tool, or exported from Konjugate, as a node</small></span><b>›</b></button>
+            <div id="addFmuRecent" class="addFmuRecent" hidden></div>
             <hr>
             <span class="contextKicker">Selection</span>
             <button data-action="select-all" type="button"><i class="primitiveIcon">▦</i><span><strong>Select all</strong><small>Select every node in the model</small></span><kbd id="selectAllShortcutHint">Ctrl+A</kbd></button>

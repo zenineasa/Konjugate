@@ -92,6 +92,9 @@ export const extensions = {
     },
     // No FMU is ever installed in the web edition.
     fmuPorts: async () => ({ error: 'FMUs run in the desktop app only.' }),
+    // Add › FMU… says so, with the desktop app's address (docs/proposals/fmuImportWorkflow.md, stage 4).
+    addFmu: async () => ({ error: 'FMUs run in the desktop app only.', desktopOnly: true }),
+    pathForFile: () => null,
     // Nothing is restarted for in the web edition: an installed package is in effect at once.
     restartPending: async () => false,
     onRestartPendingChange: () => {},

@@ -1957,7 +1957,7 @@ ipcMain.handle('packageInstall', async (event) => {
             directory: join(app.getPath('userData'), 'packages'),
             sourceFileName: basename(path)
         });
-        return { packageType: 'fmu', packageId: installed.guid, version: installed.version };
+        return { packageType: 'fmu', packageId: installed.guid, version: installed.version, name: installed.displayName };
     }
 
     const extension = lowerPath.endsWith('.kja') ? '.kja' : lowerPath.endsWith('.kjp') ? '.kjp' : null;
@@ -2003,6 +2003,36 @@ ipcMain.handle('packageFmuPorts', async (_event, { guid, version }) => {
         return await describeInstalledFmuPorts(join(app.getPath('userData'), 'packages'), guid, version);
     } catch (error) {
         return { error: error.message };
+    }
+});
+
+// Add › FMU… and an FMU dropped on the canvas (docs/proposals/fmuImportWorkflow.md, stage 4): the .fmu at `path`, or one the person
+// picks, made ready to be a node. One whose binaries cannot run on this computer is refused in words before anything is installed;
+// one already in the library (the same guid, which for Konjugate's own exports is a hash of the model) is used as it is; any other is
+// installed. Returns { guid, version, name, reused }, null when the person cancels, or { error } in words.
+ipcMain.handle('packageAddFmu', async (event, { path = null } = {}) => {
+    let chosenPath = path;
+    if (!chosenPath) {
+        const result = await dialog.showOpenDialog(getWindowFromEvent(event), {
+            title: 'Add an FMU', properties: ['openFile'], filters: [{ name: 'FMU', extensions: ['fmu'] }]
+        });
+        if (result.canceled || !result.filePaths.length) return null;
+        [chosenPath] = result.filePaths;
+    }
+    if (!chosenPath.toLowerCase().endsWith('.fmu')) return { error: `${basename(chosenPath)} is not an FMU: an FMU's file name ends in .fmu.` };
+    try {
+        const archive = await readFile(chosenPath);
+        const inspected = inspectFmuArchive(archive);
+        const name = inspected.description.modelName;
+        const chosen = await chooseFmuBinary(inspected.description, async (entry) => inspected.files[entry] ?? null);
+        if (chosen.error) return { error: `${name} cannot run on this computer: ${chosen.error}.` };
+        const directory = join(app.getPath('userData'), 'packages');
+        const existing = (await listInstalledFmus(directory)).find((entry) => entry.packageId === inspected.description.guid);
+        if (existing) return { guid: existing.packageId, version: existing.version, name: existing.name, reused: true };
+        const installed = await installFmuArchive(archive, { directory, sourceFileName: basename(chosenPath) });
+        return { guid: installed.guid, version: installed.version, name: installed.displayName, reused: false };
+    } catch (error) {
+        return { error: `${basename(chosenPath)} could not be added: ${error.message}` };
     }
 });
 

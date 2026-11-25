@@ -5052,6 +5052,7 @@ function openAddPalette(clientX, clientY) {
     const palette = $('#addPalette');
     hideCards(palette);
     positionCard(palette, clientX, clientY);
+    renderAddFmuRecent();
 }
 
 function openNodeContextMenu(clientX, clientY) {
@@ -13452,14 +13453,14 @@ function connectFromNode(node) {
 // opens in its own card, one undo taking it away.
 
 // A new node: one state, its card open on Equations with that state's line open, ready to be named.
-function newNodeFromMenu() {
-    if (activeResult) return;
+function newNodeFromMenu({ position = null } = {}) {
+    if (activeResult) return null;
     const id = allocateModelEntityId();
     const stateId = allocateModelEntityId();
     const shown = stateValueText(0, '');
     const definition = {
         id, title: 'New node', type: 'Custom node', description: '', shape: 'box', importedGeometry: null, geometryFileName: null,
-        position: [sharedVisibleNodeAxisValue(0) ?? 0, sharedVisibleNodeAxisValue(1) ?? -0.7, sharedVisibleNodeAxisValue(2) ?? 0],
+        position: position ?? [sharedVisibleNodeAxisValue(0) ?? 0, sharedVisibleNodeAxisValue(1) ?? -0.7, sharedVisibleNodeAxisValue(2) ?? 0],
         subsystemId: activeSubsystemId, deleted: false, enabled: true, color: 0x34727a,
         states: [{ id: stateId, label: 'X', symbol: 'x', initialValue: 0, unit: '', value: shown.text, exactValue: shown.exact }],
         sourceTerms: [], substepsPerGlobalStep: 1
@@ -13467,8 +13468,80 @@ function newNodeFromMenu() {
     openStateFields.add(`${id}:${stateId}`);
     openFoldedLines.add(`${id}:${stateId}`);
     hideCards();
-    insertNodeDefinition(definition, { attachCurrentTransform: true, tab: 'equations' });
+    const node = insertNodeDefinition(definition, { attachCurrentTransform: true, tab: 'equations' });
     $(`#nodeEditorStates .editorStateRow[data-state-id="${stateId}"] [data-field="name"]`)?.focus();
+    return node;
+}
+
+// ---- An FMU as a node, from where a person looks for one (docs/proposals/fmuImportWorkflow.md, stage 4) --------------------
+// Add › FMU… (a file picked), an FMU in the library (under it, and Extensions' Add to model) or a .fmu dropped on the canvas: the
+// FMU made ready (installed when it is new, src/main.mjs packageAddFmu), then a new node built from it (useFmuForNode), selected
+// with its card open, ready to run. What stops it is said in words, and the web edition says FMUs run in the desktop app.
+function showFmuNotice(title, lines = [], { desktopOnly = false } = {}) {
+    $('#fmuNoticeTitle').textContent = title;
+    $('#fmuNoticeLines').replaceChildren(...lines.map((line) => {
+        const item = document.createElement('li');
+        item.textContent = line;
+        return item;
+    }));
+    $('#fmuNoticeDownload').hidden = !desktopOnly;
+    $('#fmuNotice').hidden = false;
+}
+
+async function addFmuToModel({ path = null, position = null, installed = null } = {}) {
+    if (activeResult) {
+        showFmuNotice('Close the results to add an FMU.', ['The model is locked while a run\'s results are open: Close and edit first.']);
+        return null;
+    }
+    const added = installed ?? await window.extensions.addFmu?.(path);
+    if (!added) return null;
+    if (added.error) {
+        showFmuNotice(added.desktopOnly ? 'FMUs run in the desktop app.' : 'The FMU was not added.', added.desktopOnly
+            ? ['An FMU carries a compiled program for a computer\'s own system, which a browser cannot run. The free desktop app imports and exports FMUs.']
+            : [added.error], { desktopOnly: Boolean(added.desktopOnly) });
+        return null;
+    }
+    $('#fmuNotice').hidden = true;
+    installedFmus = null;
+    const node = newNodeFromMenu({ position });
+    if (!node) return null;
+    await useFmuForNode(node, added.guid, added.version);
+    $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}`;
+    return node;
+}
+
+// For the interaction tests, which cannot drop a file with a place on disk: what a drop of the .fmu at `path` at the screen point
+// (clientX, clientY) does.
+window.__debugFmuDrop = (path, clientX, clientY) => addFmuToModel({ path, position: modelPointUnder({ clientX, clientY }) }).then(Boolean);
+
+// The FMUs already in the library, under Add › FMU…: each a click from a node.
+async function renderAddFmuRecent() {
+    const holder = $('#addFmuRecent');
+    let fmus = [];
+    try {
+        fmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false);
+    } catch { /* none to offer */ }
+    holder.replaceChildren(...fmus.slice(0, 8).map((fmu) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.fmuId = fmu.packageId;
+        button.append(document.createTextNode(fmu.name), Object.assign(document.createElement('small'), { textContent: `FMI ${fmu.manifest?.fmiVersion ?? ''} · in your library`.replace('FMI  · ', '') }));
+        button.addEventListener('click', () => {
+            hideCards();
+            addFmuToModel({ installed: { guid: fmu.packageId, version: fmu.version, name: fmu.name, reused: true } });
+        });
+        return button;
+    }));
+    holder.hidden = !fmus.length;
+}
+
+// Where a drop lands in the model: on the plane through the point the camera turns around, facing the camera.
+function modelPointUnder(event) {
+    setPointerFromEvent(event);
+    const normal = camera.getWorldDirection(new THREE.Vector3()).negate();
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, orbitControls.target);
+    const point = raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+    return point ? point.toArray() : null;
 }
 
 // A new relationship: its two ends picked on the canvas (the source already known when it starts from a node), then made and
@@ -16308,7 +16381,7 @@ function closeLeftoversForTutorial() {
     if (!$('#parameterTuning').classList.contains('hidden')) $('#cancelParameterTuning').click();
     if (!$('#causalInference').classList.contains('hidden')) $('#cancelCausalInference').click();
     hideCards(null);
-    for (const [panel, close] of [['#componentLibraryPanel', '#closeComponentLibraryPanel'], ['#controlHistoryPanel', '#closeControlHistoryPanel'], ['#validationPanel', '#closeValidationPanel'], ['#runFailurePanel', '#closeRunFailurePanel'],
+    for (const [panel, close] of [['#componentLibraryPanel', '#closeComponentLibraryPanel'], ['#controlHistoryPanel', '#closeControlHistoryPanel'], ['#validationPanel', '#closeValidationPanel'], ['#runFailurePanel', '#closeRunFailurePanel'], ['#fmuNotice', '#closeFmuNotice'],
         ['#liveParameterPanel', '#closeLiveParameterPanel'], ['#branchesPanel', '#closeBranchesPanel'], ['#parametersPanel', '#closeParametersPanel']]) {
         if (!$(panel).hidden) $(close).click();
     }
@@ -17052,6 +17125,27 @@ function renderExtensionsDetail() {
         item.textContent = permission;
         return item;
     }));
+    // An FMU asks for no permissions: what it is and Add to model take their place (docs/proposals/fmuImportWorkflow.md, stage 4).
+    const isFmu = entry.packageType === 'fmu';
+    $('#extensionsDetailPermissionsLabel').hidden = isFmu;
+    $('#extensionsDetailPermissions').hidden = isFmu;
+    $('#extensionsAddFmuToModel').hidden = !isFmu || entry.enabled === false;
+    $('#extensionsDetailFmu').hidden = !isFmu;
+    $('#extensionsDetailFmu').textContent = '';
+    if (isFmu) {
+        window.extensions.fmuPorts(entry.packageId, entry.version).then((ports) => {
+            if (extensionsSelectedKey !== selectedKey || !ports || ports.error) return;
+            const count = (items, one, many) => `${items.length} ${items.length === 1 ? one : many}`;
+            const parameters = ports.inputs.filter((port) => port.causality === 'parameter');
+            const inputs = ports.inputs.filter((port) => port.causality !== 'parameter');
+            $('#extensionsDetailFmu').textContent = [
+                `FMI ${ports.fmiVersion} Co-Simulation${ports.about?.generationTool ? `, generated by ${ports.about.generationTool}` : ''}.`,
+                ports.about?.description,
+                `${count(ports.outputs, 'output', 'outputs')}, ${count(parameters, 'parameter', 'parameters')}, ${count(inputs, 'input', 'inputs')}.`,
+                ports.binary
+            ].filter(Boolean).join(' ');
+        }).catch(() => {});
+    }
     const bundleEntry = registryBundleFor(entry.packageId);
     $('#extensionsDetailBundleNote').hidden = !bundleEntry;
     if (bundleEntry) {
@@ -17606,7 +17700,7 @@ $('#extensionsInstall').addEventListener('click', async () => {
         renderExtensionsResults();
         renderExtensionsDetail();
         showExtensionsNotice(installed.packageType === 'fmu'
-            ? `Installed ${installed.packageId} ${installed.version}. It's ready to reference from a node's implementation immediately -- no restart needed.`
+            ? `Installed ${installed.name ?? installed.packageId}. Add it to a model with Add to model below, or Add › FMU on the canvas.`
             : `Installed ${installed.packageId} ${installed.version}. ${restartToActivate}`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);
@@ -17757,7 +17851,7 @@ $('#extensionsUninstall').addEventListener('click', async () => {
         // was already cleared by the uninstall itself).
         if (updateInfoFor(entry.packageId)) ensurePackageUpdates().then(() => { renderExtensionsResults(); renderExtensionsDetail(); }).catch(() => {});
         showExtensionsNotice(entry.packageType === 'fmu'
-            ? `Uninstalled ${entry.packageId} ${entry.version}. Any node still referencing it will fail to run until it is reinstalled or the reference is removed.`
+            ? `Uninstalled ${entry.name ?? entry.packageId}. A node that uses it will not run until it is added again.`
             : `Uninstalled ${entry.packageId} ${entry.version}.${restartToActivate.startsWith('Restart') ? ' Restart Konjugate if it was active.' : ''}`);
     } catch (error) {
         showExtensionsNotice(`Uninstall failed: ${error.message}`);
@@ -19809,6 +19903,46 @@ function placeComponentDocument(componentDocument, { name, link = null }) {
 }
 
 $('#addComponentFromFile').addEventListener('click', () => placeComponentFromFile());
+$('#addFmuFromFile').addEventListener('click', () => {
+    hideCards();
+    addFmuToModel();
+});
+$('#closeFmuNotice').addEventListener('click', () => { $('#fmuNotice').hidden = true; });
+$('#extensionsAddFmuToModel').addEventListener('click', () => {
+    const entry = extensionsEntries.find((candidate) => extensionsPackageKey(candidate) === extensionsSelectedKey);
+    if (entry?.packageType !== 'fmu') return;
+    $('#extensionsDialog').close();
+    addFmuToModel({ installed: { guid: entry.packageId, version: entry.version, name: entry.name, reused: true } });
+});
+// A .fmu dropped on the canvas becomes a node where it lands; any other file is said not to be one.
+const droppedFmu = (event) => [...(event.dataTransfer?.files ?? [])].find((file) => file.name.toLowerCase().endsWith('.fmu')) ?? null;
+canvas.addEventListener('dragover', (event) => {
+    if ([...(event.dataTransfer?.items ?? [])].some((item) => item.kind === 'file')) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+    }
+});
+canvas.addEventListener('drop', (event) => {
+    if (!(event.dataTransfer?.files?.length)) return;
+    // Taken here whatever the file, so a dropped file never replaces the page.
+    event.preventDefault();
+    const file = droppedFmu(event);
+    if (!file) {
+        showFmuNotice('Only an FMU can be dropped here.', ['Drop an .fmu file on the canvas to add it as a node. A project opens with Open project.']);
+        return;
+    }
+    // The web edition has no FMUs, and says so.
+    if (document.documentElement.hasAttribute('data-web-edition')) {
+        addFmuToModel({ installed: { error: 'FMUs run in the desktop app only.', desktopOnly: true } });
+        return;
+    }
+    const path = window.extensions.pathForFile?.(file) ?? null;
+    if (!path) {
+        showFmuNotice('The FMU was not added.', [`Konjugate could not tell where ${file.name} is on this computer. Add it with Add › FMU… instead.`]);
+        return;
+    }
+    addFmuToModel({ path, position: modelPointUnder(event) });
+});
 $('#componentLibraryPlaceFile').addEventListener('click', () => placeComponentFromFile());
 $('#subsystemSaveFile').addEventListener('click', () => {
     const id = currentSubsystemCardId();

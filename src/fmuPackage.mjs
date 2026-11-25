@@ -158,7 +158,8 @@ export async function listInstalledFmus(directory) {
         if (!guidEntry.isDirectory()) continue;
         const versionEntries = await readdir(join(fmusRoot, guidEntry.name), { withFileTypes: true }).catch(() => []);
         for (const versionEntry of versionEntries) {
-            if (!versionEntry.isDirectory()) continue;
+            // An install still being written (installFmuArchive's temporary folder) is not an FMU yet.
+            if (!versionEntry.isDirectory() || versionEntry.name.endsWith('.tmp')) continue;
             const installPath = join(fmusRoot, guidEntry.name, versionEntry.name);
             try {
                 const meta = JSON.parse(await readFile(join(installPath, 'fmuMeta.json'), 'utf8'));

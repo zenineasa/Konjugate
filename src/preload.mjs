@@ -121,6 +121,10 @@ contextBridge.exposeInMainWorld('extensions', {
     // An installed FMU's input and output ports, for wiring it into a node.
     fmuPorts: (guid, version) => ipcRenderer.invoke('packageFmuPorts', { guid, version }),
     install: () => ipcRenderer.invoke('packageInstall'),
+    // Add › FMU… and a dropped .fmu: the FMU at `path` (or one the person picks) made ready to be a node, { guid, version, name, reused }.
+    addFmu: (path = null) => ipcRenderer.invoke('packageAddFmu', { path }),
+    // Where a dropped file is on disk.
+    pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } },
     uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version }),
     setEnabled: (packageType, packageId, version, enabled) => ipcRenderer.invoke('packageSetEnabled', { packageType, packageId, version, enabled }),
     // The Explorer's "Discover" side (see docs/extensionsExplorer.md).

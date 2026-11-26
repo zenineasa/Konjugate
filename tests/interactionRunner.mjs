@@ -490,6 +490,9 @@ export async function runInteractionTests(driver) {
     // What a scenario may have left behind, put away so the next one starts as the others do: windows it opened, dialogs
     // and Settings left open, a simulation result left showing. Best effort: whatever cannot be put away is left. Done
     // after a failure, and by freshExample() before a scenario that starts from an example.
+    // An empty project in the window, for a scenario to leave before it uninstalls what its project used (an FMU): the scenario after it
+    // then starts from nothing that refers to what is gone, whichever runs next (KONJUGATE_INTERACTION_ONLY, a retry).
+    const leaveCleanProject = () => evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [], sharedParameters: [] })}, 'Untitled.kjt')`).catch(() => {});
     const putAwayLeftovers = async () => {
         for (const handle of driver.allHandles?.() ?? []) {
             if (handle === window || handle._raw === window._raw) continue;
@@ -11354,6 +11357,7 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#closeRunFailurePanel').click()`);
             assert.equal(await evaluate(window, `document.querySelector('#runFailurePanel').hidden`), true, 'Close hides the panel.');
         } finally {
+            await leaveCleanProject();
             if (guid) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
             await rm(folder, { recursive: true, force: true });
         }
@@ -11431,6 +11435,7 @@ export async function runInteractionTests(driver) {
             assert.deepEqual(saved.nodes[0].implementation.bindings, []);
             assert.deepEqual(saved.requires, ['fmuStartValues']);
         } finally {
+            await leaveCleanProject();
             if (guid) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
             await rm(folder, { recursive: true, force: true });
         }
@@ -11500,6 +11505,7 @@ export async function runInteractionTests(driver) {
                 document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click();
             })()`);
         } finally {
+            await leaveCleanProject();
             if (guid) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
             await rm(folder, { recursive: true, force: true });
         }
@@ -13253,6 +13259,7 @@ export async function runInteractionTests(driver) {
         } finally {
             if (await evaluate(window, `window.__debugTour.active()`)) await evaluate(window, `window.__debugTour.stop()`);
             await putAwayLeftovers();
+            await leaveCleanProject();
             const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
@@ -13306,6 +13313,7 @@ export async function runInteractionTests(driver) {
         } finally {
             await evaluate(window, `(() => { delete window.__staleMeasurement; })()`).catch(() => {});
             await putAwayLeftovers();
+            await leaveCleanProject();
             const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
@@ -13362,6 +13370,7 @@ export async function runInteractionTests(driver) {
             await waitFor(window, `/^Nothing was connected: PidController 2's measurement is an input too/.test(document.querySelector('#statusText').textContent)`, `The drop did not say why. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
         } finally {
             await putAwayLeftovers();
+            await leaveCleanProject();
             const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
@@ -13430,6 +13439,7 @@ export async function runInteractionTests(driver) {
             await waitFor(window, `/^Nothing was connected: Off room is switched off/.test(document.querySelector('#statusText').textContent)`, `The switched-off node was not refused. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
         } finally {
             await putAwayLeftovers();
+            await leaveCleanProject();
             const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
@@ -13475,6 +13485,7 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `(() => { if (window.__realExtensionsList) window.extensions.list = window.__realExtensionsList; })()`);
             await putAwayLeftovers();
             if (driver.kind !== 'playwright') {
+                await leaveCleanProject();
                 const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
                 for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
             }

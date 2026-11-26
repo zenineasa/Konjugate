@@ -12148,10 +12148,11 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialsGroup')].map((heading) => heading.textContent)`), groupTutorials().map((group) => group.title));
         // A tutorial only the desktop app can play is listed everywhere, with a note in place of Start where it cannot be played.
         assert.equal(await evaluate(window, `Boolean(document.querySelector('.tutorialEntry[data-tutorial="liveTwin"] .tutorialEditionNote'))`), !driver.capabilities.multiWindow);
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('.tutorialEntry[data-tutorial="controllerFromAnotherTool"] .tutorialEditionNote'))`), !driver.capabilities.multiWindow, 'The controller tutorial runs an FMU: the desktop app only.');
         assert.match(await evaluate(window, `document.querySelector('.tutorialEntry[data-tutorial="calibrateTank"] .tutorialEntryMeta').textContent`), /Starts from the Tank Calibration example/);
         const search = (text) => evaluate(window, `(() => { const field = document.querySelector('#tutorialsSearch'); field.value = ${JSON.stringify(text)}; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
         await search('pid');
-        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['tuneController']);
+        assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('.tutorialEntry')].map((entry) => entry.dataset.tutorial)`), ['tuneController', 'controllerFromAnotherTool'], 'Its title first, then a tag.');
         assert.equal(await evaluate(window, `document.querySelectorAll('.tutorialsGroup').length`), 0, 'A search lists matches, not groups.');
         await search('zzzz');
         assert.equal(await evaluate(window, `document.querySelector('#tutorialsEmpty').hidden`), false);
@@ -12953,7 +12954,7 @@ export async function runInteractionTests(driver) {
         };
         // KONJUGATE_INTERACTION_TUTORIALS=refitTwin,liveTwin skips through only those, to check one tutorial without the rest.
         const onlyTutorials = process.env.KONJUGATE_INTERACTION_TUTORIALS?.split(',').map((entry) => entry.trim()).filter(Boolean) ?? null;
-        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'reuseComponent', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel'] : []), ...(driver.capabilities.fmuExport ? ['fmuRoundTrip'] : []), ...(driver.capabilities.multiWindow ? ['extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])].filter((entry) => !onlyTutorials || onlyTutorials.includes(entry))) {
+        for (const id of ['firstModel', 'buildFromComponents', 'organiseModel', 'reuseComponent', 'equationsThatDoMore', ...(driver.capabilities.multiWindow ? ['programRelationship'] : []), ...(driver.capabilities.aiAssistant ? ['askAssistant'] : []), 'parametersAndRuns', 'layoutModel', 'fixInstability', 'calibrateTank', 'optimiseObjective', 'tuneController', ...(driver.capabilities.multiWindow ? ['steerByHand', 'driveWithJoysticks'] : []), ...(driver.capabilities.forks ? ['scheduleChanges'] : []), ...(driver.capabilities.forks ? ['whatIfBranches'] : []), 'discoverEquations', 'replayLog', ...(driver.capabilities.multiWindow ? ['keepAndShare', 'exportModel'] : []), ...(driver.capabilities.fmuExport ? ['fmuRoundTrip', 'controllerFromAnotherTool'] : []), ...(driver.capabilities.multiWindow ? ['extendKonjugate', 'liveTwin', 'matchSignals', 'refitTwin'] : [])].filter((entry) => !onlyTutorials || onlyTutorials.includes(entry))) {
             await clean();
             // The assistant's model is the person's to set up; here, the fake Ollama's, in use (as an earlier test may have left it).
             if (id === 'askAssistant') {
@@ -13070,6 +13071,15 @@ export async function runInteractionTests(driver) {
                 assert.deepEqual(saved.nodes.find((node) => node.name === 'Feedthrough').implementation.bindings.find((binding) => binding.key === 'float64ContinuousInput'),
                     { key: 'float64ContinuousInput', kind: 'state', nodeId: dahlquist.id, stateId: dahlquist.states.find((state) => state.symbol === 'x').id });
                 assert.ok(await evaluate(window, `[...document.querySelectorAll('.programReadLabel')].some((label) => label.textContent === '→ Float64_continuous_input')`), 'The connection is drawn.');
+            } else if (id === 'controllerFromAnotherTool') {
+                // The FMU from OpenModelica connected to the room, the room with Konjugate's PI switched on, the gain made 2.
+                const pid = saved.nodes.find((node) => node.name === 'PidController' && node.implementation?.kind === 'fmi');
+                const room = saved.nodes.find((node) => node.name === 'Room');
+                assert.ok(pid, 'The controller FMU is in the model.');
+                assert.deepEqual(pid.implementation.bindings.find((binding) => binding.key === 'measurement'), { key: 'measurement', kind: 'state', nodeId: room.id, stateId: room.states.find((state) => state.symbol === 'temperature').id });
+                assert.deepEqual(pid.implementation.bindings.find((binding) => binding.key === 'k'), { key: 'k', kind: 'value', value: 2 });
+                assert.ok(saved.edges.some((edge) => edge.source.nodeId === pid.id && edge.target.nodeId === room.id), 'The heater is set from the command.');
+                assert.notEqual(saved.nodes.find((node) => node.name === 'Room with Konjugate PI').enabled, false, 'The room with Konjugate\'s PI is on.');
             } else if (id === 'tuneController') {
                 assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
             }
@@ -13081,14 +13091,95 @@ export async function runInteractionTests(driver) {
                 await waitFor(window, `!window.__debugTour.blockers().simulationRunning`, 'The run did not stop.', 15000).catch(() => {});
             }
             if (['liveTwin', 'matchSignals', 'refitTwin'].includes(id)) await closeTutorialTwin();
-            // The FMUs the round trip put in the library are taken out again, for the tests after.
-            if (id === 'fmuRoundTrip') {
+            // The FMUs the round trip and the controller tutorial put in the library are taken out again, for the tests after.
+            if (id === 'fmuRoundTrip' || id === 'controllerFromAnotherTool') {
                 await evaluate(window, `document.querySelector('#closeCompareOriginal')?.click()`);
                 const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`);
                 for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
             }
         }
     });
+
+    // "Bring in a controller from another tool" (src/tutorials/controllerFromAnotherTool.mjs; docs/proposals/rootPorts.md, stage 8), done
+    // by hand as a person does it: the controller FMU put in the library and added from Add (+), its terminals dragged to the room's and the
+    // setpoint's states, run, the room with Konjugate's PI switched on and run beside it, the gain changed on the FMU's card and run again.
+    await run('the controller tutorial is done by hand: an FMU from OpenModelica added, dragged into place, run, compared with Konjugate\'s own, tuned', async () => {
+        const { press, waitForStep, clean } = tutorialHelpers();
+        const values = (await import('../src/tutorials/controllerFromAnotherTool.mjs')).controllerFromAnotherToolValues;
+        const runToEnd = async () => {
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '${values.runSeconds}'; field.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#startRun').click(); })()`);
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`, `The run did not finish. ${await evaluate(window, `document.querySelector('#runLaunchError').textContent`)}`, 120000);
+        };
+        const closeResults = async () => {
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing the results did not ask.');
+            await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().hasResult`, 'The results did not close.');
+        };
+        const expandLabels = () => evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== 'expanded'; guard += 1) button.click(); })()`);
+        try {
+            await clean();
+            await evaluate(window, `window.__debugTour.startTutorial('controllerFromAnotherTool')`);
+            await waitForStep('welcome');
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The Heated room model did not load.');
+            await press('.tourFloating .tourPrimary');
+            await waitForStep('add');
+            // Put in the library from the card, then added from Add (+), where the library's FMUs are listed under FMU….
+            await press('.tourFloating .tourSecondary');
+            await waitFor(window, `/PidController is in your library/.test(document.querySelector('.tourFloating').textContent) || /PidController is in your library/.test(document.querySelector('#statusText').textContent)`, 'The FMU was not put in the library.', 30000).catch(() => {});
+            await evaluate(window, `document.querySelector('#addButton').click()`);
+            await waitFor(window, `!document.querySelector('#addFmuRecent').hidden && [...document.querySelectorAll('#addFmuRecent button')].some((button) => button.textContent.startsWith('PidController'))`, 'The library\'s FMU was not offered under FMU….', 15000);
+            await evaluate(window, `[...document.querySelectorAll('#addFmuRecent button')].find((button) => button.textContent.startsWith('PidController')).click()`);
+            await waitForStep('measurement', 30000);
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await expandLabels();
+            await waitFor(window, `Boolean(${boxTerminal('input', 'measurement')}) && Boolean(${boxTerminal('output', 'command')})`, 'The FMU is not drawn as a box with ports.', 15000);
+            assert.match(await evaluate(window, `${boxTerminal('input', 'measurement')}.textContent`), /measurement\s*degC\s*the FMU's own start/);
+            // Three drags, as the card says.
+            for (const [step, role, key, node, row, next] of [
+                ['measurement', 'input', 'measurement', 'Room', 0, 'wanted'],
+                ['wanted', 'input', 'setpoint', 'Setpoint', 0, 'command'],
+                ['command', 'output', 'command', 'Room', 1, 'run']
+            ]) {
+                await waitForStep(step);
+                await waitForCanvasAtRest(window);
+                await dragBetween(window, await centreOf(window, boxTerminal(role, key)), await centreOf(window, stateRow(node, row)));
+                await waitForStep(next, 15000);
+            }
+            assert.match(await evaluate(window, `${boxTerminal('input', 'measurement')}.title`), /reads Room\.temperature, at the start of each step: one step late/);
+            await runToEnd();
+            await waitForStep('compare', 30000);
+            // Switched on from the card (it closes the results), and run beside it.
+            await press('.tourFloating .tourSecondary');
+            await waitFor(window, `window.__debugProject.serialize().nodes.find((node) => node.name === 'Room with Konjugate PI').enabled !== false`, 'The room with Konjugate\'s PI was not switched on.', 30000);
+            await runToEnd();
+            await waitForStep('gain', 30000);
+            const rooms = await evaluate(window, `[...document.querySelectorAll('.node-label-container')].filter((label) => ['Room', 'Room with Konjugate PI'].includes(label.querySelector('strong')?.textContent)).map((label) => Number(label.querySelector('dd').title.split(' ')[0]))`);
+            assert.equal(rooms.length, 2);
+            assert.ok(Math.abs(rooms[0] - rooms[1]) < 0.05 && Math.abs(rooms[0] - 21) < 0.1, `The two rooms end at ${rooms.join(' and ')} °C.`);
+            // The gain, on the FMU's card: k given a value of its own, 2.
+            await closeResults();
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.querySelector('strong')?.textContent === 'PidController').click()`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'PidController'`, 'The FMU\'s card did not open.');
+            const kRow = `[...document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')].find((row) => row.querySelector('[data-field="reads"]')?.getAttribute('aria-label')?.includes(' k ') || /\\bk\\b/.test(row.querySelector('input')?.value ?? ''))`;
+            await waitFor(window, `Boolean(${kRow})`, 'k has no row on the FMU\'s card.', 10000);
+            await evaluate(window, `(() => { const select = ${kRow}.querySelector('[data-field="reads"]'); select.value = 'value'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(window, `!${kRow}.querySelector('[data-field="value"]').hidden`, 'k\'s value field was not offered.');
+            await typeInto(`${kRow}.querySelector('[data-field="value"]')`, '2');
+            await waitFor(window, `window.__debugProject.serialize().nodes.find((node) => node.name === 'PidController').implementation.bindings.some((binding) => binding.key === 'k' && binding.kind === 'value' && binding.value === 2)`, 'k was not set to 2.');
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await runToEnd();
+            await waitForStep('finish', 30000);
+            await press('.tourFloating .tourPrimary');
+            await waitFor(window, `!window.__debugTour.active()`, 'The tutorial did not finish.');
+        } finally {
+            if (await evaluate(window, `window.__debugTour.active()`)) await evaluate(window, `window.__debugTour.stop()`);
+            await putAwayLeftovers();
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'the controller tutorial is for the desktop app, which runs FMUs' });
 
     await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
         const { waitForStep, clean, readAndGoOn } = tutorialHelpers();

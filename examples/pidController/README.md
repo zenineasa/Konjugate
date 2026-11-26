@@ -6,19 +6,20 @@ A PI controller for a heated room, drawn in OpenModelica from the Modelica Stand
 
 | File | What it is |
 |---|---|
-| `PidController.mo` | The model: two inputs, `setpoint` and `measurement` (°C), one output, `command` (0 to 1), and the parameters `k` (1/K) and `Ti` (s), which the FMU offers as tunable. |
+| `PidController.mo` | The model: two inputs, `setpoint` and `measurement` (°C), one output, `command` (0 to 1), and the parameters `k` (1/K) and `Ti` (s), which the FMU offers as parameters a host sets before a run starts (FMI's `fixed`); the controller block itself is protected, so its own variables stay inside the FMU. |
 | `PidController.fmu` | The FMU, with forward Euler inside, its C sources, and binaries for macOS on Apple Silicon (`binaries/darwin64`), Linux on x86_64 (`binaries/linux64`) and Linux on arm64 (`binaries/aarch64-linux`). |
+| `HeatedRoom.kjt` | The start of the tutorial "Bring in a controller from another tool": the room and the setpoint with no controller yet, and the room with Konjugate's PI switched off, for the person to add the FMU, connect it by dragging and compare. |
 | `HeatedRoomPid.kjt` | A Konjugate project: a room whose heater is set by the FMU's command, the FMU reading the room's temperature and a setpoint that steps from 18 °C to 21 °C at an hour, and beside it the same room controlled by the same PI controller written in Konjugate, to compare. The FMU is kept in the project's file, so the project opens and runs where the FMU is not in the library yet. |
 | `PidController_inputs.csv`, `PidController_ref.csv` | The check's input series (setpoint and measurement, each changing 5 s into a 10 s step) and FMPy's run of the FMU against it, every 10 s. |
 | `build.json` | What made the FMU, as `generate.mjs` recorded it. |
 | `generate.mjs` | Makes the FMU again (needs Docker). |
-| `buildProject.mjs` | Writes `HeatedRoomPid.kjt` from the FMU (needs no Docker). |
+| `buildProject.mjs` | Writes `HeatedRoomPid.kjt` from the FMU, and `HeatedRoom.kjt` (needs no Docker). |
 
 ## How the FMU was made
 
 `generate.mjs`, run by hand on a Mac with Docker running, never in CI or by the app:
 
-1. In OpenModelica's Docker image pinned by digest (the image Konjugate's benchmarks use, `benchmarks/comparisons/tools.mjs`), for arm64: installs the Modelica Standard Library at a pinned version (`installPackage(Modelica, "4.1.0+maint.om", exactMatch = true)`), checks the model, simulates it with OpenModelica's own forward Euler against the input series, and exports the FMU with `buildModelFMU(PidController, version = "2.0", fmuType = "cs", platforms = {"static"})` after `--fmiFlags=s:euler`. Euler is chosen so the FMU needs no SUNDIALS sources and steps as Konjugate's default method does. OpenModelica, run on arm64, names its aarch64 Linux binary `linux64`; it is kept under `aarch64-linux` instead, since FMI 2.0 tools read `linux64` as x86_64.
+1. In OpenModelica's Docker image pinned by digest (the image Konjugate's benchmarks use, `benchmarks/comparisons/tools.mjs`), for arm64: installs the Modelica Standard Library at a pinned version (`installPackage(Modelica, "4.1.0+maint.om", exactMatch = true)`), checks the model, simulates it with OpenModelica's own forward Euler against the input series, and exports the FMU with `buildModelFMU(PidController, version = "2.0", fmuType = "cs", platforms = {"static"})` after `--fmiFlags=s:euler --fmiFilter=protected` (the protected controller block's dozens of own parameters left out, so the FMU's card in Konjugate lists `k` and `Ti` alone). Euler is chosen so the FMU needs no SUNDIALS sources and steps as Konjugate's default method does. OpenModelica, run on arm64, names its aarch64 Linux binary `linux64`; it is kept under `aarch64-linux` instead, since FMI 2.0 tools read `linux64` as x86_64.
 2. In the same image for amd64: builds the FMU's own sources with the image's gcc and CMake (`cmake -S sources -B build -D RUNTIME_DEPENDENCIES_LEVEL=modelica`) into the x86_64 Linux binary, `linux64`.
 3. On the Mac: builds the same sources with CMake and Apple clang into the arm64 macOS binary, `darwin64`, which links only to the system's own library.
 4. Merges the three into one FMU (entries in name order, fixed timestamps), has FMPy validate it (no problem found) and simulate it against the input series, and compares FMPy's run with OpenModelica's own simulation: the FMU's command and OpenModelica's agree exactly (largest difference 0) at every 10 s point but the 20 just after an input change, where the FMU, which reads its inputs at the start of each step, uses the value from before the change by design.
@@ -34,7 +35,7 @@ The FMU committed here was made with:
 | Linux compiler and CMake | gcc 11.4.0 (Ubuntu 11.4.0-1ubuntu1~22.04.3), CMake 3.22.1, both in the image |
 | macOS compiler and CMake | Apple clang 21.0.0 (clang-2100.3.34.2), CMake 4.4.4 |
 | FMPy | 0.3.21 |
-| FMU SHA-256 | `c78818ad1ef7d5f6c50e4b297141ad714cb430d914a6584a5a0371572d8fcf14` (1 518 114 bytes) |
+| FMU SHA-256 | `21a9e91416f8f3eb881e5f186ad18593e5f03ead4e32f2e9898553bc0fcfd478` (1 517 501 bytes) |
 
 Binaries for other platforms (macOS on Intel, Windows) are added by running the script on those machines; until then the FMU runs on the three platforms above, and Konjugate says so when it cannot load it elsewhere.
 

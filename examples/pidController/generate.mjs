@@ -91,7 +91,8 @@ async function main() {
             'loadFile("PidController.mo"); getErrorString();',
             'checkModel(PidController); getErrorString();',
             `simulate(PidController, startTime = 0, stopTime = ${stopTime}, numberOfIntervals = ${stopTime / step}, method = "euler", outputFormat = "csv", fileNamePrefix = "openmodelica", variableFilter = "command", simflags = "-csvInput=inputs.csv"); getErrorString();`,
-            'setCommandLineOptions("--fmiFlags=s:euler"); getErrorString();',
+            // Forward Euler inside, and the protected controller block's own variables left out of the FMU's interface.
+            'setCommandLineOptions("--fmiFlags=s:euler --fmiFilter=protected"); getErrorString();',
             'buildModelFMU(PidController, version = "2.0", fmuType = "cs", fileNamePrefix = "PidController", platforms = {"static"}); getErrorString();',
             ''
         ].join('\n'));
@@ -164,7 +165,7 @@ print(json.dumps({ 'fmpy': __version__, 'problems': [str(p) for p in validate_fm
         await writeFile(join(here, 'PidController_ref.csv'), `time,command\n${rows.map(([time, value]) => `${time},${value}`).join('\n')}\n`);
         const record = {
             image: digest, openModelica: omcVersion, modelicaStandardLibrary: { version: modelicaVersion, sha: mslSha },
-            fmiFlags: 's:euler', linux: { compiler: linuxGcc, cmake: linuxCmake },
+            fmiFlags: 's:euler', fmiFilter: 'protected', linux: { compiler: linuxGcc, cmake: linuxCmake },
             macos: { compiler: await firstLine('clang', ['--version']), cmake: await firstLine('cmake', ['--version']) },
             fmpy, fmuSha256, fmuBytes: fmu.length, platforms: Object.keys(files).filter((name) => name.startsWith('binaries/')).map((name) => name.split('/')[1]),
             openModelicaComparison: { largestDifference: openmodelicaDifference, rowsCompared: compared, rowsInAll: rows.length }

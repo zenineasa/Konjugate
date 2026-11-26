@@ -206,7 +206,7 @@ test('what a tutorial points at, fills in and starts from exists', () => {
             const { example } = tutorial.start;
             assert.ok(existsSync(join(root, 'examples', example)), `${tutorial.id} starts from ${example}, which is not shipped`);
             // An example in the Examples dialog, or a model beside them (examples/dataSources/) that the loader opens for tutorials alone.
-            assert.ok(manifest.examples.some((entry) => `${entry.id}.kjt` === example) || (example.startsWith('dataSources/') && tutorialModelFiles.includes(example)), `${tutorial.id}'s example is not in examples/manifest.json`);
+            assert.ok(manifest.examples.some((entry) => `${entry.id}.kjt` === example) || ((example.startsWith('dataSources/') || example.startsWith('pidController/')) && tutorialModelFiles.includes(example)), `${tutorial.id}'s example is not in examples/manifest.json`);
             assert.ok(tutorialsForExample(example).includes(tutorial));
         } else {
             assert.equal(tutorial.start.from, 'empty');
@@ -555,9 +555,14 @@ test('the record of changes is read once the run has ended, though it opens by i
 // The FMU round trip (docs/proposals/fmuImportWorkflow.md, stage 9) puts two of the FMI standard's example FMUs in the library.
 test('the FMUs a tutorial puts in the library are shipped beside the examples, with their license, and only they are handed out', async () => {
     const { tutorialFmuFiles } = await import('../src/tutorials/index.mjs');
-    assert.deepEqual([...tutorialFmuFiles].sort(), ['tutorialFmus/Dahlquist.fmu', 'tutorialFmus/Feedthrough.fmu']);
+    assert.deepEqual([...tutorialFmuFiles].sort(), ['pidController/PidController.fmu', 'tutorialFmus/Dahlquist.fmu', 'tutorialFmus/Feedthrough.fmu']);
     for (const fileName of tutorialFmuFiles) assert.ok(existsSync(join(root, 'examples', fileName)), `${fileName} is shipped`);
     assert.ok(existsSync(join(root, 'examples', 'tutorialFmus', 'LICENSE.txt')), 'The Reference FMUs\' license is beside them.');
+    assert.ok(existsSync(join(root, 'thirdPartyLicenses', 'pidControllerFmu.txt')), 'The licences of what PidController.fmu carries are kept.');
+    const controller = tutorialById('controllerFromAnotherTool');
+    assert.deepEqual(controller.editions, ['desktop'], 'The web edition runs no FMU.');
+    assert.deepEqual(controller.steps.map((step) => step.id), ['welcome', 'add', 'measurement', 'wanted', 'command', 'run', 'compare', 'gain', 'finish']);
+    assert.equal(controller.start.example, 'pidController/HeatedRoom.kjt');
     const round = tutorialById('fmuRoundTrip');
     assert.deepEqual(round.editions, ['desktop'], 'The web edition runs no FMU.');
     assert.deepEqual(round.steps.map((step) => step.id), ['welcome', 'run', 'keep', 'export', 'try', 'compare', 'library', 'connect', 'runConnected', 'finish']);

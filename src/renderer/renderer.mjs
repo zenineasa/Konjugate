@@ -30,6 +30,7 @@ import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
 import { fmuRoundTripValues } from '../tutorials/fmuRoundTrip.mjs';
+import { controllerFromAnotherToolValues } from '../tutorials/controllerFromAnotherTool.mjs';
 import { groupTutorials, searchTutorials, tutorialById, tutorialStartLabel } from '../tutorials/index.mjs';
 import { stepText } from '../tutorials/steps.mjs';
 import { bugReportEmailPlaceholder, formatBugReportEmailBlock } from '../bugReport.mjs';
@@ -16342,6 +16343,37 @@ function fillRunDialog(seconds) {
         $('#runOnlineMode').dispatchEvent(new Event('change', { bubbles: true }));
     }
 }
+// A tutorial step's run, as the person would start it: the results closed, the Run dialog filled for the step's length, Start.
+async function runTutorialModel(step) {
+    await waitUntil(() => !simulationRunning, 60000);
+    // The model is locked while results are on screen; a new run needs them closed.
+    if (activeResult) await closeResultPlayback({ confirm: false });
+    await waitUntil(() => currentValidation.valid && !$('#runButton').disabled, 15000);
+    fillRunDialog(step.runSeconds);
+    $('#startRun').click();
+    // The step is done when the run is: the card waits with it (its buttons off), rather than moving on to a step about results.
+    await waitUntil(() => simulationRunning, 5000);
+    await waitUntil(() => !simulationRunning && activeResult, 180000);
+}
+
+// The room with Konjugate's PI switched on, with the relationship that gives it the setpoint, as one undo step (the controller tutorial).
+async function switchOnTutorialTwin() {
+    await waitUntil(() => !simulationRunning, 60000);
+    if (activeResult) await closeResultPlayback({ confirm: false });
+    const twin = model.nodes.find((node) => !node.deleted && node.title === controllerFromAnotherToolValues.twin);
+    if (!twin) return 'The room with Konjugate\'s PI is not in this model any more.';
+    const edges = model.relationships.filter((edge) => !edge.deleted && edge.enabled === false && edge.target === twin.id);
+    const wasOn = twin.enabled !== false;
+    if (!wasOn) setNodeEnabled(twin.id, true);
+    edges.forEach((edge) => setRelationshipEnabled(edge.id, true));
+    recordHistory({
+        undo: () => { if (!wasOn) setNodeEnabled(twin.id, false); edges.forEach((edge) => setRelationshipEnabled(edge.id, false)); },
+        redo: () => { if (!wasOn) setNodeEnabled(twin.id, true); edges.forEach((edge) => setRelationshipEnabled(edge.id, true)); }
+    });
+    updateValidationStatus();
+    return `${twin.title} is on: run again to compare the two rooms.`;
+}
+
 function openTutorialRelationship(name) {
     const relationship = model.relationships.find((candidate) => candidate.title === name && !candidate.deleted);
     if (!relationship) return false;
@@ -16541,6 +16573,8 @@ const tour = createTour({
                 })(),
                 endpointPick: $('#endpointPickBanner').hidden ? null : ($('#endpointPickTitle').textContent.toLowerCase().includes('target') ? 'target' : 'source'),
                 labelOf: tourNodeLabel,
+                // A terminal of an FMU node or an instance's box (stage 5 of docs/proposals/rootPorts.md), by its input or output key.
+                boxPortOf: (role, key) => document.querySelector(`.boxPort[data-box-port="${role}"][data-port-key="${key}"]`),
                 relationshipRowOf: tutorialRelationshipRow,
                 // A state's field (its start value, say) when its line is open on the open node's Equations tab, else the line
                 // that opens it: the state's own, or the folded line it is on.
@@ -16562,17 +16596,7 @@ const tour = createTour({
         connectNodes: async () => connectTourNodes(firstModelValues.source.name, firstModelValues.target.name),
         edgeEquation: async () => writeTourRelationshipPart(firstModelValues.source.name, firstModelValues.target.name, firstModelValues.typedEquation),
         runTime: async (step) => fillRunDialog(step.runSeconds),
-        runModel: async (step) => {
-            await waitUntil(() => !simulationRunning, 60000);
-            // The model is locked while results are on screen; a new run needs them closed.
-            if (activeResult) await closeResultPlayback({ confirm: false });
-            await waitUntil(() => currentValidation.valid && !$('#runButton').disabled, 15000);
-            fillRunDialog(step.runSeconds);
-            $('#startRun').click();
-            // The step is done when the run is: the card waits with it (its buttons off), rather than moving on to a step about results.
-            await waitUntil(() => simulationRunning, 5000);
-            await waitUntil(() => !simulationRunning && activeResult, 180000);
-        },
+        runModel: async (step) => runTutorialModel(step),
         plotNode: async (step) => {
             await waitUntil(() => activeResult && !simulationRunning, 120000);
             tourNodeLabel(step.node)?.click();
@@ -17225,7 +17249,9 @@ const tour = createTour({
                 if (added?.error) { showFmuNotice('The example FMU was not added.', [added.error]); return 'The example FMUs could not be put in your library on this computer.'; }
             }
             installedFmus = null;
-            return 'Dahlquist and Feedthrough are in your library: press Add (+) to add each.';
+            // Named as the tutorial names its FMUs (Dahlquist and Feedthrough; PidController).
+            const names = (tour.tutorial?.fmus ?? []).map((fileName) => fileName.split('/').pop().replace(/\.fmu$/, ''));
+            return names.length === 1 ? `${names[0]} is in your library: press Add (+) to add it.` : `${names.slice(0, -1).join(', ')} and ${names.at(-1)} are in your library: press Add (+) to add each.`;
         },
         addExampleFmus: async () => {
             await waitUntil(() => !simulationRunning, 60000);
@@ -17236,6 +17262,46 @@ const tour = createTour({
                 if (live().some((node) => node.title === name)) continue;
                 await addFmuToModel({ path: await window.tutorials.fmuPath(fileName) });
             }
+        },
+        // "Bring in a controller from another tool" (src/tutorials/controllerFromAnotherTool.mjs): what each drag does, done for the person.
+        connectControllerInput: async (step) => {
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            const values = controllerFromAnotherToolValues;
+            const fmu = model.nodes.find((node) => !node.deleted && node.title === values.fmu && node.implementation?.kind === 'fmi');
+            const from = model.nodes.find((node) => !node.deleted && node.title === step.input.node);
+            const state = from?.states.find((candidate) => candidate.symbol === step.input.symbol);
+            if (!fmu || !state) return;
+            const port = { key: step.input.key, name: step.input.key };
+            connectFmuInput({ id: fmu.id, name: fmu.title }, port, { nodeId: from.id, stateId: state.id });
+        },
+        connectControllerOutput: async () => {
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            const values = controllerFromAnotherToolValues;
+            const fmu = model.nodes.find((node) => !node.deleted && node.title === values.fmu && node.implementation?.kind === 'fmi');
+            const room = model.nodes.find((node) => !node.deleted && node.title === values.command.node);
+            const command = fmu?.implementation.outputs?.find((output) => output.key === values.command.key);
+            const heater = room?.states.find((state) => state.symbol === values.command.symbol);
+            if (!command || !heater) return;
+            setStateFrom({ nodeId: fmu.id, stateId: command.stateId }, { nodeId: room.id, stateId: heater.id });
+        },
+        switchOnTwin: async () => switchOnTutorialTwin(),
+        compareWithTwin: async (step) => {
+            await switchOnTutorialTwin();
+            await runTutorialModel(step);
+        },
+        setControllerGain: async (step) => {
+            await waitUntil(() => !simulationRunning, 60000);
+            if (activeResult) await closeResultPlayback({ confirm: false });
+            const fmu = model.nodes.find((node) => !node.deleted && node.title === controllerFromAnotherToolValues.fmu && node.implementation?.kind === 'fmi');
+            const object = fmu ? nodeObjects.get(fmu.id) : null;
+            if (!object) return;
+            changeNodeModel(object, (snapshot) => {
+                const bindings = snapshot.implementation.bindings ?? (snapshot.implementation.bindings = []);
+                const index = bindings.findIndex((binding) => binding.key === step.gain.key);
+                const entry = { key: step.gain.key, kind: 'value', value: step.gain.to };
+                if (index >= 0) bindings[index] = entry; else bindings.push(entry);
+            });
+            await runTutorialModel(step);
         },
         connectExampleFmus: async () => {
             if (activeResult) await closeResultPlayback({ confirm: false });

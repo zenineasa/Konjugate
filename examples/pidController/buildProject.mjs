@@ -1,6 +1,6 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// Writes HeatedRoomPid.kjt (docs/proposals/rootPorts.md, stage 7): a heated room controlled by PidController.fmu, and beside it a
+// Writes HeatedRoomPid.kjt (docs/proposals/rootPorts.md, stage 7), and HeatedRoom.kjt, the start of the tutorial built on it (stage 8): a heated room controlled by PidController.fmu, and beside it a
 // second room controlled by the same PI controller written in Konjugate, both following one setpoint that steps from 18 °C to 21 °C
 // at an hour. The FMU is kept in the project's file, so the project opens and runs where the FMU is not in the library yet. Needs no
 // Docker: it reads the committed FMU, as Konjugate reads one when it is added to a model.
@@ -140,6 +140,21 @@ export function heatedRoomPidDocument({ fmuId, fmuVersion, ports, archiveSha256 
     };
 }
 
+// The tutorial's starting model ("Bring in a controller from another tool", src/tutorials/controllerFromAnotherTool.mjs): the room and
+// the setpoint with no controller yet, the FMU to be added and connected by the person; and the room with Konjugate's own PI beside them,
+// switched off until the tutorial compares the two. No FMU in it, so it needs none to open.
+export function heatedRoomDocument(document) {
+    const start = structuredClone(document);
+    start.metadata = { ...start.metadata, projectName: 'Heated room' };
+    start.nodes = start.nodes.filter((node) => node.implementation?.kind !== 'fmi');
+    const twin = start.nodes.find((node) => node.id === 30);
+    twin.enabled = false;
+    start.edges = start.edges.filter((edge) => edge.source.nodeId !== 20);
+    start.edges.find((edge) => edge.id === 51).enabled = false;
+    delete start.requires;
+    return start;
+}
+
 // The FMU installed in a folder of its own, its ports read as Konjugate reads them when it is added to a model.
 export async function installedPidController(archive, directory) {
     const installed = await installFmuArchive(archive, { directory });
@@ -156,6 +171,9 @@ async function main() {
         const content = JSON.stringify(document);
         await writeFile(join(here, 'HeatedRoomPid.kjt'), await encodeProjectFile(content, { attachments: [{ kind: 'fmu', name: 'PidController.fmu', buffer: archive }] }));
         console.log(`HeatedRoomPid.kjt written: ${document.nodes.length} nodes, the FMU (${fmu.fmuId}) kept in it; requires ${JSON.stringify(document.requires)}.`);
+        const start = heatedRoomDocument(document);
+        await writeFile(join(here, 'HeatedRoom.kjt'), await encodeProjectFile(JSON.stringify(start)));
+        console.log(`HeatedRoom.kjt written: the tutorial's start, ${start.nodes.length} nodes, the room with Konjugate's PI switched off.`);
     } finally {
         await rm(directory, { recursive: true, force: true });
     }

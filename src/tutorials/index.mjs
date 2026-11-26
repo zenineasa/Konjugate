@@ -6,6 +6,7 @@
 
 import { askAssistant } from './askAssistant.mjs';
 import { buildFromComponents } from './buildFromComponents.mjs';
+import { controllerFromAnotherTool } from './controllerFromAnotherTool.mjs';
 import { calibrateTank } from './calibrateTank.mjs';
 import { discoverEquations } from './discoverEquations.mjs';
 import { driveWithJoysticks } from './driveWithJoysticks.mjs';
@@ -31,7 +32,7 @@ import { steerByHand } from './steerByHand.mjs';
 import { tuneController } from './tuneController.mjs';
 import { whatIfBranches } from './whatIfBranches.mjs';
 
-export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, reuseComponent, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, driveWithJoysticks, scheduleChanges, whatIfBranches, keepAndShare, exportModel, fmuRoundTrip, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
+export const tutorials = Object.freeze([firstModel, buildFromComponents, organiseModel, reuseComponent, equationsThatDoMore, programRelationship, askAssistant, parametersAndRuns, layoutModel, fixInstability, calibrateTank, optimiseObjective, tuneController, steerByHand, driveWithJoysticks, controllerFromAnotherTool, scheduleChanges, whatIfBranches, keepAndShare, exportModel, fmuRoundTrip, extendKonjugate, discoverEquations, replayLog, liveTwin, matchSignals, refitTwin]);
 
 // The groups of the list, in order, with the heading each shows. A tutorial's `area` is one of these ids.
 export const tutorialAreas = Object.freeze([

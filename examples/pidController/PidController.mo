@@ -10,6 +10,8 @@ model PidController "PI controller for a heated room, from the Modelica Standard
   Modelica.Blocks.Interfaces.RealInput setpoint(unit = "degC") "Wanted room temperature";
   Modelica.Blocks.Interfaces.RealInput measurement(unit = "degC") "Measured room temperature";
   Modelica.Blocks.Interfaces.RealOutput command(unit = "1") "Heater command, from 0 (off) to 1 (full power)";
+protected
+  // Protected, so its own parameters stay inside the FMU (exported with --fmiFilter=protected): the FMU offers k and Ti alone.
   Modelica.Blocks.Continuous.LimPID pid(
     controllerType = Modelica.Blocks.Types.SimpleController.PI,
     k = k, Ti = Ti, yMax = yMax, yMin = yMin, Ni = 0.9,

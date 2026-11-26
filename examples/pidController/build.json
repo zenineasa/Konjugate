@@ -6,6 +6,7 @@
         "sha": "8df0769a9cee6ad04ddfff95faee64cd70f662ec"
     },
     "fmiFlags": "s:euler",
+    "fmiFilter": "protected",
     "linux": {
         "compiler": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
         "cmake": "cmake version 3.22.1"
@@ -15,8 +16,8 @@
         "cmake": "cmake version 4.4.4"
     },
     "fmpy": "0.3.21",
-    "fmuSha256": "c78818ad1ef7d5f6c50e4b297141ad714cb430d914a6584a5a0371572d8fcf14",
-    "fmuBytes": 1518114,
+    "fmuSha256": "21a9e91416f8f3eb881e5f186ad18593e5f03ead4e32f2e9898553bc0fcfd478",
+    "fmuBytes": 1517501,
     "platforms": [
         "aarch64-linux",
         "linux64",

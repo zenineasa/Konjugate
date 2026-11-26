@@ -20,6 +20,7 @@
 import { collectEntityIds, remapIds } from './graphClipboard.mjs';
 import { sayKindsAlike, stateKinds, termsReachingStates } from './ratesAndUpdates.mjs';
 import { scheduleError } from './parameterSchedule.mjs';
+import { distinctPartName } from './boxPorts.mjs';
 
 const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
 const clone = (value) => structuredClone(value);
@@ -424,9 +425,11 @@ export function placeComponent(document, componentDocument, { parentSubsystemId 
     const definitionId = allocate();
     const subsystemId = allocate();
     const sealed = clone(componentDocument);
+    // Placed beside an instance of the same name (the same component placed twice), it is numbered: "Heater supply 2".
+    const siblingNames = (next.subsystems ?? []).filter((subsystem) => !subsystem.deleted && (subsystem.parentSubsystemId ?? null) === (parentSubsystemId ?? null)).map((subsystem) => subsystem.name);
     next.subsystemDefinitions = [...(next.subsystemDefinitions ?? []), { id: definitionId, document: sealed, ...(link ? { link: clone(link) } : {}) }];
     next.subsystems = [...(next.subsystems ?? []), {
-        id: subsystemId, name: name ?? sealed.component?.name ?? 'Component', parentSubsystemId, position: [...position], definitionId,
+        id: subsystemId, name: distinctPartName(name ?? sealed.component?.name ?? 'Component', siblingNames), parentSubsystemId, position: [...position], definitionId,
         ...(usableParameterValues(next, sealed, parameterValues).length ? { parameterValues: usableParameterValues(next, sealed, parameterValues) } : {})
     }];
     const { document: expanded } = expandInstance(next, subsystemId, { allocateId: allocate });
@@ -710,9 +713,18 @@ export function projectComponentDocument(document, { name = null } = {}) {
 // work out differently, so a document carrying one says rootPortSignals in its `requires`, which an older engine refuses by name.
 export const rootPortSignalsRequirement = 'rootPortSignals';
 
+// A constant signal's value as a number: a finite number, or text that is one (a file written by hand, "21"); null for anything else,
+// blank text, true, an array or a number too large to hold. The one rule the Ports list, the file and the run all follow.
+export function constantSignalNumber(value) {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value !== 'string' || value.trim() === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+}
+
 // Why a signal cannot be kept, or '' when it can.
 export function rootPortSignalProblem(signal) {
-    if (signal?.kind === 'constant') return Number.isFinite(Number(signal.value)) && signal.value !== '' && signal.value !== null ? '' : 'A constant needs a number.';
+    if (signal?.kind === 'constant') return constantSignalNumber(signal.value) === null ? 'A constant needs a number.' : '';
     if (signal?.kind === 'schedule') return scheduleError(signal);
     return 'A signal is a constant or a schedule.';
 }
@@ -729,7 +741,7 @@ export function setRootPortSignal(document, key, signal) {
     const problem = rootPortSignalProblem(signal);
     if (problem) throw new Error(problem);
     port.signal = signal.kind === 'constant'
-        ? { kind: 'constant', value: Number(signal.value) }
+        ? { kind: 'constant', value: constantSignalNumber(signal.value) }
         : { kind: 'schedule', interpolation: signal.interpolation, samples: signal.samples.map(([time, value]) => [Number(time), Number(value)]) };
     return next;
 }
@@ -737,6 +749,10 @@ export function setRootPortSignal(document, key, signal) {
 // Whether a port's signal is used when the project runs on its own: an in port (or one both ways) on an Update nothing in the model
 // reaches. A signal on any other is kept, and says why it is not used.
 export function rootPortSignalUsable(port) {
+    // One rule for what a signal is (rootPortSignalProblem): one that is not (a constant that is no number, written by hand) is kept and
+    // said, never run as something else.
+    const problem = port.signal ? rootPortSignalProblem(port.signal) : '';
+    if (problem) return problem;
     if (port.direction === 'out') return 'An out port offers its value outside: a signal is for an in port.';
     if (port.kind !== 'update') return `${port.symbol} is a Rate: a signal sets a value, so it is for an in port on an Update.`;
     if (port.reached) return `${port.symbol} is set inside the model already, so a signal would set it twice.`;
@@ -765,10 +781,11 @@ export function applyRootPortSignals(document) {
         const state = node.states.find((candidate) => candidate.id === port.stateId);
         const termId = allocate();
         if (port.signal.kind === 'constant') {
-            const literal = String(port.signal.value);
+            const number = constantSignalNumber(port.signal.value);
+            const literal = String(number);
             node.sourceTerms = [...(node.sourceTerms ?? []), {
                 id: termId, state: state.symbol, expression: literal, setsValue: true,
-                expressionModel: { latex: literal, output: { stateId: state.id }, bindings: [], mathJson: port.signal.value }, parameters: []
+                expressionModel: { latex: literal, output: { stateId: state.id }, bindings: [], mathJson: number }, parameters: []
             }];
             continue;
         }

@@ -15,7 +15,8 @@ import { LimitEditor, ObjectiveEditor } from './objectiveEditor.mjs';
 import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection, ProgramSummaryView } from './programSourceSection.mjs';
 import { programStatusKey } from './programSummary.mjs';
-import { bindPort, referenceToProviderBinding, sourceTermReferenceToBinding } from '../programBinding.mjs';
+import { compareWithOriginal } from '../fmuComparison.mjs';
+import { bindPort, entryIndexByKey, referenceToProviderBinding, sourceTermReferenceToBinding } from '../programBinding.mjs';
 import { measuredAt, objectivePorts } from '../objectiveTest.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
 import { convergenceTraces, estimateText, formatDuration, formatLoss, formatShare, limitOutcomeText, summarizeTuning, tuningWarnings } from './tuningProgress.mjs';
@@ -43,7 +44,7 @@ import { createHumanInput } from './humanInput.mjs';
 import { createSteering } from './inputSteering.mjs';
 import { originalScheduleModes, parseScheduleText, scheduleError, scheduleSummary, scheduleText, waveformPreview, waveformProblem, waveformShapes, waveformValue } from '../parameterSchedule.mjs';
 import {
-    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
+    documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuInputRows, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
@@ -109,10 +110,10 @@ import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
     declareRootPort, projectComponentDocument, removeRootPort, rootPorts,
-    applyRootPortSignals, rootPortRequires, rootPortSignalUsable, setRootPortSignal
+    applyRootPortSignals, constantSignalNumber, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
-import { fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, settingRefusal, settingRelationship } from '../boxPorts.mjs';
+import { boxDropProblem, fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortSignalText, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -2513,7 +2514,11 @@ async function endBoxPortDrag(event) {
         return;
     }
     const target = boxDropTarget(event);
-    if (!target) return;
+    const problem = boxDropProblem(drag, target);
+    if (problem) {
+        $('#statusText').textContent = problem;
+        return;
+    }
     // What the drag connects: a source state, and an FMU input or a state to set.
     let source = null;
     let destination = null;
@@ -2556,12 +2561,7 @@ function connectFmuInput(box, input, source) {
     const from = model.nodes.find((node) => node.id === source.nodeId);
     const state = from?.states.find((candidate) => candidate.id === source.stateId);
     if (!object || !state) return;
-    changeNodeModel(object, (snapshot) => {
-        const bindings = snapshot.implementation.bindings ?? (snapshot.implementation.bindings = []);
-        const index = bindings.findIndex((binding) => binding.key === input.key);
-        const entry = fmuInputBinding(input.key, source);
-        if (index >= 0) bindings[index] = entry; else bindings.push(entry);
-    });
+    changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, input.key, fmuInputBinding(input.key, source)); });
     $('#statusText').textContent = `${box.name}'s ${input.name} reads ${from.title}.${state.symbol}, at the start of each step`;
 }
 
@@ -2589,8 +2589,7 @@ function openProgramRead(nodeId, inputKey) {
     if (!object) return;
     selectNode(object);
     openNodeEditor(definition, undefined, undefined, { tab: 'equations' });
-    const index = (definition.implementation?.bindings ?? []).findIndex((binding) => binding.key === inputKey);
-    $(`#nodeProgramInputs .nodeProgramRow[data-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });
+    [...document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')].find((row) => row.dataset.key === String(inputKey))?.scrollIntoView({ block: 'nearest' });
 }
 
 updateRelationships();
@@ -3939,11 +3938,17 @@ function renderNodeProgram(node) {
 
     const inputs = $('#nodeProgramInputs');
     inputs.replaceChildren();
-    if (!(implementation.bindings ?? []).length) inputs.innerHTML = '<p class="emptyEditorState">No inputs</p>';
-    (implementation.bindings ?? []).forEach((binding, index) => {
+    // An FMU's rows are its ports, in its own order, each binding found by key; every row writes by its key (bindPort), so a row
+    // drawn before the ports were known, or a select whose change fires after the card was drawn again, still writes its own input.
+    const inputRows = isFmu && fmuPorts
+        ? fmuInputRows(fmuPorts.inputs, implementation.bindings)
+        : (implementation.bindings ?? []).map((binding, index) => ({ key: binding.key, binding, index }));
+    if (!inputRows.length) inputs.innerHTML = '<p class="emptyEditorState">No inputs</p>';
+    inputRows.forEach(({ binding, index }) => {
+        const bindInput = (entry) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, binding.key, entry, index); });
         const row = document.createElement('div');
         row.className = isFmu ? 'nodeProgramRow fmuPortRow' : 'nodeProgramRow';
-        row.dataset.index = String(index);
+        row.dataset.key = binding.key ?? '';
         const port = fmuPorts?.inputs?.find((candidate) => candidate.key === binding.key) ?? null;
         const reads = document.createElement('select');
         reads.dataset.field = 'reads';
@@ -3967,16 +3972,16 @@ function renderNodeProgram(node) {
         reads.addEventListener('change', () => {
             if (isFmu && reads.value === 'value') {
                 const value = Number.isFinite(port?.start) ? port.start : 0;
-                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'value', value }; });
+                bindInput({ kind: 'value', value });
                 return;
             }
             if (isFmu && !reads.value) {
-                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'state', stateId: null }; });
+                bindInput({ kind: 'state', stateId: null });
                 return;
             }
             const candidate = candidates.find((item) => item.value === reads.value);
             if (!candidate) return;
-            changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, ...candidate.binding }; });
+            bindInput(candidate.binding);
         });
         if (isFmu) {
             // The FMU's own name for it, its role, unit and description; a value typed in place; Share for a project parameter.
@@ -3995,8 +4000,13 @@ function renderNodeProgram(node) {
             value.disabled = Boolean(activeResult);
             value.addEventListener('change', () => {
                 const number = Number(value.value);
-                if (value.value.trim() === '' || !Number.isFinite(number)) return;
-                changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index] = { key: binding.key, kind: 'value', value: number }; });
+                if (value.value.trim() === '' || !Number.isFinite(number)) {
+                    // Not a number: the field shows the value still used, and says so.
+                    value.value = binding.kind === 'value' ? String(binding.value) : '';
+                    $('#statusText').textContent = `${port?.name ?? binding.key} keeps ${value.value || 'its value'}: give it a number.`;
+                    return;
+                }
+                bindInput({ kind: 'value', value: number });
             });
             const share = document.createElement('button');
             share.type = 'button';
@@ -4013,7 +4023,7 @@ function renderNodeProgram(node) {
                 for (let suffix = 2; taken.has(symbol); suffix += 1) symbol = `${binding.key}${suffix}`;
                 const created = { id: allocateModelEntityId(), name: port?.name ?? binding.key, symbol, value: start, unit: port?.unit ?? '', mode: 'constant' };
                 snapshot.sharedParameters.push(created);
-                snapshot.implementation.bindings[index] = { key: binding.key, kind: 'parameter', sharedParameterId: created.id };
+                snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, binding.key, { kind: 'parameter', sharedParameterId: created.id }, index);
             }));
             const connection = document.createElement('small');
             connection.className = 'fmuPortConnection';
@@ -4021,9 +4031,12 @@ function renderNodeProgram(node) {
             row.append(name, reads, value, share, about, connection, rowError(errors.inputs[index] ?? []));
         } else {
             row.append(
-                keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings[index].key = key; })),
+                keyInput(binding.key, 'Input key', (key) => changeNodeModel(node, (snapshot) => {
+                    const entry = snapshot.implementation.bindings?.[entryIndexByKey(snapshot.implementation.bindings, binding.key, index)];
+                    if (entry) entry.key = key;
+                })),
                 reads,
-                removeButton('Remove this input', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings.splice(index, 1); })),
+                removeButton('Remove this input', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, binding.key, null, index); })),
                 rowError(errors.inputs[index] ?? [])
             );
         }
@@ -4034,9 +4047,14 @@ function renderNodeProgram(node) {
     outputs.replaceChildren();
     if (!(implementation.outputs ?? []).length) outputs.innerHTML = '<p class="emptyEditorState">No outputs</p>';
     (implementation.outputs ?? []).forEach((output, index) => {
+        // Written by its key, as the inputs are.
+        const changeOutput = (change) => changeNodeModel(node, (snapshot) => {
+            const entry = snapshot.implementation.outputs?.[entryIndexByKey(snapshot.implementation.outputs, output.key, index)];
+            if (entry) change(entry, snapshot);
+        });
         const row = document.createElement('div');
         row.className = isFmu ? 'nodeProgramRow fmuPortRow fmuOutputRow' : 'nodeProgramRow';
-        row.dataset.index = String(index);
+        row.dataset.key = output.key ?? '';
         const outputPort = fmuPorts?.outputs?.find((candidate) => candidate.key === output.key) ?? null;
         const state = document.createElement('select');
         state.dataset.field = 'state';
@@ -4046,7 +4064,7 @@ function renderNodeProgram(node) {
         state.value = output.stateId === null || output.stateId === undefined ? '' : String(output.stateId);
         state.addEventListener('change', () => {
             if (!state.value) return;
-            changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].stateId = Number(state.value); });
+            changeOutput((entry) => { entry.stateId = Number(state.value); });
         });
         const setsLabel = document.createElement('label');
         setsLabel.className = 'nodeProgramSets';
@@ -4062,20 +4080,20 @@ function renderNodeProgram(node) {
         // An FMU reports values, never rates.
         if (isFmu) sets.setAttribute('data-unavailable', '');
         sets.disabled = isFmu || Boolean(activeResult);
-        sets.addEventListener('change', () => changeNodeModel(node, (snapshot) => {
-            if (sets.checked) snapshot.implementation.outputs[index].setsValue = true;
-            else delete snapshot.implementation.outputs[index].setsValue;
+        sets.addEventListener('change', () => changeOutput((entry) => {
+            if (sets.checked) entry.setsValue = true;
+            else delete entry.setsValue;
         }));
         setsLabel.append(sets, document.createTextNode(chosen ? ` sets ${chosen.symbol}, rather than adding to d${chosen.symbol}/dt` : ' sets its state, rather than adding to its rate'));
         // An FMU's output always sets its state (it reports values), so the choice is not offered.
         setsLabel.hidden = isFmu;
-        const outputName = keyInput(isFmu ? outputPort?.name ?? output.key : output.key, 'Output key', (key) => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs[index].key = key; }));
+        const outputName = keyInput(isFmu ? outputPort?.name ?? output.key : output.key, 'Output key', (key) => changeOutput((entry) => { entry.key = key; }));
         if (isFmu && outputPort) outputName.title = [outputPort.name, outputPort.unit, outputPort.description].filter(Boolean).join(' · ');
         row.append(
             outputName,
             state,
             setsLabel,
-            removeButton('Remove this output', () => changeNodeModel(node, (snapshot) => { snapshot.implementation.outputs.splice(index, 1); })),
+            removeButton('Remove this output', () => changeOutput((entry, snapshot) => { snapshot.implementation.outputs.splice(snapshot.implementation.outputs.indexOf(entry), 1); })),
             rowError(errors.outputs[index] ?? [])
         );
         outputs.appendChild(row);
@@ -4109,21 +4127,9 @@ async function renderNodeProgramFmus(node) {
         return item;
     }));
     renderFmuKeep(node, ports && !ports.error ? ports : null);
-    // The rows were drawn before the ports were known: drawn again, with the FMU's names, units and start values.
+    // The rows were drawn before the ports were known: drawn again, one per port in the FMU's order (an input or parameter the
+    // file leaves to the FMU, src/nodeProgram.mjs implementationForFile, has its row reading nothing). The model is not touched.
     if (!known && ports && !ports.error && selectedNode === node) renderNodeProgram(node);
-    // An input or parameter the file leaves to the FMU has no binding there (src/nodeProgram.mjs, implementationForFile): it is
-    // given its row here, reading nothing, so the card lists every port. Only in memory: the file leaves it out all the same.
-    const live = node.userData.definition.implementation;
-    if (ports && !ports.error && live?.kind === 'fmi' && live.fmuId === implementation.fmuId) {
-        const bound = new Set((live.bindings ?? []).map((binding) => binding.key));
-        const missing = (ports.inputs ?? []).filter((port) => !bound.has(port.key));
-        if (missing.length) {
-            const order = new Map((ports.inputs ?? []).map((port, index) => [port.key, index]));
-            live.bindings = [...(live.bindings ?? []), ...missing.map((port) => ({ key: port.key, kind: 'state', stateId: null }))]
-                .sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity));
-            if (selectedNode === node) renderNodeProgram(node);
-        }
-    }
 }
 
 // Where the node's FMU is kept (stage 8 of docs/proposals/fmuImportWorkflow.md): in the project's file, so it runs on another computer,
@@ -4202,6 +4208,7 @@ async function useFmuForNode(node, guid, version) {
     changeNodeModel(node, (snapshot) => {
         const built = fmiNodeFromPorts(snapshot, {
             guid, version, ports, newId: allocateModelEntityId, removableStateIds: untouched ? [definition.states[0].id] : [],
+            takenNames: model.nodes.filter((other) => !other.deleted && other.id !== definition.id).map((other) => other.title),
             makeState: ({ name, ...state }) => {
                 const shown = stateValueText(state.initialValue, state.unit);
                 return { ...state, label: name, value: shown.text, exactValue: shown.exact, className: '' };
@@ -9336,67 +9343,40 @@ $('#exportFmuTry').addEventListener('click', async () => {
 });
 async function tryExportedFmuHere() {
     if (!lastExportedFmu) return null;
-    originalComparison = lastExportedFmu.original ?? null;
-    return addFmuToModel({ path: lastExportedFmu.path });
+    const original = lastExportedFmu.original ?? null;
+    const node = await addFmuToModel({ path: lastExportedFmu.path });
+    // Compared as the node it was placed as, and only that one.
+    originalComparison = node && original ? { ...original, nodeId: node.userData.id } : null;
+    return node;
 }
 
 // A window opened by Try it as a node: the FMU placed, and its run to be compared with the original.
 async function startTryFmu({ path, original }) {
-    originalComparison = original ?? null;
     const node = await addFmuToModel({ path });
+    originalComparison = node && original ? { ...original, nodeId: node.userData.id } : null;
     if (!node) return;
     $('#statusText').textContent = originalComparison
         ? `Added ${node.userData.definition.title}: run it to compare with the original`
         : `Added ${node.userData.definition.title}`;
 }
 
-// Each FMU node's outputs in the last run against the original's by name: the largest difference, output by output.
+// The FMU node's outputs in the last run against the original's by name: the largest difference, output by output (src/fmuComparison.mjs).
+// Only the node the exported FMU was placed as is compared; the comparison goes with the project (loadProjectDocument clears it).
+const originalOutputName = (node, output) => fmuPortsFor(node.implementation)?.outputs?.find((port) => port.key === output.key)?.name ?? output.key;
 function updateOriginalComparison() {
     $('#compareOriginalPanel').hidden = true;
-    if (!originalComparison || !activeResult?.samples?.length) return;
-    const original = originalComparison;
-    const byTime = new Map(original.times.map((time, index) => [Number(time).toPrecision(12), index]));
-    const lines = [];
-    let largest = 0;
-    let compared = 0;
-    let where = '';
-    for (const node of model.nodes.filter((candidate) => !candidate.deleted && candidate.implementation?.kind === 'fmi')) {
-        const ports = fmuPortsFor(node.implementation);
-        for (const output of node.implementation.outputs ?? []) {
-            const name = ports?.outputs?.find((port) => port.key === output.key)?.name ?? output.key;
-            const reference = original.outputs[name];
-            if (!reference) continue;
-            let difference = 0;
-            let samples = 0;
-            for (const sample of activeResult.samples) {
-                const index = byTime.get(Number(sample.time).toPrecision(12));
-                const value = sample.states.find((state) => state.stateId === output.stateId)?.value;
-                if (index === undefined || !Number.isFinite(value)) continue;
-                const gap = Math.abs(value - reference[index]);
-                if (gap > difference) difference = gap;
-                if (gap > largest) { largest = gap; where = `${name} at t = ${sample.time} s`; }
-                samples += 1;
-            }
-            if (!samples) continue;
-            compared += samples;
-            lines.push(`${name}: ${samples} samples, largest difference ${difference === 0 ? '0 (identical)' : difference.toPrecision(3)}.`);
-        }
-    }
-    if (!lines.length) {
-        lines.push('No output of the FMU matched one of the original run, by name and time: compare the samples the two runs share, or run both to the same times.');
-    }
-    $('#compareOriginalTitle').textContent = !compared ? `Not compared with ${original.modelName}'s run.`
-        : largest === 0 ? `Identical to ${original.modelName}'s run: largest difference 0 over ${compared} values.`
-            : `Largest difference from ${original.modelName}'s run: ${largest.toPrecision(3)} (${where}).`;
-    $('#compareOriginalLines').replaceChildren(...lines.map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+    const outcome = compareWithOriginal({ original: originalComparison, nodes: model.nodes, samples: activeResult?.samples, outputName: originalOutputName });
+    if (!outcome) return;
+    $('#compareOriginalTitle').textContent = outcome.title;
+    $('#compareOriginalLines').replaceChildren(...outcome.lines.map((line) => Object.assign(document.createElement('li'), { textContent: line })));
     $('#compareOriginalPanel').hidden = false;
-    if (tour.active && compared) tutorialComparedWithOriginal = true;
+    if (tour.active && outcome.compared) tutorialComparedWithOriginal = true;
 }
 $('#closeCompareOriginal').addEventListener('click', () => { $('#compareOriginalPanel').hidden = true; });
 
 // The original's series for an FMU node's outputs, beside the run's own on the node's plot.
 function originalSeriesFor(definition) {
-    if (!originalComparison || definition?.implementation?.kind !== 'fmi') return [];
+    if (!originalComparison || definition?.implementation?.kind !== 'fmi' || definition.id !== originalComparison.nodeId) return [];
     const ports = fmuPortsFor(definition.implementation);
     return (definition.implementation.outputs ?? []).map((output) => {
         const name = ports?.outputs?.find((port) => port.key === output.key)?.name ?? output.key;
@@ -10985,6 +10965,9 @@ async function loadProjectDocument(document, {
     hideRunFailure();
     keptComparisonSamples = null;
     $('#exportFmuNotice').hidden = true;
+    // Compare with original belongs to the project its FMU was tried in, never to the one opened after it.
+    originalComparison = null;
+    $('#compareOriginalPanel').hidden = true;
     demonstrationProject = false;
     // A project from before components, or one whose subsystems are plain, opens with each subsystem an instance of a
     // definition of its own; ids and the flat graph are unchanged (src/components.mjs).
@@ -13336,7 +13319,7 @@ function parameterTuningProgramTargets() {
 
 function renderParameterTuningProgramBindings() {
     const targets = parameterTuningProgramTargets();
-    $('#parameterTuningProgramBindings').replaceChildren(...parameterTuningProgram.bindings.map((binding, index) => {
+    $('#parameterTuningProgramBindings').replaceChildren(...parameterTuningProgram.bindings.map((binding) => {
         const row = document.createElement('div');
         row.className = 'parameterTuningProgramBinding';
         const key = document.createElement('input');
@@ -13369,7 +13352,9 @@ function renderParameterTuningProgramBindings() {
         remove.textContent = '×';
         remove.title = 'Remove this key';
         remove.addEventListener('click', () => {
-            parameterTuningProgram.bindings.splice(index, 1);
+            // The row's own entry, which its key and target edit in place: the list may have been replaced (a template) since it was drawn.
+            const at = parameterTuningProgram.bindings.indexOf(binding);
+            if (at >= 0) parameterTuningProgram.bindings.splice(at, 1);
             renderParameterTuningProgramBindings();
             refreshParameterTuningRunnable();
         });
@@ -14539,8 +14524,39 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     // Placed beside the rightmost node, it may stand outside a view fitted to a small model: brought into view, with room for its label.
     if (!position) bringIntoViewWithLabel(node);
     await useFmuForNode(node, added.guid, added.version);
+    if (!position) await settleClearOfDrawnModel(node);
     $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}`;
     return node;
+}
+
+// An FMU just placed beside the model, once its terminals are drawn and the view fitted around it: moved right while its input terminals
+// lie over anything else drawn (another box's label or terminals), measured at the zoom it is now seen at, which the fit may have
+// changed after it was placed. Its place is its object's, which the file reads; nothing else holds the earlier one.
+async function settleClearOfDrawnModel(object) {
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+    const id = object.userData.id;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        await frame();
+        await frame();
+        const column = labelRenderer.domElement.querySelector(`.boxPorts.left[data-box="n${id}"]`);
+        if (!column) return;
+        const own = column.getBoundingClientRect();
+        let reach = -Infinity;
+        for (const element of labelRenderer.domElement.children) {
+            if (element.matches?.(`[data-box="n${id}"], [data-node="${id}"]`) || element.querySelector?.(`[data-box="n${id}"], [data-node="${id}"]`)) continue;
+            const rect = element.getBoundingClientRect();
+            if (!rect.width || rect.top >= own.bottom || rect.bottom <= own.top || rect.right <= own.left || rect.left >= own.right) continue;
+            reach = Math.max(reach, rect.right);
+        }
+        if (reach === -Infinity) return;
+        const canvas = renderer.domElement.getBoundingClientRect();
+        const screenX = (point) => ((point.clone().project(camera).x + 1) / 2) * canvas.width;
+        const pixelsPerUnit = Math.abs(screenX(object.position.clone().add(new THREE.Vector3(1, 0, 0))) - screenX(object.position));
+        if (!(pixelsPerUnit > 1)) return;
+        object.position.x += (reach + 24 - own.left) / pixelsPerUnit;
+        updateRelationships();
+        bringIntoViewWithLabel(object);
+    }
 }
 
 // For the interaction tests, which cannot drop a file with a place on disk: what a drop of the .fmu at `path` at the screen point
@@ -14563,8 +14579,26 @@ function besideVisibleNodes() {
     if (!shown.length) return null;
     const rightmost = shown.reduce((best, node) => (nodeObjects.get(node.id).position.x > nodeObjects.get(best.id).position.x ? node : best));
     const at = nodeObjects.get(rightmost.id).position;
-    // Far enough for the FMU's input terminals to stand between them (stage 5 of docs/proposals/rootPorts.md).
-    return [at.x + 7.5, at.y, at.z];
+    // Far enough for the FMU's input terminals to stand between them (stage 5 of docs/proposals/rootPorts.md), and clear of every label
+    // and terminal drawn, whatever the zoom.
+    return [xClearOfDrawnModel(at, 7.5), at.y, at.z];
+}
+
+// The x, at the depth of `at`, right of everything drawn on the canvas (labels, terminals), with room for a new box's inputs
+// (placementBeside, src/boxPorts.mjs); at least `minimumStep` beyond `at`.
+function xClearOfDrawnModel(at, minimumStep) {
+    const canvas = renderer.domElement.getBoundingClientRect();
+    const screenX = (point) => ((point.clone().project(camera).x + 1) / 2) * canvas.width + canvas.left;
+    const atScreenX = screenX(at);
+    let drawnRightPx = atScreenX;
+    for (const element of labelRenderer.domElement.children) {
+        const rect = element.getBoundingClientRect();
+        if (!rect.width || rect.right < canvas.left || rect.left > canvas.right || rect.bottom < canvas.top || rect.top > canvas.bottom) continue;
+        drawnRightPx = Math.max(drawnRightPx, rect.right);
+    }
+    return placementBeside({
+        atX: at.x, atScreenX, pixelsPerUnit: Math.abs(screenX(at.clone().add(new THREE.Vector3(1, 0, 0))) - atScreenX), drawnRightPx, minimumStep
+    });
 }
 
 // The FMUs already in the library, under Add › FMU…: each a click from a node.
@@ -15403,7 +15437,9 @@ function renderProgramOutputRows(definition) {
         key.value = output.key ?? '';
         key.autocomplete = 'off';
         key.setAttribute('aria-label', `Output ${index + 1}'s key`);
-        key.addEventListener('change', () => changeEdgeModel(definition, (snapshot) => { snapshot.implementation.outputs[index].key = key.value.trim(); }));
+        // Each written by its key (entryIndexByKey), the row's place only telling apart outputs of the same key.
+        const outputAt = (snapshot) => entryIndexByKey(snapshot.implementation.outputs, output.key, index);
+        key.addEventListener('change', () => changeEdgeModel(definition, (snapshot) => { const at = outputAt(snapshot); if (at >= 0) snapshot.implementation.outputs[at].key = key.value.trim(); }));
         const state = document.createElement('select');
         state.setAttribute('aria-label', `The state output ${index + 1} reaches`);
         for (const [role, node] of ends) {
@@ -15415,14 +15451,16 @@ function renderProgramOutputRows(definition) {
         state.value = equationOutputValue(output.role === 'source' ? 'source' : 'target', output.stateId);
         state.addEventListener('change', () => {
             const picked = parseEquationOutput(state.value);
-            if (picked) changeEdgeModel(definition, (snapshot) => { Object.assign(snapshot.implementation.outputs[index], picked); });
+            if (picked) changeEdgeModel(definition, (snapshot) => { const at = outputAt(snapshot); if (at >= 0) Object.assign(snapshot.implementation.outputs[at], picked); });
         });
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.textContent = '×';
         remove.title = 'Remove this output';
         remove.addEventListener('click', () => changeEdgeModel(definition, (snapshot) => {
-            const remaining = snapshot.implementation.outputs.filter((_, at) => at !== index);
+            const removed = outputAt(snapshot);
+            if (removed < 0) return;
+            const remaining = snapshot.implementation.outputs.filter((_, at) => at !== removed);
             if (remaining.length <= 1) {
                 snapshot.implementation.output = remaining[0] ?? { key: 'output', role: 'target', stateId: definition.targetStateId };
                 delete snapshot.implementation.outputs;
@@ -17295,12 +17333,7 @@ const tour = createTour({
             const fmu = model.nodes.find((node) => !node.deleted && node.title === controllerFromAnotherToolValues.fmu && node.implementation?.kind === 'fmi');
             const object = fmu ? nodeObjects.get(fmu.id) : null;
             if (!object) return;
-            changeNodeModel(object, (snapshot) => {
-                const bindings = snapshot.implementation.bindings ?? (snapshot.implementation.bindings = []);
-                const index = bindings.findIndex((binding) => binding.key === step.gain.key);
-                const entry = { key: step.gain.key, kind: 'value', value: step.gain.to };
-                if (index >= 0) bindings[index] = entry; else bindings.push(entry);
-            });
+            changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, step.gain.key, { kind: 'value', value: step.gain.to }); });
             await runTutorialModel(step);
         },
         connectExampleFmus: async () => {
@@ -17313,9 +17346,8 @@ const tour = createTour({
             if (!x || !object) return;
             selectNode(object);
             openNodeEditor(reader, undefined, undefined, { tab: 'equations' });
-            const index = (reader.implementation.bindings ?? []).findIndex((binding) => binding.key === values.reader.input);
-            if (index < 0) return;
-            changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings[index] = { key: values.reader.input, kind: 'state', nodeId: source.id, stateId: x.id }; });
+            // By key: an input the file left out (it read nothing, src/nodeProgram.mjs implementationForFile) is added, not skipped.
+            changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, values.reader.input, { kind: 'state', nodeId: source.id, stateId: x.id }); });
         },
         lock2D: async () => { if (!is2DLocked) $('#lock2DButton').click(); },
         cycleNodeLabels: async () => { $('#nodeLabelsButton').click(); },
@@ -20175,18 +20207,22 @@ function renderGroupProviderBindingRows(group, previewSource, previewTarget) {
         }
         $('[data-field="key"]', row).addEventListener('change', (event) => {
             changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
-                implementation.bindings[index] = { ...implementation.bindings[index], key: event.target.value.trim() };
+                const at = entryIndexByKey(implementation.bindings, binding.key, index);
+                if (at >= 0) implementation.bindings[at] = { ...implementation.bindings[at], key: event.target.value.trim() };
             }));
         });
         select.addEventListener('change', (event) => {
             const candidate = candidates.find((option) => providerReferenceValue(option) === event.target.value);
             if (!candidate) return;
             changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
-                implementation.bindings[index] = candidateToGroupBinding($('[data-field="key"]', row).value.trim(), candidate, previewSource, previewTarget);
+                const entry = candidateToGroupBinding($('[data-field="key"]', row).value.trim(), candidate, previewSource, previewTarget);
+                const at = entryIndexByKey(implementation.bindings, binding.key, index);
+                if (at >= 0) implementation.bindings[at] = entry; else implementation.bindings.push(entry);
             }));
         });
         row.querySelector('.removeBuilderRow').addEventListener('click', () => changeEdgeGroupModel(group, (snapshot) => changeProgramBindings(snapshot.definition.implementation, snapshot.name, (implementation) => {
-            implementation.bindings = implementation.bindings.filter((candidate, i) => i !== index);
+            const at = entryIndexByKey(implementation.bindings, binding.key, index);
+            if (at >= 0) implementation.bindings = implementation.bindings.filter((candidate, i) => i !== at);
         })));
         container.appendChild(row);
     });
@@ -20961,7 +20997,8 @@ function freePlacementPosition() {
     if (!shown.length) return [orbitControls.target.x, orbitControls.target.y, orbitControls.target.z];
     const box = new THREE.Box3();
     shown.forEach((object) => box.expandByPoint(object.position));
-    return [box.max.x + 4, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2];
+    // Clear of every label and terminal drawn, so the same component placed twice stands apart (xClearOfDrawnModel).
+    return [xClearOfDrawnModel(new THREE.Vector3(box.max.x, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2), 4), (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2];
 }
 
 // The file name of a component saved from a subsystem.
@@ -22034,7 +22071,17 @@ function portRow(port, locked) {
             }
         });
         value.addEventListener('change', () => {
-            if (value.value.trim() !== '' && Number.isFinite(Number(value.value))) setSignal({ kind: 'constant', value: Number(value.value) }, `${port.name} is set to ${stateValueText(Number(value.value), port.unit).text} when run here`);
+            const number = constantSignalNumber(value.value);
+            if (number !== null) {
+                setSignal({ kind: 'constant', value: number }, `${port.name} is set to ${stateValueText(number, port.unit).text} when run here`);
+                return;
+            }
+            // Cleared, or not a number it can hold (1e400): the field shows again the value still used, and says so.
+            const kept = constantSignalNumber(port.signal?.value);
+            value.value = kept === null ? '' : String(kept);
+            $('#statusText').textContent = kept === null
+                ? `${port.name}'s constant needs a number: it stays at its start when run here.`
+                : `${port.name} is still set to ${stateValueText(kept, port.unit).text} when run here: give the constant a number.`;
         });
         edit.addEventListener('click', () => openPortScheduleDialog(port));
     }

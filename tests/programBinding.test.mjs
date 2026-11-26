@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindPort, portBindingChoices, referenceToProviderBinding, sourceTermReferenceToBinding } from '../src/programBinding.mjs';
+import { bindPort, entryIndexByKey, portBindingChoices, referenceToProviderBinding, sourceTermReferenceToBinding } from '../src/programBinding.mjs';
 
 const withoutKey = ({ key, ...rest }) => rest;
 
@@ -50,4 +50,15 @@ test('the choices for a port: those whose unit converts first, the others listed
         ['a', false, 'Cannot be bound: Pa and K measure different kinds of quantity']
     ]);
     assert.ok(portBindingChoices('', [{ value: 'a', unit: 'Pa' }])[0].compatible, 'A port with no unit is not checked.');
+});
+
+test('a row finds its entry by key, its drawn place only telling apart entries of the same key', () => {
+    const list = [{ key: 'a' }, { key: '' }, { key: 'b' }, { key: '' }];
+    assert.equal(entryIndexByKey(list, 'b', 0), 2, 'A stale place is not trusted when it holds another key.');
+    assert.equal(entryIndexByKey(list, '', 3), 3, 'Of two new rows with no key, the one drawn there.');
+    assert.equal(entryIndexByKey(list, '', 7), 1);
+    assert.equal(entryIndexByKey(list, 'c'), -1);
+    // The second of two new rows bound: the right one, not the first with the same (empty) key.
+    assert.deepEqual(bindPort(list, '', { kind: 'state', stateId: 4 }, 3), [{ key: 'a' }, { key: '' }, { key: 'b' }, { key: '', kind: 'state', stateId: 4 }]);
+    assert.deepEqual(bindPort(list, '', null, 3), [{ key: 'a' }, { key: '' }, { key: 'b' }]);
 });

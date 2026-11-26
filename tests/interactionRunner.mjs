@@ -8752,6 +8752,13 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]').hidden`, 'The constant field was not offered.');
         await typeInto(`document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]')`, '17');
         await waitFor(window, `window.__debugProject.serialize().component.ports[1].signal?.value === 17`, 'The constant was not kept.');
+        // Cleared, or given a number too large to hold: the field shows again the 17 still used, and says so (the bug hunt's empty field).
+        for (const typed of ['', '1e400']) {
+            await typeInto(`document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]')`, typed);
+            await waitFor(window, `document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]').value === '17'`, `After "${typed}", the field does not show the constant still used.`);
+            assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /still set to 17 degC when run here: give the constant a number/);
+            assert.equal(await evaluate(window, `window.__debugProject.serialize().component.ports[1].signal.value`), 17);
+        }
         const saved = await savedProject();
         assert.deepEqual(saved.component.ports[0].signal, { kind: 'schedule', interpolation: 'hold', samples: [[0, 20], [1, 21]] });
         assert.deepEqual(saved.requires, ['rootPortSignals'], 'The file says it needs a Konjugate that applies port signals.');
@@ -13124,6 +13131,8 @@ export async function runInteractionTests(driver) {
                 assert.deepEqual(pid.implementation.bindings.find((binding) => binding.key === 'k'), { key: 'k', kind: 'value', value: 2 });
                 assert.ok(saved.edges.some((edge) => edge.source.nodeId === pid.id && edge.target.nodeId === room.id), 'The heater is set from the command.');
                 assert.notEqual(saved.nodes.find((node) => node.name === 'Room with Konjugate PI').enabled, false, 'The room with Konjugate\'s PI is on.');
+                // Run after the round trip in the same window: no comparison with springMassDamper's run, which this project never came from.
+                assert.equal(await evaluate(window, `document.querySelector('#compareOriginalPanel').hidden`), true, 'The round trip\'s Compare with original stayed with the window.');
             } else if (id === 'tuneController') {
                 assert.equal(saved.edges.find((edge) => edge.name === 'Position control').parameters.find((parameter) => parameter.symbol === 'gain').value, 10);
             }
@@ -13224,6 +13233,112 @@ export async function runInteractionTests(driver) {
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
     }, { skip: !driver.capabilities.fmuExport && 'the controller tutorial is for the desktop app, which runs FMUs' });
+
+    // The bug hunt's "measurement switched to setpoint": an FMU's card opened on a project whose file keeps only its connected inputs, in
+    // the order they were connected. The card lists the FMU's ports in its own order at once, and a row's change that lands after the card
+    // was drawn again (a select whose popup stayed open across it) writes its own input, never the one now drawn at its old place.
+    await run('an FMU card\'s rows follow the FMU\'s ports and write by key: a change from a row drawn before the ports arrived keeps every connection', async () => {
+        await putAwayLeftovers();
+        const room = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], subsystems: [], edgeGroups: [],
+            nodes: [
+                { id: 1, name: 'Setpoint', position: [-6, 2, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 21, unit: 'degC', kind: 'update' }], sourceTerms: [] },
+                { id: 10, name: 'Room', position: [-6, -2, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 11, name: 'Temperature', symbol: 'temperature', initialValue: 15, unit: 'degC', kind: 'rate' }, { id: 12, name: 'Heater', symbol: 'heater', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] }
+            ]
+        };
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(room)}, 'Room.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 2`, 'The room did not load.');
+            const path = await evaluate(window, `window.tutorials.fmuPath('pidController/PidController.fmu')`);
+            assert.ok(await evaluate(window, `window.__debugFmuDrop(${JSON.stringify(path)}, 900, 400)`), 'The FMU was not added.');
+            await waitFor(window, `window.__debugProject.serialize().nodes.some((node) => node.name === 'PidController')`, 'The FMU node was not made.', 30000);
+            // As a file keeps it: setpoint connected first, then measurement; the rest left to the FMU.
+            const document_ = await savedProject();
+            const pid = document_.nodes.find((node) => node.name === 'PidController');
+            pid.implementation.bindings = [{ key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }, { key: 'measurement', kind: 'state', nodeId: 10, stateId: 11 }];
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(document_)}, 'Room.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The reopened project did not load.');
+            // The FMU's ports read slowly, as a large FMU's are: the card is drawn first, and again when they arrive.
+            await evaluate(window, `(() => { const real = window.__realFmuPorts ?? window.extensions.fmuPorts; window.__realFmuPorts = real; window.extensions.fmuPorts = (...args) => new Promise((resolve) => setTimeout(() => resolve(real(...args)), 1500)); })()`);
+            const before = JSON.stringify((await savedProject()).nodes.find((node) => node.name === 'PidController').implementation);
+            await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.querySelector('strong')?.textContent === 'PidController').click()`);
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length > 0`, 'The FMU\'s card did not open.');
+            // The measurement row as first drawn, kept, as a select with its popup open is.
+            await evaluate(window, `(() => { window.__staleMeasurement = document.querySelector('#nodeProgramInputs .nodeProgramRow[data-key="measurement"] [data-field="reads"]'); })()`);
+            assert.ok(await evaluate(window, `Boolean(window.__staleMeasurement)`), 'The measurement has no row.');
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')].map((row) => row.dataset.key)`), ['measurement', 'setpoint', 'ti', 'k'], 'The rows are the FMU\'s ports, in its order.');
+            assert.equal(JSON.stringify((await savedProject()).nodes.find((node) => node.name === 'PidController').implementation), before, 'Opening the card did not change the model.');
+            // The kept row's change, after the card was drawn again: measurement now reads Room.heater.
+            await evaluate(window, `(() => { const select = window.__staleMeasurement; select.value = 'state:10:12'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            const bindings = (await savedProject()).nodes.find((node) => node.name === 'PidController').implementation.bindings;
+            assert.deepEqual(bindings.find((binding) => binding.key === 'measurement'), { key: 'measurement', kind: 'state', nodeId: 10, stateId: 12 });
+            assert.deepEqual(bindings.find((binding) => binding.key === 'setpoint'), { key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }, 'The setpoint\'s connection was kept.');
+            assert.equal(bindings.filter((binding) => binding.key === 'measurement').length, 1, 'No input is written twice.');
+            await waitFor(window, `!/Two inputs/.test(document.querySelector('#nodeProgramInputs').textContent)`, 'The card says two inputs share a name.');
+        } finally {
+            await evaluate(window, `(() => { if (window.__realFmuPorts) window.extensions.fmuPorts = window.__realFmuPorts; delete window.__staleMeasurement; })()`).catch(() => {});
+            await putAwayLeftovers();
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
+
+    // The bug hunt's second FMU: added again from Add › FMU…, it landed on the first, under the same name, and a drag meant for a row
+    // it covered landed on its terminal and did nothing.
+    await run('the same FMU added twice stands clear of the first under a name of its own, and an input dropped on an input says why nothing was connected', async () => {
+        await putAwayLeftovers();
+        const room = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], subsystems: [], edgeGroups: [],
+            nodes: [{ id: 1, name: 'Setpoint', position: [-3, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 21, unit: 'degC', kind: 'update' }], sourceTerms: [] }]
+        };
+        const addFromMenu = async (count) => {
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await evaluate(window, `document.querySelector('#addButton').click()`);
+            await waitFor(window, `!document.querySelector('#addFmuRecent').hidden && [...document.querySelectorAll('#addFmuRecent button')].some((button) => button.textContent.startsWith('PidController'))`, 'The library\'s FMU was not offered under FMU….', 15000);
+            await evaluate(window, `(() => { document.querySelector('#statusText').textContent = ''; [...document.querySelectorAll('#addFmuRecent button')].find((button) => button.textContent.startsWith('PidController')).click(); })()`);
+            await waitFor(window, `window.__debugProject.serialize().nodes.filter((node) => node.implementation?.kind === 'fmi').length === ${count}`, 'The FMU was not added.', 30000);
+            // Said once it stands in its place.
+            await waitFor(window, `document.querySelector('#statusText').textContent.startsWith('Added PidController')`, 'The FMU was not said to be added.', 15000);
+        };
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(room)}, 'Room.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The room did not load.');
+            // The labels at their fullest, as in the bug hunt's screen.
+            await evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== 'expanded'; guard += 1) button.click(); })()`);
+            const path = await evaluate(window, `window.tutorials.fmuPath('pidController/PidController.fmu')`);
+            // Into the library first, as the tutorial's "Put it in my library" does, then added twice from Add (+).
+            assert.ok(await evaluate(window, `window.extensions.addFmu(${JSON.stringify(path)}).then((added) => Boolean(added && !added.error))`), 'The FMU was not put in the library.');
+            await addFromMenu(1);
+            await addFromMenu(2);
+            const names = (await savedProject()).nodes.filter((node) => node.implementation?.kind === 'fmi').map((node) => node.name);
+            assert.deepEqual(names, ['PidController', 'PidController 2']);
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== 'expanded'; guard += 1) button.click(); })()`);
+            await waitFor(window, `document.querySelectorAll('.boxPorts.left').length === 2`, 'The two FMUs are not both drawn with terminals.', 15000);
+            await waitForCanvasAtRest(window);
+            // Nothing of the first FMU, its label or its terminals, lies under the second one's inputs.
+            const overlap = await evaluate(window, `(() => {
+                const ids = window.__debugProject.serialize().nodes.filter((node) => node.implementation?.kind === 'fmi').map((node) => node.id);
+                const second = document.querySelector('.boxPorts.left[data-box="n' + ids[1] + '"]').getBoundingClientRect();
+                const firstLabel = document.querySelector('.node-label-container[data-node="' + ids[0] + '"]');
+                const first = [...document.querySelectorAll('.boxPorts[data-box="n' + ids[0] + '"]'), ...(firstLabel ? [firstLabel] : [])].map((element) => element.getBoundingClientRect());
+                const box = (rect) => [rect.left, rect.top, rect.right, rect.bottom].map(Math.round);
+                return { overlaps: first.some((rect) => rect.left < second.right && rect.right > second.left && rect.top < second.bottom && rect.bottom > second.top), second: box(second), first: first.map(box),
+                    positions: window.__debugProject.serialize().nodes.map((node) => [node.name, node.position]) };
+            })()`);
+            assert.equal(overlap.overlaps, false, `The second FMU's inputs lie over the first FMU: ${JSON.stringify(overlap)}`);
+            // The first FMU's setpoint let go on the second one's measurement: nothing connected, and said why.
+            const ids = (await savedProject()).nodes.filter((node) => node.implementation?.kind === 'fmi').map((node) => node.id);
+            await dragBetween(window, await centreOf(window, `document.querySelector('.boxPort[data-box="n${ids[0]}"][data-box-port="input"][data-port-key="setpoint"]')`),
+                await centreOf(window, `document.querySelector('.boxPort[data-box="n${ids[1]}"][data-box-port="input"][data-port-key="measurement"]')`));
+            await waitFor(window, `/^Nothing was connected: PidController 2's measurement is an input too/.test(document.querySelector('#statusText').textContent)`, `The drop did not say why. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+        } finally {
+            await putAwayLeftovers();
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
 
     await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
         const { waitForStep, clean, readAndGoOn } = tutorialHelpers();

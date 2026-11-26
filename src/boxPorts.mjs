@@ -66,6 +66,40 @@ export function inputTerminalText(input, { kind, startText = null }) {
         : { detail: `nothing connected${startText ? ` · stays at ${startText}` : ''}`, tooltip: `${input.name} has nothing connected, so it stays at its start. Drag an output or a state here to set it.` };
 }
 
+// A name for a part placed beside others of the same name (an FMU added twice, a component placed twice): its own when free, else
+// numbered, "PidController 2", "PidController 3", so its card, its arrows and the messages about it say which one is meant.
+export function distinctPartName(name, takenNames) {
+    const taken = new Set(takenNames);
+    if (!taken.has(name)) return name;
+    for (let number = 2; ; number += 1) if (!taken.has(`${name} ${number}`)) return `${name} ${number}`;
+}
+
+// Where, along the model's x, a part placed beside the drawn model goes so that nothing drawn covers another: right of the right edge of
+// every label and terminal drawn (`drawnRightPx`, on screen), with room for the new box's own input terminals and half its body, turned
+// into model units at the current zoom (`pixelsPerUnit` at `atX`, which stands at `atScreenX`); never nearer than `minimumStep`. A fixed
+// step alone put a second FMU's terminals over the first one's label at some zooms, where a drop meant for a covered row landed on a
+// terminal (the bug hunt).
+export const placementRoomPx = { inputTerminals: 230, boxHalfUnits: 0.75 };
+export function placementBeside({ atX, atScreenX, pixelsPerUnit, drawnRightPx, minimumStep }) {
+    const fixed = atX + minimumStep;
+    if (!(pixelsPerUnit > 1) || !Number.isFinite(drawnRightPx) || !Number.isFinite(atScreenX)) return fixed;
+    const clear = atX + (Math.max(drawnRightPx, atScreenX) - atScreenX + placementRoomPx.inputTerminals) / pixelsPerUnit + placementRoomPx.boxHalfUnits;
+    return Math.max(fixed, clear);
+}
+
+// Why a drag from a terminal connects nothing where it was let go, said on the status line; '' when the drop can connect. `drag` is
+// { box, role, terminal } (role "input" or "output"), `target` what is under the pointer: a terminal { kind: "terminal", box, role,
+// terminal }, a node { kind: "node", node }, or null for empty canvas. A drop is never silently dropped (the bug hunt: a drag onto a
+// row hidden under another box's terminal landed on that terminal and did nothing).
+export function boxDropProblem(drag, target) {
+    const dragged = `${drag.box.name}'s ${drag.terminal.name}`;
+    const wanted = drag.role === 'input' ? 'an output, a node or one of its states' : 'an input, a node or one of its states';
+    if (!target) return `Nothing was connected: drop ${dragged} on ${wanted}.`;
+    if (target.kind !== 'terminal' || target.role !== drag.role) return '';
+    if (target.box.key === drag.box.key && String(target.terminal.key) === String(drag.terminal.key)) return `Nothing was connected: ${dragged} was let go where it started.`;
+    return `Nothing was connected: ${target.box.name}'s ${target.terminal.name} is an ${drag.role} too. Drop ${dragged} on ${wanted}.`;
+}
+
 // The binding Connect to… writes for an FMU input reading a state: the same entry, so a drag and the card are one thing.
 export function fmuInputBinding(inputKey, source) {
     return { key: inputKey, kind: 'state', nodeId: source.nodeId, stateId: source.stateId };

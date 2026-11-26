@@ -4,6 +4,8 @@
 // computational-node provider, or an installed FMU, reading inputs (any node's states, shared parameters) under keys
 // and writing outputs (this node's states) under keys. Pure functions of their arguments.
 
+import { distinctPartName } from './boxPorts.mjs';
+
 export const nodeProgramKeyPattern = /^[a-z][A-Za-z0-9]*$/;
 
 // What an input may read, each as { value, label, binding } where `value` is the dropdown's text: this node's states,
@@ -111,6 +113,22 @@ export function fmiImplementation(guid, version, ports, previous = null) {
     };
 }
 
+// The rows of an FMU node's card, one per input or parameter in the FMU's own order, each with its binding found by key (or reading
+// nothing, the FMU's own start, when the file left it out: implementationForFile), then any binding the FMU has no port for. The
+// card draws and writes each row by its key, never by its place in `bindings`, whose order follows the file and the connections
+// made (a drag appends). `index` is the binding's place in `bindings` (-1 when it has none), for its row's errors only.
+export function fmuInputRows(portInputs, bindings) {
+    const list = bindings ?? [];
+    const used = new Set();
+    const rows = (portInputs ?? []).map((port) => {
+        const index = list.findIndex((binding, at) => binding?.key === port.key && !used.has(at));
+        if (index >= 0) used.add(index);
+        return { key: port.key, binding: index >= 0 ? list[index] : { key: port.key, kind: 'state', stateId: null }, index };
+    });
+    list.forEach((binding, index) => { if (!used.has(index)) rows.push({ key: binding?.key, binding, index }); });
+    return rows;
+}
+
 const floatTypes = new Set(['Real', 'Float64', 'Float32']);
 
 function listOf(names) {
@@ -199,7 +217,7 @@ export function documentRequires(previous, nodes) {
 // { states, implementation, name } -- name the FMU's model name when the node still has a new node's name, else its own.
 export const newNodeName = 'New node';
 
-export function fmiNodeFromPorts(definition, { guid, version, ports, newId, removableStateIds = [], makeState = (state) => state }) {
+export function fmiNodeFromPorts(definition, { guid, version, ports, newId, removableStateIds = [], makeState = (state) => state, takenNames = [] }) {
     const previous = definition.implementation?.kind === 'fmi' ? definition.implementation : null;
     const implementation = fmiImplementation(guid, version, ports, previous);
     // Kept in the project by its archive's SHA-256 (stage 8), unless the node was linked, or the archive is over the limit kept by
@@ -232,8 +250,9 @@ export function fmiNodeFromPorts(definition, { guid, version, ports, newId, remo
     return {
         states,
         implementation,
-        // In the canvas a node's name is its `title`; in the file, its `name`.
-        name: ((current) => (!current || current === newNodeName ? (ports.name ?? current) : current))(definition.title ?? definition.name)
+        // In the canvas a node's name is its `title`; in the file, its `name`. Named after the FMU, it is numbered when another node
+        // (`takenNames`) has that name already: the same FMU added twice is "PidController" and "PidController 2".
+        name: ((current) => (!current || current === newNodeName ? (ports.name ? distinctPartName(ports.name, takenNames) : current) : current))(definition.title ?? definition.name)
     };
 }
 

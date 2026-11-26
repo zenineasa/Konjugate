@@ -21,10 +21,11 @@ export function sourceTermReferenceToBinding(key, reference) {
 }
 
 // The bindings with `key` bound as `binding` (an entry without its key), in place of its binding when it had one, else after the others;
-// `binding` null leaves the key bound to nothing. A new array; the entries of the others are kept as they were.
-export function bindPort(bindings, key, binding) {
+// `binding` null leaves the key bound to nothing. A new array; the entries of the others are kept as they were. `hint`, the place a row
+// was drawn at, only tells apart entries of the same key (entryIndexByKey).
+export function bindPort(bindings, key, binding, hint = -1) {
     const list = [...(bindings ?? [])];
-    const index = list.findIndex((entry) => entry?.key === key);
+    const index = entryIndexByKey(list, key, hint);
     if (!binding) {
         if (index >= 0) list.splice(index, 1);
         return list;
@@ -45,4 +46,13 @@ export function portBindingChoices(portUnit, candidates) {
             : { ...candidate, index, compatible: true, note: conversion.text ?? '' };
     });
     return [...choices.filter((choice) => choice.compatible), ...choices.filter((choice) => !choice.compatible)].map(({ index, ...choice }) => choice);
+}
+
+// Where the entry a row was drawn for stands now: by its key, the row's drawn place `hint` used only to tell apart entries of the same
+// key (several new rows with no key yet). A row's handler can run after the list was changed under it (reordered, an entry before it
+// removed), so it never writes by its drawn place alone. -1 when no entry has the key.
+export function entryIndexByKey(entries, key, hint = -1) {
+    const list = entries ?? [];
+    if (hint >= 0 && hint < list.length && list[hint]?.key === key) return hint;
+    return list.findIndex((entry) => entry?.key === key);
 }

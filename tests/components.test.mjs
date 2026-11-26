@@ -410,3 +410,17 @@ test('a component settles its nodes\' updates as its instance says, in every ins
     syncDefinitions(document, { preferredSubsystemId: 20 });
     assert.equal(document.subsystemDefinitions[0].document.component.updates, undefined);
 });
+
+// The bug hunt: the same component placed twice from My library gave two instances of the same name, so its card and the refusals
+// about it did not say which one was meant.
+test('the same component placed twice is numbered, as the same FMU added twice is; an instance elsewhere keeps its name', () => {
+    const component = componentDocumentOf(migrateLegacySubsystems(project()), 20);
+    const target = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [node(1, 'Other', [state(2, 'x')])], edges: [], subsystems: [], edgeGroups: [] };
+    const first = placeComponent(target, component, { position: [4, 0, 0] });
+    const second = placeComponent(first.document, component, { position: [9, 0, 0] });
+    const third = placeComponent(second.document, component, { position: [14, 0, 0] });
+    assert.deepEqual(third.document.subsystems.map((item) => item.name), ['Plant', 'Plant 2', 'Plant 3']);
+    // Inside the first instance, a Plant of its own is not beside the others: it keeps its name.
+    const inside = placeComponent(first.document, component, { parentSubsystemId: first.subsystemId });
+    assert.equal(inside.document.subsystems.find((item) => item.id === inside.subsystemId).name, 'Plant');
+});

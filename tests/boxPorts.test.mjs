@@ -5,7 +5,8 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
+import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
+import { fmiNodeFromPorts } from '../src/nodeProgram.mjs';
 
 const room = { id: 1, title: 'Room', states: [{ id: 2, label: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C', kind: 'rate' }, { id: 3, label: 'Heater', symbol: 'heater', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] };
 const pid = {
@@ -65,4 +66,40 @@ test('a value set on an Update is a one-way relationship written as the editor w
     const existing = { id: 41, title: 'Heat', source: 5, sourceStateId: 6, target: 1, targetStateId: 3, directionality: 'directed', equationModel: { latex: 'x', output: { role: 'target', stateId: 3 } } };
     assert.match(settingRefusal({ nodeId: 1, stateId: 3 }, [room, pid], [existing]), /is already set by “Heat”/);
     assert.equal(settingRefusal({ nodeId: 1, stateId: 99 }, [room, pid], []), 'That state is no longer there.');
+});
+
+// ---- A second FMU, or a second instance, beside the first (the bug hunt) -------------------------------------------------------
+test('a part placed beside one of the same name is numbered; one named by the person keeps its name', () => {
+    assert.equal(distinctPartName('PidController', ['Room', 'Setpoint']), 'PidController');
+    assert.equal(distinctPartName('PidController', ['PidController', 'PidController 2']), 'PidController 3');
+    const ports = { name: 'PidController', inputs: [], outputs: [{ key: 'command', name: 'command', start: 0 }] };
+    const fresh = { id: 9, title: 'New node', states: [] };
+    assert.equal(fmiNodeFromPorts(fresh, { guid: 'g', version: '1', ports, newId: () => 10, takenNames: ['PidController'] }).name, 'PidController 2');
+    assert.equal(fmiNodeFromPorts({ ...fresh, title: 'My controller' }, { guid: 'g', version: '1', ports, newId: () => 10, takenNames: ['My controller'] }).name, 'My controller', 'Its own name is never changed.');
+});
+
+test('placed beside the drawn model, a box stands clear of every label and terminal at the current zoom, never nearer than its step', () => {
+    // 40 pixels a unit: the first FMU's label and terminals reach 300 px right of it, so 7.5 units (300 px) was not enough.
+    const x = placementBeside({ atX: 2, atScreenX: 900, pixelsPerUnit: 40, drawnRightPx: 1200, minimumStep: 7.5 });
+    assert.ok(x > 2 + 7.5, `Placed at ${x}.`);
+    const leftTerminalsPx = (x - 0.75 - 2) * 40 - 300;
+    assert.ok(leftTerminalsPx >= 230, 'Its input terminals have room right of what is drawn.');
+    // Zoomed in, with little drawn right of it, the step is enough on its own.
+    assert.equal(placementBeside({ atX: 2, atScreenX: 900, pixelsPerUnit: 100, drawnRightPx: 950, minimumStep: 7.5 }), 9.5);
+    // Nothing measured (a hidden canvas): the step.
+    assert.equal(placementBeside({ atX: 2, atScreenX: NaN, pixelsPerUnit: 0, drawnRightPx: NaN, minimumStep: 4 }), 6);
+});
+
+test('a terminal let go where it connects nothing says so', () => {
+    const first = { key: 'n1', name: 'PidController' };
+    const second = { key: 'n2', name: 'PidController 2' };
+    const setpoint = { key: 'setpoint', name: 'setpoint' };
+    const drag = { box: first, role: 'input', terminal: setpoint };
+    assert.equal(boxDropProblem(drag, { kind: 'terminal', box: second, role: 'input', terminal: { key: 'measurement', name: 'measurement' } }),
+        'Nothing was connected: PidController 2\'s measurement is an input too. Drop PidController\'s setpoint on an output, a node or one of its states.');
+    assert.match(boxDropProblem(drag, null), /^Nothing was connected: drop PidController's setpoint on an output/);
+    assert.match(boxDropProblem(drag, { kind: 'terminal', box: first, role: 'input', terminal: setpoint }), /let go where it started/);
+    assert.equal(boxDropProblem(drag, { kind: 'terminal', box: second, role: 'output', terminal: { key: 'command', name: 'command' } }), '');
+    assert.equal(boxDropProblem(drag, { kind: 'node', node: { id: 3 } }), '');
+    assert.match(boxDropProblem({ box: first, role: 'output', terminal: { key: 'command', name: 'command' } }, { kind: 'terminal', box: second, role: 'output', terminal: { key: 'command', name: 'command' } }), /is an output too\. Drop PidController's command on an input/);
 });

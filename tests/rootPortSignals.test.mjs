@@ -75,3 +75,25 @@ test('a signal is never applied where the component is placed, nor in its FMU ex
     const withSignal = describeFmu(stripEdgeGroups(executionProjectDocument(signalled)), 'C', { fmuInterface: fmuExportInterface(signalled) });
     assert.deepEqual(withSignal, plain, 'The FMU is the same with a signal as without: its host drives its inputs.');
 });
+
+// The bug hunt: a constant written by hand as " ", true or [] was taken as 0 or 1, while the Ports list showed something else.
+test('a constant is a finite number or text that is one; anything else is refused, and one already in a file is said and not run', () => {
+    for (const value of [' ', '', true, false, [], null, '1e400', Infinity, 'warm', {}]) {
+        assert.match(rootPortSignalProblem({ kind: 'constant', value }), /needs a number/, `${JSON.stringify(value)} is not a constant.`);
+        assert.throws(() => setRootPortSignal(portsDocument, 1, { kind: 'constant', value }), /needs a number/);
+    }
+    for (const [value, number] of [[-5, -5], ['21', 21], [' 2.5 ', 2.5], [0, 0]]) {
+        assert.equal(rootPortSignalProblem({ kind: 'constant', value }), '');
+        assert.deepEqual(setRootPortSignal(portsDocument, 1, { kind: 'constant', value }).component.ports[0].signal, { kind: 'constant', value: number });
+    }
+    // A file written by hand: the port says why its signal is not used, and the run leaves it at its start.
+    const handWritten = structuredClone(portsDocument);
+    handWritten.component.ports[0].signal = { kind: 'constant', value: true };
+    handWritten.requires = ['rootPortSignals'];
+    assert.match(rootPortSignalUsable(rootPorts(handWritten)[0]), /needs a number/);
+    assert.deepEqual(applyRootPortSignals(handWritten).nodes[0].sourceTerms ?? [], portsDocument.nodes[0].sourceTerms ?? [], 'Not run as 1.');
+    // Text that is a number runs as that number, written as one.
+    handWritten.component.ports[0].signal = { kind: 'constant', value: '21' };
+    const [term] = applyRootPortSignals(handWritten).nodes[0].sourceTerms;
+    assert.deepEqual([term.expression, term.expressionModel.mathJson], ['21', 21]);
+});

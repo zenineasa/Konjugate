@@ -3,10 +3,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    documentRequires, fmiImplementation, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuPortHint, fmuPortNotes, fmuPortRole, fmuUsesStartValues, freeKey, implementationForFile,
+    documentRequires, fmiImplementation, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuInputRows, fmuPortHint, fmuPortNotes, fmuPortRole, fmuUsesStartValues, freeKey, implementationForFile,
     nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../src/nodeProgram.mjs';
 import { defaultNodeProviderSource, olderNodeProviderSource } from '../src/providerTemplate.mjs';
+import { bindPort } from '../src/programBinding.mjs';
+import { fmuBoxPorts } from '../src/boxPorts.mjs';
+import { readFile } from 'node:fs/promises';
 
 const tank = { id: 1, title: 'Tank', states: [{ id: 2, symbol: 'level' }, { id: 3, symbol: 'effort' }] };
 const valve = { id: 4, title: 'Valve', states: [{ id: 5, symbol: 'opening' }] };
@@ -261,4 +264,61 @@ test('a node keeps its FMU in the project by the archive\'s SHA-256, links it wh
     assert.equal(stillKept.fmuSha256, 'new');
     // A project from before (no SHA-256 on its FMU node) stays linked, and its file stays readable by older versions.
     assert.deepEqual(documentRequires([], [{ implementation: { kind: 'fmi', fmuId: 'g', fmuVersion: '1', bindings: [{ key: 'k', kind: 'state', stateId: 2 }], outputs: [] } }]), []);
+});
+
+// ---- The FMU card's rows, by key (the bug hunt's "measurement switched to setpoint") --------------------------------------
+const pidPorts = {
+    name: 'PidController',
+    inputs: [
+        { key: 'measurement', name: 'measurement', causality: 'input', start: 0, unit: 'degC' },
+        { key: 'setpoint', name: 'setpoint', causality: 'input', start: 0, unit: 'degC' },
+        { key: 'ti', name: 'Ti', causality: 'parameter', variability: 'fixed', start: 600, unit: 's' },
+        { key: 'k', name: 'k', causality: 'parameter', variability: 'fixed', start: 1, unit: '' }
+    ],
+    outputs: [{ key: 'command', name: 'command', unit: '' }]
+};
+
+test('an FMU card lists one row per port in the FMU\'s order, each binding found by key, whatever order the file and the drags left', () => {
+    // Reopened (the file leaves out what reads nothing), then setpoint connected before measurement: [setpoint, measurement].
+    const bindings = [
+        { key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 },
+        { key: 'measurement', kind: 'state', nodeId: 10, stateId: 11 }
+    ];
+    const rows = fmuInputRows(pidPorts.inputs, bindings);
+    assert.deepEqual(rows.map((row) => row.key), ['measurement', 'setpoint', 'ti', 'k']);
+    assert.deepEqual(rows.map((row) => row.index), [1, 0, -1, -1]);
+    assert.deepEqual(rows[2].binding, { key: 'ti', kind: 'state', stateId: null }, 'A port the file left out reads nothing: the FMU\'s own start.');
+    // A binding the FMU has no port for (an older FMU's input) keeps a row, after the ports.
+    assert.deepEqual(fmuInputRows(pidPorts.inputs, [{ key: 'gone', kind: 'value', value: 1 }]).map((row) => row.key), ['measurement', 'setpoint', 'ti', 'k', 'gone']);
+});
+
+test('an FMU row\'s change written after the list changed under it still writes its own input, never another\'s', () => {
+    // The reported sequence: built from the FMU, saved and reopened (compacted), setpoint then measurement connected by dragging.
+    let implementation = structuredClone(implementationForFile(fmiImplementation('pid', '1.0.0', pidPorts)));
+    for (const [key, nodeId, stateId] of [['setpoint', 1, 2], ['measurement', 10, 11]]) {
+        implementation.bindings = bindPort(implementation.bindings, key, { kind: 'state', nodeId, stateId });
+    }
+    // The card drawn now: the measurement row was drawn with its binding at place 1.
+    const measurementRow = fmuInputRows(pidPorts.inputs, implementation.bindings).find((row) => row.key === 'measurement');
+    // Before its change lands, the list is reordered (as the card's ports arriving used to re-sort it) and k given a value.
+    implementation.bindings = [...implementation.bindings].reverse();
+    implementation.bindings = bindPort(implementation.bindings, 'k', { kind: 'value', value: 2 });
+    // The stale row's change: measurement now reads Room.heater.
+    implementation.bindings = bindPort(implementation.bindings, measurementRow.key, { kind: 'state', nodeId: 10, stateId: 12 }, measurementRow.index);
+    const keys = implementation.bindings.map((binding) => binding.key);
+    assert.equal(new Set(keys).size, keys.length, 'No input is written twice.');
+    const nodes = [{ id: 1, name: 'Setpoint', states: [{ id: 2, symbol: 'setpoint' }] }, { id: 10, name: 'Room', states: [{ id: 11, symbol: 'temperature' }, { id: 12, symbol: 'heater' }] }];
+    const box = fmuBoxPorts({ implementation, states: [] }, pidPorts, nodes);
+    assert.deepEqual(box.inputs.map((input) => `${input.key}: ${input.reads?.text ?? 'start'}`), ['measurement: Room.heater', 'setpoint: Setpoint.setpoint']);
+    assert.deepEqual(nodeProgramErrors(implementation, { id: 20, states: [] }, nodes, []).inputs.flat(), [], 'No "two inputs are called" error.');
+});
+
+test('the project window writes program and FMU bindings by key, and never reorders an FMU\'s bindings outside undo', async () => {
+    const renderer = await readFile(new URL('../src/renderer/renderer.mjs', import.meta.url), 'utf8');
+    assert.doesNotMatch(renderer, /implementation\.bindings\[index\]/, 'A row writes the binding it was drawn for by its key, not its drawn place.');
+    assert.doesNotMatch(renderer, /implementation\.outputs\[index\]/, 'An output row writes by its key, not its drawn place.');
+    assert.doesNotMatch(renderer, /bindings\.splice\(index, 1\)/, 'A row removes the entry it was drawn for, not whatever stands at its place.');
+    const fmus = renderer.slice(renderer.indexOf('async function renderNodeProgramFmus('), renderer.indexOf('function megabytes('));
+    assert.doesNotMatch(fmus, /\.bindings\s*=/, 'Showing an FMU\'s ports does not change its node\'s bindings.');
+    assert.doesNotMatch(fmus, /\.sort\(/, 'Showing an FMU\'s ports does not re-sort its node\'s bindings.');
 });

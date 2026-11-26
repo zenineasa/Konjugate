@@ -14109,6 +14109,8 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     installedFmus = null;
     const node = newNodeFromMenu({ position: position ?? besideVisibleNodes() });
     if (!node) return null;
+    // Placed beside the rightmost node, it may stand outside a view fitted to a small model: brought into view, with room for its label.
+    if (!position) bringIntoViewWithLabel(node);
     await useFmuForNode(node, added.guid, added.version);
     $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}`;
     return node;
@@ -14117,6 +14119,15 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
 // For the interaction tests, which cannot drop a file with a place on disk: what a drop of the .fmu at `path` at the screen point
 // (clientX, clientY) does.
 window.__debugFmuDrop = (path, clientX, clientY) => addFmuToModel({ path, position: modelPointUnder({ clientX, clientY }) }).then(Boolean);
+
+// A node just placed, and the label to its right, fitted into the view when either stands outside it.
+function bringIntoViewWithLabel(object) {
+    const outside = (point) => {
+        const projected = point.clone().project(camera);
+        return Math.abs(projected.x) > 0.92 || Math.abs(projected.y) > 0.88 || projected.z > 1;
+    };
+    if (outside(object.position) || outside(object.position.clone().add(new THREE.Vector3(3, 0, 0)))) fitCurrentView();
+}
 
 // Where an FMU added from a menu goes when it is not dropped: to the right of the rightmost node in view, so several FMUs added one
 // after another stand side by side rather than on top of each other, and the arrows between them can be seen.

@@ -11305,6 +11305,34 @@ export async function runInteractionTests(driver) {
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only; the web edition\'s Add › FMU… is checked on its own' });
 
     // The web edition keeps Add › FMU… where a person looks for it, and says FMUs run in the desktop app, with where to get it.
+    // A model of two nodes is fitted tightly when it opens; FMUs added from the menu stand one after another to the right of the
+    // rightmost node, so the second stood outside the view, where a person could not see it (and the round-trip tutorial's ring on it
+    // was off the screen). Each is brought into view with its label.
+    await run('FMUs added from the menu to a small model stay in view, with their labels', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Dahlquist.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
+        const installed = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => ({ guid: entry.packageId, version: entry.version })))`);
+        const allInView = `(() => { const labels = [...document.querySelectorAll('.objectLabel')]; return labels.length > 0 && labels.every((label) => { const r = label.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight; }); })()`;
+        try {
+            await freshExample('springMassDamper');
+            await waitForCanvasAtRest(window);
+            for (const count of [3, 4]) {
+                await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+                await driver.answerDialogs({ open: fmuPath }, async () => {
+                    await evaluate(window, `document.querySelector('#addFmuFromFile').click()`);
+                    await waitFor(window, `window.__debugProject.serialize().nodes.length === ${count}`, 'The FMU was not added.', 20000);
+                });
+                await waitForCanvasAtRest(window);
+                await waitFor(window, allInView, `With ${count} nodes, a label stood outside the view: ${await evaluate(window, `JSON.stringify([...document.querySelectorAll('.objectLabel')].map((label) => [label.textContent.trim().split('\\n')[0], Math.round(label.getBoundingClientRect().right)]))`)}`);
+            }
+        } finally {
+            for (const fmu of await installed()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
     await run('Add › FMU… in the web edition says FMUs run in the desktop app, and where to get it', async () => {
         await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);
         await evaluate(window, `document.querySelector('#addButton').click()`);

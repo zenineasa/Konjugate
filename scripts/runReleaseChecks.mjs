@@ -110,6 +110,9 @@ const checks = [
     { name: 'FMI 3.0 FMU export fidelity (FMPy)', script: 'tests/engine/fmi3ExportFidelity.mjs', args: [engine] },
     { name: 'FMU round trip', script: 'tests/engine/fmiRoundTrip.mjs', args: [engine] },
     { name: 'FMI example FMUs (examples/fmi)', script: 'tests/engine/fmiExamples.mjs', args: [engine] },
+    { name: 'FMU export with declared ports (FMPy)', script: 'tests/engine/fmiPortsExportFidelity.mjs', args: [engine] },
+    { name: 'Test signals for in ports', script: 'tests/engine/rootPortSignals.mjs', args: [engine] },
+    { name: 'Controller example from OpenModelica (examples/pidController)', script: 'tests/engine/pidControllerExample.mjs', args: [engine] },
     { name: 'Accuracy benchmarks', script: 'benchmarks/run.mjs', args: ['--accuracy', '--engine', engine] }
 ];
 

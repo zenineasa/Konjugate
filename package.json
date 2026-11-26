@@ -68,6 +68,7 @@
         "test:fmiExamples": "npm run build:engine && node tests/engine/fmiExamples.mjs",
         "test:fmiPortsExport": "npm run build:engine && node tests/engine/fmiPortsExportFidelity.mjs",
         "test:rootPortSignals": "npm run build:engine && node tests/engine/rootPortSignals.mjs",
+        "test:pidControllerExample": "npm run build:engine && node tests/engine/pidControllerExample.mjs",
         "generate:fmi-examples": "npm run build:engine && node scripts/generateFmiExamples.mjs",
         "test:release": "npm run build:engine && node scripts/runReleaseChecks.mjs",
         "benchmark:engine": "npm run build:engine && node tests/engine/executionBenchmark.mjs",

@@ -1,0 +1,30 @@
+{
+    "image": "openmodelica/openmodelica@sha256:ac9a0223e69b8055d444b42f58ccb9680342b56848c68b81385bf83d7c0ba824",
+    "openModelica": "OpenModelica 1.27.1",
+    "modelicaStandardLibrary": {
+        "version": "4.1.0+maint.om",
+        "sha": "8df0769a9cee6ad04ddfff95faee64cd70f662ec"
+    },
+    "fmiFlags": "s:euler",
+    "linux": {
+        "compiler": "gcc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+        "cmake": "cmake version 3.22.1"
+    },
+    "macos": {
+        "compiler": "Apple clang version 21.0.0 (clang-2100.3.34.2)",
+        "cmake": "cmake version 4.4.4"
+    },
+    "fmpy": "0.3.21",
+    "fmuSha256": "c78818ad1ef7d5f6c50e4b297141ad714cb430d914a6584a5a0371572d8fcf14",
+    "fmuBytes": 1518114,
+    "platforms": [
+        "aarch64-linux",
+        "linux64",
+        "darwin64"
+    ],
+    "openModelicaComparison": {
+        "largestDifference": 0,
+        "rowsCompared": 1421,
+        "rowsInAll": 1441
+    }
+}

@@ -20,7 +20,7 @@
 
 import { build, transform } from 'esbuild';
 import { existsSync } from 'node:fs';
-import { readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -36,7 +36,7 @@ const externalPackages = ['electron', 'bufferutil', 'utf-8-validate', 'proper-lo
 // Dependencies the renderer pages load anyway and whose Node entry is that same file, so the main
 // process shares the one copy rather than carrying another inside its bundle (5 MB for the compute engine).
 const sharedPackages = ['@cortex-js/compute-engine'];
-const testModules = ['../tests/interactionRunner.mjs', '../tests/drivers/electronWindowDriver.mjs'];
+const testModules = ['../tests/interactionRunner.mjs', '../tests/drivers/electronWindowDriver.mjs', '../tests/exploreRunner.mjs'];
 const devToolModules = ['../tests/generateExampleThumbnails.mjs'];
 // Dependencies loaded as ES modules from a renderer whose unreached script files are removed. The
 // rest (classic scripts like plotly, or packages that fetch their own files) are kept whole.
@@ -200,8 +200,15 @@ export async function bundlePackagedApp(buildPath, { includeTests = false } = {}
         if (rendererFiles.has(file) || preloadPattern.test(toPosix(relative(buildPath, file)))) await minifyInPlace(file);
         else await rm(file);
     }
-    // The runner is inside the bundle when it is included at all.
+    // The runner is inside the bundle when it is included at all; the preload its driver registers to answer a window's dialogs is
+    // loaded by path, so it stays.
+    const dialogPreload = join(buildPath, 'tests', 'drivers', 'nativeDialogPreload.cjs');
+    const keptPreload = includeTests && existsSync(dialogPreload) ? await readFile(dialogPreload, 'utf8') : null;
     await rm(join(buildPath, 'tests'), { recursive: true, force: true });
+    if (keptPreload !== null) {
+        await mkdir(dirname(dialogPreload), { recursive: true });
+        await writeFile(dialogPreload, keptPreload);
+    }
 
     // Dependencies: the ones the pages load, the external ones the bundle loads, and theirs.
     const kept = new Set();

@@ -29,6 +29,7 @@ okf_version: "0.2"
 
 * [Design Principles](designPrinciples.md) - One source of truth: how to build on a shared definition instead of copying it, and the checklist for adding a field to the schema
 * [Development Setup](developmentSetup.md) - Prerequisites, toolchain setup, and build instructions for Konjugate core and native engine
+* [Driving the App from a Script](drivingTheApp.md) - Exploring or testing the desktop app from a script: the entry point, answering its native dialogs, screenshots, one driven run at a time, and the lock-screen check
 * [Add-on Development](addonDevelopment.md) - Building launcher and visualizer add-ons (.kja) with the visualizer bridge and window state
 * [Plugin Development](pluginDevelopment.md) - Authoring .kjp packages with numerical behavior and declarative component templates
 * [Package Development](packageDevelopment.md) - Building and distributing portable .kja and .kjp packages

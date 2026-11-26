@@ -4138,6 +4138,9 @@ app.whenReady().then(async () => {
     // blank and then a second one; any additional macOS open-file paths queued before ready
     // get their own window each via the normal open-or-focus routing.
     const initialPath = parseKjtPathFromArgv(process.argv) ?? openFileQueue.shift() ?? null;
+    // A driven run (the interaction tests, scripts/exploreApp.mjs) answers the operating system's dialogs itself, from before the first
+    // window opens, so none is left on the screen for a person to close (docs/drivingTheApp.md).
+    if (process.argv.includes('--interaction-test')) (await import('../tests/drivers/electronWindowDriver.mjs')).interceptNativeDialogs();
     const firstWindow = initialPath
         ? createProjectWindow(readProjectFilePayload(initialPath).catch((error) => ({ error: error.message })))
         : createProjectWindow();
@@ -4150,9 +4153,19 @@ app.whenReady().then(async () => {
     if (process.argv.includes('--interaction-test')) {
         firstWindow.webContents.once('did-finish-load', async () => {
             try {
-                const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
                 const { createElectronDriver } = await import('../tests/drivers/electronWindowDriver.mjs');
-                await runInteractionTests(createElectronDriver(firstWindow));
+                // scripts/exploreApp.mjs runs one script of its own in place of the suite.
+                if (process.env.KONJUGATE_EXPLORE_SCRIPT) {
+                    const { runExploration } = await import('../tests/exploreRunner.mjs');
+                    await runExploration(createElectronDriver(firstWindow), {
+                        scriptPath: process.env.KONJUGATE_EXPLORE_SCRIPT,
+                        outputDirectory: process.env.KONJUGATE_EXPLORE_OUTPUT,
+                        heartbeatFile: process.env.KONJUGATE_EXPLORE_HEARTBEAT
+                    });
+                } else {
+                    const { runInteractionTests } = await import('../tests/interactionRunner.mjs');
+                    await runInteractionTests(createElectronDriver(firstWindow));
+                }
                 app.exit(0);
             } catch (error) {
                 console.error(error);

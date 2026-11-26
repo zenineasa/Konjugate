@@ -36,6 +36,9 @@ const packagedTestFiles = new Set([
     'tests/interactionRunner.mjs',
     'tests/fixtures/thermalSystemCsv.mjs',
     'tests/drivers/electronWindowDriver.mjs',
+    'tests/drivers/nativeDialogAnswers.mjs',
+    'tests/drivers/nativeDialogPreload.cjs',
+    'tests/exploreRunner.mjs',
 ]);
 const packagedTestAncestorDirectories = new Set(
     [...packagedTestFiles].flatMap((file) => {

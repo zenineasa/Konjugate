@@ -32,6 +32,7 @@
     ],
     "ignoreBinaries": [
         "make",
+        "caffeinate",
         "makeappx",
         "openssl",
         "cl.exe",

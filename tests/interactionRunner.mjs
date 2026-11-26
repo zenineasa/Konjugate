@@ -7,6 +7,7 @@ import { unzipSync } from 'fflate';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
+import { describeDialog } from './drivers/nativeDialogAnswers.mjs';
 import { createServer } from 'node:net';
 import { request as httpsRequest } from 'node:https';
 import { spawnSync } from 'node:child_process';
@@ -461,7 +462,8 @@ export async function runInteractionTests(driver) {
             outcomes.push({ name, status: 'passed', ...(groupOf.has(name) ? { group: groupOf.get(name) } : {}) });
             console.log(`✓ ${name} · ${took()}`);
             // A native dialog the test did not expect was answered for it, not left on the screen: said, so it can be looked at.
-            for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (a native ${asked.kind} dialog, "${asked.title}", was answered as cancelled)`);
+            for (const asked of driver.takeNativeDialogs?.() ?? []) console.log(`  (${describeDialog(asked)})`);
+            for (const left of driver.clearDialogAnswers?.() ?? []) console.log(`  (a ${left.kind} dialog answer was queued and never used: ${JSON.stringify(left)})`);
         } catch (error) {
             // Some errors (Electron's own "Script failed to execute") ignore a changed message, which
             // would leave the failure unnamed: wrap those instead, keeping the original as the cause.
@@ -505,6 +507,7 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#closeResultsDialog[open] #confirmCloseResults')?.click()`);
         } catch { /* the window may be gone */ }
         driver.takeNativeDialogs?.();
+        driver.clearDialogAnswers?.();
     };
 
     // An example as it is when loaded, for a scenario that works on it: the scenario then runs the same alone (a retry,
@@ -729,6 +732,47 @@ export async function runInteractionTests(driver) {
         assert.ok(!(await window.isDestroyed()), 'Closing the second window destroyed the first.');
         assert.equal(await evaluate(window, `1 + 1`), 2, 'The first window is no longer responsive after the second closed.');
     }, { skip: !driver.capabilities.multiWindow && 'multi-window and per-window Welcome-window scoping have no web-edition equivalent' });
+
+    // The native "Discard unsaved changes?" (src/main.mjs, projectConfirmDiscard), answered by the driver as a script would
+    // (docs/drivingTheApp.md): Cancel keeps the changed project, Discard changes opens the example over it.
+    await run('opening an example over a changed project asks to discard the changes, and Cancel keeps them', async () => {
+        await putAwayLeftovers();
+        const emptyDocument = { format: 'konjugate', version: 1, metadata: { units: 'SI' }, runConfigurations: [], sharedParameters: [], nodes: [], edges: [], subsystems: [], edgeGroups: [] };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(emptyDocument)}, 'discardPrompt.kjt')`);
+        await waitFor(window, `document.querySelector('.modelStatus')?.textContent.includes('0 nodes') && !window.__debugTour.blockers().dirty`, 'The empty project did not load.');
+        await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('1 node') && window.__debugTour.blockers().dirty`, 'Adding a node did not change the project.');
+        const openSpringMassDamper = async () => {
+            await evaluate(window, `document.querySelector('#exampleButton').click()`);
+            await waitFor(window, `Boolean([...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper'))`, 'Examples explorer did not populate.');
+            await evaluate(window, `[...document.querySelectorAll('.examplesExplorerItem')].find((item) => item.querySelector('b').textContent === 'Spring Mass Damper').click()`);
+            await evaluate(window, `document.querySelector('#examplesExplorerLoad').click()`);
+        };
+
+        const asked = await driver.answerDialog({ button: 'Cancel' }, openSpringMassDamper);
+        assert.equal(asked.kind, 'message');
+        assert.equal(asked.message, 'Discard unsaved changes?');
+        assert.match(asked.detail, /cannot be recovered/);
+        assert.deepEqual(asked.buttons, ['Cancel', 'Discard changes']);
+        assert.equal(asked.answer, 'pressed "Cancel"');
+        await evaluate(window, `(() => { const dialog = document.querySelector('#examplesExplorerDialog'); if (dialog.open) dialog.close(); })()`);
+        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'The examples explorer did not close.');
+        assert.match(await evaluate(window, `document.querySelector('.modelStatus').textContent`), /^1 nodes?(?!\d)/, 'Cancel did not keep the changed project.');
+        assert.equal(await evaluate(window, `window.__debugTour.blockers().dirty`), true, 'Cancel lost the change.');
+        assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'discardPrompt');
+
+        // A label the prompt does not have is the script's mistake, said with the buttons it offers; the project is kept.
+        await assert.rejects(driver.answerDialog({ button: 'Discard' }, openSpringMassDamper), /has no "Discard" button; it offers "Cancel", "Discard changes"/);
+        await evaluate(window, `(() => { const dialog = document.querySelector('#examplesExplorerDialog'); if (dialog.open) dialog.close(); })()`);
+        assert.match(await evaluate(window, `document.querySelector('.modelStatus').textContent`), /^1 nodes?(?!\d)/);
+
+        const discarded = await driver.answerDialog({ button: 'Discard changes', expect: 'Discard unsaved changes?' }, openSpringMassDamper);
+        assert.equal(discarded.answer, 'pressed "Discard changes"');
+        await waitFor(window, `document.querySelector('.modelStatus').textContent.includes('2 nodes')`, 'Discard changes did not open the example.', 15000);
+        assert.equal(await evaluate(window, `document.querySelector('.documentTitle').textContent`), 'springMassDamper');
+        await waitFor(window, `!document.querySelector('#examplesExplorerDialog').open`, 'The examples explorer did not close after loading the example.');
+        assert.deepEqual(driver.takeNativeDialogs().map((record) => record.answer), ['pressed "Cancel"', 'cancelled', 'pressed "Discard changes"']);
+    }, { skip: driver.answerDialog ? null : 'the web edition asks with the page\'s own dialog, not a native one' });
 
     await run('the Welcome page suggests tutorials not yet done and starts one, opens the whole list, and has nothing to dismiss', async () => {
         // An empty, saved project, so starting a tutorial asks nothing (as tutorialHelpers().clean() does further on).

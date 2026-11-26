@@ -8,10 +8,12 @@
 // sendInputEvent calls, dialog.showSaveDialog stubbing, and BrowserWindow.getAllWindows() polling
 // into the shared handle/driver shape -- not new behavior.
 
-import { app, BrowserWindow, dialog, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, session, shell, webContents } from 'electron';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createNativeDialogAnswers, describeDialog } from './nativeDialogAnswers.mjs';
 
 // One handle per BrowserWindow, cached by identity so the same raw window always maps back to the
 // same handle object -- scenario code compares handles by reference (e.g. `excluding: [window]`,
@@ -127,27 +129,158 @@ function probeMinimize() {
     return minimizeProbe;
 }
 
-// The operating system's own dialogs (save, open, a message box) cannot be clicked by a test, and one left open stays on the
-// screen for the rest of the run and after it. While the tests run, each is answered as a person backing out would: a save or an
-// open cancelled, a message box with its cancel button. Each is recorded, so the runner can say which test asked for one. A test
-// that needs an answer (captureExport) sets its own for as long as it needs it.
-const nativeDialogs = [];
+// The operating system's own dialogs cannot be clicked by a script, and one left open stays on the screen for the rest of the run
+// and after it, for a person to close. While the app is driven every one is answered here instead (tests/drivers/nativeDialogAnswers.mjs
+// decides how; docs/drivingTheApp.md says how a script chooses): with an answer the script queued, or as a person backing out would.
+// Each is recorded, so the runner can say which test asked for one. Installed once, before the app opens its first window, and it
+// covers every way Konjugate brings up something native:
+//   - the main process's dialogs, at Electron's native binding beneath the dialog module, so a reference to dialog.showMessageBox
+//     taken early, the Sync forms, dialog.showErrorBox and Electron's own "A JavaScript error occurred in the main process" box
+//     are all answered;
+//   - shell.openExternal, openPath, showItemInFolder and trashItem, which would bring another app in front of the run: recorded and
+//     not done;
+//   - a window's alert, confirm and prompt, through a preload registered on every session (nativeDialogPreload.cjs);
+//   - a window's <input type="file"> chooser, through the window's DevTools protocol, which takes it before it is shown.
+// And a watchdog: should a native dialog get past all of that (a window that loaded before the preload was registered, a page
+// that kept the browser's own confirm), the DevTools protocol sees it open, it is said loudly with its text and dismissed, and if it
+// cannot be dismissed the app is ended rather than left waiting for a click nobody will make.
+let interception = null;
 // A dialog's options: Electron takes them second when a window is given first.
 const dialogOptions = (args) => (args[0] && typeof args[0] === 'object' && !('webContents' in args[0]) ? args[0] : args[1]) ?? {};
-function answerNativeDialogs() {
-    const options = dialogOptions;
-    const record = (kind, args) => nativeDialogs.push({ kind, title: options(args).title ?? options(args).message ?? '' });
-    dialog.showSaveDialog = async (...args) => { record('save', args); return { canceled: true, filePath: undefined }; };
-    dialog.showOpenDialog = async (...args) => { record('open', args); return { canceled: true, filePaths: [] }; };
-    dialog.showMessageBox = async (...args) => {
-        record('message', args);
-        const { cancelId, buttons = [] } = options(args);
-        const cancel = cancelId ?? buttons.findIndex((label) => /cancel|^no\b|don.t|keep/i.test(label));
-        return { response: cancel >= 0 ? cancel : 0, checkboxChecked: false };
+const rendererDialogChannel = 'konjugate-test:native-dialog';
+
+export function interceptNativeDialogs() {
+    if (interception) return interception;
+    const answers = createNativeDialogAnswers();
+    const listeners = new Set();
+    const notify = (record) => {
+        if (record.error) console.error(`  [native dialog] ${describeDialog(record)}`);
+        for (const listener of listeners) {
+            try { listener(record); } catch { /* a listener's own failure is not the dialog's */ }
+        }
     };
-    dialog.showSaveDialogSync = (...args) => { record('save', args); return undefined; };
-    dialog.showOpenDialogSync = (...args) => { record('open', args); return undefined; };
-    dialog.showMessageBoxSync = (...args) => { record('message', args); return options(args).cancelId ?? 0; };
+    const answer = (asked) => {
+        const { result, record } = answers.answer(asked);
+        notify(record);
+        return result;
+    };
+
+    // The main process's dialogs, at the binding the dialog module calls (lib/browser/api/dialog.ts in Electron: its settings are the
+    // options it was given, checked and filled in, with the window as settings.window). Node keeps one object per binding, so the
+    // module's own reference sees these.
+    const binding = process._linkedBinding('electron_browser_dialog');
+    const fromSettings = (kind, settings = {}) => ({
+        kind, source: 'main',
+        title: settings.title ?? '', message: settings.message ?? '', detail: settings.detail ?? '',
+        ...(Array.isArray(settings.buttons) ? { buttons: settings.buttons } : {}),
+        ...(Number.isInteger(settings.cancelId) ? { cancelId: settings.cancelId } : {}),
+        ...(settings.checkboxLabel ? { checkboxChecked: Boolean(settings.checkboxChecked) } : {}),
+        ...(settings.defaultPath ? { path: settings.defaultPath } : {})
+    });
+    const replacements = {
+        showSaveDialog: async (settings) => answer(fromSettings('save', settings)),
+        showSaveDialogSync: (settings) => { const result = answer(fromSettings('save', settings)); return result.canceled ? '' : result.filePath; },
+        showOpenDialog: async (settings) => answer(fromSettings('open', settings)),
+        showOpenDialogSync: (settings) => { const result = answer(fromSettings('open', settings)); return result.canceled ? undefined : result.filePaths; },
+        showMessageBox: async (settings) => answer(fromSettings('message', settings)),
+        showMessageBoxSync: (settings) => answer(fromSettings('message', settings)).response,
+        showErrorBox: (title, content) => {
+            console.error(`  [native dialog] An error box was asked for: ${title}${content ? `\n${content}` : ''}`);
+            answer({ kind: 'error', source: 'main', title: String(title ?? ''), message: String(content ?? '') });
+        },
+        showCertificateTrustDialog: async (_window, _certificate, message) => { answer({ kind: 'certificate', source: 'main', message: String(message ?? '') }); }
+    };
+    for (const [name, replacement] of Object.entries(replacements)) {
+        binding[name] = replacement;
+        if (process._linkedBinding('electron_browser_dialog')[name] !== replacement) throw new Error(`Native dialogs could not be intercepted: Electron's dialog.${name} could not be replaced.`);
+    }
+
+    // Outside apps.
+    const outside = {
+        openExternal: async (url) => { answer({ kind: 'external', source: 'main', message: `shell.openExternal ${url}`, url: String(url) }); },
+        openPath: async (path) => { answer({ kind: 'external', source: 'main', message: `shell.openPath ${path}`, path: String(path) }); return ''; },
+        showItemInFolder: (path) => { answer({ kind: 'external', source: 'main', message: `shell.showItemInFolder ${path}`, path: String(path) }); },
+        trashItem: async (path) => { answer({ kind: 'external', source: 'main', message: `shell.trashItem ${path}`, path: String(path) }); }
+    };
+    for (const [name, replacement] of Object.entries(outside)) shell[name] = replacement;
+
+    // A window's alert, confirm and prompt. The reply is wrapped: a reply of undefined would leave the window waiting.
+    ipcMain.on(rendererDialogChannel, (event, asked) => {
+        const kind = ['alert', 'confirm', 'prompt'].includes(asked?.kind) ? asked.kind : 'alert';
+        let url = '';
+        try { url = event.sender.getURL(); } catch { /* gone */ }
+        event.returnValue = { value: answer({ kind, source: 'renderer', message: String(asked?.message ?? ''), url }) };
+    });
+    // From the app's folder rather than this module's: a packaged test build bundles this module into the main process's own.
+    const preload = join(app.getAppPath(), 'tests', 'drivers', 'nativeDialogPreload.cjs');
+    const withPreload = new WeakSet();
+    const preloadFound = existsSync(preload);
+    if (!preloadFound) console.error(`  [native dialog] no dialog preload at ${preload}: a window's alert, confirm and prompt are left to the watchdog.`);
+    const registerPreload = (ses) => {
+        if (!preloadFound || !ses || withPreload.has(ses)) return;
+        withPreload.add(ses);
+        try { ses.registerPreloadScript({ type: 'frame', filePath: preload }); } catch (error) { console.error(`  [native dialog] could not register the dialog preload: ${error.message}`); }
+    };
+    registerPreload(session.defaultSession);
+    app.on('session-created', registerPreload);
+
+    // Each window's DevTools protocol: its file chooser taken before it is shown, and the watchdog.
+    const watched = new WeakSet();
+    const bypass = (contents, params) => {
+        const record = answers.note({
+            kind: params.type ?? 'dialog', source: 'renderer', message: params.message ?? '', url: params.url ?? '',
+            answer: 'dismissed by the watchdog', bypassed: true,
+            error: `A native ${params.type ?? ''} dialog reached the screen past the interception: "${params.message ?? ''}" (from ${params.url || 'a window'}).`
+        });
+        console.error(`\n  [native dialog] ${record.error}\n`);
+        contents.debugger.sendCommand('Page.handleJavaScriptDialog', { accept: false }).then(() => notify(record), (error) => {
+            record.answer = 'left on the screen';
+            notify(record);
+            console.error(`  [native dialog] It could not be dismissed (${error.message}): the app is ended rather than left waiting for a click.`);
+            setTimeout(() => app.exit(70), 500);
+        });
+    };
+    const chooseFiles = async (contents, { backendNodeId, mode }) => {
+        const filePaths = answer({ kind: 'open', source: 'renderer', title: mode === 'selectMultiple' ? 'Choose files' : 'Choose a file', url: contents.getURL() }).filePaths;
+        if (!filePaths.length) return;
+        const files = mode === 'selectMultiple' ? filePaths : filePaths.slice(0, 1);
+        try {
+            await contents.debugger.sendCommand('DOM.setFileInputFiles', { files, backendNodeId });
+        } catch {
+            await contents.debugger.sendCommand('DOM.enable');
+            await contents.debugger.sendCommand('DOM.setFileInputFiles', { files, backendNodeId });
+        }
+    };
+    const watch = (contents) => {
+        if (!contents || watched.has(contents) || contents.isDestroyed()) return;
+        watched.add(contents);
+        try {
+            if (!contents.debugger.isAttached()) contents.debugger.attach('1.3');
+        } catch (error) {
+            console.error(`  [native dialog] the watchdog could not watch ${contents.getURL() || 'a window'}: ${error.message}`);
+            return;
+        }
+        contents.debugger.on('message', (_event, method, params) => {
+            if (method === 'Page.javascriptDialogOpening') bypass(contents, params);
+            else if (method === 'Page.fileChooserOpened') chooseFiles(contents, params).catch((error) => console.error(`  [native dialog] the chosen files could not be given to the window: ${error.message}`));
+        });
+        contents.debugger.sendCommand('Page.enable')
+            .then(() => contents.debugger.sendCommand('Page.setInterceptFileChooserDialog', { enabled: true }))
+            .catch(() => { /* the window went first */ });
+    };
+    app.on('web-contents-created', (_event, contents) => watch(contents));
+    for (const contents of webContents.getAllWebContents()) watch(contents);
+
+    interception = {
+        answers,
+        // Every native dialog so far, those past the interception included, oldest first.
+        records: () => answers.records(),
+        onDialog(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        }
+    };
+    return interception;
 }
 
 // With KONJUGATE_INTERACTION_COVERAGE set to a folder, every window's code is measured while the scenarios run (V8's precise
@@ -225,10 +358,12 @@ function restartInPlace(mainWindow) {
 
 export function createElectronDriver(mainWindow) {
     const mainHandle = wrapWindow(mainWindow);
-    answerNativeDialogs();
+    const dialogs = interceptNativeDialogs();
     restartInPlace(mainWindow);
     const coverage = process.env.KONJUGATE_INTERACTION_COVERAGE ? createRendererCoverage(process.env.KONJUGATE_INTERACTION_COVERAGE) : null;
     windowCoverage = coverage;
+    // checkDialogs looks at the dialogs after the last it looked at.
+    let checkedUpTo = 0;
 
     return {
         // Before the first scenario, and after the last.
@@ -238,9 +373,103 @@ export function createElectronDriver(mainWindow) {
         async finish() {
             await coverage?.finish();
         },
-        // The native dialogs asked for since the last call, each answered as cancelled.
+        // The native dialogs asked for since the last call (not the outside apps asked for), with how each was answered.
         takeNativeDialogs() {
-            return nativeDialogs.splice(0);
+            return dialogs.answers.take().filter((record) => record.kind !== 'external');
+        },
+        // Queues the answer for the next native dialog of its kind: { button: 'Discard changes' } or { response: 1 } for a message box
+        // (or a window's confirm/alert, whose buttons are OK and Cancel), { filePaths: [...] } for an open dialog or a file chooser,
+        // { filePath } for a save dialog, { text } for a prompt, { kind, cancel: true } to cancel one; with expect: 'some text' (or a
+        // RegExp) the dialog must say it. Answers of a kind are used in order.
+        answerNextDialog(answer) {
+            return dialogs.answers.queue(answer);
+        },
+        // Queues `answer`, runs `trigger`, and waits for the dialog the answer was for. Returns what the dialog asked (kind, title,
+        // message, detail, buttons) and the answer given; throws if no such dialog came, or the answer did not fit it (a button it does
+        // not have, wording it does not say), naming what it offered.
+        async answerDialog(answer, trigger, { timeoutMs = 10000 } = {}) {
+            const queue = dialogs.answers.queue(answer);
+            const ahead = dialogs.answers.queued().filter((queued) => queued.kind === queue.kind).length - 1;
+            const servedBy = { message: ['message', 'alert', 'confirm'], open: ['open'], save: ['save'], prompt: ['prompt'] }[queue.kind];
+            let seen = 0;
+            let stop = () => {};
+            const answered = new Promise((resolve) => {
+                stop = dialogs.onDialog((record) => {
+                    if (!servedBy.includes(record.kind) || record.bypassed) return;
+                    if (seen++ === ahead) resolve(record);
+                });
+            });
+            let timer;
+            try {
+                await trigger?.();
+                const record = await Promise.race([answered, new Promise((_resolve, reject) => {
+                    timer = setTimeout(() => reject(new Error(`No ${queue.kind} dialog came within ${timeoutMs} ms for the answer ${JSON.stringify(answer)}.`)), timeoutMs);
+                })]);
+                if (record.error) throw new Error(record.error);
+                return record;
+            } catch (error) {
+                // An answer not used is not left for a later dialog.
+                const left = dialogs.answers.clearQueued().filter((queued) => queued !== queue);
+                for (const queued of left) dialogs.answers.queue(queued);
+                throw error;
+            } finally {
+                clearTimeout(timer);
+                stop();
+            }
+        },
+        // What a native dialog with no answer queued gets: 'cancel' (the default), 'fail' (cancelled, and an error for checkDialogs),
+        // or a function given the dialog that returns an answer, or nothing to cancel it.
+        setDialogPolicy(policy) {
+            dialogs.answers.setUnmatched(policy);
+        },
+        // Every native dialog so far, oldest first: { kind, source ('main' or 'renderer'), title, message, detail, buttons, answer,
+        // error? }. Outside apps asked for are listed as kind 'external'.
+        nativeDialogs() {
+            return dialogs.records();
+        },
+        // Calls `listener` with each native dialog's record as it is answered; returns a function that stops it.
+        onNativeDialog(listener) {
+            return dialogs.onDialog(listener);
+        },
+        // The answers queued and not yet used, dropped.
+        clearDialogAnswers() {
+            return dialogs.answers.clearQueued();
+        },
+        // Waits for the next native dialog (of `kind`, saying `includes`) to be asked for after this call.
+        async waitForDialog({ kind = null, includes = null } = {}, timeoutMs = 10000) {
+            let stop = () => {};
+            let timer;
+            try {
+                return await new Promise((resolve, reject) => {
+                    stop = dialogs.onDialog((record) => {
+                        if (kind && record.kind !== kind) return;
+                        if (includes && ![record.title, record.message, record.detail].some((text) => text.includes(includes))) return;
+                        resolve(record);
+                    });
+                    timer = setTimeout(() => reject(new Error(`No native ${kind ?? ''} dialog${includes ? ` saying "${includes}"` : ''} came within ${timeoutMs} ms.`)), timeoutMs);
+                });
+            } finally {
+                clearTimeout(timer);
+                stop();
+            }
+        },
+        // Throws if a native dialog since the last check went wrong: an answer that did not fit, one with no answer under the 'fail'
+        // policy, or one that got past the interception.
+        checkDialogs() {
+            const wrong = dialogs.records().filter((record) => record.error && record.id > checkedUpTo);
+            checkedUpTo = dialogs.records().length;
+            if (wrong.length) throw new Error(wrong.map((record) => record.error).join('\n'));
+        },
+        // A window (the project window by default) as a PNG at `path`, through the window itself: no screen-recording permission needed.
+        // The capture lags the drawing, so the window is asked to draw again and given a moment first.
+        async screenshot(path, handle = mainHandle) {
+            const win = handle._raw;
+            if (win.isDestroyed()) throw new Error('The window is closed.');
+            win.webContents.invalidate();
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            const image = await win.webContents.capturePage();
+            await writeFile(path, image.toPNG());
+            return path;
         },
         kind: 'electron',
         mainHandle,

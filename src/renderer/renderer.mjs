@@ -107,9 +107,9 @@ import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDef
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
-    declareRootPort, removeRootPort, rootPorts
+    declareRootPort, projectComponentDocument, removeRootPort, rootPorts
 } from '../components.mjs';
-import { layoutRootPortTerminals, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
+import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
     subsystemLocations, subsystemMoveTargets
@@ -590,6 +590,13 @@ let projectOpenedAsComponent = false;
 // The Ports panel's row shown as the one a terminal was clicked for, and the result it was last opened for.
 let portsPanelHighlight = null;
 let portsPanelOpenedForResult = null;
+// The interface of the component file as it was opened or last saved here ({ nodes, sharedParameters, component }), to say before
+// saving which open projects linked to it would be asked about a change (docs/proposals/rootPorts.md, stage 3).
+let savedInterfaceDocument = null;
+// The warning's last inputs and request, and the component files last reported as linked (stage 3).
+let linkedWarningSignature = null;
+let linkedWarningRequest = 0;
+let reportedLinkPaths = null;
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
@@ -6420,6 +6427,8 @@ async function offerFirstSteps() {
 function updateModelStatus() {
     updateEmptyCanvasState();
     refreshPortsPanel();
+    renderComponentProjectBar();
+    reportLinkedComponentFiles();
     const status = $$('.modelStatus span');
     const visibleNodes = model.nodes.filter((node) => !node.deleted).length;
     const visibleRelationships = model.relationships.filter((relationship) => !relationship.deleted).length;
@@ -10405,6 +10414,9 @@ function serializedSubsystemDefinitions() {
 // the node back, and with it the port, which the block in the window still holds.
 function serializedComponentBlock(visibleNodeIds) {
     if (!projectComponentBlock) return {};
+    // A project that became a component here is named for its file, as a subsystem saved as a component file is; a component
+    // file opened keeps its own name.
+    if (!projectOpenedAsComponent && projectComponentBlock.name !== projectComponentName()) projectComponentBlock = { ...projectComponentBlock, name: projectComponentName() };
     const liveStates = new Set(model.nodes.filter((node) => visibleNodeIds.has(node.id)).flatMap((node) => node.states.map((state) => state.id)));
     const gone = (projectComponentBlock.ports ?? []).filter((port) => !liveStates.has(port.stateId));
     if (!gone.length) return { component: structuredClone(projectComponentBlock) };
@@ -10555,6 +10567,8 @@ async function loadProjectDocument(document, {
     $('#componentProjectBar').hidden = !document.component;
     projectComponentBlock = document.component ? structuredClone(document.component) : null;
     projectOpenedAsComponent = Boolean(document.component);
+    savedInterfaceDocument = path && document.component ? structuredClone({ nodes: document.nodes ?? [], sharedParameters: document.sharedParameters ?? [], component: document.component }) : null;
+    linkedWarningSignature = null;
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
@@ -17189,6 +17203,10 @@ async function checkPendingProjectOpen() {
         await startTryFmu(pending.tryFmu);
         return;
     }
+    if (pending.placeComponent) {
+        await placeComponentFileFromPath(pending.placeComponent.path);
+        return;
+    }
     if (pending.error) {
         $('#statusText').textContent = `Load failed · ${pending.error}`;
         return;
@@ -17423,6 +17441,10 @@ async function saveProject(saveAs = false, password = currentProjectPassword, { 
         addonDataUnsaved = false;
         demonstrationProject = false;
         documentController.markSaved();
+        // The interface as saved: what the models linked to this file now have, to compare the next change with.
+        savedInterfaceDocument = projectDocument.component ? structuredClone({ nodes: projectDocument.nodes, sharedParameters: projectDocument.sharedParameters ?? [], component: projectDocument.component }) : null;
+        linkedWarningSignature = null;
+        renderComponentProjectBar();
         $('#statusText').textContent = `${result.encrypted ? 'Encrypted project' : 'Project'} saved${result.includesResults ? ' with simulation results' : ' · model only'}`;
         // An encrypted component kept in a project that is not: said, not refused (docs/subsystems.md#linked-components).
         const encryptedComponents = linkedDefinitionsInUse().filter((definition) => definition.link.encrypted).map((definition) => definition.link.fileName);
@@ -20479,6 +20501,44 @@ async function placeComponentFromFile() {
         return;
     }
     if (!file) return;
+    openComponentFileForPlacing(file);
+}
+
+// A component file sent from another window (Place in another model…, docs/proposals/rootPorts.md): read by its path, unlocked
+// if it is encrypted, and offered on the review card, placed linked to the file.
+async function placeComponentFileFromPath(path) {
+    if (activeResult) {
+        $('#statusText').textContent = `Close the results here to place ${String(path).split(/[\\/]/).at(-1)}.`;
+        return;
+    }
+    hideCards();
+    let file;
+    try {
+        file = await window.componentFiles.read(path);
+        let passwordError = '';
+        while (file?.requiresPassword) {
+            const password = await requestProjectPassword({ error: passwordError, title: `Unlock ${file.fileName}`, hint: `Enter the password for ${file.fileName}.` });
+            if (password === null) return;
+            try {
+                file = await window.componentFiles.unlock(file.path, password);
+                file.password = password;
+            } catch {
+                passwordError = 'Incorrect password, or this file has been modified.';
+            }
+        }
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+        return;
+    }
+    if (!file || file.missing) {
+        $('#statusText').textContent = `${file?.fileName ?? 'The component file'} is no longer there.`;
+        return;
+    }
+    openComponentFileForPlacing(file);
+}
+window.componentFiles?.onPlaceRequest?.(({ path }) => placeComponentFileFromPath(path));
+
+function openComponentFileForPlacing(file) {
     let document_;
     try {
         document_ = JSON.parse(file.content);
@@ -21600,6 +21660,131 @@ $('#nodeContextPortDirections').addEventListener('click', (event) => {
     offerStateOutside(state.id, button.dataset.offerDirection);
 });
 
+// ---- The component bar, saving as a component, and placing it elsewhere (docs/proposals/rootPorts.md, stage 3) ----------
+// A project with ports is a component: the bar says its interface ("PID controller is a component: 2 in ports, 1 out port"),
+// says before saving which open projects linked to its file would be asked about a change to it, and offers Save to my
+// library and, on the desktop, Place in another model….
+
+// The name the project goes by as a component: its file's, unless it opened as a component with a name of its own.
+function componentBlockName() {
+    if (!projectComponentBlock) return projectComponentName();
+    return projectOpenedAsComponent ? projectComponentBlock.name ?? projectComponentName() : projectComponentName();
+}
+
+function renderComponentProjectBar() {
+    const bar = $('#componentProjectBar');
+    bar.hidden = !projectComponentBlock;
+    if (bar.hidden) return;
+    const ports = currentRootPorts();
+    const exposed = model.sharedParameters.filter((shared) => shared.exposed && shared.subsystemId == null).length;
+    const line = componentInterfaceLine(componentBlockName(), ports, exposed);
+    if ($('#componentProjectBarText').textContent !== line) $('#componentProjectBarText').textContent = line;
+    const hint = ports.length
+        ? 'Its ports are drawn at the sides and edited here, in Ports. Placed in another model, they are what gets connected; run here on its own, an in port with nothing connected stays at its start.'
+        : 'It has no ports yet: add one with Add › Input port or Output port, or offer a state outside. Placed in another model, its ports are what gets connected.';
+    if ($('#componentProjectBarHint').textContent !== hint) $('#componentProjectBarHint').textContent = hint;
+    const placeable = ports.length > 0 && Boolean(window.componentFiles?.placeInWindow);
+    $('#componentProjectLibrary').hidden = !ports.length;
+    $('#componentProjectPlace').hidden = !placeable;
+    $('#portsSaveToLibrary').hidden = !ports.length;
+    $('#portsPlace').hidden = !placeable;
+    refreshLinkedChangeWarning();
+}
+
+// Before saving: an interface change (a port removed, or its symbol, unit or direction changed; an exposed parameter removed or
+// changed) is said, naming the open projects that link this file, which will be asked about it when it is saved.
+function refreshLinkedChangeWarning() {
+    const live = model.nodes.filter((node) => !node.deleted);
+    const conflicts = savedInterfaceDocument && projectComponentBlock
+        ? interfaceChanges(savedInterfaceDocument, { nodes: live, sharedParameters: model.sharedParameters, component: projectComponentBlock }).conflicts : [];
+    const signature = JSON.stringify([currentProjectPath, conflicts]);
+    if (signature === linkedWarningSignature) return;
+    linkedWarningSignature = signature;
+    const warning = $('#componentProjectBarWarning');
+    const request = ++linkedWarningRequest;
+    if (!conflicts.length) {
+        warning.textContent = '';
+        return;
+    }
+    warning.textContent = linkedChangeWarning(conflicts);
+    if (!currentProjectPath || !window.componentFiles?.linkingWindows) return;
+    window.componentFiles.linkingWindows(currentProjectPath).then((windows) => {
+        if (request === linkedWarningRequest) warning.textContent = linkedChangeWarning(conflicts, windows.map((item) => item.name));
+    }, () => {});
+}
+
+// Which component files this project links, told to the desktop whenever it changes, so a window saving one can name it.
+function reportLinkedComponentFiles() {
+    if (!window.componentFiles?.reportLinks) return;
+    const paths = [...new Set(linkedDefinitionsInUse().filter((definition) => definition.link.kind === 'file' && definition.link.path).map((definition) => definition.link.path))].sort();
+    const key = JSON.stringify(paths);
+    if (key === reportedLinkPaths) return;
+    reportedLinkPaths = key;
+    window.componentFiles.reportLinks(paths);
+}
+// Another window may have opened or closed a project linking this one since: asked again when this window comes back to the front.
+window.addEventListener('focus', () => {
+    linkedWarningSignature = null;
+    if (projectComponentBlock) refreshLinkedChangeWarning();
+});
+
+function saveProjectToLibrary() {
+    hideCards();
+    openTemplateDialog({ kind: 'create', project: true });
+}
+
+// Place in another model…: saved first if it is new or changed (it is placed linked to its file), then the open models to place
+// it in, and a new window, each placing it through that window's own review card.
+async function placeInAnotherModel() {
+    if (!window.componentFiles?.otherWindows) return;
+    if (!currentRootPorts().length) {
+        $('#statusText').textContent = 'Give this model a port first: placed elsewhere, its ports are what gets connected.';
+        return;
+    }
+    hideCards();
+    if (!currentProjectPath || documentController.dirty) {
+        $('#statusText').textContent = 'Saving it first: it is placed linked to its file';
+        if (!await saveProject()) return;
+    }
+    let windows;
+    try {
+        windows = await window.componentFiles.otherWindows();
+    } catch (error) {
+        $('#statusText').textContent = friendlyError(error);
+        return;
+    }
+    const name = componentBlockName();
+    $('#placeInWindowTitle').textContent = name;
+    $('#placeInWindowHint').textContent = windows.length
+        ? `Choose the open model to place ${name} in. It is placed linked to ${currentProjectFilename}, so saving a change here reaches it.`
+        : `No other model is open: place ${name} in a new window, linked to ${currentProjectFilename}, and build around it there.`;
+    const choice = (label, detail, windowId) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.placeWindow = windowId === null ? 'new' : String(windowId);
+        button.innerHTML = `<strong>${escapeHtml(label)}</strong><small>${escapeHtml(detail)}</small>`;
+        button.addEventListener('click', async () => {
+            $('#placeInWindowDialog').close();
+            try {
+                await window.componentFiles.placeInWindow(windowId, currentProjectPath);
+                $('#statusText').textContent = windowId === null ? `${name} opened for placing in a new window` : `${name} sent to ${label}: place it there`;
+            } catch (error) {
+                $('#statusText').textContent = friendlyError(error);
+            }
+        });
+        return button;
+    };
+    $('#placeInWindowChoices').replaceChildren(...windows.map((item) => choice(item.name, 'An open model', item.id)), choice('A new window', 'An empty model, with it placed', null));
+    $('#placeInWindowDialog').showModal();
+}
+
+$('#componentProjectPorts').addEventListener('click', () => setPortsPanelOpen(true));
+$('#componentProjectLibrary').addEventListener('click', saveProjectToLibrary);
+$('#portsSaveToLibrary').addEventListener('click', saveProjectToLibrary);
+$('#componentProjectPlace').addEventListener('click', placeInAnotherModel);
+$('#portsPlace').addEventListener('click', placeInAnotherModel);
+$('#placeInWindowCancel').addEventListener('click', () => $('#placeInWindowDialog').close());
+
 // ---- The user's own library of components ---------------------------------------------------------------------------
 // A selection is kept as a template of kind "fragment" with the section it is filed in (src/userLibrary.mjs); where it
 // is kept, and what may be done with it, is the same code on the desktop and in the web edition (src/userLibraryStore.mjs).
@@ -21620,9 +21805,11 @@ async function showUserLibrary() {
 }
 
 async function openTemplateDialog(mode) {
-    if (mode.kind === 'create' && (activeResult || (!selectedNodeIds.size && selectedSubsystemId === null))) return;
+    if (mode.kind === 'create' && !mode.project && (activeResult || (!selectedNodeIds.size && selectedSubsystemId === null))) return;
+    // A whole model with ports is saved as a component (docs/proposals/rootPorts.md); one without has nothing to connect to.
+    if (mode.project && !currentRootPorts().length) return;
     // Exactly one subsystem selected: it is saved as a component (src/userLibrary.mjs's buildUserComponentTemplate).
-    if (mode.kind === 'create' && selectedSubsystemId !== null && !selectedNodeIds.size) mode = { ...mode, subsystemId: selectedSubsystemId };
+    if (mode.kind === 'create' && !mode.project && selectedSubsystemId !== null && !selectedNodeIds.size) mode = { ...mode, subsystemId: selectedSubsystemId };
     templateDialogMode = mode;
     const mine = (await window.componentLibrary.list()).filter((template) => template.source === 'user');
     const creating = mode.kind === 'create';
@@ -21641,7 +21828,12 @@ async function openTemplateDialog(mode) {
         $('#templateDialogKicker').textContent = 'Selected subsystem';
         $('#templateDialogHint').textContent = 'The subsystem is saved as a component, with its ports and exposed parameters, to place in any model. Placed from the library, it stays linked to it unless placed as a copy.';
     }
-    $('#templateName').value = savingSubsystem ? savingSubsystem.name : creating ? (selectedNodeIds.size === 1 ? firstSelected?.title ?? '' : 'My component') : filing ? '' : mode.template.name;
+    if (mode.project) {
+        const ports = currentRootPorts();
+        $('#templateDialogKicker').textContent = 'This model';
+        $('#templateDialogHint').textContent = `The whole model is kept as a component, with its ${countText(ports.length, 'port')} (${portCountText(ports)}) and its exposed parameters, to place in any model. Placed from the library, it stays linked to it unless placed as a copy.`;
+    }
+    $('#templateName').value = mode.project ? componentBlockName() : savingSubsystem ? savingSubsystem.name : creating ? (selectedNodeIds.size === 1 ? firstSelected?.title ?? '' : 'My component') : filing ? '' : mode.template.name;
     $('#templateDescription').value = creating || filing ? '' : mode.template.description ?? '';
     $('#templateSection').value = sectionPathText(filing ? mode.path : creating ? [] : mode.template.section ?? []);
     $('#templateSectionChoices').replaceChildren(...sectionPaths(mine).map((path) => {
@@ -21660,7 +21852,15 @@ async function submitTemplateDialog() {
     const section = parseSectionPath($('#templateSection').value);
     const name = $('#templateName').value;
     const description = $('#templateDescription').value;
-    if (mode.kind === 'create' && mode.subsystemId != null) {
+    if (mode.kind === 'create' && mode.project) {
+        syncComponents();
+        const takenIds = (await window.componentLibrary.list()).map((template) => template.id);
+        const template = buildUserComponentTemplate({ componentDocument: projectComponentDocument(serializeProjectDocument()), name, description, section, takenIds });
+        const saved = await window.componentLibrary.saveUser(template);
+        const ports = template.document.component.ports?.length ?? 0;
+        const parameters = (template.document.sharedParameters ?? []).filter((shared) => shared.exposed).length;
+        $('#statusText').textContent = `Saved this model to my library as “${saved.name}”, a component with ${countText(ports, 'port')} and ${countText(parameters, 'parameter')}`;
+    } else if (mode.kind === 'create' && mode.subsystemId != null) {
         syncComponents();
         const takenIds = (await window.componentLibrary.list()).map((template) => template.id);
         const componentDocument = componentDocumentOf(serializeProjectDocument(), mode.subsystemId);

@@ -105,3 +105,32 @@ export function portCountText(ports) {
     return [[count('in'), 'in'], [count('out'), 'out'], [count('both'), 'in and out']]
         .filter(([number]) => number > 0).map(([number, label]) => `${number} ${label}`).join(', ');
 }
+
+const counted = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+// The component bar's interface line (docs/proposals/rootPorts.md, Opening a component file): "PID controller is a component:
+// 2 in ports, 1 out port, 3 exposed parameters."
+export function componentInterfaceLine(name, ports, exposedParameters = 0) {
+    const count = (direction) => ports.filter((port) => (port.direction ?? 'both') === direction).length;
+    const parts = [
+        count('in') ? counted(count('in'), 'in port') : null,
+        count('out') ? counted(count('out'), 'out port') : null,
+        count('both') ? counted(count('both'), 'port in and out', 'ports in and out') : null,
+        exposedParameters ? counted(exposedParameters, 'exposed parameter') : null
+    ].filter(Boolean);
+    return `${name} is a component: ${parts.length ? parts.join(', ') : 'no ports yet'}.`;
+}
+
+const listed = (items) => (items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
+
+// What saving a component file changes for the models that link it, from interfaceChanges' conflicts (ports and parameters
+// removed or changed) and the open projects known to link the file, by name: '' when nothing would be asked.
+export function linkedChangeWarning(conflicts, linkingNames = []) {
+    if (!conflicts.length) return '';
+    const removed = conflicts.filter((item) => item.change === 'removed').map((item) => `‘${item.name}’`);
+    const changed = conflicts.filter((item) => item.change !== 'removed').map((item) => `‘${item.name}’`);
+    const about = [removed.length ? `removing ${listed(removed)}` : null, changed.length ? `the change to ${listed(changed)}` : null].filter(Boolean).join(' and ');
+    if (!linkingNames.length) return `Saving changes its interface: models that link this file will be asked about ${about}.`;
+    const who = linkingNames.length === 1 ? `1 open project linked to this file (${linkingNames[0]}) will be asked` : `${linkingNames.length} open projects linked to this file (${listed(linkingNames)}) will be asked`;
+    return `Saving changes its interface: ${who} about ${about}.`;
+}

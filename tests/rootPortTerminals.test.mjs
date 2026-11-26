@@ -63,3 +63,16 @@ test('the node a new port makes holds one state named for it, with a symbol made
     assert.equal(portCountText([port(1, 'both')]), '1 in and out');
     assert.equal(portCountText([]), '');
 });
+
+test('the component bar says a model\'s interface, and what saving an interface change will ask of the models linked to it', async () => {
+    const { componentInterfaceLine, linkedChangeWarning } = await import('../src/rootPortTerminals.mjs');
+    assert.equal(componentInterfaceLine('PID controller', [port(1, 'in'), port(2, 'in'), port(3, 'out')], 3), 'PID controller is a component: 2 in ports, 1 out port, 3 exposed parameters.');
+    assert.equal(componentInterfaceLine('Plant', [port(1, 'both')], 1), 'Plant is a component: 1 port in and out, 1 exposed parameter.');
+    assert.equal(componentInterfaceLine('Model', []), 'Model is a component: no ports yet.');
+    assert.equal(linkedChangeWarning([]), '');
+    const removed = [{ kind: 'port', key: 2, name: 'measurement', change: 'removed' }];
+    assert.equal(linkedChangeWarning(removed), 'Saving changes its interface: models that link this file will be asked about removing ‘measurement’.');
+    assert.equal(linkedChangeWarning(removed, ['Heated room']), 'Saving changes its interface: 1 open project linked to this file (Heated room) will be asked about removing ‘measurement’.');
+    assert.equal(linkedChangeWarning([...removed, { kind: 'port', key: 1, name: 'setpoint', change: 'changed' }], ['Heated room', 'Office', 'Lab']),
+        'Saving changes its interface: 3 open projects linked to this file (Heated room, Office and Lab) will be asked about removing ‘measurement’ and the change to ‘setpoint’.');
+});

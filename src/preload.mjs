@@ -117,6 +117,13 @@ contextBridge.exposeInMainWorld('componentFiles', {
     save: (suggestedFilename, content, path = null) => ipcRenderer.invoke('componentSave', { suggestedFilename, content, path }),
     editInWindow: (path) => ipcRenderer.invoke('componentEditInWindow', { path }),
     onChanged: (callback) => ipcRenderer.on('componentFileChanged', (_event, detail) => callback(detail)),
+    // Which component files this window's project links, so a window saving one can say who will be asked (docs/proposals/rootPorts.md).
+    reportLinks: (paths) => ipcRenderer.send('componentLinksReport', paths),
+    linkingWindows: (path) => ipcRenderer.invoke('componentLinkingWindows', { path }),
+    // Place in another model…: the other project windows, and this file placed in one of them (null: a new window).
+    otherWindows: () => ipcRenderer.invoke('projectOtherWindows'),
+    placeInWindow: (windowId, path) => ipcRenderer.invoke('componentPlaceInWindow', { windowId, path }),
+    onPlaceRequest: (callback) => ipcRenderer.on('componentPlaceRequest', (_event, detail) => callback(detail)),
     followsPaths: true
 });
 

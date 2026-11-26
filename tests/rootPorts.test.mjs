@@ -165,3 +165,23 @@ test('a component file v2.0.4 wrote keeps its block, keys and ports, and its por
     assert.deepEqual(describeComponentDocument(document).ports.map((port) => port.key), [1, 2, 3]);
     assert.equal(JSON.stringify(document.component), JSON.stringify(block), 'Reading never changes the block.');
 });
+
+test('a whole model with ports becomes a library component: its model and block, laid out around its middle, without what is the project\'s own', async () => {
+    const { projectComponentDocument } = await import('../src/components.mjs');
+    assert.throws(() => projectComponentDocument(controller()), /once it has ports/);
+    let { document } = declareRootPort(controller(), { stateId: 2, direction: 'in', componentName: 'PID' });
+    document.ownership = { owner: 'Someone' };
+    document.scenarios = [{ id: 1 }];
+    document.nodes[0].position = [-2, 0, 0];
+    document.nodes[1].position = [0, 2, 0];
+    document.nodes[2].position = [2, 1, 3];
+    document.component.terminalPositions = [{ portKey: 1, position: [-6, 1, 1] }];
+    const component = projectComponentDocument(document, { name: 'Room controller' });
+    assert.equal(component.ownership, undefined);
+    assert.equal(component.scenarios, undefined);
+    assert.equal(component.component.name, 'Room controller');
+    assert.deepEqual(component.nodes.map((item) => item.position), [[-2, -1, -1], [0, 1, -1], [2, 0, 2]]);
+    assert.deepEqual(component.component.terminalPositions, [{ portKey: 1, position: [-6, 0, 0] }], 'Placed terminals move with the model.');
+    assert.equal(document.component.name, 'PID', 'The project is not changed.');
+    assert.deepEqual(component.edges, document.edges, 'Its relationships are as they are.');
+});

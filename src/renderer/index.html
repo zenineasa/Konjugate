@@ -242,6 +242,16 @@
         </form>
     </dialog>
 
+    <dialog id="placeInWindowDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Place in another model</span>
+            <strong id="placeInWindowTitle">Component</strong>
+            <p id="placeInWindowHint">Choose the open model to place it in. It is placed linked to this file, so saving a change here reaches it.</p>
+            <div id="placeInWindowChoices" class="placeInWindowChoices"></div>
+            <footer><button id="placeInWindowCancel" type="button">Cancel</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="templateDialog" class="passwordDialog">
         <form method="dialog">
             <span id="templateDialogKicker" class="contextKicker">Selected nodes</span>
@@ -888,7 +898,8 @@
         <div id="css2dContainer" class="css2dContainer"></div>
         <div id="selectionRectangle" class="selectionRectangle" aria-hidden="true" hidden></div>
         <nav id="subsystemBreadcrumb" class="subsystemBreadcrumb" aria-label="Subsystem location" hidden></nav>
-        <div id="componentProjectBar" class="endpointPickBanner componentBar" role="status" hidden><span>Component</span><strong id="componentProjectBarText">This is a component, used by other models when placed from a file.</strong><small>Its ports and parameters are edited in a subsystem's card when it is placed; here it opens and runs on its own.</small></div>
+        <!-- A project with ports is a component (docs/proposals/rootPorts.md): its interface said, its ports edited here, and the ways to use it elsewhere. -->
+        <div id="componentProjectBar" class="endpointPickBanner componentBar" role="status" hidden><span>Component</span><strong id="componentProjectBarText">This is a component, used by other models when placed from a file.</strong><small id="componentProjectBarHint">Its ports are drawn at the sides and edited here, in Ports; it opens and runs on its own, with nothing connected to its in ports.</small><small id="componentProjectBarWarning" class="componentBarWarning"></small><div class="componentBarButtons"><button id="componentProjectPorts" type="button">Ports</button><button id="componentProjectLibrary" type="button" title="Keep this whole model in my library as a component, to place in any model">Save to my library</button><button id="componentProjectPlace" type="button" title="Save it if needed, and place it, linked, in another open model">Place in another model…</button></div></div>
         <div id="componentLinkBar" class="endpointPickBanner componentBar" role="status" hidden><span>Linked component</span><strong id="componentLinkBarText"></strong><small id="componentLinkBarHint"></small><div class="componentBarButtons"><button id="componentLinkEdit" type="button">Edit component</button><button id="componentLinkUpdate" type="button">Update from file…</button><button id="componentLinkLocate" type="button">Locate…</button><button id="componentLinkKeep" type="button">Keep using the saved copy</button><button id="componentLinkRemove" type="button">Update and remove</button><button id="componentLinkOld" type="button">Keep the old version</button><button id="componentLinkSave" type="button">Save to my library</button><button id="componentLinkDiscard" type="button">Discard changes</button><button id="componentLinkDetach" type="button">Detach</button></div></div>
         <div id="endpointPickBanner" class="endpointPickBanner" role="status" aria-live="polite" hidden>
             <span><strong id="endpointPickTitle">Choose a node</strong><small id="endpointPickHint">Select a highlighted node on the canvas</small></span>
@@ -1634,6 +1645,8 @@
             <div class="portsActions">
                 <button id="portsAddInput" type="button">＋ Input port</button>
                 <button id="portsAddOutput" type="button">＋ Output port</button>
+                <button id="portsSaveToLibrary" type="button" title="Keep this whole model in my library as a component">Save to my library</button>
+                <button id="portsPlace" type="button" title="Save it if needed, and place it, linked, in another open model">Place in another model…</button>
                 <label><span>Make a state a port</span><select id="portsMakeState" aria-label="Make a state of the model a port"></select></label>
             </div>
         </section>

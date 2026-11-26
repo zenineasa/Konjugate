@@ -10071,6 +10071,144 @@ export async function runInteractionTests(driver) {
         await search('');
     };
 
+    // ---- A model with ports is a component: saved, placed in another model, kept in the library (docs/proposals/rootPorts.md, stage 3)
+    // A room controller with a setpoint in and a command out, authored at the top level and offered through the Ports list.
+    const roomController = {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+        nodes: [
+            { id: 1, name: 'Setpoint', position: [-3, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 20, unit: '°C', kind: 'update' }], sourceTerms: [] },
+            { id: 3, name: 'Command', position: [3, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 4, name: 'Command', symbol: 'command', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] }
+        ],
+        edges: [], subsystems: [], edgeGroups: []
+    };
+    const heatedRoom = {
+        format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+        nodes: [{ id: 1, name: 'Room', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C', kind: 'rate' }], sourceTerms: [] }],
+        edges: [], subsystems: [], edgeGroups: []
+    };
+    // Its two states offered through the Ports list: the setpoint in, the command out.
+    const offerControllerPorts = async (win) => {
+        await evaluate(win, `document.querySelector('#portsButton').click()`);
+        await waitFor(win, `!document.querySelector('#portsPanel').hidden`, 'The Ports list did not open.');
+        for (const stateId of [2, 4]) {
+            await evaluate(win, `(() => { const select = document.querySelector('#portsMakeState'); select.value = '${stateId}'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(win, `window.__debugProject.serialize().component?.ports.some((port) => port.stateId === ${stateId})`, `State ${stateId} was not made a port.`);
+        }
+        await evaluate(win, `(() => { const select = document.querySelector('#portsList [data-port-key="2"] [data-port-direction]'); select.value = 'out'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(win, `window.__debugProject.serialize().component.ports[1].direction === 'out'`, 'The command was not made an out port.');
+        await evaluate(win, `document.querySelector('#closePortsPanel').click()`);
+    };
+
+    await run('a model with ports is saved to my library as a component and placed from it, linked, with its ports', async () => {
+        await putAwayLeftovers();
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(roomController)}, 'Room controller.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 2`, 'The controller did not load.');
+        assert.equal(await evaluate(window, `document.querySelector('#componentProjectBar').hidden`), true, 'A model without ports is not a component.');
+        await offerControllerPorts(window);
+        await waitFor(window, `!document.querySelector('#componentProjectBar').hidden && document.querySelector('#componentProjectBarText').textContent === 'Room controller is a component: 1 in port, 1 out port.'`, 'The bar did not say the model\'s interface.');
+        assert.equal(await evaluate(window, `document.querySelector('#componentProjectLibrary').hidden`), false, 'Save to my library is offered.');
+
+        await evaluate(window, `document.querySelector('#componentProjectLibrary').click()`);
+        await waitFor(window, `document.querySelector('#templateDialog').open`, 'Save to my library did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#templateDialogKicker').textContent`), 'This model');
+        assert.equal(await evaluate(window, `document.querySelector('#templateName').value`), 'Room controller');
+        await evaluate(window, `document.querySelector('#templateSubmit').click()`);
+        await waitFor(window, `!document.querySelector('#templateDialog').open`, 'Saving to my library did not finish.');
+        const template = (await evaluate(window, `window.componentLibrary.list()`)).find((entry) => entry.source === 'user' && entry.name === 'Room controller');
+        assert.ok(template, 'The model is not in my library.');
+        assert.equal(template.kind, 'component');
+        assert.deepEqual(template.document.component.ports.map(({ key, direction }) => [key, direction]), [[1, 'in'], [2, 'out']]);
+        try {
+            // Placed from the library into another model, through the review card, linked.
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(heatedRoom)}, 'Heated room.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1 && document.querySelector('#componentProjectBar').hidden`, 'The room did not load.');
+            await placeFromLibrary(template.id, 'Room controller', `document.querySelector('#componentPlaceDialog').open || window.__debugProject.serialize().subsystems.some((item) => item.name === 'Room controller')`);
+            if (await evaluate(window, `document.querySelector('#componentPlaceDialog').open`)) {
+                assert.equal(await evaluate(window, `document.querySelectorAll('#componentPlacePorts li').length`), 2, 'The review card lists both ports.');
+                await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = false; document.querySelector('#componentPlaceConfirm').click(); })()`);
+            }
+            await waitFor(window, `window.__debugProject.serialize().subsystems.some((item) => item.name === 'Room controller')`, 'The controller was not placed.');
+            const placed = await savedProject();
+            const definition = placed.subsystemDefinitions.find((item) => item.id === placed.subsystems.find((subsystem) => subsystem.name === 'Room controller').definitionId);
+            assert.equal(definition.link?.kind, 'library', 'Placed from the library, it is linked to it.');
+            assert.deepEqual(definition.document.component.ports.map(({ key, direction }) => [key, direction]), [[1, 'in'], [2, 'out']]);
+            assert.equal(placed.component, undefined, 'The model it was placed in is not a component.');
+        } finally {
+            await evaluate(window, `window.componentLibrary.removeUser(${JSON.stringify(template.id)})`);
+            await evaluate(window, `document.querySelector('#closeComponentLibraryPanel')?.click()`);
+        }
+    });
+
+    await run('a model authored as a component is saved, placed linked in another window and run there; a port renamed in its file reaches it, a changed one is asked about', async () => {
+        await putAwayLeftovers();
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(roomController)}, 'Room controller.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 2`, 'The controller did not load.');
+        await offerControllerPorts(window);
+        const { path } = await driver.captureExport(() => evaluate(window, `document.querySelector('#saveButton').click()`), { fileName: 'Room controller.kjt' });
+        await waitFor(window, `!window.__debugTour.blockers().dirty`, 'The controller was not saved.');
+        assert.equal(JSON.parse(await decodeProjectFile(await readFile(path))).component.name, 'Room controller', 'The file is a component named for itself.');
+
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('#newWindowButton').click()`);
+        const second = await driver.waitForNewHandle(before);
+        try {
+            await waitFor(second, `Boolean(window.__debugProject) && Boolean(document.querySelector('.documentTitle'))`, 'The second window did not finish loading.', 15000);
+            await evaluate(second, `(async () => { if (window.__debugTour?.active()) window.__debugTour.stop(); await window.__debugProject.load(${JSON.stringify(heatedRoom)}, 'Heated room.kjt'); })()`);
+            await waitFor(second, `document.querySelectorAll('.node-label-container').length === 1`, 'The room did not load in the second window.');
+
+            // Place in another model…: the open models listed, the second chosen, its review card placing it linked to the file.
+            await window.focus();
+            await evaluate(window, `document.querySelector('#componentProjectPlace').click()`);
+            await waitFor(window, `document.querySelector('#placeInWindowDialog').open && document.querySelectorAll('#placeInWindowChoices [data-place-window]').length === 2`, 'The open models were not offered.');
+            await evaluate(window, `document.querySelector('#placeInWindowChoices [data-place-window]:not([data-place-window="new"])').click()`);
+            await waitFor(second, `document.querySelector('#componentPlaceDialog').open`, 'The second window did not offer to place it.');
+            assert.equal(await evaluate(second, `document.querySelector('#componentPlaceName').textContent`), 'Room controller');
+            assert.equal(await evaluate(second, `document.querySelector('#componentPlaceCopy').checked`), false, 'It is placed linked to its file.');
+            await evaluate(second, `document.querySelector('#componentPlaceConfirm').click()`);
+            await waitFor(second, `window.__debugProject.serialize().subsystemDefinitions?.some((definition) => definition.link?.path === ${JSON.stringify(path)})`, 'The controller was not placed linked to its file.');
+
+            // Connected: the room's model sets the controller's setpoint; run there.
+            const placed = JSON.parse(await evaluate(second, `JSON.stringify(window.__debugProject.serialize())`));
+            const instance = placed.subsystems.find((item) => item.name === 'Room controller');
+            const setpoint = placed.nodes.find((node) => node.subsystemId === instance.id && node.states.some((state) => state.definitionKey === 2));
+            const setpointState = setpoint.states.find((state) => state.definitionKey === 2).id;
+            placed.edges.push({ id: 900, name: 'Wanted temperature', source: { nodeId: 1, stateId: 2 }, target: { nodeId: setpoint.id, stateId: setpointState }, directionality: 'directed',
+                equation: '21', equationModel: { latex: '21', output: { role: 'target', stateId: setpointState }, bindings: [], mathJson: 21 }, parameters: [], appearance: { color: '#888888', offset: 0 } });
+            await evaluate(second, `window.__debugProject.load(${JSON.stringify(placed)}, 'Heated room.kjt')`);
+            await openRunDialog(second);
+            await evaluate(second, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '1'; field.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#startRun').click(); })()`);
+            await waitFor(second, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`, `The placed controller did not run. ${await evaluate(second, `document.querySelector('#runLaunchError').textContent`)}`, 60000);
+            await evaluate(second, `document.querySelector('#closeResults').click()`);
+            await waitFor(second, `document.querySelector('#closeResultsDialog').open`, 'Closing the results did not ask.');
+            await evaluate(second, `document.querySelector('#confirmCloseResults').click()`);
+            await waitFor(second, `!document.querySelector('#closeResultsDialog').open && !document.querySelector('#addButton').disabled`, 'The results did not close.');
+
+            // A port renamed in the file is compatible: saved, the second window takes it in.
+            await window.focus();
+            await evaluate(window, `document.querySelector('#portsButton').click()`);
+            await typeInto(`document.querySelector('#portsList [data-port-key="1"] [data-port-name]')`, 'reference');
+            await waitFor(window, `window.__debugProject.serialize().component.ports[0].name === 'reference'`, 'The port was not renamed.');
+            assert.equal(await evaluate(window, `document.querySelector('#componentProjectBarWarning').textContent`), '', 'A rename asks nothing of the models linked to it.');
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().dirty`, 'The rename was not saved.');
+            await waitFor(second, `window.__debugProject.serialize().subsystemDefinitions.some((definition) => definition.document.component.ports.some((port) => port.key === 1 && port.name === 'reference'))`, 'The second window did not take the renamed port in.');
+
+            // A changed direction is an interface change: the bar names the open project that will be asked, and, saved, it asks.
+            await evaluate(window, `(() => { const select = document.querySelector('#portsList [data-port-key="1"] [data-port-direction]'); select.value = 'both'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(window, `/1 open project linked to this file \\(Untitled\\) will be asked about the change to ‘reference’/.test(document.querySelector('#componentProjectBarWarning').textContent)`,
+                `The bar did not name the linked project. It said: ${await evaluate(window, `document.querySelector('#componentProjectBarWarning').textContent`)}`);
+            await evaluate(window, `document.querySelector('#saveButton').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().dirty && document.querySelector('#componentProjectBarWarning').textContent === ''`, 'Saving did not clear the warning.');
+            await waitFor(second, `window.__debugComponentLinks().some((link) => link.state === 'conflict') && !document.querySelector('#componentLinkBar').hidden`, 'The second window did not ask about the changed port.');
+            await evaluate(window, `document.querySelector('#closePortsPanel').click()`);
+        } finally {
+            if (!await second.isDestroyed()) {
+                await evaluate(second, `window.__debugProject.load({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [] }, 'empty.kjt')`).catch(() => {});
+                await closeWhenValidated(second).catch(() => {});
+            }
+        }
+    }, { skip: !driver.capabilities.multiWindow && 'places a component file in another project window; the web edition has one window' });
+
     await run('every editor card has one order of tabs, one width, its actions on every tab, the tab last chosen for its kind, and nothing to change while results are open', async () => {
         await freshExample();
         const openNode = async (title) => {

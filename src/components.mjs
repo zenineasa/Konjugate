@@ -679,6 +679,26 @@ export function pruneRootPorts(document, { keepBlock = false } = {}) {
     return gone.reduce((current, key) => removeRootPort(current, key, { keepBlock }), document);
 }
 
+// A whole project with root ports as a component document, for the library (Save to my library on a project with ports): the
+// project's model and its block, laid out around its own middle as componentDocumentOf lays out a subsystem's, without what is
+// the project's own (ownership, its tuning, twin, scenarios, add-on data). The block is named `name` when given.
+const projectComponentKeys = ['format', 'version', 'metadata', 'requires', 'runConfigurations', 'activeRunConfigurationId', 'sharedParameters', 'nodes', 'edges', 'edgeGroups', 'subsystemDefinitions', 'subsystems', 'component'];
+export function projectComponentDocument(document, { name = null } = {}) {
+    if (!document?.component?.ports?.length) throw new Error('A model is kept as a component once it has ports.');
+    const result = Object.fromEntries(projectComponentKeys.filter((key) => document[key] !== undefined).map((key) => [key, clone(document[key])]));
+    if (name?.trim()) result.component.name = name.trim();
+    const points = (result.nodes ?? []).filter((node) => node.subsystemId == null).map((node) => node.position ?? [0, 0, 0])
+        .concat((result.subsystems ?? []).filter((subsystem) => (subsystem.parentSubsystemId ?? null) === null).map((subsystem) => subsystem.position ?? [0, 0, 0]));
+    if (points.length) {
+        const middle = [0, 1, 2].map((axis) => points.reduce((sum, point) => sum + Number(point[axis] ?? 0), 0) / points.length);
+        const moved = (position) => (position ?? [0, 0, 0]).map((value, axis) => Number(value) - middle[axis]);
+        (result.nodes ?? []).forEach((node) => { node.position = moved(node.position); });
+        (result.subsystems ?? []).forEach((subsystem) => { subsystem.position = moved(subsystem.position); });
+        (result.component.terminalPositions ?? []).forEach((entry) => { entry.position = moved(entry.position); });
+    }
+    return result;
+}
+
 // The exposed parameters of an instance: `{ key, sharedParameterId, name, symbol, unit, value, defaultValue, boundTo }`,
 // `sharedParameterId` the instance's own copy in the project (null when bound to a parameter of the parent).
 export function instanceParameters(document, subsystemId) {

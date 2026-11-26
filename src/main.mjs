@@ -202,7 +202,10 @@ function createProjectWindowState() {
         exampleGuideWindow: null, exampleGuideBounds: null,
         providerEditorWindow: null, providerEditorBounds: null, providerEditorOwner: null, pendingProviderApply: null, providerEditorDirty: false,
         analysisWindow: null, analysisAddonId: null, visualizerManifest: null, visualizerSession: null,
-        currentProjectPath: null
+        currentProjectPath: null,
+        // The component files the window's project links (docs/proposals/rootPorts.md): a window about to save one is told
+        // which open projects would be asked about a change to its interface.
+        linkedComponentPaths: []
     };
 }
 // A window created specifically to open an OS-provided file (double-click, second-instance
@@ -2586,6 +2589,51 @@ function announceComponentFileChanged(path) {
         if (!window.isDestroyed()) window.webContents.send('componentFileChanged', { path });
     }
 }
+
+// The name a project window goes by in another window's lists: its file's, or Untitled.
+function projectWindowName(window) {
+    const path = projectWindowState.get(window)?.currentProjectPath;
+    return path ? basename(path).replace(/\.kjt$/i, '') : 'Untitled';
+}
+
+ipcMain.on('componentLinksReport', (event, paths) => {
+    if (!senderIsProjectWindow(event)) return;
+    const state = projectWindowState.get(getWindowFromEvent(event));
+    if (state) state.linkedComponentPaths = Array.isArray(paths) ? paths.filter((path) => typeof path === 'string') : [];
+});
+
+// The other open projects that link the file at `path`, by name.
+ipcMain.handle('componentLinkingWindows', async (event, { path }) => {
+    requireProjectWindow(event);
+    const sender = getWindowFromEvent(event);
+    return [...projectWindows].filter((window) => window !== sender && !window.isDestroyed() && projectWindowState.get(window)?.linkedComponentPaths.includes(path))
+        .map((window) => ({ name: projectWindowName(window) }));
+});
+
+// Place in another model… (docs/proposals/rootPorts.md): the other project windows, and the component file placed in one of them,
+// or in a new window, through that window's own review card.
+ipcMain.handle('projectOtherWindows', async (event) => {
+    requireProjectWindow(event);
+    const sender = getWindowFromEvent(event);
+    return [...projectWindows].filter((window) => window !== sender && !window.isDestroyed()).map((window) => ({ id: window.id, name: projectWindowName(window) }));
+});
+
+ipcMain.handle('componentPlaceInWindow', async (event, { windowId, path }) => {
+    requireProjectWindow(event);
+    if (typeof path !== 'string' || !path.toLowerCase().endsWith('.kjt')) throw new Error('A component file is a .kjt file.');
+    await access(path);
+    if (windowId === null) {
+        createProjectWindow(Promise.resolve({ placeComponent: { path } }));
+        return true;
+    }
+    const target = [...projectWindows].find((window) => window.id === windowId && !window.isDestroyed());
+    if (!target) throw new Error('That window has been closed.');
+    if (target.isMinimized()) target.restore();
+    target.show();
+    target.focus();
+    target.webContents.send('componentPlaceRequest', { path });
+    return true;
+});
 
 // A linked component edited in a window of its own, as a project.
 ipcMain.handle('componentEditInWindow', async (_event, { path }) => {

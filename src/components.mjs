@@ -635,6 +635,18 @@ export function rootPorts(document) {
 // at another state. The first port declared makes the project's component block, `{ name, ports }`, `name` the one given
 // (the project's name), else 'Model'; a component file's block is kept as it is. Returns `{ document, key }`, a new
 // document and the port's key. `name` '' takes a given name off; `direction` 'both' or '' takes the direction off.
+// A port's name is kept to 80 characters (it heads terminals, rows and the FMU's variables). What a typed name becomes, said plainly
+// where it is typed while it is too long, so the name shown is never silently other than the name kept: { name, cut, note }, name trimmed
+// and cut to the limit, note '' when nothing is cut.
+export const portNameLimit = 80;
+export function portNameAsKept(typed) {
+    const trimmed = String(typed ?? '').trim();
+    const characters = [...trimmed];
+    if (characters.length <= portNameLimit) return { name: trimmed, cut: false, note: '' };
+    const name = characters.slice(0, portNameLimit).join('').trim();
+    return { name, cut: true, note: `A port's name is kept to ${portNameLimit} characters: this one, ${characters.length} long, will be kept as “${name}”.` };
+}
+
 export function declareRootPort(document, { stateId, key = null, name = null, direction = null, componentName = null } = {}) {
     const next = clone(document);
     const owner = stateOwners(next).get(stateId);
@@ -655,7 +667,7 @@ export function declareRootPort(document, { stateId, key = null, name = null, di
             component.ports.push(port);
         }
     }
-    if (name !== null) { if (name.trim()) port.name = name.trim(); else delete port.name; }
+    if (name !== null) { const kept = portNameAsKept(name).name; if (kept) port.name = kept; else delete port.name; }
     if (direction !== null) { if (direction && direction !== 'both') port.direction = direction; else delete port.direction; }
     return { document: next, key: port.key };
 }

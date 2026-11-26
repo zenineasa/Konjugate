@@ -236,7 +236,8 @@
             <span class="contextKicker">Add to model</span>
             <strong id="rootPortDialogTitle">Input port</strong>
             <p id="rootPortDialogHint">A signal this model takes from outside. Placed in another model, it is what gets connected; run here on its own, nothing is connected to it and it stays at its start value.</p>
-            <label><span>Name</span><input id="rootPortName" autocomplete="off" required maxlength="80" placeholder="setpoint"></label>
+            <label><span>Name</span><input id="rootPortName" autocomplete="off" required placeholder="setpoint"></label>
+            <small id="rootPortNameNote" class="rootPortNameNote" role="status" hidden></small>
             <label><span>Unit</span><input id="rootPortUnit" autocomplete="off" maxlength="40" placeholder="°C, or leave empty"></label>
             <footer><button id="rootPortCancel" type="button">Cancel</button><button id="rootPortCreate" class="doneButton" type="submit">Add port</button></footer>
         </form>

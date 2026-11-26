@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     componentDocumentOf, declarePort, describeComponentDocument, expandInstance, exposeParameter, extractComponent, instanceCount,
-    instanceParameters, instancePorts, migrateLegacySubsystems, placeAnotherInstance, placeComponent, separateInstance,
+    instanceParameters, instancePorts, migrateLegacySubsystems, placeAnotherInstance, placeComponent, portNameAsKept, portNameLimit, separateInstance, declareRootPort,
     refreshDefinition, setInstanceParameter, stripComponents, subsystemPath, syncDefinitions
 } from '../src/components.mjs';
 import { executionProjectDocument } from '../src/subsystems.mjs';
@@ -423,4 +423,19 @@ test('the same component placed twice is numbered, as the same FMU added twice i
     // Inside the first instance, a Plant of its own is not beside the others: it keeps its name.
     const inside = placeComponent(first.document, component, { parentSubsystemId: first.subsystemId });
     assert.equal(inside.document.subsystems.find((item) => item.id === inside.subsystemId).name, 'Plant');
+});
+
+// The bug hunt: a port's name was cut at 80 characters by the field itself, silently, so a pasted name lost its end unsaid.
+test('a port\'s name is kept to 80 characters, said plainly when it is cut, and declared so whatever wrote it', () => {
+    assert.deepEqual(portNameAsKept('  setpoint  '), { name: 'setpoint', cut: false, note: '' });
+    const long = `Heater power delivered by the very long named upstream supply network segment number forty two`;
+    const kept = portNameAsKept(long);
+    assert.equal(portNameLimit, 80);
+    assert.equal(kept.cut, true);
+    assert.equal(kept.name, long.slice(0, 80).trim());
+    assert.equal(kept.note, `A port's name is kept to 80 characters: this one, ${long.length} long, will be kept as “${kept.name}”.`);
+    // Counted in characters, not UTF-16 units: an emoji is one.
+    assert.equal([...portNameAsKept('°'.repeat(79) + '🙂🙂').name].length, 80);
+    const document = { format: 'konjugate', version: 1, nodes: [node(1, 'Room', [state(2, 'x')])], edges: [], subsystems: [], edgeGroups: [] };
+    assert.equal(declareRootPort(document, { stateId: 2, name: long, direction: 'in' }).document.component.ports[0].name, kept.name);
 });

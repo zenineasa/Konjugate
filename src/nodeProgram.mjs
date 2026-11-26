@@ -190,10 +190,15 @@ function fmuBindingTargeted(binding) {
     return false;
 }
 
-// Whether a node's FMU takes any start value of its own or any value given in the file.
-export function fmuUsesStartValues(implementation) {
+// Whether a node's FMU takes any start value of its own or any value given in the file. `ports`, the FMU's ports when known
+// (describeInstalledFmuPorts), also counts an input or parameter with no binding at all, as a file leaves one that reads nothing
+// (implementationForFile): it keeps the FMU's start value too.
+export function fmuUsesStartValues(implementation, ports = null) {
     if (implementation?.kind !== 'fmi') return false;
-    return (implementation.bindings ?? []).some((binding) => binding?.kind === 'value' || !fmuBindingTargeted(binding));
+    const bindings = implementation.bindings ?? [];
+    if (bindings.some((binding) => binding?.kind === 'value' || !fmuBindingTargeted(binding))) return true;
+    const bound = new Set(bindings.map((binding) => binding?.key));
+    return (ports?.inputs ?? []).some((port) => !bound.has(port.key));
 }
 
 // An implementation as the file keeps it: an FMU's inputs that read nothing are left out (they keep the FMU's start value).
@@ -206,10 +211,10 @@ export function implementationForFile(implementation) {
 // The document's `requires`, from what it required when it was opened (`previous`) and its nodes now: `fmuStartValues` while
 // a node's FMU takes a start value or a given value. A file opened with it keeps it while it still has an FMU node, since a
 // binding it left out is not known here without the FMU's ports.
-export function documentRequires(previous, nodes) {
+export function documentRequires(previous, nodes, portsFor = () => null) {
     const others = (previous ?? []).filter((entry) => entry !== fmuStartValuesRequirement && entry !== fmuAttachmentsRequirement);
     const fmuNodes = (nodes ?? []).filter((node) => node?.implementation?.kind === 'fmi');
-    const needed = fmuNodes.some((node) => fmuUsesStartValues(node.implementation))
+    const needed = fmuNodes.some((node) => fmuUsesStartValues(node.implementation, portsFor(node.implementation)))
         || ((previous ?? []).includes(fmuStartValuesRequirement) && fmuNodes.length > 0);
     const kept = fmuNodes.some((node) => fmuKeptInProject(node.implementation));
     return [...others, ...(needed ? [fmuStartValuesRequirement] : []), ...(kept ? [fmuAttachmentsRequirement] : [])];

@@ -2769,6 +2769,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .boxPorts.compact .boxPort small { display: none; }
 .boxPorts.compact .boxPort.unconnected i { color: #d8b878; }
 .node-label-container.hasBoxPorts .objectLabel dl, .node-label-container.hasBoxPorts .objectLabel .stateCount { display: none; }
+.rootPortNameNote, .portRow .portRowNameNote { display: block; margin: -2px 0 6px; color: #d8b878; font-size: 8px; line-height: 1.35; }
+.portRow .portRowNameNote { grid-column: 1 / -1; margin: 0; font-size: 7.5px; }
 .portRow .portRowSignal { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #6f8792; font-size: 7.5px; }
 .portRow .portRowSignal select { height: 22px; font-size: 8px; }
 .portRow .portRowSignal input[data-port-signal-value] { width: 72px; }

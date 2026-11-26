@@ -9411,17 +9411,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelectorAll('#componentPlacePorts li').length`), 2, 'The review card lists the ports.');
         assert.match(await evaluate(window, `document.querySelector('#componentPlaceSource').textContent`), /^From Plant\.kjt/);
         await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = true; document.querySelector('#componentPlaceConfirm').click(); })()`);
-        await waitFor(window, `!document.querySelector('#componentPlaceDialog').open && window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Plant').length === 2`, 'The copy was not placed.');
+        // Placed beside the Plant already there, it is numbered (as the same FMU added twice is): "Plant 2".
+        const plants = (expression) => `${expression}.subsystems.filter((item) => /^Plant( \\d+)?$/.test(item.name))`;
+        await waitFor(window, `!document.querySelector('#componentPlaceDialog').open && ${plants('window.__debugProject.serialize()')}.length === 2`, 'The copy was not placed.');
         let after = await saved();
-        const copy = after.subsystems.filter((item) => item.name === 'Plant').at(-1);
+        const copy = after.subsystems.filter((item) => /^Plant( \d+)?$/.test(item.name)).at(-1);
+        assert.equal(copy.name, 'Plant 2', 'The copy is numbered beside the Plant already there.');
         assert.equal(after.subsystemDefinitions.find((definition) => definition.id === copy.definitionId).link, undefined, 'Placed as a copy, it is not linked.');
         assert.deepEqual(after.nodes.filter((item) => item.subsystemId === copy.id).map((item) => item.name), ['Tank']);
         await choosing(componentPath, componentContent, () => evaluate(window, `document.querySelector('#componentLibraryPlaceFile').click()`));
         await waitFor(window, `document.querySelector('#componentPlaceDialog').open`, 'The review card did not open from the library panel.');
         await evaluate(window, `(() => { document.querySelector('#componentPlaceCopy').checked = false; document.querySelector('#componentPlaceConfirm').click(); })()`);
-        await waitFor(window, `window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Plant').length === 3`, 'The linked instance was not placed.');
+        await waitFor(window, `${plants('window.__debugProject.serialize()')}.length === 3`, 'The linked instance was not placed.');
         after = await saved();
-        const linked = after.subsystems.filter((item) => item.name === 'Plant').at(-1);
+        const linked = after.subsystems.filter((item) => /^Plant( \d+)?$/.test(item.name)).at(-1);
+        assert.equal(linked.name, 'Plant 3');
         assert.equal(after.subsystemDefinitions.find((definition) => definition.id === linked.definitionId).link.fileName, 'Plant.kjt', 'Placed linked, it names its file.');
         if (!desktop) await waitFor(window, `(document.querySelector('#componentLinkBarText')?.textContent ?? '').includes('the browser cannot check it for changes')`, 'The browser does not say it cannot follow the file.');
 
@@ -9434,9 +9438,10 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#componentPlaceSubsystem').options].map((option) => option.textContent)`), ['Plant', 'Controls']);
         assert.equal(await evaluate(window, `document.querySelector('#componentPlaceCopyField').hidden`), true, 'A subsystem out of a project is always a copy.');
         await evaluate(window, `(() => { const select = document.querySelector('#componentPlaceSubsystem'); select.value = [...select.options].find((option) => option.textContent === 'Controls').value; select.dispatchEvent(new Event('change', { bubbles: true })); document.querySelector('#componentPlaceConfirm').click(); })()`);
-        await waitFor(window, `window.__debugProject.serialize().subsystems.filter((item) => item.name === 'Controls').length === 2`, 'The chosen subsystem was not placed.');
+        await waitFor(window, `window.__debugProject.serialize().subsystems.filter((item) => /^Controls( \\d+)?$/.test(item.name)).length === 2`, 'The chosen subsystem was not placed.');
         after = await saved();
-        const placed = after.subsystems.filter((item) => item.name === 'Controls').at(-1);
+        const placed = after.subsystems.filter((item) => /^Controls( \d+)?$/.test(item.name)).at(-1);
+        assert.equal(placed.name, 'Controls 2', 'Placed beside the Controls already there, it is numbered.');
         assert.deepEqual(after.nodes.filter((item) => item.subsystemId === placed.id).map((item) => item.name), ['Sensor']);
         await rm(folder, { recursive: true, force: true });
     });
@@ -13256,7 +13261,7 @@ export async function runInteractionTests(driver) {
     // The bug hunt's "measurement switched to setpoint": an FMU's card opened on a project whose file keeps only its connected inputs, in
     // the order they were connected. The card lists the FMU's ports in its own order at once, and a row's change that lands after the card
     // was drawn again (a select whose popup stayed open across it) writes its own input, never the one now drawn at its old place.
-    await run('an FMU card\'s rows follow the FMU\'s ports and write by key: a change from a row drawn before the ports arrived keeps every connection', async () => {
+    await run('an FMU card\'s rows follow the FMU\'s ports and write by key: a change from a row drawn before the card was drawn again keeps every connection', async () => {
         await putAwayLeftovers();
         const room = {
             format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], subsystems: [], edgeGroups: [],
@@ -13277,26 +13282,29 @@ export async function runInteractionTests(driver) {
             pid.implementation.bindings = [{ key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }, { key: 'measurement', kind: 'state', nodeId: 10, stateId: 11 }];
             await evaluate(window, `window.__debugProject.load(${JSON.stringify(document_)}, 'Room.kjt')`);
             await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The reopened project did not load.');
-            // The FMU's ports read slowly, as a large FMU's are: the card is drawn first, and again when they arrive.
-            await evaluate(window, `(() => { const real = window.__realFmuPorts ?? window.extensions.fmuPorts; window.__realFmuPorts = real; window.extensions.fmuPorts = (...args) => new Promise((resolve) => setTimeout(() => resolve(real(...args)), 1500)); })()`);
-            const before = JSON.stringify((await savedProject()).nodes.find((node) => node.name === 'PidController').implementation);
+            const implementationNow = async () => (await savedProject()).nodes.find((node) => node.name === 'PidController').implementation;
+            const before = JSON.stringify(await implementationNow());
             await evaluate(window, `[...document.querySelectorAll('.objectLabel')].find((label) => label.querySelector('strong')?.textContent === 'PidController').click()`);
-            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length > 0`, 'The FMU\'s card did not open.');
-            // The measurement row as first drawn, kept, as a select with its popup open is.
+            await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelectorAll('#nodeProgramInputs .nodeProgramRow').length === 4`, 'The FMU\'s card did not open with a row per port.');
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')].map((row) => row.dataset.key)`), ['measurement', 'setpoint', 'ti', 'k'], 'The rows are the FMU\'s ports, in its order.');
+            assert.equal(JSON.stringify(await implementationNow()), before, 'Opening the card did not change the model.');
+            // The measurement row's select as drawn now, kept, as a select whose popup stays open is while the card is drawn again.
             await evaluate(window, `(() => { window.__staleMeasurement = document.querySelector('#nodeProgramInputs .nodeProgramRow[data-key="measurement"] [data-field="reads"]'); })()`);
             assert.ok(await evaluate(window, `Boolean(window.__staleMeasurement)`), 'The measurement has no row.');
-            await new Promise((resolve) => setTimeout(resolve, 2500));
-            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#nodeProgramInputs .nodeProgramRow')].map((row) => row.dataset.key)`), ['measurement', 'setpoint', 'ti', 'k'], 'The rows are the FMU\'s ports, in its order.');
-            assert.equal(JSON.stringify((await savedProject()).nodes.find((node) => node.name === 'PidController').implementation), before, 'Opening the card did not change the model.');
-            // The kept row's change, after the card was drawn again: measurement now reads Room.heater.
+            // Another edit draws the card again: k, which the file left out, is given a value of its own (it joins the bindings at their end).
+            await evaluate(window, `(() => { const select = document.querySelector('#nodeProgramInputs .nodeProgramRow[data-key="k"] [data-field="reads"]'); select.value = 'value'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            await waitFor(window, `!document.contains(window.__staleMeasurement)`, 'The card was not drawn again: the kept select is still on it.');
+            assert.deepEqual((await implementationNow()).bindings.map((binding) => binding.key), ['setpoint', 'measurement', 'k'], 'k joined the bindings.');
+            // The kept select's change, after the card was drawn again: measurement now reads Room.heater.
             await evaluate(window, `(() => { const select = window.__staleMeasurement; select.value = 'state:10:12'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-            const bindings = (await savedProject()).nodes.find((node) => node.name === 'PidController').implementation.bindings;
-            assert.deepEqual(bindings.find((binding) => binding.key === 'measurement'), { key: 'measurement', kind: 'state', nodeId: 10, stateId: 12 });
+            const bindings = (await implementationNow()).bindings;
+            assert.deepEqual(bindings.find((binding) => binding.key === 'measurement'), { key: 'measurement', kind: 'state', nodeId: 10, stateId: 12 }, 'The kept row wrote its own input.');
             assert.deepEqual(bindings.find((binding) => binding.key === 'setpoint'), { key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }, 'The setpoint\'s connection was kept.');
-            assert.equal(bindings.filter((binding) => binding.key === 'measurement').length, 1, 'No input is written twice.');
+            assert.equal(bindings.find((binding) => binding.key === 'k')?.kind, 'value', 'k kept its value.');
+            assert.deepEqual(bindings.map((binding) => binding.key).sort(), ['k', 'measurement', 'setpoint'], 'No input is written twice, none lost.');
             await waitFor(window, `!/Two inputs/.test(document.querySelector('#nodeProgramInputs').textContent)`, 'The card says two inputs share a name.');
         } finally {
-            await evaluate(window, `(() => { if (window.__realFmuPorts) window.extensions.fmuPorts = window.__realFmuPorts; delete window.__staleMeasurement; })()`).catch(() => {});
+            await evaluate(window, `(() => { delete window.__staleMeasurement; })()`).catch(() => {});
             await putAwayLeftovers();
             const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});

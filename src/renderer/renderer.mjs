@@ -110,7 +110,7 @@ import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
     declareRootPort, projectComponentDocument, removeRootPort, rootPorts,
-    applyRootPortSignals, constantSignalNumber, rootPortRequires, rootPortSignalUsable, setRootPortSignal
+    applyRootPortSignals, constantSignalNumber, portNameAsKept, portNameLimit, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
 import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
@@ -10899,7 +10899,7 @@ function serializeProjectDocument() {
         metadata: { units: model.metadata.units },
         // What the model needs of the Konjugate that opens it (docs/projectSchema.md), with an FMU's start values (src/nodeProgram.mjs).
         // With rootPortSignals while one of its in ports carries a test signal (docs/proposals/rootPorts.md, stage 6).
-        ...((requires) => (requires.length ? { requires } : {}))(rootPortRequires(documentRequires(model.requires, visibleNodes), serializedComponentBlock(visibleNodeIds).component)),
+        ...((requires) => (requires.length ? { requires } : {}))(rootPortRequires(documentRequires(model.requires, visibleNodes, fmuPortsFor), serializedComponentBlock(visibleNodeIds).component)),
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
         ...serializedSharedParameters(visibleNodeIds),
@@ -14596,6 +14596,9 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
 async function settleClearOfDrawnModel(object) {
     const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
     const id = object.userData.id;
+    // Alone in the view (an FMU tried as a node in a window of its own), nothing can lie under it: placed as it is, at once.
+    const others = [...nodeObjects.values(), ...subsystemObjects.values()].some((other) => other !== object && other.visible);
+    if (!others) return;
     for (let attempt = 0; attempt < 3; attempt += 1) {
         await frame();
         await frame();
@@ -21259,6 +21262,8 @@ function placeComponentDocument(componentDocument, { name, link = null }) {
         return result.document;
     }, `${name} placed${link ? `, linked to ${link.kind === 'library' ? 'my library' : link.fileName}` : ' as a copy'}`);
     if (placed !== null) {
+        // Placed clear of what is drawn, it may stand outside the view: brought into it, with its label.
+        if (subsystemObjects.get(placed)) bringIntoViewWithLabel(subsystemObjects.get(placed));
         selectSubsystem(placed);
         openSubsystemEditor(placed);
         // A new link is checked at once: in the browser, that says the file cannot be followed by path.
@@ -21869,6 +21874,8 @@ $('#subsystemPlaceAnother').addEventListener('click', () => {
         return result.document;
     }, 'Another instance placed beside it: a change inside one reaches both');
     if (placed !== null) {
+        // Placed clear of what is drawn, it may stand outside the view: brought into it, with its label.
+        if (subsystemObjects.get(placed)) bringIntoViewWithLabel(subsystemObjects.get(placed));
         selectSubsystem(placed);
         openSubsystemEditor(placed);
     }
@@ -22077,7 +22084,8 @@ function portRow(port, locked) {
     const said = status || (takesFromOutside(port) ? 'set inside this model too' : 'offered outside');
     const unusable = port.signal ? rootPortSignalUsable(port) : '';
     row.innerHTML = `
-        <input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}" maxlength="80">
+        <input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}">
+        <small class="portRowNameNote" data-port-name-note role="status" hidden></small>
         <select data-port-direction aria-label="Port direction"><option value="in">In</option><option value="out">Out</option><option value="both">In and out</option></select>
         <button data-port-remove type="button" title="Stop offering it outside; its node stays">Remove</button>
         <div class="portRowDetail">
@@ -22098,7 +22106,12 @@ function portRow(port, locked) {
     if ($('[data-port-start]', row)) $('[data-port-start]', row).value = String(port.startValue);
     if ($('[data-port-value]', row)) $('[data-port-value]', row).textContent = `now ${portValueNow(port)}`;
     row.querySelectorAll('input, select, [data-port-remove]').forEach((control) => { control.disabled = locked; });
-    $('[data-port-name]', row).addEventListener('change', (event) => declareProjectPort(port.stateId, { name: event.target.value }, event.target.value.trim() ? `Port named ${event.target.value.trim()}` : 'Port named after its state'));
+    // Typed in full; while too long, said what it will be kept as (portNameAsKept).
+    $('[data-port-name]', row).addEventListener('input', (event) => showPortNameNote($('[data-port-name-note]', row), event.target.value));
+    $('[data-port-name]', row).addEventListener('change', (event) => {
+        const kept = portNameAsKept(event.target.value);
+        declareProjectPort(port.stateId, { name: event.target.value }, kept.name ? `Port named ${kept.name}${kept.cut ? `, cut to ${portNameLimit} characters` : ''}` : 'Port named after its state');
+    });
     $('[data-port-direction]', row).addEventListener('change', (event) => declareProjectPort(port.stateId, { direction: event.target.value }, `${port.name}: ${portDirectionLabel(event.target.value).toLowerCase()}`));
     $('[data-port-remove]', row).addEventListener('click', () => removeProjectPort(port.key));
     $('[data-port-start]', row)?.addEventListener('change', (event) => {
@@ -22218,6 +22231,7 @@ function openRootPortDialog(direction) {
         ? 'A signal this model takes from outside. Placed in another model, it is what gets connected; run here on its own, nothing is connected to it and it stays at its start value.'
         : 'A signal this model offers outside. Its node is made with its equation open: type what it is, as "= …".';
     $('#rootPortName').value = '';
+    showPortNameNote($('#rootPortNameNote'), '');
     $('#rootPortName').placeholder = direction === 'in' ? 'setpoint' : 'command';
     $('#rootPortUnit').value = '';
     $('#rootPortDialog').showModal();
@@ -22256,15 +22270,24 @@ function addRootPortNode(direction, name, unit) {
     return key;
 }
 
+// What a port's name will be kept as, said under where it is typed while it is too long (portNameAsKept, src/components.mjs).
+function showPortNameNote(note, typed) {
+    const kept = portNameAsKept(typed);
+    note.textContent = kept.note;
+    note.hidden = !kept.cut;
+}
+$('#rootPortName').addEventListener('input', (event) => showPortNameNote($('#rootPortNameNote'), event.target.value));
+
 $('#addInputPort').addEventListener('click', () => openRootPortDialog('in'));
 $('#addOutputPort').addEventListener('click', () => openRootPortDialog('out'));
 $('#rootPortCancel').addEventListener('click', () => $('#rootPortDialog').close());
 $('#rootPortDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
-    const name = $('#rootPortName').value.trim();
-    if (!name) return;
+    const kept = portNameAsKept($('#rootPortName').value);
+    if (!kept.name) return;
     $('#rootPortDialog').close();
-    addRootPortNode(rootPortDialogDirection, name, $('#rootPortUnit').value);
+    addRootPortNode(rootPortDialogDirection, kept.name, $('#rootPortUnit').value);
+    if (kept.cut) $('#statusText').textContent = `${$('#statusText').textContent} · its name cut to ${portNameLimit} characters`;
 });
 
 // The node's right-click menu: offer its state outside (a node of one state) or choose which in the Ports list.

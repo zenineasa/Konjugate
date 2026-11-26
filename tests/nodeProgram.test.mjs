@@ -333,3 +333,16 @@ test('a switched-off node\'s states are not offered, and an input reading one sa
     const implementation = { kind: 'fmi', fmuId: 'g', fmuVersion: '1', bindings: [{ key: 'measurement', kind: 'state', nodeId: 7, stateId: 8 }], outputs: [{ key: 'command', stateId: 10 }] };
     assert.deepEqual(nodeProgramErrors(implementation, fmu, [tank, off, fmu], []).inputs, [['Room with Konjugate PI is switched off, so this cannot read it: switch it on, or choose another.']]);
 });
+
+// Found by the full desktop run: a file whose FMU node binds none of its parameters (`bindings: []`) relies on the FMU's own start
+// values; once the card no longer pads the bindings in memory, only the FMU's ports can say so.
+test('an FMU input the file has no binding for relies on its start value, as one reading nothing does, once its ports are known', () => {
+    const ports = { inputs: [{ key: 'k', causality: 'parameter' }] };
+    const unbound = { kind: 'fmi', fmuId: 'g', fmuVersion: '1', bindings: [], outputs: [{ key: 'x', stateId: 2 }] };
+    assert.equal(fmuUsesStartValues(unbound), false, 'Without its ports nothing can be said.');
+    assert.equal(fmuUsesStartValues(unbound, ports), true);
+    assert.equal(fmuUsesStartValues({ ...unbound, bindings: [{ key: 'k', kind: 'state', stateId: 3 }] }, ports), false, 'Bound, it relies on nothing.');
+    const node = { id: 1, implementation: unbound };
+    assert.deepEqual(documentRequires(undefined, [node], () => ports), ['fmuStartValues']);
+    assert.deepEqual(documentRequires(undefined, [{ ...node, implementation: { ...unbound, bindings: [{ key: 'k', kind: 'state', stateId: 3 }] } }], () => ports), []);
+});

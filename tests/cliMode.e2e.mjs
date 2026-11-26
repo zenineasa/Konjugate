@@ -22,7 +22,7 @@ let folder;
 before(async () => { folder = await mkdtemp(join(tmpdir(), 'konjugate-cli-')); });
 after(async () => { await rm(folder, { recursive: true, force: true }); });
 
-function konjugate(args, { password } = {}) {
+function konjugate(args, { password, timeout = 60000 } = {}) {
     const environment = { ...process.env, KONJUGATE_INTERACTION_USER_DATA: join(folder, 'profile') };
     delete environment.ELECTRON_RUN_AS_NODE;
     delete environment.KONJUGATE_PASSWORD;
@@ -33,7 +33,7 @@ function konjugate(args, { password } = {}) {
         let stderr = '';
         child.stdout.on('data', (chunk) => { stdout += chunk; });
         child.stderr.on('data', (chunk) => { stderr += chunk; });
-        const timer = setTimeout(() => { child.kill(); reject(new Error(`konjugate --cli ${args.join(' ')} did not finish.\n${stdout}\n${stderr}`)); }, 60000);
+        const timer = setTimeout(() => { child.kill(); reject(new Error(`konjugate --cli ${args.join(' ')} did not finish.\n${stdout}\n${stderr}`)); }, timeout);
         child.once('error', reject);
         child.once('exit', (code) => { clearTimeout(timer); resolve({ code, stdout, stderr }); });
     });
@@ -136,4 +136,48 @@ test('run with a configuration named on the command line uses it', async () => {
     assert.equal(byId.code, 0, byId.stderr);
     assert.match(byId.stdout, /with configuration "Fine"/, 'With none named, the project\'s own active configuration is used.');
     assert.match(byId.stdout, /Pass --output-kjt and\/or --output-csv/);
+});
+
+// A project that keeps its FMU (container version 2, docs/engineCli.md): the app's command line checks the attachment's SHA-256 as it
+// reads it, installs the FMU, resolves the node for the engine and runs it, headless. Its numbers are the ones the app gives: the same
+// run made here as tests/engine/pidControllerExample.mjs makes it, sample for sample, to the bit.
+test('a project that keeps its FMU runs from the command line, giving the numbers the app gives', { skip: !['darwin', 'linux'].includes(process.platform) && 'PidController.fmu has binaries for macOS and Linux only' }, async () => {
+    const { runWithEngine } = await import('../src/engineAdapter.mjs');
+    const { executionProjectDocument } = await import('../src/subsystems.mjs');
+    const { stripEdgeGroups } = await import('../src/edgeGroups.mjs');
+    const { installedPidController } = await import('../examples/pidController/buildProject.mjs');
+    const project = join(root, 'examples', 'pidController', 'HeatedRoomPid.kjt');
+    const output = join(folder, 'heatedRoomPid.csv');
+    const { code, stdout, stderr } = await konjugate(['run', project, '--target-time', '14400', '--output-csv', output], { timeout: 600000 });
+    assert.equal(code, 0, `${stdout}\n${stderr}`);
+    const [header, ...rows] = (await readFile(output, 'utf8')).trim().split('\n').map((line) => line.split(','));
+    const column = (name) => {
+        const index = header.indexOf(name);
+        assert.ok(index >= 0, `No column ${name}: ${header.join(', ')}`);
+        return index;
+    };
+    const fmuRoom = column('Room — Temperature (degC)');
+    const konjugateRoom = column('Room with Konjugate PI — Temperature (degC)');
+
+    // The same project run here, as pidControllerExample.mjs runs it: its FMU installed from its own file.
+    const bundle = await decodeProjectBundle(await readFile(project));
+    const packages = join(folder, 'pidPackages');
+    await installedPidController(bundle.attachments[0].buffer, packages);
+    const document = JSON.parse(bundle.content);
+    const run = document.runConfigurations[0];
+    const flat = stripEdgeGroups(executionProjectDocument(document));
+    flat.requires = (flat.requires ?? []).filter((entry) => entry !== 'fmuAttachments' && entry !== 'fmuStartValues');
+    const loop = await runWithEngine(JSON.stringify(flat), { targetTime: run.targetTime, globalTimeStep: run.globalTimeStep, outputInterval: run.outputInterval, pacing: { mode: 'fastest' } },
+        { applicationPath: root, resourcesPath: '', packaged: false, fmuDirectory: packages, disabledFmuKeys: [] });
+    assert.ok(loop.available, 'The engine run of the project was not available.');
+    const byTime = new Map(loop.result.samples.map((sample) => [sample.time, sample]));
+    const value = (sample, stateId) => sample.states.find((state) => state.stateId === stateId).value;
+    assert.equal(rows.length, loop.result.samples.length, 'Every sample is written.');
+    for (const row of rows) {
+        const sample = byTime.get(Number(row[0]));
+        assert.ok(sample, `No sample at t=${row[0]} s.`);
+        assert.equal(Number(row[fmuRoom]), value(sample, 11), `The room the FMU controls differs at t=${row[0]} s.`);
+        assert.equal(Number(row[konjugateRoom]), value(sample, 31), `The room Konjugate's PI controls differs at t=${row[0]} s.`);
+    }
+    assert.ok(Math.abs(Number(rows.at(-1)[fmuRoom]) - 21) < 0.1, `The room the FMU controls ends at ${rows.at(-1)[fmuRoom]} °C, not near 21.`);
 });

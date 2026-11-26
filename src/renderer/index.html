@@ -1568,6 +1568,12 @@
             <button id="nodeContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong id="nodeContextDeleteLabel">Delete node</strong></span><b>›</b></button>
         </div>
 
+        <!-- A drop on a node of several states, connecting a box's terminal (docs/proposals/rootPorts.md, stage 5): which state. -->
+        <div id="boxStateChooser" class="contextCard addPalette hidden">
+            <span class="contextKicker" id="boxStateChooserTitle">Which state?</span>
+            <div id="boxStateChooserList"></div>
+        </div>
+
         <div id="subsystemContextMenu" class="contextCard addPalette hidden">
             <span class="contextKicker">Subsystem</span>
             <button id="subsystemContextOpen" type="button"><i class="primitiveIcon">▤</i><span><strong>Open subsystem</strong><small>Step inside to see and edit what it holds</small></span><b>›</b></button>

@@ -2740,3 +2740,27 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .editorParameterRow .parameterField:has([data-field="displaySymbol"]), #groupParameterRows .parameterField:has([data-field="displaySymbol"]) { order: 1; grid-column: 1 / 3; }
 .exportFmuSummary li button { margin-left: 4px; padding: 2px 8px; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px solid #4aa99f; border-radius: 4px; font-size: 8px; cursor: pointer; }
 .exportFmuSummary li button:disabled { opacity: .5; cursor: default; }
+
+/* FMU nodes and component instances as boxes with ports (docs/proposals/rootPorts.md, stage 5). */
+.boxPorts { display: grid; gap: 3px; pointer-events: none; }
+.boxPorts.left { justify-items: end; }
+.boxPorts.right { justify-items: start; }
+.boxPort { display: flex; align-items: center; gap: 5px; max-width: 170px; padding: 3px 7px 3px 5px; color: #d9e8ec; background: rgb(16 32 52 / 92%); border: 1px solid #3f5f8c; border-radius: 5px; box-shadow: 0 6px 16px rgb(0 0 0 / 24%); cursor: crosshair; pointer-events: auto; user-select: none; text-align: left; }
+.boxPorts.left .boxPort { flex-direction: row-reverse; text-align: right; }
+.boxPort i { color: #9cc1f5; font-size: 9px; font-style: normal; }
+.boxPort span { display: grid; min-width: 0; }
+.boxPort strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.boxPort strong em { color: #8aa5c9; font-size: 7.5px; font-style: normal; font-weight: 400; }
+.boxPort small { overflow: hidden; color: #8aa5c9; font-size: 7.5px; text-overflow: ellipsis; white-space: nowrap; }
+.boxPort.unconnected small { color: #d8b878; }
+.boxPort:hover, .boxPort:focus-visible, .boxPort.dropTarget { border-color: #9cc1f5; }
+.node-label-container.dropTarget .objectLabel { outline: 2px solid #9cc1f5; outline-offset: 2px; }
+#boxPortDragLine { position: fixed; z-index: 60; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
+#boxPortDragLine line { stroke: #9cc1f5; stroke-width: 2; stroke-dasharray: 6 4; }
+.hideNodeLabels:not(.pickingEndpoint) .boxPorts { visibility: hidden; }
+.hideNodeLabels:not(.pickingEndpoint) .boxPorts .boxPort { pointer-events: none; }
+.boxPorts.compact { gap: 2px; }
+.boxPorts.compact .boxPort { padding: 1px 6px 1px 4px; }
+.boxPorts.compact .boxPort small { display: none; }
+.boxPorts.compact .boxPort.unconnected i { color: #d8b878; }
+.node-label-container.hasBoxPorts .objectLabel dl, .node-label-container.hasBoxPorts .objectLabel .stateCount { display: none; }

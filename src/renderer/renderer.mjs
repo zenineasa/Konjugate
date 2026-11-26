@@ -110,6 +110,7 @@ import {
     declareRootPort, projectComponentDocument, removeRootPort, rootPorts
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
+import { fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, settingRefusal, settingRelationship } from '../boxPorts.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -598,6 +599,10 @@ let savedInterfaceDocument = null;
 let linkedWarningSignature = null;
 let linkedWarningRequest = 0;
 let reportedLinkPaths = null;
+// FMU nodes' and instances' terminals, by box (`n<node id>`, `s<subsystem id>`), the FMUs whose ports were asked for, and a drag between terminals (stage 5).
+const boxTerminals = new Map();
+const boxPortsRequested = new Set();
+let boxPortDrag = null;
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
@@ -1803,6 +1808,7 @@ function syncSubsystemBoundaries() {
         refreshHierarchyLabelVisibility();
     }
     syncRootPortTerminals();
+    syncBoxTerminals();
     relationshipObjects.forEach((relationship) => {
         const source = relationshipEndObject(relationship.definition, 'source');
         const target = relationshipEndObject(relationship.definition, 'target');
@@ -2227,7 +2233,7 @@ function updateProgramReads() {
             programReadObjects.set(read.id, object);
         }
         const start = fromObject.position.clone();
-        const end = toObject.position.clone();
+        const end = read.to.implementation?.kind === 'fmi' ? fmuInputEnd(toObject) : toObject.position.clone();
         object.line.geometry.dispose();
         object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
         object.line.computeLineDistances();
@@ -2244,6 +2250,332 @@ function updateProgramReads() {
         element.textContent = `→ ${read.input}`;
         element.title = `${read.to.title ?? read.to.name}'s ${read.input} reads ${read.from.title ?? read.from.name}.${read.state.symbol}, at the start of each step: one step late.`;
     }
+}
+
+// ---- FMU nodes and component instances as boxes with ports (docs/proposals/rootPorts.md, stage 5) -------------------------
+// An FMU node and a component instance are both a part with inputs and outputs: its inputs are terminals on its left edge, its
+// outputs on its right, each named with its unit, and a connection is made by dragging from one terminal to another, or between a
+// terminal and a node (its label, one of its state rows, or the node itself). An FMU input reading a state is the binding Connect
+// to… writes; a value set on a component's in port, or on any Konjugate Update, is a one-way relationship that sets it. Drawn from
+// what the file holds, so nothing new is stored.
+
+// The ports of an FMU node, read once from the library (as the run dialog reads them) and drawn when known.
+function knownFmuPorts(definition) {
+    const implementation = definition.implementation;
+    const ports = fmuPortsFor(implementation);
+    if (ports || !implementation?.fmuId) return ports;
+    const key = fmuPortsKey(implementation);
+    if (!boxPortsRequested.has(key) && !fmuPortsCache.has(key)) {
+        boxPortsRequested.add(key);
+        window.extensions.fmuPorts?.(implementation.fmuId, implementation.fmuVersion).then((loaded) => {
+            fmuPortsCache.set(key, loaded ?? { error: 'unknown' });
+            updateRelationships();
+        }, () => fmuPortsCache.set(key, { error: 'unknown' }));
+    }
+    return null;
+}
+
+// An instance's declared ports from the canvas (as declaredPortsOf reads them), with whether a relationship from outside reaches each.
+function canvasInstancePorts(subsystemId) {
+    const crossings = liveBoundaryCrossings(subsystemId);
+    const reached = new Set(crossings.map((crossing) => {
+        const edge = model.relationships.find((item) => item.id === crossing.edgeId);
+        return crossing.role === 'source' ? edge?.sourceStateId : edge?.targetStateId;
+    }));
+    return [...declaredPortsOf(subsystemId).values()].map((entry) => ({
+        key: entry.port.key, name: entry.name, unit: entry.state.unit ?? '', stateId: entry.state.id, nodeId: entry.node.id,
+        direction: entry.port.direction ?? 'both', declared: true, connected: reached.has(entry.state.id)
+    }));
+}
+
+// The boxes that have terminals in the view being looked at: FMU nodes whose ports are known, and instances with declared ports.
+function boxesWithPorts() {
+    const boxes = [];
+    for (const definition of model.nodes) {
+        if (definition.deleted || definition.implementation?.kind !== 'fmi') continue;
+        const object = nodeObjects.get(definition.id);
+        if (!object?.visible) continue;
+        const ports = knownFmuPorts(definition);
+        if (!ports) continue;
+        const terminals = fmuBoxPorts(definition, ports, model.nodes);
+        if (terminals.inputs.length || terminals.outputs.length) boxes.push({ key: `n${definition.id}`, kind: 'fmu', id: definition.id, object, terminals, name: definition.title, ports });
+    }
+    for (const subsystem of model.subsystems) {
+        if (subsystem.deleted || subsystem.definitionId == null) continue;
+        const object = subsystemObjects.get(subsystem.id);
+        if (!object?.visible) continue;
+        const terminals = instanceBoxPorts(canvasInstancePorts(subsystem.id));
+        if (terminals.inputs.length || terminals.outputs.length) boxes.push({ key: `s${subsystem.id}`, kind: 'instance', id: subsystem.id, object, terminals, name: subsystem.name });
+    }
+    return boxes;
+}
+
+function boxEdges(object) {
+    object.geometry.computeBoundingBox();
+    const bounds = object.geometry.boundingBox;
+    return { left: bounds.min.x - 0.12, right: bounds.max.x + 0.12, middle: (bounds.min.y + bounds.max.y) / 2, height: bounds.max.y - bounds.min.y };
+}
+
+function removeBoxTerminals(key) {
+    const entry = boxTerminals.get(key);
+    if (!entry) return;
+    if (entry.box.kind === 'fmu') labelElementOf(entry.box.object, 'node-label-container')?.classList.remove('hasBoxPorts');
+    entry.labels.forEach((label) => {
+        label.parent?.remove(label);
+        label.element.remove();
+    });
+    boxTerminals.delete(key);
+}
+
+function boxTerminalStart(box, input) {
+    if (box.kind !== 'fmu') {
+        const node = model.nodes.find((candidate) => candidate.id === input.nodeId);
+        const state = node?.states.find((candidate) => candidate.id === input.stateId);
+        return state ? stateValueText(state.initialValue, state.unit).text : null;
+    }
+    const port = box.ports.inputs.find((candidate) => candidate.key === input.key);
+    return Number.isFinite(port?.start) ? fmuValueText(port.start, port.unit) : null;
+}
+
+function boxTerminalColumn(box, side, terminals) {
+    const element = document.createElement('div');
+    // Many terminals (an FMU of a dozen inputs) are one line each, their details in their tooltips.
+    element.className = `boxPorts ${side}${terminals.length > 6 ? ' compact' : ''}`;
+    element.dataset.box = box.key;
+    terminals.forEach((terminal) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'boxPort';
+        button.dataset.boxPort = side === 'left' ? 'input' : 'output';
+        button.dataset.box = box.key;
+        button.dataset.portKey = String(terminal.key);
+        const text = side === 'left'
+            ? inputTerminalText(terminal, { kind: box.kind, startText: boxTerminalStart(box, terminal) })
+            : { detail: terminal.unit || 'output', tooltip: `${terminal.name}, an output of ${box.name}. Drag it to an input, a component's in port or a Konjugate Update to connect it.` };
+        if (side === 'left' && (box.kind === 'fmu' ? !terminal.reads : !terminal.connected)) button.classList.add('unconnected');
+        button.innerHTML = `<i aria-hidden="true">◆</i><span><strong>${escapeHtml(terminal.name)}${side === 'left' && terminal.unit ? ` <em>${escapeHtml(terminal.unit)}</em>` : ''}</strong><small>${escapeHtml(text.detail)}</small></span>`;
+        button.title = text.tooltip;
+        button.addEventListener('pointerdown', (event) => startBoxPortDrag(event, box, side === 'left' ? 'input' : 'output', terminal));
+        button.addEventListener('click', (event) => event.stopPropagation());
+        element.appendChild(button);
+    });
+    return element;
+}
+
+// Draws each box's terminals again when what they say changes; cheap otherwise, as it runs with every redraw of the relationships.
+function syncBoxTerminals() {
+    const boxes = activeResult && !boxTerminals.size ? [] : boxesWithPorts();
+    const wanted = new Set(boxes.map((box) => box.key));
+    [...boxTerminals.keys()].forEach((key) => { if (!wanted.has(key)) removeBoxTerminals(key); });
+    for (const box of boxes) {
+        const signature = JSON.stringify([box.object.uuid, box.terminals, box.kind === 'fmu' ? box.terminals.inputs.map((input) => boxTerminalStart(box, input)) : null]);
+        if (boxTerminals.get(box.key)?.signature === signature) continue;
+        removeBoxTerminals(box.key);
+        const edges = boxEdges(box.object);
+        const labels = [];
+        if (box.terminals.inputs.length) {
+            const left = new CSS2DObject(boxTerminalColumn(box, 'left', box.terminals.inputs));
+            left.position.set(edges.left, edges.middle, 0);
+            left.center.set(1, 0.5);
+            labels.push(left);
+        }
+        if (box.terminals.outputs.length) {
+            // Below the node's own label, which stands at its right edge.
+            const right = new CSS2DObject(boxTerminalColumn(box, 'right', box.terminals.outputs));
+            right.position.set(edges.right, edges.middle + edges.height * 0.05, 0);
+            right.center.set(0, 0);
+            labels.push(right);
+        }
+        labels.forEach((label) => { label.renderOrder = 19; box.object.add(label); });
+        // An FMU's outputs are its states: shown on its terminals, its label keeps its name alone.
+        labelElementOf(box.object, 'node-label-container')?.classList.toggle('hasBoxPorts', box.kind === 'fmu' && box.terminals.outputs.length > 0);
+        boxTerminals.set(box.key, { signature, labels, box });
+    }
+}
+
+// Where a connection's line ends on an FMU node: its left edge, where its inputs stand, rather than its middle.
+function fmuInputEnd(nodeObject) {
+    if (!boxTerminals.has(`n${nodeObject.userData.id}`)) return nodeObject.position.clone();
+    return nodeObject.localToWorld(new THREE.Vector3(boxEdges(nodeObject).left, boxEdges(nodeObject).middle, 0));
+}
+
+// ---- Dragging to connect ----
+function boxDragLine() {
+    let svg = document.querySelector('#boxPortDragLine');
+    if (!svg) {
+        svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.id = 'boxPortDragLine';
+        svg.innerHTML = '<line x1="0" y1="0" x2="0" y2="0"/>';
+        document.body.appendChild(svg);
+    }
+    return svg;
+}
+
+function startBoxPortDrag(event, box, role, terminal) {
+    event.stopPropagation();
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const from = { x: role === 'input' ? rect.left + 6 : rect.left + 6, y: rect.top + rect.height / 2 };
+    boxPortDrag = { box, role, terminal, from, startX: event.clientX, startY: event.clientY, moved: false };
+    boxDragLine().style.display = 'none';
+    window.addEventListener('pointermove', moveBoxPortDrag);
+    window.addEventListener('pointerup', endBoxPortDrag, { once: true });
+}
+
+function moveBoxPortDrag(event) {
+    if (!boxPortDrag) return;
+    if (!boxPortDrag.moved && Math.hypot(event.clientX - boxPortDrag.startX, event.clientY - boxPortDrag.startY) <= 4) return;
+    boxPortDrag.moved = true;
+    const svg = boxDragLine();
+    svg.style.display = 'block';
+    const line = svg.querySelector('line');
+    line.setAttribute('x1', String(boxPortDrag.from.x));
+    line.setAttribute('y1', String(boxPortDrag.from.y));
+    line.setAttribute('x2', String(event.clientX));
+    line.setAttribute('y2', String(event.clientY));
+    document.querySelectorAll('.boxPort.dropTarget, .node-label-container.dropTarget').forEach((item) => item.classList.remove('dropTarget'));
+    const under = document.elementFromPoint(event.clientX, event.clientY);
+    (under?.closest('.boxPort') ?? under?.closest('.node-label-container'))?.classList.add('dropTarget');
+}
+
+// What a drop landed on: a terminal, a node's state row or label, or a node on the canvas.
+function boxDropTarget(event) {
+    const under = document.elementFromPoint(event.clientX, event.clientY);
+    const port = under?.closest('.boxPort');
+    if (port) {
+        const entry = boxTerminals.get(port.dataset.box);
+        const side = port.dataset.boxPort === 'input' ? 'inputs' : 'outputs';
+        const terminal = entry?.box.terminals[side].find((candidate) => String(candidate.key) === port.dataset.portKey);
+        return terminal ? { kind: 'terminal', box: entry.box, role: port.dataset.boxPort, terminal } : null;
+    }
+    const label = under?.closest('.node-label-container');
+    if (label) {
+        const node = model.nodes.find((candidate) => candidate.id === Number(label.dataset.node) && !candidate.deleted);
+        const row = under.closest('dl > div');
+        const index = row ? [...row.parentElement.children].indexOf(row) : -1;
+        return node ? { kind: 'node', node, stateId: index >= 0 ? node.states[index]?.id ?? null : null } : null;
+    }
+    if (under === renderer.domElement) {
+        setPointerFromEvent(event);
+        const hit = rootNodeFromIntersection(firstIntersection(nodePickTargets));
+        const node = hit ? model.nodes.find((candidate) => candidate.id === hit.userData.id && !candidate.deleted) : null;
+        return node ? { kind: 'node', node, stateId: null } : null;
+    }
+    return null;
+}
+
+// A state of `node` chosen: its only one, the row dropped on, or one picked from a short list beside the pointer.
+function chooseNodeState(node, stateId, event) {
+    if (stateId != null) return Promise.resolve(stateId);
+    if (node.states.length === 1) return Promise.resolve(node.states[0].id);
+    return new Promise((resolve) => {
+        const menu = $('#boxStateChooser');
+        hideCards(menu);
+        $('#boxStateChooserTitle').textContent = `Which state of ${node.title}?`;
+        $('#boxStateChooserList').replaceChildren(...node.states.map((state) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.dataset.stateId = String(state.id);
+            button.innerHTML = `<i class="primitiveIcon">◆</i><span><strong>${escapeHtml(state.label || state.symbol)}</strong><small>${escapeHtml(state.symbol)}${state.unit ? ` · ${escapeHtml(state.unit)}` : ''}</small></span>`;
+            button.addEventListener('click', () => { hideCards(); resolve(state.id); });
+            return button;
+        }));
+        menu.dataset.open = 'true';
+        positionCard(menu, event.clientX, event.clientY);
+        menu.onclose = () => resolve(null);
+    });
+}
+
+// A terminal or node state as the source or target of a connection: `{ nodeId, stateId }`.
+const terminalState = (box, terminal) => (box.kind === 'fmu' ? { nodeId: box.id, stateId: terminal.stateId } : { nodeId: terminal.nodeId, stateId: terminal.stateId });
+
+async function endBoxPortDrag(event) {
+    window.removeEventListener('pointermove', moveBoxPortDrag);
+    const drag = boxPortDrag;
+    boxPortDrag = null;
+    // An SVG element has no `hidden` property of its own: its display is set.
+    boxDragLine().style.display = 'none';
+    document.querySelectorAll('.dropTarget').forEach((item) => item.classList.remove('dropTarget'));
+    if (!drag) return;
+    if (!drag.moved) {
+        // A click: the box's card, at the input for an FMU.
+        if (drag.box.kind === 'fmu') openProgramRead(drag.box.id, drag.terminal.key);
+        else { selectSubsystem(drag.box.id); openSubsystemEditor(drag.box.id); }
+        return;
+    }
+    if (activeResult) {
+        $('#statusText').textContent = 'Close the results to connect.';
+        return;
+    }
+    const target = boxDropTarget(event);
+    if (!target) return;
+    // What the drag connects: a source state, and an FMU input or a state to set.
+    let source = null;
+    let destination = null;
+    if (drag.role === 'output') {
+        source = terminalState(drag.box, drag.terminal);
+        destination = target.kind === 'terminal' ? (target.role === 'input' ? target : null) : target;
+    } else {
+        destination = { kind: 'terminal', box: drag.box, role: 'input', terminal: drag.terminal };
+        if (target.kind === 'terminal' && target.role === 'output') source = terminalState(target.box, target.terminal);
+        else if (target.kind === 'node') {
+            const stateId = await chooseNodeState(target.node, target.stateId, event);
+            if (stateId == null) return;
+            source = { nodeId: target.node.id, stateId };
+        }
+    }
+    if (!source || !destination) {
+        $('#statusText').textContent = 'Connect an output to an input: drag from one terminal to another, or between a terminal and a node.';
+        return;
+    }
+    if (destination.kind === 'terminal' && destination.box.kind === 'fmu') {
+        connectFmuInput(destination.box, destination.terminal, source);
+        return;
+    }
+    let settle = null;
+    if (destination.kind === 'terminal') settle = terminalState(destination.box, destination.terminal);
+    else {
+        const stateId = await chooseNodeState(destination.node, destination.stateId, event);
+        if (stateId == null) return;
+        settle = { nodeId: destination.node.id, stateId };
+    }
+    setStateFrom(source, settle);
+}
+
+function connectFmuInput(box, input, source) {
+    if (source.nodeId === box.id) {
+        $('#statusText').textContent = `${box.name} cannot read its own output: connect it to another part.`;
+        return;
+    }
+    const object = nodeObjects.get(box.id);
+    const from = model.nodes.find((node) => node.id === source.nodeId);
+    const state = from?.states.find((candidate) => candidate.id === source.stateId);
+    if (!object || !state) return;
+    changeNodeModel(object, (snapshot) => {
+        const bindings = snapshot.implementation.bindings ?? (snapshot.implementation.bindings = []);
+        const index = bindings.findIndex((binding) => binding.key === input.key);
+        const entry = fmuInputBinding(input.key, source);
+        if (index >= 0) bindings[index] = entry; else bindings.push(entry);
+    });
+    $('#statusText').textContent = `${box.name}'s ${input.name} reads ${from.title}.${state.symbol}, at the start of each step`;
+}
+
+function setStateFrom(source, target) {
+    if (source.nodeId === target.nodeId && source.stateId === target.stateId) return;
+    const nodes = model.nodes.filter((node) => !node.deleted);
+    const edges = model.relationships.filter((edge) => !edge.deleted);
+    const refusal = settingRefusal(target, nodes, edges);
+    if (refusal) {
+        $('#statusText').textContent = refusal;
+        return;
+    }
+    let made = null;
+    applyDocumentChange((document_) => {
+        made = settingRelationship({ id: allocateModelEntityId(), source, target, nodes: document_.nodes });
+        document_.edges.push(made);
+        return document_;
+    }, () => `${made.name}: set from it, a one-way relationship`);
 }
 
 // The reading node's card, at the input's row.
@@ -2707,6 +3039,8 @@ function applyNodeModel(node, snapshot) {
     invalidateRelationshipBundles();
     syncContextualOverlays();
     updateProgramReads();
+    // An FMU's ports and what its inputs read, on its box (stage 5).
+    syncBoxTerminals();
     updateValidationStatus();
     if (selectedNode === node && !$('#nodeEditor').classList.contains('hidden')) {
         renderNodeEditorModel(node);
@@ -10564,6 +10898,7 @@ function clearRenderedModel() {
     subsystemTerminalSignature = '';
     removeRootPortTerminals();
     rootPortTerminalSignature = '';
+    [...boxTerminals.keys()].forEach(removeBoxTerminals);
     relationshipObjects.clear();
     nodeObjects.clear();
     subsystemObjects.clear();
@@ -14192,7 +14527,8 @@ function besideVisibleNodes() {
     if (!shown.length) return null;
     const rightmost = shown.reduce((best, node) => (nodeObjects.get(node.id).position.x > nodeObjects.get(best.id).position.x ? node : best));
     const at = nodeObjects.get(rightmost.id).position;
-    return [at.x + 4.5, at.y, at.z];
+    // Far enough for the FMU's input terminals to stand between them (stage 5 of docs/proposals/rootPorts.md).
+    return [at.x + 7.5, at.y, at.z];
 }
 
 // The FMUs already in the library, under Add › FMU…: each a click from a node.
@@ -19346,6 +19682,14 @@ function fitCurrentView() {
     const bounds = new THREE.Box3();
     nodeObjects.forEach((object) => {
         if (object.visible) bounds.expandByObject(object);
+    });
+    // A box with terminals (an instance with declared ports, an FMU node), and room beside it for them (stage 5 of
+    // docs/proposals/rootPorts.md); a model without any is framed as before.
+    boxTerminals.forEach(({ box }) => {
+        if (!box.object.visible) return;
+        bounds.expandByObject(box.object);
+        if (box.terminals.inputs.length) bounds.expandByPoint(box.object.position.clone().add(new THREE.Vector3(-3.5, 0, 0)));
+        if (box.terminals.outputs.length) bounds.expandByPoint(box.object.position.clone().add(new THREE.Vector3(3.5, 0, 0)));
     });
     // The model's own ports are part of what it shows: their terminals, with room for the label beside each.
     if (projectComponentBlock?.ports?.length) {

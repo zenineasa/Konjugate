@@ -8682,6 +8682,136 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(variables, [['command', 0, 'output'], ['setpoint', 1, 'input'], ['measurement', 2, 'input'], ['g', 3, 'parameter'], ['Counter.Count', 4, 'local']]);
     }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
+    // ---- FMU nodes and component instances as boxes with ports (docs/proposals/rootPorts.md, stage 5) -----------------
+    // A drag from a box's terminal to a node's state row (or another terminal), as a person makes it: pressed, moved in steps, let go.
+    const dragBetween = async (win, from, to) => {
+        await win.mouseMove(from);
+        await win.mouseDown(from, { button: 'left', clickCount: 1 });
+        for (let step = 1; step <= 10; step += 1) {
+            await win.mouseMove({ x: Math.round(from.x + (to.x - from.x) * step / 10), y: Math.round(from.y + (to.y - from.y) * step / 10) });
+            await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        await win.mouseUp(to, { button: 'left', clickCount: 1 });
+    };
+    const centreOf = (win, expression) => evaluate(win, `(() => { const element = ${expression}; if (!element) return null; const r = element.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
+    const boxTerminal = (role, key) => `document.querySelector('.boxPort[data-box-port="${role}"][data-port-key="${key}"]')`;
+    const stateRow = (title, index) => `[...document.querySelectorAll('.node-label-container')].find((label) => label.querySelector('strong')?.textContent === ${JSON.stringify(title)})?.querySelectorAll('dl > div')[${index}]`;
+
+    await run('a component instance is a box with ports: dragging connects a value into its in port and its out port to an Update, and a Rate is refused', async () => {
+        await putAwayLeftovers();
+        const { placeComponent } = await import('../src/components.mjs');
+        const controller = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' },
+            nodes: [
+                { id: 1, name: 'Setpoint', position: [-1.5, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 20, unit: '°C', kind: 'update' }], sourceTerms: [] },
+                { id: 3, name: 'Command', position: [1.5, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 4, name: 'Command', symbol: 'command', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] }
+            ],
+            edges: [], subsystems: [], edgeGroups: [],
+            component: { name: 'Room controller', ports: [{ key: 1, stateId: 2, name: 'setpoint', direction: 'in' }, { key: 2, stateId: 4, name: 'command', direction: 'out' }] }
+        };
+        const room = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{ id: 1, name: 'Room', position: [-7, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C', kind: 'rate' }, { id: 3, name: 'Heater', symbol: 'heater', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] }],
+            edges: [], subsystems: [], edgeGroups: []
+        };
+        const { document: placed } = placeComponent(room, controller, { position: [4, 0, 0], name: 'Room controller' });
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(placed)}, 'Heated room.kjt')`);
+        await evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== 'expanded'; guard += 1) button.click(); })()`);
+        await waitFor(window, `Boolean(${boxTerminal('input', 1)}) && Boolean(${boxTerminal('output', 2)})`, 'The instance\'s box has no terminals.');
+        await evaluate(window, `document.querySelector('[data-nav-action="fit"]').click()`);
+        assert.match(await evaluate(window, `${boxTerminal('input', 1)}.textContent`), /setpoint\s*°C\s*nothing connected · stays at 20 °C/);
+        await waitForCanvasAtRest(window);
+
+        // Its in port set from the room's temperature: a drag from the terminal to the state row, a relationship that crosses into it.
+        await dragBetween(window, await centreOf(window, boxTerminal('input', 1)), await centreOf(window, stateRow('Room', 0)));
+        await waitFor(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Setpoint.setpoint = Room.temperature')`, `The in port was not connected. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+        await waitFor(window, `/connected/.test(${boxTerminal('input', 1)}?.textContent ?? '') && !/nothing/.test(${boxTerminal('input', 1)}?.textContent ?? '')`, 'The terminal does not say it is connected.');
+        // Its out port into the room's heater, an Update: set from it.
+        await waitForCanvasAtRest(window);
+        await dragBetween(window, await centreOf(window, boxTerminal('output', 2)), await centreOf(window, stateRow('Room', 1)));
+        await waitFor(window, `window.__debugProject.serialize().edges.some((edge) => edge.name === 'Room.heater = Command.command')`, `The out port was not connected. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+        const edge = (await savedProject()).edges.find((item) => item.name === 'Room.heater = Command.command');
+        assert.deepEqual([edge.directionality, edge.equationModel.latex, edge.target.nodeId, edge.target.stateId], ['directed', '\\mathrm{sourceCommand}', 1, 3]);
+        // Into the temperature, a Rate: refused, said why; nothing is made.
+        await waitForCanvasAtRest(window);
+        await dragBetween(window, await centreOf(window, boxTerminal('output', 2)), await centreOf(window, stateRow('Room', 0)));
+        await waitFor(window, `/is a Rate: a relationship would add to its rate, not set it/.test(document.querySelector('#statusText').textContent)`, 'Setting a Rate was not refused.');
+        assert.equal((await savedProject()).edges.length, 2);
+        // Undone by its shortcut (the toolbar's Undo can sit behind another group in a narrow window).
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'z', metaKey: true, ctrlKey: true })); })()`);
+        await waitFor(window, `!window.__debugProject.serialize().edges.some((item) => item.name === 'Room.heater = Command.command')`, 'Undone, the connection did not go.');
+    });
+
+    await run('an exported FMU tried as a node is a box with ports: an input dragged to a Rate state of the same value runs identical to the original', async () => {
+        await putAwayLeftovers();
+        const { portsDocument } = await import('./engine/fixtures/fmuPortsFixture.mjs');
+        let tried = null;
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(portsDocument)}, 'Ported controller.kjt')`);
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '2'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`, 'The ported controller did not run.', 60000);
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing did not ask.');
+            await evaluate(window, `document.querySelector('#keepCloseResults').click()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'The export dialog did not open.');
+            await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = 'fmu3'; format.dispatchEvent(new Event('change')); })()`);
+            await driver.captureExport(async () => {
+                await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+                await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, 'The FMU was not written.', 120000);
+            }, { fileName: 'Ported controller.fmu', maxAttempts: 400 });
+            await waitFor(window, `!document.querySelector('#exportFmuNotice').hidden`, 'The export did not lead on.');
+            const before = await driver.allHandles();
+            await evaluate(window, `document.querySelector('#exportFmuTry').click()`);
+            tried = await driver.waitForNewHandle(before, {}, 20000);
+            await waitFor(tried, `window.__debugProject?.serialize().nodes[0]?.implementation?.kind === 'fmi'`, 'The FMU was not placed in the new window.', 30000);
+            // The FMU's box: its inputs on the left, keeping the FMU's own start, its output on the right.
+            await waitFor(tried, `Boolean(${boxTerminal('input', 'setpoint')}) && Boolean(${boxTerminal('input', 'measurement')}) && Boolean(${boxTerminal('output', 'command')})`, 'The FMU node has no terminals.', 15000);
+            assert.match(await evaluate(tried, `${boxTerminal('input', 'setpoint')}.textContent`), /the FMU's own start · 20 degC/);
+            // A node of ours holding 20 °C, as a Rate nothing changes, beside the FMU; its value read by the setpoint, dragged.
+            await evaluate(tried, `document.querySelector('#addButton').click()`);
+            await waitFor(tried, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'The Add menu did not open.');
+            await evaluate(tried, `document.querySelector('[data-add-kind="node"]').click()`);
+            await waitFor(tried, `window.__debugProject.serialize().nodes.length === 2`, 'The node was not made.');
+            // Its start set on its Equations tab (the card opens on the tab last chosen, which an earlier scenario may have changed).
+            await evaluate(tried, `document.querySelector('#nodeEditor [data-editor-tab="equations"]')?.click()`);
+            await waitFor(tried, `Boolean(document.querySelector('#nodeEditorStates .editorStateRow input[data-field="value"]'))`, 'The new node\'s start value is not on its card.');
+            await evaluate(tried, `(() => { const field = document.querySelector('#nodeEditorStates .editorStateRow input[data-field="value"]'); field.value = '20'; field.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+            const ours = await evaluate(tried, `window.__debugProject.serialize().nodes[1].id`);
+            await waitFor(tried, `Boolean(document.querySelector('.node-label-container[data-node="${ours}"] .objectLabel')?.isConnected)`, 'The new node\'s label was not drawn.');
+            await evaluate(tried, `(() => { document.querySelector('[data-tool="move"]').click(); document.querySelector('.node-label-container[data-node="${ours}"] .objectLabel').click(); })()`);
+            await evaluate(tried, `(() => { window.__debugTransform.simulateDragTo(-9, -0.7, 0); document.querySelector('[data-tool="select"]').click(); })()`);
+            await evaluate(tried, `(() => { document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden')); const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 3 && button.dataset.mode !== 'expanded'; guard += 1) button.click(); document.querySelector('[data-nav-action="fit"]').click(); })()`);
+            await waitForCanvasAtRest(tried);
+            await dragBetween(tried, await centreOf(tried, boxTerminal('input', 'setpoint')), await centreOf(tried, stateRow('New node', 0)));
+            await waitFor(tried, `window.__debugProject.serialize().nodes[0].implementation.bindings.some((binding) => binding.key === 'setpoint' && binding.kind === 'state' && binding.nodeId === window.__debugProject.serialize().nodes[1].id)`,
+                `The setpoint was not connected. ${await evaluate(tried, `document.querySelector('#statusText').textContent`)}`);
+            await waitFor(tried, `/reads New node\\.x/.test(${boxTerminal('input', 'setpoint')}?.title ?? '') || /reads New node\\.x/.test(${boxTerminal('input', 'setpoint')}?.textContent ?? '')`, 'The terminal does not say what it reads.');
+            assert.match(await evaluate(tried, `${boxTerminal('input', 'setpoint')}.title`), /at the start of each step: one step late/);
+            // Run as the FMU suggests: the same numbers as the original, its setpoint read from a Rate state holding 20 °C.
+            await openRunDialog(tried);
+            await waitFor(tried, `!document.querySelector('#runFmuSuggestion').hidden`, 'The FMU\'s run was not suggested.', 10000);
+            await evaluate(tried, `document.querySelector('#runFmuSuggestionUse').click()`);
+            await evaluate(tried, `document.querySelector('#startRun').click()`);
+            await waitFor(tried, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU did not run.', 180000);
+            await waitFor(tried, `!document.querySelector('#compareOriginalPanel').hidden`, 'The run was not compared with the original.', 10000);
+            assert.match(await evaluate(tried, `document.querySelector('#compareOriginalTitle').textContent`), /^Identical to Ported controller's run: largest difference 0/);
+        } finally {
+            if (tried && !await tried.isDestroyed()) {
+                await evaluate(tried, `window.__debugProject.load({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [] }, 'empty.kjt')`).catch(() => {});
+                await closeWhenValidated(tried).catch(() => {});
+            }
+            // What this scenario put on screen and in the library goes again: the Ports list its run opened, and the FMU it tried.
+            await evaluate(window, `document.querySelector('#closePortsPanel')?.click()`).catch(() => {});
+            const fmus = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu' && /ported/i.test(entry.name ?? '')).map((entry) => ({ guid: entry.packageId, version: entry.version })))`).catch(() => []);
+            for (const fmu of fmus) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
+
     // ---- Everything a toolbox can write, a user can write in the canvas ------------------------------------------------
     // A small model of two nodes joined by one edge, loaded into this window, for the scenarios below.
     const loadAuthoringProject = async (overrides = {}) => {
@@ -10134,7 +10264,7 @@ export async function runInteractionTests(driver) {
     };
     // Its two states offered through the Ports list: the setpoint in, the command out.
     const offerControllerPorts = async (win) => {
-        await evaluate(win, `document.querySelector('#portsButton').click()`);
+        await evaluate(win, `(() => { if (document.querySelector('#portsPanel').hidden) document.querySelector('#portsButton').click(); })()`);
         await waitFor(win, `!document.querySelector('#portsPanel').hidden`, 'The Ports list did not open.');
         for (const stateId of [2, 4]) {
             await evaluate(win, `(() => { const select = document.querySelector('#portsMakeState'); select.value = '${stateId}'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);

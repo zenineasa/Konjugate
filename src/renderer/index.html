@@ -231,6 +231,17 @@
         </form>
     </dialog>
 
+    <dialog id="rootPortDialog" class="passwordDialog">
+        <form method="dialog">
+            <span class="contextKicker">Add to model</span>
+            <strong id="rootPortDialogTitle">Input port</strong>
+            <p id="rootPortDialogHint">A signal this model takes from outside. Placed in another model, it is what gets connected; run here on its own, nothing is connected to it and it stays at its start value.</p>
+            <label><span>Name</span><input id="rootPortName" autocomplete="off" required maxlength="80" placeholder="setpoint"></label>
+            <label><span>Unit</span><input id="rootPortUnit" autocomplete="off" maxlength="40" placeholder="°C, or leave empty"></label>
+            <footer><button id="rootPortCancel" type="button">Cancel</button><button id="rootPortCreate" class="doneButton" type="submit">Add port</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="templateDialog" class="passwordDialog">
         <form method="dialog">
             <span id="templateDialogKicker" class="contextKicker">Selected nodes</span>
@@ -821,6 +832,7 @@
         <div class="toolSpacer"></div>
         <div class="toolGroup modelToolGroup" role="group" aria-label="Model and data">
             <button id="parametersButton" class="squareTool" type="button" aria-label="Parameters table" data-tooltip="Parameters" aria-expanded="false" aria-controls="parametersPanel"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="2.2" y="3" width="11.6" height="10" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M2.2 6.3h11.6M2.2 9.6h11.6M6.4 3v10" fill="none" stroke="currentColor" stroke-width="1.1"/></svg></button>
+            <button id="portsButton" class="squareTool" type="button" aria-label="Ports" data-tooltip="Ports" aria-expanded="false" aria-controls="portsPanel"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><rect x="4.6" y="3.2" width="6.8" height="9.6" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1.2 6h3.4M11.4 10h3.4" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><path d="M3.4 4.8 4.6 6 3.4 7.2M13.6 8.8l1.2 1.2-1.2 1.2" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
             <button id="parameterTuningButton" class="squareTool" type="button" aria-controls="parameterTuning" aria-label="Parameter tuning" data-tooltip="Parameter tuning">
                 <svg class="toolSvg" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2.5 5h3m3 0h5M2.5 11h6m3 0h2" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><circle cx="7" cy="5" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="11" r="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>
             </button>
@@ -1515,6 +1527,9 @@
             <span class="contextKicker">Add to model</span>
             <button data-add-kind="node" type="button"><i class="primitiveIcon">●</i><span><strong>Node</strong><small>States and their equations</small></span><b>›</b></button>
             <button data-add-kind="edge" type="button"><i class="primitiveIcon edgeIcon">↔</i><span><strong>Relationship</strong><small>Connect two nodes with an equation</small></span><b>›</b></button>
+            <!-- Ports at the top level (docs/proposals/rootPorts.md): a small node holding one state, offered outside as the model's own port. -->
+            <button id="addInputPort" type="button"><i class="primitiveIcon">◆</i><span><strong>Input port</strong><small>A signal this model takes from outside</small></span><b>›</b></button>
+            <button id="addOutputPort" type="button"><i class="primitiveIcon">◆</i><span><strong>Output port</strong><small>A signal this model offers outside</small></span><b>›</b></button>
             <button id="addComponentFromFile" type="button"><i class="primitiveIcon">▤</i><span><strong>Component from file…</strong><small>Place a subsystem saved as a .kjt, or one from any project</small></span><b>›</b></button>
             <!-- An FMU as a node (docs/proposals/fmuImportWorkflow.md, stage 4): one picked here or dropped on the canvas, and the FMUs
                  already in the library below it. In the web edition it says FMUs run in the desktop app. -->
@@ -1531,6 +1546,8 @@
             <button id="nodeContextToggle" type="button"><i class="primitiveIcon">⏻</i><span><strong id="nodeContextToggleLabel">Disable node</strong><small>Keep it saved, drop it from the engine</small></span><b>›</b></button>
             <button id="nodeContextAddToGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Add to relationship group</strong><small>Join the group currently open for editing</small></span><b>›</b></button>
             <button id="nodeContextDetachFromGroup" type="button" hidden><i class="primitiveIcon edgeIcon">⬡</i><span><strong>Detach from relationship group</strong><small>Its relationships to the group stay, as ordinary ones</small></span><b>›</b></button>
+            <button id="nodeContextOfferPort" type="button" hidden><i class="primitiveIcon">◆</i><span><strong>Offer outside as a port</strong><small id="nodeContextOfferPortHint">In, out, or in and out: one of this model's ports</small></span><b>›</b></button>
+            <div id="nodeContextPortDirections" class="contextChoiceRow" hidden><span>Offer <b id="nodeContextPortState"></b> as</span><button type="button" data-offer-direction="in">In</button><button type="button" data-offer-direction="out">Out</button><button type="button" data-offer-direction="both">In and out</button></div>
             <button id="nodeContextSaveTemplate" type="button"><i class="primitiveIcon">⊞</i><span><strong>Save to my library</strong><small>Keep the selection as a reusable component</small></span><b>›</b></button>
             <button id="nodeContextDisableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Disable all</strong><small>Disable every selected node</small></span><b>›</b></button>
             <button id="nodeContextEnableAll" type="button" hidden><i class="primitiveIcon">⏻</i><span><strong>Enable all</strong><small>Enable every selected node</small></span><b>›</b></button>
@@ -1602,6 +1619,23 @@
                 </table>
             </div>
             <p id="parametersEmpty" class="parametersNotice" hidden>No parameters match.</p>
+        </section>
+        <!-- The model's own ports (docs/proposals/rootPorts.md): what it offers outside, as a component placed elsewhere or an FMU. -->
+        <section id="portsPanel" class="liveParameterPanel portsPanel" aria-label="Model ports" hidden>
+            <header>
+                <div><strong>Ports</strong><small id="portsSummary"></small></div>
+                <button id="closePortsPanel" type="button" aria-label="Close ports">×</button>
+            </header>
+            <p id="portsReadOnly" class="parametersNotice" hidden>Results mode · model locked. Each port's value at the time shown; close results to edit ports.</p>
+            <div id="portsEmpty" class="portsEmpty">
+                <p>No ports yet. A port is a signal this model offers outside: placed in another model, its ports are what gets connected, and an in port with nothing connected stays at its start value when it runs here on its own.</p>
+            </div>
+            <div id="portsList" class="portsList"></div>
+            <div class="portsActions">
+                <button id="portsAddInput" type="button">＋ Input port</button>
+                <button id="portsAddOutput" type="button">＋ Output port</button>
+                <label><span>Make a state a port</span><select id="portsMakeState" aria-label="Make a state of the model a port"></select></label>
+            </div>
         </section>
         <section id="resultTransport" class="resultTransport" aria-label="Simulation status and results" hidden>
             <button id="transportToggle" class="transportToggle" type="button" aria-expanded="true" aria-controls="resultTransport" aria-label="Show fewer result controls"></button>

@@ -133,8 +133,9 @@ const context = {
     sourceTermExpressionModel: (definition, term) => term.expressionModel ?? { latex: term.expression }, relationshipEquationModel: (definition) => definition.equationModel
 };
 
-// The fixture was written by v2.0.4's own code (its componentDocumentOf and encodeProjectFile, from `git archive v2.0.4`), as its
-// Save as component file writes one: a Plant subsystem with an in port, an out port, a port both ways and an exposed parameter.
+// The fixture was saved by the Konjugate v2.0.4 app itself (a tree from `git archive v2.0.4`, run in interaction-test mode): a
+// plain project's Plant subsystem given an in port, an out port and a port both ways, named and directed, and an exposed
+// parameter, through Plant's card, then Save as component file…, its save dialog answered by the app's own test driver.
 test('a component file v2.0.4 wrote keeps its block, keys and ports, and its ports are its root ports', async () => {
     const path = join(repository, 'tests/fixtures/olderVersions/v2.0.4/components/plant.kjt');
     const content = (await decodeProjectBundle(await readFile(path))).content;
@@ -142,7 +143,7 @@ test('a component file v2.0.4 wrote keeps its block, keys and ports, and its por
     const block = structuredClone(document.component);
     assert.deepEqual(block.ports.map((port) => port.key), [1, 2, 3]);
     assert.deepEqual(rootPorts(document).map((port) => [port.key, port.name, port.direction, port.symbol, port.reached]), [
-        [1, 'heater', 'in', 'P', false], [2, 'temperature', 'out', 'T', true], [3, 'Wall · Temperature', 'both', 'Tw', true]
+        [1, 'heater', 'in', 'power', false], [2, 'temperature', 'out', 'temperature', true], [3, 'Wall · Temperature', 'both', 'wallTemperature', true]
     ]);
     // Its entities through the codec as opening and saving does: saving again is stable.
     const saved = (items) => ({

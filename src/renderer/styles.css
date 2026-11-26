@@ -741,6 +741,12 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .subsystemTerminalEdge small { overflow: hidden; color: #6fa89f; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .subsystemTerminalJump { padding: 0 7px; color: #86ddd5; font-size: 11px; }
 .subsystemTerminal.emptyPort button { border-style: dotted; opacity: .85; }
+/* A model's own port at the top level (docs/proposals/rootPorts.md): a terminal like a subsystem's, in the port's own colour. */
+.subsystemTerminal.rootPortTerminal button { border-style: solid; border-color: #5f8fd6; background: rgb(16 32 52 / 94%); }
+.subsystemTerminal.rootPortTerminal button:hover, .subsystemTerminal.rootPortTerminal button:focus-visible { border-color: #9cc1f5; }
+.subsystemTerminal.rootPortTerminal .subsystemTerminalEdge b { color: #9cc1f5; }
+.subsystemTerminal.rootPortTerminal .subsystemTerminalEdge small { color: #8aa5c9; }
+.subsystemTerminal.rootPortTerminal.unconnected .subsystemTerminalEdge small { color: #d8b878; }
 .subsystemLabel .subsystemOpen { pointer-events: auto; margin-top: 7px; padding: 3px 9px; color: #062a2b; background: #62e1d5; border: 0; border-radius: 4px; font-size: 8px; font-weight: 600; cursor: pointer; }
 .subsystemLabel .subsystemOpen:hover, .subsystemLabel .subsystemOpen:focus-visible { background: #8cfff5; }
 .subsystemLabel.selected { border-color: #8cfff5; box-shadow: 0 0 0 2px rgb(98 225 213 / 45%), 0 10px 28px rgb(0 0 0 / 30%); }
@@ -1776,6 +1782,30 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
    one layer below them for the short-window case where they still meet. */
 .parametersPanel { z-index: 12; top: calc(var(--title-height) + var(--tools-height) + 10px); left: 210px; right: auto; bottom: auto; width: min(720px, calc(100% - 228px)); max-height: min(420px, calc(100% - 340px)); }
 .parametersPanel > header { gap: 10px; }
+.portsPanel { z-index: 12; top: calc(var(--title-height) + var(--tools-height) + 10px); right: 18px; bottom: auto; width: min(430px, calc(100% - 36px)); max-height: min(460px, calc(100% - 200px)); }
+.portsEmpty p { margin: 0; padding: 12px; color: #8ea3ac; font-size: 8.5px; line-height: 1.5; }
+.portsList { display: grid; }
+.portRow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px; padding: 9px 12px; border-bottom: 1px solid #1e313b; }
+.portRow.highlighted { background: rgb(95 143 214 / 12%); }
+.portRow input, .portRow select { min-width: 0; height: 24px; padding: 0 6px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8.5px; }
+.portRow input[data-port-start] { width: 72px; }
+.portRow button { height: 24px; padding: 0 8px; color: #9fb7c0; background: transparent; border: 1px solid #31525a; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.portRow button:hover { color: #d9e8ec; border-color: #4aa99f; }
+.portRow input:disabled, .portRow select:disabled, .portRow button:disabled { opacity: .55; cursor: default; }
+.portRow .portRowDetail { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #6f8792; font-size: 7.5px; }
+.portRow .portRowDetail .portNode { padding: 0; color: #8fb5bd; background: transparent; border: 0; height: auto; font-size: 7.5px; text-decoration: underline dotted; }
+.portRow .portRowStatus.unconnected { color: #d8b878; }
+.portRow .portRowValue { color: #d6e6e9; font-variant-numeric: tabular-nums; }
+.portsActions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 12px; }
+.portsActions button { height: 24px; padding: 0 9px; color: #c4d8f5; background: rgb(95 143 214 / 14%); border: 1px solid #3f5f8c; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.portsActions button:disabled, .portsActions select:disabled { opacity: .5; cursor: default; }
+.portsActions label { display: flex; flex: 1 1 100%; align-items: center; gap: 6px; color: #6f8792; font-size: 7.5px; }
+.portsActions select { flex: 1; min-width: 0; height: 24px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
+.contextChoiceRow { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 4px 10px 8px 34px; color: #7f939c; font-size: 8px; }
+.contextChoiceRow[hidden] { display: none; }
+.addPalette .contextChoiceRow button { display: inline-block; width: auto; min-height: 0; padding: 3px 8px; color: #c4d8f5; background: rgb(95 143 214 / 14%); border: 1px solid #3f5f8c; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.statePortField { display: flex; grid-column: 1 / -1; align-items: center; gap: 6px; margin-top: 4px; color: #6f8792; font-size: 8px; }
+.statePortField select { height: 22px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
 .parametersPanel > header .parametersControls { display: flex; flex: 1; justify-content: flex-end; gap: 6px; }
 .parametersControls input, .parametersControls select { height: 22px; color: #c9dcdf; background: #0d1c25; border: 1px solid #304651; border-radius: 4px; font-size: 8px; }
 .parametersControls input { width: 120px; padding: 0 6px; }
@@ -1827,6 +1857,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* Subsystem boxes and boundary terminals follow the Nodes label control: compact is the name, expanded adds the detail
    line, and hidden leaves them out unless selected or pointed at. A hidden terminal keeps its diamond on the canvas. */
 #canvas:not(.showNodesDetails) .subsystemLabel small, #canvas:not(.showNodesDetails) .subsystemTerminalEdge small { display: none; }
+/* An in port with nothing connected says it stays at its start even with compact labels: it is what its terminal is for. */
+#canvas .rootPortTerminal.unconnected .subsystemTerminalEdge small { display: block; }
 .hideNodeLabels:not(.pickingEndpoint) .subsystemLabel:not(.selected):not(.peek),
 .hideNodeLabels:not(.pickingEndpoint) .subsystemTerminal:not(.selected):not(.peek) { visibility: hidden; pointer-events: none; }
 

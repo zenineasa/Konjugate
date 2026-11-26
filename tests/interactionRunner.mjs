@@ -8485,6 +8485,157 @@ export async function runInteractionTests(driver) {
         await closeWhenValidated(crowdedWindow);
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
+    // ---- Ports at the top level (docs/proposals/rootPorts.md, stage 2) -------------------------------------------------
+    // A room controller drawn from scratch: Add › Input port and Output port make the model's own ports, drawn as terminals at
+    // the sides of the top level; run on its own, the input stays at its start, and the result is read from the Ports list.
+    const rootPortTerminal = (key) => `document.querySelector('.rootPortTerminal[data-root-port="${key}"]')`;
+    const addPortFromMenu = async (button, name, unit) => {
+        await evaluate(window, `document.querySelector('#addButton').click()`);
+        await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden') && !document.querySelector('${button}').hidden`, 'The Add menu did not offer the port.');
+        await evaluate(window, `document.querySelector('${button}').click()`);
+        await waitFor(window, `document.querySelector('#rootPortDialog').open`, 'The port dialog did not open.');
+        await evaluate(window, `(() => {
+            document.querySelector('#rootPortName').value = ${JSON.stringify(name)};
+            document.querySelector('#rootPortUnit').value = ${JSON.stringify(unit)};
+            document.querySelector('#rootPortCreate').click();
+        })()`);
+        await waitFor(window, `!document.querySelector('#rootPortDialog').open`, 'The port dialog did not close.');
+    };
+    await run('Add › Input port and Output port make the model\'s own ports, drawn as terminals; run alone, the input stays at its start and the result lists it under Ports', async () => {
+        await putAwayLeftovers();
+        const project = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [],
+            nodes: [{ id: 1, name: 'Room', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C' }], sourceTerms: [] }],
+            edges: [], subsystems: [], edgeGroups: []
+        };
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Room controller.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The room did not load.');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.rootPortTerminal').length`), 0, 'A model without ports draws no terminals.');
+        assert.equal((await savedProject()).component, undefined, 'and writes no component block.');
+
+        await addPortFromMenu('#addInputPort', 'setpoint', '°C');
+        await waitFor(window, `Boolean(${rootPortTerminal(1)})`, 'The input port has no terminal.');
+        const first = await savedProject();
+        const setpointNode = first.nodes.find((node) => node.name === 'setpoint');
+        assert.ok(setpointNode, 'The port has a node of its own.');
+        assert.deepEqual(setpointNode.states.map(({ name, symbol, initialValue, unit, kind }) => ({ name, symbol, initialValue, unit, kind })), [{ name: 'setpoint', symbol: 'setpoint', initialValue: 0, unit: '°C', kind: 'update' }]);
+        assert.equal(first.nodes.find((node) => node.id === 1).states[0].kind, 'rate', 'The room, which said no kind, now says it is a rate, as the engine read it.');
+        assert.deepEqual(first.component, { name: 'Room controller', ports: [{ key: 1, stateId: setpointNode.states[0].id, name: 'setpoint', direction: 'in' }] }, 'The first port makes the model\'s component block, named for the project.');
+        assert.equal(await evaluate(window, `${rootPortTerminal(1)}.classList.contains('left')`), true, 'An input stands on the left.');
+        assert.match(await evaluate(window, `${rootPortTerminal(1)}.textContent`), /→ In\s*setpoint\s*nothing connected · stays at 0 °C/);
+
+        await addPortFromMenu('#addOutputPort', 'command', '');
+        await waitFor(window, `Boolean(${rootPortTerminal(2)})`, 'The output port has no terminal.');
+        assert.equal(await evaluate(window, `${rootPortTerminal(2)}.classList.contains('right')`), true, 'An output stands on the right.');
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'command'`, 'The output\'s node did not open, ready for its equation.');
+
+        // The Ports list: both, the input's start edited in place, the output pointed at the room's temperature.
+        await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden')); document.querySelector('#portsButton').click()`);
+        await waitFor(window, `!document.querySelector('#portsPanel').hidden && document.querySelectorAll('#portsList .portRow').length === 2`, 'The Ports list did not show both ports.');
+        assert.match(await evaluate(window, `document.querySelector('#portsSummary').textContent`), /^1 in, 1 out/);
+        await typeInto(`document.querySelector('#portsList [data-port-key="1"] [data-port-start]')`, '21');
+        await waitFor(window, `${rootPortTerminal(1)}?.textContent.includes('stays at 21 °C')`, 'The terminal did not take the new start value.');
+        await typeInto(`document.querySelector('#portsList [data-port-key="2"] [data-port-name]')`, 'heater command');
+        await waitFor(window, `window.__debugProject.serialize().component.ports[1].name === 'heater command' && ${rootPortTerminal(2)}?.textContent.includes('heater command')`, 'Renaming the output did not reach its terminal.');
+
+        // Make a state a port: the room's temperature, which nothing reaches, offered as an in port; removed, then undone.
+        await evaluate(window, `(() => { const select = document.querySelector('#portsMakeState'); select.value = '2'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 3`, 'Making the room\'s temperature a port did not list it.');
+        assert.deepEqual((await savedProject()).component.ports[2], { key: 3, stateId: 2, direction: 'in' });
+        await evaluate(window, `document.querySelector('#portsList [data-port-key="3"] [data-port-remove]').click()`);
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 2 && !${rootPortTerminal(3)}`, 'Removing the port did not take it off.');
+        assert.equal((await savedProject()).nodes.some((node) => node.id === 1), true, 'Its node stays.');
+        await undoRedo('undo');
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 3 && Boolean(${rootPortTerminal(3)})`, 'Undo did not bring the port back.');
+        await undoRedo('redo');
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 2`, 'Redo did not take it off again.');
+
+        assert.equal((await savedProject()).component.terminalPositions, undefined, 'No terminal position is written until one is moved.');
+        // Dragged by its diamond, beside its label, a terminal stays where it is put; undone, it goes back to the layout.
+        // Drawn again after the redo, its label joins the page with the next frame.
+        await waitFor(window, `Boolean(${rootPortTerminal(1)}?.isConnected)`, 'The input\'s terminal was not drawn again.');
+        await waitForCanvasAtRest(window);
+        const diamond = await evaluate(window, `window.__rootPortScreenPoint(1)`);
+        assert.ok(diamond, 'The input\'s terminal has no diamond on the canvas.');
+        await window.mouseMove(diamond);
+        await window.mouseDown(diamond, { button: 'left', clickCount: 1 });
+        for (let step = 1; step <= 8; step += 1) {
+            await window.mouseMove({ x: diamond.x - 10 * step, y: diamond.y - 12 * step });
+            await new Promise((resolve) => setTimeout(resolve, 30));
+        }
+        await window.mouseUp({ x: diamond.x - 80, y: diamond.y - 96 }, { button: 'left', clickCount: 1 });
+        await waitFor(window, `window.__debugProject.serialize().component.terminalPositions?.[0]?.portKey === 1`, 'Dragging the terminal did not keep where it was put.');
+        await undoRedo('undo');
+        assert.equal((await savedProject()).component.terminalPositions, undefined, 'Undone, the terminal goes back to the layout.');
+
+        // The node's right-click menu offers its state outside: the room's temperature as an out port, then not a port again.
+        await evaluate(window, `(() => { const room = [...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes('Room')); room.click(); })()`);
+        await waitFor(window, `!document.querySelector('#nodeEditor').classList.contains('hidden') && document.querySelector('#editNodeName').value === 'Room'`, 'The room did not open.');
+        await evaluate(window, `(() => { document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden')); })()`);
+        await rightClickElement(window, `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes('Room'))`);
+        await waitFor(window, `!document.querySelector('#nodeContextMenu').classList.contains('hidden') && !document.querySelector('#nodeContextOfferPort').hidden`, 'The room\'s right-click menu did not offer it outside.');
+        await evaluate(window, `document.querySelector('#nodeContextOfferPort').click()`);
+        await waitFor(window, `!document.querySelector('#nodeContextPortDirections').hidden`, 'The directions were not offered.');
+        await evaluate(window, `document.querySelector('#nodeContextPortDirections [data-offer-direction="out"]').click()`);
+        await waitFor(window, `window.__debugProject.serialize().component.ports.some((port) => port.stateId === 2 && port.direction === 'out')`, 'The room\'s temperature was not made an out port.');
+        await rightClickElement(window, `[...document.querySelectorAll('.objectLabel')].find((item) => item.textContent.includes('Room'))`);
+        await waitFor(window, `!document.querySelector('#nodeContextOfferPort').hidden`, 'The right-click menu did not open again.');
+        await evaluate(window, `document.querySelector('#nodeContextOfferPort').click()`);
+        await evaluate(window, `document.querySelector('#nodeContextPortDirections [data-offer-direction=""]').click()`);
+        await waitFor(window, `!window.__debugProject.serialize().component.ports.some((port) => port.stateId === 2)`, '"Not a port" did not take it off.');
+
+        // Run on its own: the input stays at 21 °C, and the Ports list opens with each port's value.
+        await evaluate(window, `document.querySelector('#closePortsPanel').click()`);
+        await openRunDialog(window);
+        await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '1'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+        await evaluate(window, `document.querySelector('#startRun').click()`);
+        await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult && !document.querySelector('#continueRun').hidden`,
+            `The room controller did not run. ${await evaluate(window, `document.querySelector('#runLaunchError').textContent`)}`, 60000);
+        await waitFor(window, `!document.querySelector('#portsPanel').hidden && Boolean(document.querySelector('#portsList [data-port-value="1"]'))`, 'The result did not open the Ports list.');
+        assert.equal(await evaluate(window, `document.querySelector('#portsList [data-port-value="1"]').textContent`), 'now 21 °C', 'The unconnected input stayed at its start.');
+        assert.equal(await evaluate(window, `document.querySelector('#portsReadOnly').hidden`), false, 'The list says the model is locked.');
+        assert.equal(await evaluate(window, `document.querySelector('#portsList [data-port-key="1"] [data-port-name]').disabled`), true);
+        await putAwayLeftovers();
+        await evaluate(window, `document.querySelector('#closePortsPanel').click()`);
+    });
+
+    await run('a component file v2.0.4 wrote opens with its ports as terminals at the top, and saves its block as it was', async () => {
+        await putAwayLeftovers();
+        const content = await decodeProjectFile(await readFile(join(process.cwd(), 'tests/fixtures/olderVersions/v2.0.4/components/plant.kjt')));
+        const block = JSON.parse(content).component;
+        await evaluate(window, `window.__debugProject.load(${content}, 'plant.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.rootPortTerminal').length === 3`, 'The component\'s three ports were not drawn at the top.');
+        assert.deepEqual((await savedProject()).component, block, 'Opened and saved, its block is as it was.');
+        assert.match(await evaluate(window, `${rootPortTerminal(1)}.textContent`), /→ In\s*heater\s*nothing connected · stays at 0 W/);
+        assert.equal(await evaluate(window, `${rootPortTerminal(3)}.classList.contains('right')`), true, 'A port both ways stands on the right.');
+        await evaluate(window, `document.querySelector('#portsButton').click()`);
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 3`, 'The Ports list did not show the component\'s ports.');
+        for (const key of [1, 2, 3]) {
+            await evaluate(window, `document.querySelector('#portsList [data-port-key="${key}"] [data-port-remove]').click()`);
+        }
+        await waitFor(window, `document.querySelectorAll('#portsList .portRow').length === 0 && !document.querySelector('#portsEmpty').hidden`, 'The ports were not removed.');
+        assert.deepEqual((await savedProject()).component, { name: 'Plant', ports: [] }, 'A component file keeps its block with its last port gone.');
+        await evaluate(window, `document.querySelector('#closePortsPanel').click()`);
+    });
+
+    await run('every shipped example opens and saves with no component block, the same each time', async () => {
+        await putAwayLeftovers();
+        const directory = join(process.cwd(), 'examples');
+        const { readdir } = await import('node:fs/promises');
+        const files = (await readdir(directory)).filter((name) => name.endsWith('.kjt')).sort();
+        assert.ok(files.length >= 10, 'The shipped examples are missing.');
+        for (const file of files) {
+            const content = await decodeProjectFile(await readFile(join(directory, file)));
+            await evaluate(window, `window.__debugProject.load(${content}, ${JSON.stringify(file)})`);
+            await waitFor(window, `document.querySelector('.documentTitle')?.textContent === ${JSON.stringify(file.replace(/\.kjt$/, ''))}`, `${file} did not open.`);
+            const once = await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`);
+            assert.equal('component' in JSON.parse(once), false, `${file} was given a component block.`);
+            assert.equal(await evaluate(window, `document.querySelectorAll('.rootPortTerminal').length`), 0, `${file} draws port terminals.`);
+            await evaluate(window, `window.__debugProject.load(${once}, ${JSON.stringify(file)})`);
+            assert.equal(await evaluate(window, `JSON.stringify(window.__debugProject.serialize())`), once, `${file} saves differently the second time.`);
+        }
+    });
+
     // ---- Everything a toolbox can write, a user can write in the canvas ------------------------------------------------
     // A small model of two nodes joined by one edge, loaded into this window, for the scenarios below.
     const loadAuthoringProject = async (overrides = {}) => {

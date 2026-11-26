@@ -106,8 +106,10 @@ import { displaySymbols, displaySymbolsToStored, foldedName, foldStates, mergeOw
 import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDefinition, snapshotFields } from '../modelDefinition.mjs';
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
-    migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions
+    migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
+    declareRootPort, removeRootPort, rootPorts
 } from '../components.mjs';
+import { layoutRootPortTerminals, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
     subsystemLocations, subsystemMoveTargets
@@ -583,6 +585,11 @@ let projectAddonData = {};
 // A component file opened as a project keeps its component block (its name, description and declared ports), written back
 // when it is saved, so it stays a component (docs/subsystems.md#component-files).
 let projectComponentBlock = null;
+// Whether the project opened as a component (a component file): its block stays with its last port gone (src/components.mjs, removeRootPort).
+let projectOpenedAsComponent = false;
+// The Ports panel's row shown as the one a terminal was clicked for, and the result it was last opened for.
+let portsPanelHighlight = null;
+let portsPanelOpenedForResult = null;
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
 let projectTuningSetup = null;
@@ -1467,6 +1474,135 @@ function declaredPortsOf(subsystemId) {
     }).filter(Boolean));
 }
 
+// ---- The project's own ports at the top level (docs/proposals/rootPorts.md, stage 2) -----------------------------------
+// Each root port is a terminal at the side of the top-level view, as a subsystem's inside view draws its own: in ports on the
+// left, the others on the right, a dotted line to the node holding the port's state, and an in port nothing reaches saying
+// it stays at its start. Laid out when the ports change, not as nodes are dragged; dragged, it stays where it is put (the
+// block's `terminalPositions`, keyed by port key).
+const rootPortTerminals = new Map();
+let rootPortTerminalSignature = '';
+
+// The project as rootPorts reads it, from the canvas's own definitions (cheap enough to run as the canvas is redrawn).
+function canvasRootPortDocument() {
+    return { nodes: model.nodes.filter((node) => !node.deleted), edges: model.relationships.filter((edge) => !edge.deleted), component: projectComponentBlock };
+}
+
+function currentRootPorts() {
+    return projectComponentBlock?.ports?.length ? rootPorts(canvasRootPortDocument()) : [];
+}
+
+const portStartText = (port) => stateValueText(port.startValue, port.unit).text;
+
+function removeRootPortTerminals() {
+    rootPortTerminals.forEach(({ object, label, line }) => {
+        const pickIndex = nodePickTargets.indexOf(object);
+        if (pickIndex >= 0) nodePickTargets.splice(pickIndex, 1);
+        object.remove(label);
+        label.element.remove();
+        scene.remove(object, line);
+        object.geometry.dispose();
+        object.material.dispose();
+        line.geometry.dispose();
+        line.material.dispose();
+    });
+    rootPortTerminals.clear();
+}
+
+function layoutRootPorts(ports) {
+    const shown = [...nodeObjects.values(), ...subsystemObjects.values()].filter((object) => object.visible);
+    const box = new THREE.Box3();
+    shown.forEach((object) => box.expandByPoint(object.position));
+    if (box.isEmpty()) box.expandByPoint(new THREE.Vector3(0, -0.7, 0));
+    const view = camera.position.clone().sub(orbitControls.target).normalize();
+    const stackAxis = Math.abs(view.y) < 0.7 ? 1 : 2;
+    const stackSign = stackAxis === 1 ? 1 : -Math.sign(view.y || 1);
+    return layoutRootPortTerminals(ports, {
+        bounds: { min: box.min.toArray(), max: box.max.toArray(), centre: box.getCenter(new THREE.Vector3()).toArray() },
+        stackAxis, stackSign, saved: projectComponentBlock?.terminalPositions ?? [],
+        nodeHeight: (nodeId) => displayObjectForNode(nodeId)?.position.getComponent(stackAxis) ?? null
+    });
+}
+
+function createRootPortTerminal(port, text, { position, side }) {
+    const object = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), new THREE.MeshBasicMaterial({ color: 0x9cc1f5, depthTest: false }));
+    object.renderOrder = 9;
+    object.position.fromArray(position);
+    object.userData = { restPosition: object.position.clone(), kind: 'rootPortTerminal', portKey: port.key };
+    const element = document.createElement('div');
+    element.className = `subsystemTerminal rootPortTerminal ${port.direction} ${side}${rootPortStatus(port, '') ? ' unconnected' : ''}`;
+    element.dataset.rootPort = String(port.key);
+    element.innerHTML = `<button class="subsystemTerminalEdge" type="button"><b>${text.badge}</b><strong>${escapeHtml(text.name)}</strong><small>${escapeHtml(text.detail)}</small></button>`;
+    $('.subsystemTerminalEdge', element).title = text.tooltip;
+    element.addEventListener('pointerdown', (event) => event.stopPropagation());
+    $('.subsystemTerminalEdge', element).addEventListener('click', (event) => {
+        event.stopPropagation();
+        showRootPort(port.key);
+    });
+    const label = new CSS2DObject(element);
+    label.renderOrder = 20;
+    label.center.set(side === 'left' ? 1 : 0, 0.5);
+    label.position.set(side === 'left' ? -0.3 : 0.3, 0, 0);
+    object.add(label);
+    const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([object.position.clone(), object.position.clone()]),
+        new THREE.LineDashedMaterial({ color: 0x5f8fd6, dashSize: 0.16, gapSize: 0.12, depthTest: false, transparent: true, opacity: 0.85 })
+    );
+    line.renderOrder = 8;
+    line.frustumCulled = false;
+    scene.add(object, line);
+    nodePickTargets.push(object);
+    rootPortTerminals.set(port.key, { object, label, line, port, text });
+}
+
+// Draws the terminals again when the ports change, and keeps each dotted line on its node as nodes and terminals move.
+function syncRootPortTerminals() {
+    const ports = activeSubsystemId === null ? currentRootPorts() : [];
+    const described = ports.map((port) => ({ port, text: rootPortTerminalText(port, { startText: portStartText(port) }) }));
+    const signature = JSON.stringify([activeSubsystemId, projectComponentBlock?.terminalPositions ?? [],
+        described.map(({ port, text }) => [port.key, port.nodeId, port.direction, port.reached, text.badge, text.name, text.detail])]);
+    if (signature !== rootPortTerminalSignature) {
+        rootPortTerminalSignature = signature;
+        removeRootPortTerminals();
+        if (described.length) {
+            const positions = layoutRootPorts(ports);
+            described.forEach(({ port, text }) => createRootPortTerminal(port, text, positions.get(port.key)));
+        }
+        refreshHierarchyLabelVisibility();
+    }
+    rootPortTerminals.forEach(({ object, line, port }) => {
+        const target = displayObjectForNode(port.nodeId);
+        line.visible = Boolean(target);
+        if (!target) return;
+        const points = line.geometry.attributes.position;
+        points.setXYZ(0, object.position.x, object.position.y, object.position.z);
+        points.setXYZ(1, target.position.x, target.position.y, target.position.z);
+        points.needsUpdate = true;
+        line.computeLineDistances();
+    });
+}
+
+// A terminal moved, kept in the block as one undo step; undone, it goes back to where it was or to the automatic layout.
+function moveRootPortTerminal(portKey, position) {
+    if (activeResult || !projectComponentBlock) return false;
+    return applyDocumentChange((document_) => {
+        if (!document_.component) return null;
+        const placed = placedTerminalPositions(document_.component.terminalPositions, portKey, position);
+        if (placed) document_.component.terminalPositions = placed; else delete document_.component.terminalPositions;
+        return document_;
+    }, 'Port terminal moved');
+}
+
+// A root port's terminal clicked: its node selected where it is shown, and the Ports panel open on its row.
+function showRootPort(portKey) {
+    const port = currentRootPorts().find((candidate) => candidate.key === portKey);
+    if (!port) return;
+    const node = nodeObjects.get(port.nodeId);
+    if (node?.visible) selectNode(node);
+    setPortsPanelOpen(true, { highlight: portKey });
+    const text = rootPortTerminals.get(portKey)?.text;
+    if (text) $('#statusText').textContent = text.tooltip.replace(/ Click to see .*$/, '');
+}
+
 function describeBoundaryCrossing(crossing) {
     const edge = model.relationships.find((relationship) => relationship.id === crossing.edgeId);
     const outside = model.nodes.find((node) => node.id === crossing.externalNodeId);
@@ -1658,6 +1794,7 @@ function syncSubsystemBoundaries() {
         descriptions.forEach((description) => createSubsystemTerminal(description, positions.get(description.edgeId)));
         refreshHierarchyLabelVisibility();
     }
+    syncRootPortTerminals();
     relationshipObjects.forEach((relationship) => {
         const source = relationshipEndObject(relationship.definition, 'source');
         const target = relationshipEndObject(relationship.definition, 'target');
@@ -1678,6 +1815,7 @@ function refreshSubsystemView() {
     updateEmptyCanvasState();
     // Laid out afresh for the view just entered, from where its contents are now.
     subsystemTerminalSignature = '';
+    rootPortTerminalSignature = '';
     updateRelationships();
     updateModelStatus();
 }
@@ -2125,7 +2263,7 @@ let waypointDragStart = null;
 let terminalDragStart = null;
 dragControls.addEventListener('dragstart', (event) => {
     orbitControls.enabled = false;
-    if (event.object.userData.kind === 'subsystemTerminal') {
+    if (event.object.userData.kind === 'subsystemTerminal' || event.object.userData.kind === 'rootPortTerminal') {
         // A terminal is moved within the subsystem it belongs to; results mode locks the layout as it does nodes.
         terminalDragStart = activeResult ? null : event.object.position.clone();
         return;
@@ -2139,7 +2277,7 @@ dragControls.addEventListener('dragstart', (event) => {
     dragLastPosition = event.object.position.clone();
 });
 dragControls.addEventListener('drag', (event) => {
-    if (event.object.userData.kind === 'subsystemTerminal') {
+    if (event.object.userData.kind === 'subsystemTerminal' || event.object.userData.kind === 'rootPortTerminal') {
         if (!terminalDragStart) {
             event.object.position.copy(event.object.userData.restPosition ?? event.object.position);
             return;
@@ -2169,6 +2307,12 @@ dragControls.addEventListener('drag', (event) => {
 });
 dragControls.addEventListener('dragend', (event) => {
     orbitControls.enabled = true;
+    if (event.object.userData.kind === 'rootPortTerminal') {
+        const start = terminalDragStart;
+        terminalDragStart = null;
+        if (start && !event.object.position.equals(start)) moveRootPortTerminal(event.object.userData.portKey, event.object.position.toArray());
+        return;
+    }
     if (event.object.userData.kind === 'subsystemTerminal') {
         const { subsystemId, edgeId } = event.object.userData;
         const start = terminalDragStart;
@@ -2276,6 +2420,11 @@ window.__terminalScreenPoint = (edgeId) => {
     return terminal ? screenPointFor(terminal.object.position) : null;
 };
 window.__terminalPosition = (edgeId) => subsystemTerminals.get(edgeId)?.object.position.toArray() ?? null;
+// A root port's diamond on screen, by port key (docs/proposals/rootPorts.md).
+window.__rootPortScreenPoint = (portKey) => {
+    const terminal = rootPortTerminals.get(portKey);
+    return terminal ? screenPointFor(terminal.object.position) : null;
+};
 
 // Whether a relationship is drawn in the current view, by title (subsystem scoping hides some).
 window.__relationshipVisible = (title) => [...relationshipObjects.values()].find((entry) => entry.definition.title === title)?.line.visible ?? null;
@@ -2545,6 +2694,8 @@ function applyNodeModel(node, snapshot) {
         }
     });
     refreshNodeLabel(node);
+    // A port's state renamed, its unit or start changed: its terminal and its row in the Ports list say so.
+    if (projectComponentBlock?.ports?.length) { syncRootPortTerminals(); refreshPortsPanel(); }
     invalidateRelationshipBundles();
     syncContextualOverlays();
     updateProgramReads();
@@ -3295,6 +3446,14 @@ function stateFieldsRow(node, state, index) {
         snapshot.states = snapshot.states.filter((candidate) => candidate.id !== state.id);
         snapshot.sourceTerms = snapshot.sourceTerms.filter((term) => term.state !== state.symbol);
     }));
+    // Offered outside as one of the model's own ports (docs/proposals/rootPorts.md), or not.
+    const port = (projectComponentBlock?.ports ?? []).find((candidate) => candidate.stateId === state.id);
+    const offer = document.createElement('label');
+    offer.className = 'statePortField';
+    offer.innerHTML = `<span>Offer outside</span><select data-port-offer aria-label="Offer ${escapeHtml(state.symbol)} outside as a port of this model"><option value="">No</option><option value="in">As an in port</option><option value="out">As an out port</option><option value="both">As a port in and out</option></select>`;
+    $('[data-port-offer]', offer).value = port ? port.direction ?? 'both' : '';
+    $('[data-port-offer]', offer).addEventListener('change', (event) => offerStateOutside(state.id, event.target.value));
+    row.appendChild(offer);
     return row;
 }
 
@@ -5225,6 +5384,9 @@ function openRelationshipEditor(definition, clientX, clientY, { tab = null } = {
 function openAddPalette(clientX, clientY) {
     const palette = $('#addPalette');
     hideCards(palette);
+    // The model's own ports are made at the top; a subsystem's ports are declared on its card.
+    $('#addInputPort').hidden = activeSubsystemId !== null;
+    $('#addOutputPort').hidden = activeSubsystemId !== null;
     positionCard(palette, clientX, clientY);
     renderAddFmuRecent();
 }
@@ -5239,6 +5401,7 @@ function openNodeContextMenu(clientX, clientY) {
     $('#nodeContextEnableAll').hidden = !multi;
     $('#nodeContextCreateEdgeGroup').hidden = !multi;
     renderNodeContextMoveTargets();
+    renderNodeContextOfferPort();
     // Scoped to whichever group is currently open for editing -- a node can technically belong
     // to more than one group, but a single context click can only unambiguously mean "this one".
     const activeGroup = currentEdgeGroup();
@@ -6256,6 +6419,7 @@ async function offerFirstSteps() {
 
 function updateModelStatus() {
     updateEmptyCanvasState();
+    refreshPortsPanel();
     const status = $$('.modelStatus span');
     const visibleNodes = model.nodes.filter((node) => !node.deleted).length;
     const visibleRelationships = model.relationships.filter((relationship) => !relationship.deleted).length;
@@ -6567,6 +6731,7 @@ function projectResultSampleValue(sample) {
     nodeResultPlot.setCursor(sample.time);
     edgeResultPlot.setCursor(sample.time);
     showPartValues();
+    refreshPortValues();
     window.addons.publishEvent('timeline.change', sample.time);
 }
 
@@ -7272,6 +7437,11 @@ function liveControlsOffered() {
 function updateLiveResultControls() {
     // The parameters table locks while results are open (the model is read-only then).
     refreshParametersPanel();
+    // A run of a model with ports is read by its interface: the Ports list opens once for each result, with their values.
+    if (activeResult && portsPanelOpenedForResult !== activeResult && currentRootPorts().length) {
+        portsPanelOpenedForResult = activeResult;
+        setPortsPanelOpen(true);
+    } else refreshPortsPanel();
     renderControlHistory();
     const lifecycle = activeResult?.lifecycle;
     const live = simulationRunning && ['running', 'paused'].includes(lifecycle);
@@ -10230,6 +10400,18 @@ function serializedSubsystemDefinitions() {
     return written.length ? { subsystemDefinitions: written } : {};
 }
 
+// The project's own component block: its root ports (docs/proposals/rootPorts.md), less those whose node is deleted, which go
+// as removeRootPort takes them off (the block too, when the project was not a component before). Undoing the deletion brings
+// the node back, and with it the port, which the block in the window still holds.
+function serializedComponentBlock(visibleNodeIds) {
+    if (!projectComponentBlock) return {};
+    const liveStates = new Set(model.nodes.filter((node) => visibleNodeIds.has(node.id)).flatMap((node) => node.states.map((state) => state.id)));
+    const gone = (projectComponentBlock.ports ?? []).filter((port) => !liveStates.has(port.stateId));
+    if (!gone.length) return { component: structuredClone(projectComponentBlock) };
+    const kept = gone.reduce((current, port) => removeRootPort(current, port.key, { keepBlock: projectOpenedAsComponent }), { component: projectComponentBlock });
+    return kept.component ? { component: kept.component } : {};
+}
+
 function serializeProjectDocument() {
     const visibleNodes = model.nodes.filter((node) => !node.deleted);
     const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
@@ -10250,7 +10432,7 @@ function serializeProjectDocument() {
             ))
             .map((edge) => relationshipToDocument(edge, modelCodecContext)),
         ...serializedSubsystemDefinitions(),
-        ...(projectComponentBlock ? { component: structuredClone(projectComponentBlock) } : {}),
+        ...serializedComponentBlock(visibleNodeIds),
         subsystems: model.subsystems.filter((subsystem) => !subsystem.deleted).map((subsystem) => subsystemToDocument(subsystem, {
             position: subsystemObjects.get(subsystem.id)?.position.toArray() ?? subsystem.position,
             // A terminal moved for an edge that no longer crosses the boundary has nothing left to place.
@@ -10312,6 +10494,8 @@ function clearRenderedModel() {
     });
     removeSubsystemTerminals();
     subsystemTerminalSignature = '';
+    removeRootPortTerminals();
+    rootPortTerminalSignature = '';
     relationshipObjects.clear();
     nodeObjects.clear();
     subsystemObjects.clear();
@@ -10370,6 +10554,7 @@ async function loadProjectDocument(document, {
     // A component file opened as a project opens like any project; a bar says what it is.
     $('#componentProjectBar').hidden = !document.component;
     projectComponentBlock = document.component ? structuredClone(document.component) : null;
+    projectOpenedAsComponent = Boolean(document.component);
     const nextModel = hydrateProjectDocument(document);
     projectAddonData = addonDataOf(document);
     projectTuningSetup = normalizeTuningSetup(document?.tuningSetup);
@@ -14306,6 +14491,11 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
         terminalPointerDown = { edgeId: nodeIntersection.object.userData.edgeId, x: event.clientX, y: event.clientY };
         return;
     }
+    // A root port's diamond: a click shows the port, a drag moves it.
+    if (nodeIntersection?.object.userData.kind === 'rootPortTerminal') {
+        terminalPointerDown = { portKey: nodeIntersection.object.userData.portKey, x: event.clientX, y: event.clientY };
+        return;
+    }
     // A waypoint handle isn't reachable via rootNodeFromIntersection's node-only walk (by
     // design -- it degrades to null for any non-'node' kind), so it falls through to here just
     // like empty canvas would. Bail out without touching selection and let DragControls' own
@@ -14350,9 +14540,11 @@ renderer.domElement.addEventListener('pointermove', (event) => {
 
 renderer.domElement.addEventListener('pointerup', (event) => {
     if (terminalPointerDown) {
-        const { edgeId, x, y } = terminalPointerDown;
+        const { edgeId, portKey, x, y } = terminalPointerDown;
         terminalPointerDown = null;
-        if (event.button === 0 && Math.hypot(event.clientX - x, event.clientY - y) <= 4) selectSubsystemTerminal(edgeId);
+        if (event.button === 0 && Math.hypot(event.clientX - x, event.clientY - y) <= 4) {
+            if (portKey !== undefined) showRootPort(portKey); else selectSubsystemTerminal(edgeId);
+        }
         return;
     }
     if (subsystemPointerDown) {
@@ -18723,6 +18915,11 @@ function refreshHierarchyLabelVisibility() {
         classes.toggle('peek', hoveredLabelKey === `t${edgeId}`);
         label.visible = allowed(`t${edgeId}`, classes.contains('selected') || classes.contains('peek'));
     });
+    rootPortTerminals.forEach(({ label }, key) => {
+        const classes = label.element.classList;
+        classes.toggle('peek', hoveredLabelKey === `p${key}`);
+        label.visible = allowed(`p${key}`, classes.contains('peek'));
+    });
 }
 
 // Works out again which labels to leave out, from where they fall on screen now: called a few times a second, since
@@ -19061,6 +19258,14 @@ function fitCurrentView() {
     nodeObjects.forEach((object) => {
         if (object.visible) bounds.expandByObject(object);
     });
+    // The model's own ports are part of what it shows: their terminals, with room for the label beside each.
+    if (projectComponentBlock?.ports?.length) {
+        syncRootPortTerminals();
+        rootPortTerminals.forEach(({ object, label }) => {
+            bounds.expandByPoint(object.position);
+            bounds.expandByPoint(object.position.clone().add(new THREE.Vector3(label.center.x === 1 ? -2.6 : 2.6, 0, 0)));
+        });
+    }
     if (bounds.isEmpty()) {
         orbitControls.target.set(0, -0.7, 0);
         camera.position.set(0, 7.5, 19);
@@ -20152,6 +20357,8 @@ function reconcileModel(current, next) {
     model.sharedParameters = [...nextModel.sharedParameters, ...model.sharedParameters.filter((shared) => !nextShared.has(shared.id))];
     const nextDefinitions = new Set(nextModel.subsystemDefinitions.map((definition) => definition.id));
     model.subsystemDefinitions = [...nextModel.subsystemDefinitions, ...(model.subsystemDefinitions ?? []).filter((definition) => !nextDefinitions.has(definition.id))];
+    // The project's own ports come with the document (a port declared, renamed or removed is a document change, undone as one).
+    projectComponentBlock = next.component ? structuredClone(next.component) : null;
     applySubsystemVisibility();
     subsystemTerminalSignature = '';
     invalidateRelationshipBundles();
@@ -21131,6 +21338,266 @@ $('#subsystemCancel').addEventListener('click', () => $('#subsystemDialog').clos
 $('#subsystemDialog form').addEventListener('submit', (event) => {
     event.preventDefault();
     if (createSubsystemFromSelection($('#subsystemName').value)) $('#subsystemDialog').close();
+});
+
+// ---- The Ports panel, Add › Input port and Output port, and offering a state outside (docs/proposals/rootPorts.md) -------
+// The model's own ports in one list, opened from the Ports button: each named, its direction, its node and state, whether
+// anything reaches it ("nothing connected · stays at 20 °C", its start editable in place) and, while results are open, its
+// value at the time shown. Every change is a document change, undone as one step.
+
+// The name the project's component block takes when its first port makes one: the project's file name.
+function projectComponentName() {
+    const name = String(currentProjectFilename ?? '').replace(/\.kjt$/i, '').trim();
+    return name && name !== 'untitled' ? name : 'Model';
+}
+
+function declareProjectPort(stateId, change, message) {
+    return applyDocumentChange((document_) => declareRootPort(document_, { stateId, componentName: projectComponentName(), ...change }).document, message);
+}
+
+function removeProjectPort(key, message = 'Port removed · its node stays in the model') {
+    return applyDocumentChange((document_) => removeRootPort(document_, key, { keepBlock: projectOpenedAsComponent }), message);
+}
+
+// A state offered outside in a direction, or no longer offered (''): from a state's fields, the node's right-click menu.
+function offerStateOutside(stateId, direction) {
+    const port = (projectComponentBlock?.ports ?? []).find((candidate) => candidate.stateId === stateId);
+    if (!direction) return port ? removeProjectPort(port.key, 'No longer a port') : false;
+    return declareProjectPort(stateId, { direction }, `${direction === 'in' ? 'An in port' : direction === 'out' ? 'An out port' : 'A port in and out'} of this model now: see Ports`);
+}
+
+function setPortsPanelOpen(open, { highlight = null } = {}) {
+    $('#portsPanel').hidden = !open;
+    $('#portsButton').ariaExpanded = String(open);
+    $('#portsButton').classList.toggle('active', open);
+    portsPanelHighlight = open ? highlight : null;
+    if (!open) return;
+    refreshPortsPanel();
+    if (highlight !== null) $(`#portsList [data-port-key="${highlight}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+
+// A port's node and state, as a person finds them: "Room · Temperature", with where it is when inside a subsystem.
+function portOwnerText(port) {
+    const node = model.nodes.find((candidate) => candidate.id === port.nodeId);
+    const state = node?.states.find((candidate) => candidate.id === port.stateId);
+    const path = node?.subsystemId != null ? ` · ${subsystemPathName(node.subsystemId)}` : '';
+    return `${node?.title ?? 'Node'} · ${state?.label || state?.symbol || port.symbol}${path}`;
+}
+
+// The value a port's state shows now: its value at the time shown while results are open.
+function portValueNow(port) {
+    const state = model.nodes.find((candidate) => candidate.id === port.nodeId)?.states.find((candidate) => candidate.id === port.stateId);
+    return state?.value ?? portStartText(port);
+}
+
+function refreshPortValues() {
+    if ($('#portsPanel').hidden) return;
+    const ports = new Map(currentRootPorts().map((port) => [port.key, port]));
+    $$('#portsList [data-port-value]').forEach((element) => {
+        const port = ports.get(Number(element.dataset.portValue));
+        if (port) element.textContent = `now ${portValueNow(port)}`;
+    });
+}
+
+function portRow(port, locked) {
+    const row = document.createElement('div');
+    row.className = `portRow${portsPanelHighlight === port.key ? ' highlighted' : ''}`;
+    row.dataset.portKey = String(port.key);
+    const status = rootPortStatus(port, portStartText(port));
+    const said = status || (takesFromOutside(port) ? 'set inside this model too' : 'offered outside');
+    row.innerHTML = `
+        <input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}" maxlength="80">
+        <select data-port-direction aria-label="Port direction"><option value="in">In</option><option value="out">Out</option><option value="both">In and out</option></select>
+        <button data-port-remove type="button" title="Stop offering it outside; its node stays">Remove</button>
+        <div class="portRowDetail">
+            <button class="portNode" data-port-node type="button" title="Select its node">${escapeHtml(portOwnerText(port))}</button>
+            <span>${escapeHtml(port.symbol)}${port.unit ? ` · ${escapeHtml(port.unit)}` : ''}</span>
+            <span class="portRowStatus${status ? ' unconnected' : ''}" data-port-status>${escapeHtml(said)}</span>
+            ${status && !locked ? '<label>starts at <input data-port-start type="number" step="any" aria-label="Start value"></label>' : ''}
+            ${locked ? `<span class="portRowValue" data-port-value="${port.key}"></span>` : ''}
+        </div>`;
+    $('[data-port-name]', row).value = port.named ? port.name : '';
+    $('[data-port-direction]', row).value = port.direction;
+    if ($('[data-port-start]', row)) $('[data-port-start]', row).value = String(port.startValue);
+    if ($('[data-port-value]', row)) $('[data-port-value]', row).textContent = `now ${portValueNow(port)}`;
+    row.querySelectorAll('input, select, [data-port-remove]').forEach((control) => { control.disabled = locked; });
+    $('[data-port-name]', row).addEventListener('change', (event) => declareProjectPort(port.stateId, { name: event.target.value }, event.target.value.trim() ? `Port named ${event.target.value.trim()}` : 'Port named after its state'));
+    $('[data-port-direction]', row).addEventListener('change', (event) => declareProjectPort(port.stateId, { direction: event.target.value }, `${port.name}: ${portDirectionLabel(event.target.value).toLowerCase()}`));
+    $('[data-port-remove]', row).addEventListener('click', () => removeProjectPort(port.key));
+    $('[data-port-start]', row)?.addEventListener('change', (event) => {
+        const node = nodeObjects.get(port.nodeId);
+        const value = Number(event.target.value);
+        if (!node || !Number.isFinite(value)) return;
+        changeNodeModel(node, (snapshot) => {
+            const target = snapshot.states.find((candidate) => candidate.id === port.stateId);
+            target.initialValue = value;
+            ({ text: target.value, exact: target.exactValue } = stateValueText(target.initialValue, target.unit));
+        });
+        $('#statusText').textContent = `${port.name} starts at ${stateValueText(value, port.unit).text}`;
+    });
+    $('[data-port-node]', row).addEventListener('click', () => {
+        const node = model.nodes.find((candidate) => candidate.id === port.nodeId && !candidate.deleted);
+        if (!node) return;
+        if ((node.subsystemId ?? null) !== activeSubsystemId) enterSubsystem(node.subsystemId ?? null);
+        const object = nodeObjects.get(node.id);
+        if (object?.visible) selectNode(object);
+    });
+    return row;
+}
+
+function refreshPortsPanel() {
+    const panel = $('#portsPanel');
+    if (panel.hidden) return;
+    const locked = Boolean(activeResult);
+    const ports = currentRootPorts();
+    // Keyboard focus kept across the redraw an edit makes.
+    const focused = document.activeElement;
+    const focusedKey = panel.contains(focused) ? focused.closest('[data-port-key]')?.dataset.portKey : null;
+    const focusedField = focusedKey ? [...focused.attributes].map((attribute) => attribute.name).find((name) => name.startsWith('data-port-')) : null;
+    $('#portsList').replaceChildren(...ports.map((port) => portRow(port, locked)));
+    if (focusedKey && focusedField) $(`#portsList [data-port-key="${focusedKey}"] [${focusedField}]`)?.focus();
+    $('#portsSummary').textContent = ports.length ? `${portCountText(ports)} · what this model offers outside` : 'None yet';
+    $('#portsEmpty').hidden = ports.length > 0;
+    $('#portsReadOnly').hidden = !locked;
+    $('#portsAddInput').disabled = locked;
+    $('#portsAddOutput').disabled = locked;
+    const portStates = new Set(ports.map((port) => port.stateId));
+    const choices = model.nodes.filter((node) => !node.deleted).flatMap((node) => node.states.filter((state) => !portStates.has(state.id)).map((state) => ({
+        label: `${node.title} · ${state.label || state.symbol}${node.subsystemId != null ? ` · ${subsystemPathName(node.subsystemId)}` : ''}`, stateId: state.id
+    })));
+    const select = $('#portsMakeState');
+    select.replaceChildren(new Option(choices.length ? 'Choose a state…' : model.nodes.some((node) => !node.deleted) ? 'Every state is a port' : 'No states yet', ''), ...choices.map((choice) => new Option(choice.label, String(choice.stateId))));
+    select.disabled = locked || !choices.length;
+}
+
+$('#portsButton').addEventListener('click', () => setPortsPanelOpen($('#portsPanel').hidden));
+$('#closePortsPanel').addEventListener('click', () => setPortsPanelOpen(false));
+$('#portsAddInput').addEventListener('click', () => openRootPortDialog('in'));
+$('#portsAddOutput').addEventListener('click', () => openRootPortDialog('out'));
+$('#portsMakeState').addEventListener('change', (event) => {
+    const stateId = Number(event.target.value);
+    if (!event.target.value) return;
+    // Something already reaches it: it is worked out here and offered outside. Nothing reaches it: it takes a value from outside.
+    const reached = (termsReachingStates(model.nodes.filter((node) => !node.deleted), model.relationships.filter((edge) => !edge.deleted)).get(stateId) ?? []).length > 0;
+    declareProjectPort(stateId, { direction: reached ? 'out' : 'in' }, `Made ${reached ? 'an out' : 'an in'} port: change its direction in the list`);
+});
+
+// Where a new port's node goes: at the left edge of what is shown for an input, the right for an output, below the ports
+// already on that side.
+function rootPortNodePosition(direction) {
+    const shown = [...nodeObjects.values(), ...subsystemObjects.values()].filter((object) => object.visible);
+    const onSide = currentRootPorts().filter((port) => (direction === 'in' ? port.direction === 'in' : port.direction !== 'in')).length;
+    if (!shown.length) return [direction === 'in' ? -3 : 3, -0.7 - 2.6 * onSide, 0];
+    const box = new THREE.Box3();
+    shown.forEach((object) => box.expandByPoint(object.position));
+    const centre = box.getCenter(new THREE.Vector3());
+    return [direction === 'in' ? box.min.x - 5 : box.max.x + 5, box.max.y - 2.6 * onSide, centre.z];
+}
+
+let rootPortDialogDirection = 'in';
+function openRootPortDialog(direction) {
+    if (activeResult) {
+        $('#statusText').textContent = 'Close the results to add a port.';
+        return;
+    }
+    hideCards();
+    rootPortDialogDirection = direction;
+    $('#rootPortDialogTitle').textContent = direction === 'in' ? 'Input port' : 'Output port';
+    $('#rootPortDialogHint').textContent = direction === 'in'
+        ? 'A signal this model takes from outside. Placed in another model, it is what gets connected; run here on its own, nothing is connected to it and it stays at its start value.'
+        : 'A signal this model offers outside. Its node is made with its equation open: type what it is, as "= …".';
+    $('#rootPortName').value = '';
+    $('#rootPortName').placeholder = direction === 'in' ? 'setpoint' : 'command';
+    $('#rootPortUnit').value = '';
+    $('#rootPortDialog').showModal();
+    $('#rootPortName').focus();
+}
+
+// Add › Input port or Output port: a small node holding one state of the port's name and unit, offered outside, made and
+// declared as one undo step. An output's node opens with its equation ready to type.
+function addRootPortNode(direction, name, unit) {
+    if (activeResult) return null;
+    if (activeSubsystemId !== null) enterSubsystem(null);
+    const nodeId = allocateModelEntityId();
+    const stateId = allocateModelEntityId();
+    const title = String(name ?? '').trim() || (direction === 'out' ? 'Output' : 'Input');
+    let key = null;
+    const made = applyDocumentChange((document_) => {
+        // Its state is an Update: a model that said no kinds says them now, as content that says them is put in (sayKindsAlike), its numbers unchanged.
+        document_.nodes.push(portNodeDocument({ name: title, unit, direction, position: rootPortNodePosition(direction), ids: { nodeId, stateId } }));
+        const declared = declareRootPort(document_, { stateId, name: title, direction, componentName: projectComponentName() });
+        key = declared.key;
+        return declared.document;
+    }, `${direction === 'in' ? 'Input' : 'Output'} port “${title}” added${direction === 'in' ? ': with nothing connected, it stays at its start value' : ''}`);
+    if (!made) return null;
+    const object = nodeObjects.get(nodeId);
+    if (object) selectNode(object);
+    // The new terminal is brought into view when it stands outside it.
+    const terminal = rootPortTerminals.get(key)?.object;
+    if (terminal && [-1, 1].some((sign) => Math.abs(terminal.position.clone().add(new THREE.Vector3(sign * 2.6, 0, 0)).project(camera).x) > 0.95)) fitCurrentView();
+    if (direction === 'out' && object) {
+        openStateFields.delete(`${nodeId}:${stateId}`);
+        openFoldedLines.add(`${nodeId}:${stateId}`);
+        openNodeEditor(object.userData.definition, undefined, undefined, { tab: 'equations' });
+        $(`#nodeEditorStates .ownPart[data-state-id="${stateId}"]`)?.focus();
+    }
+    if (!$('#portsPanel').hidden) setPortsPanelOpen(true, { highlight: key });
+    return key;
+}
+
+$('#addInputPort').addEventListener('click', () => openRootPortDialog('in'));
+$('#addOutputPort').addEventListener('click', () => openRootPortDialog('out'));
+$('#rootPortCancel').addEventListener('click', () => $('#rootPortDialog').close());
+$('#rootPortDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const name = $('#rootPortName').value.trim();
+    if (!name) return;
+    $('#rootPortDialog').close();
+    addRootPortNode(rootPortDialogDirection, name, $('#rootPortUnit').value);
+});
+
+// The node's right-click menu: offer its state outside (a node of one state) or choose which in the Ports list.
+function renderNodeContextOfferPort() {
+    const node = selectedNodeIds.size === 1 ? selectedNode?.userData.definition : null;
+    const offer = $('#nodeContextOfferPort');
+    const row = $('#nodeContextPortDirections');
+    offer.hidden = !node || !node.states.length || Boolean(activeResult);
+    row.hidden = true;
+    if (offer.hidden) return;
+    const port = node.states.length === 1 ? (projectComponentBlock?.ports ?? []).find((candidate) => candidate.stateId === node.states[0].id) : null;
+    $('#nodeContextOfferPortHint').textContent = port ? `${node.states[0].label || node.states[0].symbol} is a port, ${portDirectionLabel(port.direction ?? 'both').toLowerCase()}: change or stop it` : node.states.length === 1 ? 'In, out, or in and out: one of this model\'s ports' : 'Choose which of its states in the Ports list';
+}
+
+$('#nodeContextOfferPort').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const node = selectedNode?.userData.definition;
+    if (!node) return;
+    if (node.states.length !== 1) {
+        hideCards();
+        setPortsPanelOpen(true);
+        $('#portsMakeState').focus();
+        return;
+    }
+    const state = node.states[0];
+    const port = (projectComponentBlock?.ports ?? []).find((candidate) => candidate.stateId === state.id);
+    $('#nodeContextPortState').textContent = state.label || state.symbol;
+    $$('#nodeContextPortDirections [data-offer-direction]').forEach((button) => button.classList.toggle('active', port ? (port.direction ?? 'both') === button.dataset.offerDirection : false));
+    if (!$('#nodeContextPortDirections [data-offer-direction=""]')) {
+        const stop = document.createElement('button');
+        stop.type = 'button';
+        stop.dataset.offerDirection = '';
+        stop.textContent = 'Not a port';
+        $('#nodeContextPortDirections').append(stop);
+    }
+    $('#nodeContextPortDirections [data-offer-direction=""]').hidden = !port;
+    $('#nodeContextPortDirections').hidden = false;
+});
+$('#nodeContextPortDirections').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-offer-direction]');
+    const state = selectedNode?.userData.definition.states[0];
+    if (!button || !state) return;
+    hideCards();
+    offerStateOutside(state.id, button.dataset.offerDirection);
 });
 
 // ---- The user's own library of components ---------------------------------------------------------------------------

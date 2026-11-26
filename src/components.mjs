@@ -602,7 +602,8 @@ const stateOwners = (document) => {
 // `{ key, stateId, nodeId, name, named, symbol, unit, direction, kind, startValue, reached }`, in the block's order; `kind`
 // is the state's (`rate` or `update`), `startValue` its initial value, and `reached` says whether anything in the project
 // (a source term, a program, a relationship) changes it, so an in port with nothing reaching it stays at its start when the
-// project runs on its own. A port whose state is gone is left out. A project with no block has none.
+// project runs on its own. A port whose state is gone is left out. A project with no block has none. The canvas's own
+// definitions (a node's `title`, a state's `label`, relationships' `source`/`sourceStateId`) are read as well as a document's.
 export function rootPorts(document) {
     const ports = document?.component?.ports ?? [];
     if (!ports.length) return [];
@@ -617,7 +618,7 @@ export function rootPorts(document) {
         const { node, state } = owner;
         return {
             key: port.key, stateId: state.id, nodeId: node.id,
-            name: port.name || `${node.name} · ${state.name ?? state.symbol}`, named: Boolean(port.name),
+            name: port.name || `${node.name ?? node.title} · ${state.name ?? state.label ?? state.symbol}`, named: Boolean(port.name),
             symbol: state.symbol, unit: state.unit ?? '', direction: port.direction ?? 'both',
             kind: kinds.get(Number(state.id))?.kind ?? 'rate', startValue: Number(state.initialValue ?? 0),
             reached: (reaching.get(Number(state.id)) ?? []).length > 0

@@ -18,7 +18,7 @@
 // - Shared parameters made from a definition carry `subsystemId`, the instance they belong to.
 
 import { collectEntityIds, remapIds } from './graphClipboard.mjs';
-import { sayKindsAlike } from './ratesAndUpdates.mjs';
+import { sayKindsAlike, stateKinds, termsReachingStates } from './ratesAndUpdates.mjs';
 
 const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
 const clone = (value) => structuredClone(value);
@@ -585,6 +585,97 @@ export function removePort(document, subsystemId, key) {
     if (!definition || definition.link) throw new Error('Ports are declared in a local component.');
     definition.document.component.ports = (definition.document.component.ports ?? []).filter((port) => port.key !== key);
     return next;
+}
+
+// ---- Root ports: the project's own component block (docs/proposals/rootPorts.md) --------------------------------------
+
+const portDirections = new Set(['in', 'out', 'both']);
+// The next key of a component's ports, by the rule declarePort keeps: one more than the largest.
+const nextPortKey = (ports) => ports.reduce((max, item) => Math.max(max, Number(item.key) || 0), 0) + 1;
+const stateOwners = (document) => {
+    const owners = new Map();
+    (document.nodes ?? []).forEach((node) => (node.states ?? []).forEach((state) => owners.set(state.id, { node, state })));
+    return owners;
+};
+
+// The project's own ports, its top-level interface: each entry of its `component.ports`, described with its state.
+// `{ key, stateId, nodeId, name, named, symbol, unit, direction, kind, startValue, reached }`, in the block's order; `kind`
+// is the state's (`rate` or `update`), `startValue` its initial value, and `reached` says whether anything in the project
+// (a source term, a program, a relationship) changes it, so an in port with nothing reaching it stays at its start when the
+// project runs on its own. A port whose state is gone is left out. A project with no block has none.
+export function rootPorts(document) {
+    const ports = document?.component?.ports ?? [];
+    if (!ports.length) return [];
+    const owners = stateOwners(document);
+    const nodes = document.nodes ?? [];
+    const edges = document.edges ?? [];
+    const reaching = termsReachingStates(nodes, edges);
+    const kinds = stateKinds(nodes, edges);
+    return ports.map((port) => {
+        const owner = owners.get(port.stateId);
+        if (!owner) return null;
+        const { node, state } = owner;
+        return {
+            key: port.key, stateId: state.id, nodeId: node.id,
+            name: port.name || `${node.name} · ${state.name ?? state.symbol}`, named: Boolean(port.name),
+            symbol: state.symbol, unit: state.unit ?? '', direction: port.direction ?? 'both',
+            kind: kinds.get(Number(state.id))?.kind ?? 'rate', startValue: Number(state.initialValue ?? 0),
+            reached: (reaching.get(Number(state.id)) ?? []).length > 0
+        };
+    }).filter(Boolean);
+}
+
+// Declares a state of the project a root port, renames it, changes its direction, or (with `key`) points an existing port
+// at another state. The first port declared makes the project's component block, `{ name, ports }`, `name` the one given
+// (the project's name), else 'Model'; a component file's block is kept as it is. Returns `{ document, key }`, a new
+// document and the port's key. `name` '' takes a given name off; `direction` 'both' or '' takes the direction off.
+export function declareRootPort(document, { stateId, key = null, name = null, direction = null, componentName = null } = {}) {
+    const next = clone(document);
+    const owner = stateOwners(next).get(stateId);
+    if (!owner) throw new Error('A port must be a state of the project.');
+    if (direction !== null && direction !== '' && !portDirections.has(direction)) throw new Error(`A port's direction is in, out or both, not "${direction}".`);
+    const component = next.component ?? (next.component = { name: componentName?.trim() || 'Model', ports: [] });
+    component.ports = component.ports ?? [];
+    let port;
+    if (key !== null) {
+        port = component.ports.find((item) => item.key === key);
+        if (!port) throw new Error(`No port ${key} in this project.`);
+        if (port.stateId !== stateId && component.ports.some((item) => item.stateId === stateId)) throw new Error('That state is already a port.');
+        port.stateId = stateId;
+    } else {
+        port = component.ports.find((item) => item.stateId === stateId);
+        if (!port) {
+            port = { key: nextPortKey(component.ports), stateId };
+            component.ports.push(port);
+        }
+    }
+    if (name !== null) { if (name.trim()) port.name = name.trim(); else delete port.name; }
+    if (direction !== null) { if (direction && direction !== 'both') port.direction = direction; else delete port.direction; }
+    return { document: next, key: port.key };
+}
+
+// Removes a root port, and where it was put on the canvas. Removing the last one removes the component block again, unless
+// `keepBlock` (the project was a component before its first port was declared here, as a component file is) or the block
+// holds anything else (a description, settling, another field). Returns a new document.
+export function removeRootPort(document, key, { keepBlock = false } = {}) {
+    const next = clone(document);
+    const component = next.component;
+    if (!component) return next;
+    component.ports = (component.ports ?? []).filter((port) => port.key !== key);
+    if (Array.isArray(component.terminalPositions)) {
+        component.terminalPositions = component.terminalPositions.filter((entry) => entry.portKey !== key);
+        if (!component.terminalPositions.length) delete component.terminalPositions;
+    }
+    const onlyNameAndPorts = Object.keys(component).every((field) => field === 'name' || field === 'ports');
+    if (!component.ports.length && !keepBlock && onlyNameAndPorts) delete next.component;
+    return next;
+}
+
+// Root ports whose state is gone (its node deleted) taken off, as removeRootPort would; the document itself when none is.
+export function pruneRootPorts(document, { keepBlock = false } = {}) {
+    const owners = stateOwners(document);
+    const gone = (document?.component?.ports ?? []).filter((port) => !owners.has(port.stateId)).map((port) => port.key);
+    return gone.reduce((current, key) => removeRootPort(current, key, { keepBlock }), document);
 }
 
 // The exposed parameters of an instance: `{ key, sharedParameterId, name, symbol, unit, value, defaultValue, boundTo }`,

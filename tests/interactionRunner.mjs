@@ -7611,11 +7611,25 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.multiWindow && 'opens its own project window through an OS-style file open; no web-edition equivalent' });
 
     await run('the push service: started in Settings, a key made, a live twin following what a script sends, and stopped with the twin attached', async () => {
-        // A free port for the service (and the one after it for gRPC), found the way any program finds one.
-        const port = await new Promise((resolve) => {
-            const probe = createServer();
-            probe.listen(0, '127.0.0.1', () => { const { port: found } = probe.address(); probe.close(() => resolve(found)); });
+        // A free port for the service and the one after it for gRPC. A port the system hands out is free, but the one after it need not
+        // be: the system hands such ports out in turn, so the next is often taken a moment later by another connection (a run once failed
+        // with EADDRINUSE on it). So both are held while they are checked, and another pair is tried until both are free.
+        const listenOn = (wanted) => new Promise((resolve) => {
+            const server = createServer();
+            server.once('error', () => resolve(null));
+            server.listen(wanted, '127.0.0.1', () => resolve(server));
         });
+        const close = (server) => new Promise((resolve) => (server ? server.close(() => resolve()) : resolve()));
+        let port = null;
+        for (let attempt = 0; attempt < 50 && port === null; attempt += 1) {
+            const first = await listenOn(0);
+            const found = first?.address().port;
+            const second = found && found < 65535 ? await listenOn(found + 1) : null;
+            if (first && second) port = found;
+            await close(first);
+            await close(second);
+        }
+        assert.ok(port, 'No two free ports in a row were found for the push service.');
         const directory = await mkdtemp(join(tmpdir(), 'konjugate-push-'));
         let sending = null;
         try {

@@ -27,10 +27,11 @@ export function fmuBoxPorts(node, ports, nodes = []) {
     const inputs = (ports.inputs ?? []).filter((port) => port.causality === 'input').map((port) => {
         const binding = bindings.get(port.key);
         let reads = null;
-        if (binding?.kind === 'state' && binding.nodeId != null) {
-            const source = nodes.find((candidate) => candidate.id === binding.nodeId && !candidate.deleted);
+        if (binding?.kind === 'state' && binding.stateId != null) {
+            // With no node, it reads one of the FMU node's own states (Connect to…'s "this."), as a drag of its output to its input does.
+            const source = binding.nodeId == null ? node : nodes.find((candidate) => candidate.id === binding.nodeId && !candidate.deleted);
             const state = source?.states?.find((candidate) => candidate.id === binding.stateId);
-            reads = { nodeId: binding.nodeId, stateId: binding.stateId, text: source && state ? `${nodeName(source)}.${state.symbol}` : 'a state no longer there' };
+            reads = { nodeId: binding.nodeId ?? node.id, stateId: binding.stateId, text: source && state ? `${source === node ? 'this' : nodeName(source)}.${state.symbol}` : 'a state no longer there' };
         } else if (binding?.kind === 'value') {
             reads = { value: Number(binding.value), text: String(binding.value) };
         }
@@ -95,14 +96,31 @@ export function boxDropProblem(drag, target) {
     const dragged = `${drag.box.name}'s ${drag.terminal.name}`;
     const wanted = drag.role === 'input' ? 'an output, a node or one of its states' : 'an input, a node or one of its states';
     if (!target) return `Nothing was connected: drop ${dragged} on ${wanted}.`;
+    // As the card's Connect to… does not offer it: a program cannot read a switched-off node.
+    if (target.kind === 'node' && target.node.enabled === false && drag.role === 'input') return `Nothing was connected: ${nodeName(target.node)} is switched off. Switch it on to connect ${dragged} to it.`;
     if (target.kind !== 'terminal' || target.role !== drag.role) return '';
     if (target.box.key === drag.box.key && String(target.terminal.key) === String(drag.terminal.key)) return `Nothing was connected: ${dragged} was let go where it started.`;
     return `Nothing was connected: ${target.box.name}'s ${target.terminal.name} is an ${drag.role} too. Drop ${dragged} on ${wanted}.`;
 }
 
+// Whether to ask the library again for an FMU's ports, to draw its box's terminals: never once they are known; once at first; and again
+// a short while after a lookup failed, since it can fail only for now (a project's own FMU still being installed from its file as the
+// project opens, the bug hunt's box without terminals until it was edited). `cached` is what the last lookup gave, `askedAt` when it was
+// asked (null never, "pending" while it runs), `now` the time, in milliseconds.
+export const fmuPortsRetryMs = 2000;
+export function shouldAskFmuPorts(cached, askedAt, now) {
+    if (cached && !cached.error) return false;
+    if (askedAt === null || askedAt === undefined) return true;
+    if (askedAt === 'pending') return false;
+    return now - askedAt >= fmuPortsRetryMs;
+}
+
 // The binding Connect to… writes for an FMU input reading a state: the same entry, so a drag and the card are one thing.
-export function fmuInputBinding(inputKey, source) {
-    return { key: inputKey, kind: 'state', nodeId: source.nodeId, stateId: source.stateId };
+// One of the FMU node's own states (`ownNodeId`) is written as Connect to… writes "this.": without a node.
+export function fmuInputBinding(inputKey, source, ownNodeId = null) {
+    return source.nodeId === ownNodeId && ownNodeId !== null
+        ? { key: inputKey, kind: 'state', stateId: source.stateId }
+        : { key: inputKey, kind: 'state', nodeId: source.nodeId, stateId: source.stateId };
 }
 
 // Whether a value can be set on a state by a relationship: an Update can (a relationship's single equation gives an Update its

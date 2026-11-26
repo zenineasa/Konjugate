@@ -8545,6 +8545,25 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(window, `!document.querySelector('#rootPortDialog').open`, 'The port dialog did not close.');
     };
+    // The bug hunt: the bar still said "a component: no ports yet" once the only port's node was deleted, while the file was no longer one.
+    await run('a project made a component by its one port is no longer one when that port\'s node is deleted, and the bar says so; undone, both come back', async () => {
+        await putAwayLeftovers();
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], subsystems: [], edgeGroups: [],
+            nodes: [{ id: 1, name: 'Room', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C', kind: 'rate' }], sourceTerms: [] }] })}, 'Room.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.node-label-container').length === 1`, 'The room did not load.');
+        await addPortFromMenu('#addInputPort', 'setpoint', '°C');
+        await waitFor(window, `!document.querySelector('#componentProjectBar').hidden && Boolean(window.__debugProject.serialize().component)`, 'The port did not make the project a component.');
+        const portNodeId = (await savedProject()).component.ports[0].nodeId ?? (await savedProject()).nodes.find((node) => node.id !== 1).id;
+        await evaluate(window, `document.querySelector('.node-label-container[data-node="${portNodeId}"] .objectLabel').click()`);
+        await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
+        await waitFor(window, `!window.__debugProject.serialize().nodes.some((node) => node.id === ${portNodeId})`, 'The port\'s node was not deleted.');
+        assert.equal(await evaluate(window, `window.__debugProject.serialize().component`), undefined, 'The file is no longer a component.');
+        await waitFor(window, `document.querySelector('#componentProjectBar').hidden`, 'The bar still says the project is a component.');
+        await undoRedo('undo');
+        await waitFor(window, `!document.querySelector('#componentProjectBar').hidden && window.__debugProject.serialize().component?.ports?.length === 1`, 'Undone, the port and the bar did not come back.');
+        await putAwayLeftovers();
+    });
+
     await run('Add › Input port and Output port make the model\'s own ports, drawn as terminals; run alone, the input stays at its start and the result lists it under Ports', async () => {
         await putAwayLeftovers();
         const project = {
@@ -13339,6 +13358,85 @@ export async function runInteractionTests(driver) {
             for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
         }
     }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
+
+    // The bug hunt's reported "swap": every read into an FMU ended at the middle of its box's left edge, so the arrow from above entered the
+    // lower terminal and the one from below the upper. Each now ends at its own terminal. Also: what the card offers a drag accepts (the
+    // FMU's own output), a drop on a compact label asks which state rather than taking the row that grew under the pointer, and a
+    // switched-off node is not connected to, said why.
+    await run('each read into an FMU ends at its own terminal; a drag accepts what the card offers, asks which state on a compact label, and refuses a switched-off node', async () => {
+        await putAwayLeftovers();
+        const room = {
+            format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [], subsystems: [], edgeGroups: [],
+            nodes: [
+                { id: 1, name: 'Setpoint', position: [-6, 3, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 21, unit: 'degC', kind: 'update' }], sourceTerms: [] },
+                { id: 10, name: 'Room', position: [-6, -3, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 11, name: 'Temperature', symbol: 'temperature', initialValue: 15, unit: 'degC', kind: 'rate' }, { id: 12, name: 'Heater', symbol: 'heater', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] },
+                { id: 20, name: 'Off room', enabled: false, position: [-6, -8, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' }, states: [{ id: 21, name: 'Temperature', symbol: 'temperature', initialValue: 15, unit: 'degC', kind: 'rate' }], sourceTerms: [] }
+            ]
+        };
+        const fmuIdOf = async () => (await savedProject()).nodes.find((node) => node.name === 'PidController').id;
+        const terminal = (id, role, key) => `document.querySelector('.boxPort[data-box="n${id}"][data-box-port="${role}"][data-port-key="${key}"]')`;
+        const labelOf = (name) => `[...document.querySelectorAll('.node-label-container')].find((label) => label.querySelector('strong')?.textContent === ${JSON.stringify(name)})?.querySelector('.objectLabel')`;
+        const setLabels = (mode) => evaluate(window, `(() => { const button = document.querySelector('[data-detail="nodes"]'); for (let guard = 0; guard < 4 && button.dataset.mode !== '${mode}'; guard += 1) button.click(); })()`);
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(room)}, 'Room.kjt')`);
+            await waitFor(window, `document.querySelectorAll('.node-label-container').length === 3`, 'The room did not load.');
+            const path = await evaluate(window, `window.tutorials.fmuPath('pidController/PidController.fmu')`);
+            assert.ok(await evaluate(window, `window.__debugFmuDrop(${JSON.stringify(path)}, 900, 400)`), 'The FMU was not added.');
+            await waitFor(window, `window.__debugProject.serialize().nodes.some((node) => node.name === 'PidController')`, 'The FMU node was not made.', 30000);
+            // Measurement reads the room (below), setpoint the setpoint (above): the bug hunt's picture.
+            const document_ = await savedProject();
+            const pid = document_.nodes.find((node) => node.name === 'PidController');
+            pid.position = [4, 0, 0];
+            pid.implementation.bindings = [{ key: 'measurement', kind: 'state', nodeId: 10, stateId: 11 }, { key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }];
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(document_)}, 'Room.kjt')`);
+            await setLabels('expanded');
+            const id = await fmuIdOf();
+            await waitFor(window, `Boolean(${terminal(id, 'input', 'measurement')}) && Boolean(${terminal(id, 'input', 'setpoint')})`, 'The FMU has no terminals.', 15000);
+            await evaluate(window, `document.querySelector('[data-nav-action="fit"]').click()`);
+            await waitForCanvasAtRest(window);
+            await waitFor(window, `window.__debugProgramReadEnds().filter((end) => end.nodeId === ${id}).length === 2`, 'The reads into the FMU are not drawn.');
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const ends = await evaluate(window, `window.__debugProgramReadEnds().filter((end) => end.nodeId === ${id}).map((end) => {
+                const rect = document.querySelector('.boxPort[data-box="n${id}"][data-box-port="input"][data-port-key="' + end.inputKey + '"]').getBoundingClientRect();
+                return { key: end.inputKey, x: end.x, y: end.y, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+            })`);
+            for (const end of ends) {
+                assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.right) <= 3, `The read into ${end.key} does not end at its own terminal: ${JSON.stringify(end)}`);
+            }
+            // The FMU's own output to its own input, as Connect to… offers "this.command": accepted, the same entry the card writes.
+            await dragBetween(window, await centreOf(window, terminal(id, 'output', 'command')), await centreOf(window, terminal(id, 'input', 'measurement')));
+            const commandId = (await savedProject()).nodes.find((node) => node.id === id).states.find((state) => state.symbol === 'command').id;
+            await waitFor(window, `JSON.stringify(window.__debugProject.serialize().nodes.find((node) => node.id === ${id}).implementation.bindings.find((binding) => binding.key === 'measurement')) === ${JSON.stringify(JSON.stringify({ key: 'measurement', kind: 'state', stateId: commandId }))}`, `The FMU's own output was not connected to its input. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+            // Compact labels: a drop at the middle of the room's name asks which of its two states, whatever row grew under the pointer.
+            await setLabels('compact');
+            await waitForCanvasAtRest(window);
+            await dragBetween(window, await centreOf(window, terminal(id, 'input', 'setpoint')), await centreOf(window, labelOf('Room')));
+            await waitFor(window, `document.querySelector('#boxStateChooser').dataset.open === 'true'`, `Dropped on a compact label, the states were not offered. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+            assert.deepEqual(JSON.parse(await evaluate(window, `JSON.stringify(window.__debugProject.serialize().nodes.find((node) => node.id === ${id}).implementation.bindings.find((binding) => binding.key === 'setpoint'))`)), { key: 'setpoint', kind: 'state', nodeId: 1, stateId: 2 }, 'Nothing changes until a state is chosen.');
+            await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+            await evaluate(window, `document.querySelector('#boxStateChooser').onclose?.()`);
+            // A switched-off node: refused, said why.
+            await setLabels('expanded');
+            await waitForCanvasAtRest(window);
+            await dragBetween(window, await centreOf(window, terminal(id, 'input', 'setpoint')), await centreOf(window, labelOf('Off room')));
+            await waitFor(window, `/^Nothing was connected: Off room is switched off/.test(document.querySelector('#statusText').textContent)`, `The switched-off node was not refused. ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`);
+        } finally {
+            await putAwayLeftovers();
+            const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+            for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
+
+    // The bug hunt: a refusal built from long names filled the top bar and pushed Run and Add off screen.
+    await run('a long status message is shortened on the bar, whole on hover, and never pushes Run or Add off screen', async () => {
+        await putAwayLeftovers();
+        const message = `Setpoint.${'heaterPowerDeliveredByTheVeryLongNamedUpstreamSupplyNetworkSegmentNumberFortyTwo'.repeat(3)} is already set by "${'x'.repeat(200)}": remove that relationship first.`;
+        await evaluate(window, `document.querySelector('#statusText').textContent = ${JSON.stringify(message)}`);
+        await waitFor(window, `document.querySelector('#validationSummary').title === ${JSON.stringify(message)}`, 'The whole message is not given on hover.');
+        const layout = await evaluate(window, `(() => { const run = document.querySelector('#runButton').getBoundingClientRect(); const add = document.querySelector('#addButton').getBoundingClientRect(); return { runRight: run.right, addLeft: add.left, addWidth: add.width, width: window.innerWidth }; })()`);
+        assert.ok(layout.runRight <= layout.width && layout.addWidth > 0 && layout.addLeft >= 0, `Run or Add left the screen: ${JSON.stringify(layout)}`);
+        await putAwayLeftovers();
+    });
 
     await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
         const { waitForStep, clean, readAndGoOn } = tutorialHelpers();

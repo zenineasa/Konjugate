@@ -5,8 +5,9 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
+import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
 import { fmiNodeFromPorts } from '../src/nodeProgram.mjs';
+import { readFile } from 'node:fs/promises';
 
 const room = { id: 1, title: 'Room', states: [{ id: 2, label: 'Temperature', symbol: 'temperature', initialValue: 18, unit: '°C', kind: 'rate' }, { id: 3, label: 'Heater', symbol: 'heater', initialValue: 0, unit: '', kind: 'update' }], sourceTerms: [] };
 const pid = {
@@ -102,4 +103,39 @@ test('a terminal let go where it connects nothing says so', () => {
     assert.equal(boxDropProblem(drag, { kind: 'terminal', box: second, role: 'output', terminal: { key: 'command', name: 'command' } }), '');
     assert.equal(boxDropProblem(drag, { kind: 'node', node: { id: 3 } }), '');
     assert.match(boxDropProblem({ box: first, role: 'output', terminal: { key: 'command', name: 'command' } }, { kind: 'terminal', box: second, role: 'output', terminal: { key: 'command', name: 'command' } }), /is an output too\. Drop PidController's command on an input/);
+});
+
+// The bug hunt: a project opened with its results showed its FMU without terminals until the node was edited. Its ports were asked for
+// while its FMU was still being installed from the file, the failure was kept, and never asked again.
+test('an FMU\'s ports that could not be read are asked for again after a short wait; known ones never', () => {
+    assert.equal(shouldAskFmuPorts(undefined, undefined, 0), true, 'Asked at first.');
+    assert.equal(shouldAskFmuPorts(undefined, 'pending', 10), false, 'Not twice at once.');
+    assert.equal(shouldAskFmuPorts({ error: 'not installed yet' }, 1000, 1000 + fmuPortsRetryMs - 1), false);
+    assert.equal(shouldAskFmuPorts({ error: 'not installed yet' }, 1000, 1000 + fmuPortsRetryMs), true, 'A failed lookup is tried again.');
+    assert.equal(shouldAskFmuPorts({ inputs: [], outputs: [] }, 1000, 1e9), false, 'Known ports are kept.');
+});
+
+test('the project window draws FMU terminals in results mode too, and draws the canvas again when an FMU\'s ports become known', async () => {
+    const renderer = await readFile(new URL('../src/renderer/renderer.mjs', import.meta.url), 'utf8');
+    const sync = renderer.slice(renderer.indexOf('function syncBoxTerminals('), renderer.indexOf('function syncBoxTerminals(') + 400);
+    assert.doesNotMatch(sync, /activeResult/, 'Terminals are drawn whether or not results are open.');
+    assert.equal(renderer.split('fmuPortsCache.set(').length - 1, 1, 'Every lookup is kept through rememberFmuPorts, which draws the canvas again.');
+});
+
+// The bug hunt: the card offered "this.command" for an FMU's input and accepted it, while a drag of the same output to the same input was
+// refused. One rule now: the drag writes the very entry the card writes, and the terminal says what it reads.
+test('an FMU\'s own output dragged to its input is the card\'s "this." binding, and its terminal says so', () => {
+    assert.deepEqual(fmuInputBinding('measurement', { nodeId: 5, stateId: 6 }, 5), { key: 'measurement', kind: 'state', stateId: 6 });
+    assert.deepEqual(fmuInputBinding('measurement', { nodeId: 1, stateId: 2 }, 5), { key: 'measurement', kind: 'state', nodeId: 1, stateId: 2 });
+    const node = { id: 5, title: 'PidController', states: [{ id: 6, symbol: 'command' }], implementation: { kind: 'fmi', bindings: [{ key: 'measurement', kind: 'state', stateId: 6 }, { key: 'setpoint', kind: 'state', stateId: null }], outputs: [] } };
+    const ports = { inputs: [{ key: 'measurement', causality: 'input' }, { key: 'setpoint', causality: 'input' }], outputs: [] };
+    const [measurement, setpoint] = fmuBoxPorts(node, ports, [node]).inputs;
+    assert.deepEqual(measurement.reads, { nodeId: 5, stateId: 6, text: 'this.command' });
+    assert.equal(setpoint.reads, null, 'One reading nothing keeps the FMU\'s own start.');
+});
+
+test('a terminal dropped on a switched-off node is refused, said why', () => {
+    const drag = { box: { key: 'n1', name: 'PidController' }, role: 'input', terminal: { key: 'measurement', name: 'measurement' } };
+    assert.equal(boxDropProblem(drag, { kind: 'node', node: { id: 3, title: 'Room with Konjugate PI', enabled: false } }),
+        'Nothing was connected: Room with Konjugate PI is switched off. Switch it on to connect PidController\'s measurement to it.');
 });

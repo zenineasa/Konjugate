@@ -19,7 +19,8 @@ export function nodeProgramInputCandidates(node, nodes, sharedParameters) {
         candidates.push({ value: `state:${node.id}:${state.id}`, label: `this.${state.symbol}`, unit: state.unit ?? '', group: 'This node', binding: { kind: 'state', stateId: state.id } });
     }
     for (const other of nodes) {
-        if (other.id === node.id) continue;
+        // A switched-off node's states are not offered: the engine refuses a program reading one (providerBindingStateDisabled).
+        if (other.id === node.id || other.enabled === false) continue;
         const name = other.title ?? other.name;
         for (const state of other.states ?? []) {
             candidates.push({ value: `state:${other.id}:${state.id}`, label: `${name}.${state.symbol}`, unit: state.unit ?? '', group: name, binding: { kind: 'state', nodeId: other.id, stateId: state.id } });
@@ -53,6 +54,13 @@ export function nodeProgramInputValue(binding, node) {
     return '';
 }
 
+// What a binding reading a switched-off node's state says, in plain words; null when it reads none.
+function switchedOffSourceProblem(binding, nodes) {
+    if (binding?.kind !== 'state' || binding.nodeId === undefined || binding.nodeId === null) return null;
+    const source = nodes.find((candidate) => candidate.id === binding.nodeId);
+    return source?.enabled === false ? `${source.title ?? source.name} is switched off, so this cannot read it: switch it on, or choose another.` : null;
+}
+
 // Why the program cannot run as written, as { inputs: [errors per row], outputs: [errors per row], errors: [general] }.
 export function nodeProgramErrors(implementation, node, nodes, sharedParameters) {
     const result = { inputs: [], outputs: [], errors: [] };
@@ -75,7 +83,7 @@ export function nodeProgramErrors(implementation, node, nodes, sharedParameters)
         } else if (!value) {
             if (!isFmu) errors.push('Choose what this input reads.');
         }
-        if (value && !known.has(value)) errors.push('What this input read is gone; choose again.');
+        if (value && !known.has(value)) errors.push(switchedOffSourceProblem(binding, nodes) ?? 'What this input read is gone; choose again.');
         result.inputs.push(errors);
     }
     const outputKeys = new Set();

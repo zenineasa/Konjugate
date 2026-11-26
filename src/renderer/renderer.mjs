@@ -113,7 +113,7 @@ import {
     applyRootPortSignals, constantSignalNumber, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
-import { boxDropProblem, fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
+import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortSignalText, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -604,7 +604,8 @@ let linkedWarningRequest = 0;
 let reportedLinkPaths = null;
 // FMU nodes' and instances' terminals, by box (`n<node id>`, `s<subsystem id>`), the FMUs whose ports were asked for, and a drag between terminals (stage 5).
 const boxTerminals = new Map();
-const boxPortsRequested = new Set();
+// When each FMU's ports were last asked for, to draw its terminals (shouldAskFmuPorts): "pending" while asked.
+const boxPortsRequested = new Map();
 let boxPortDrag = null;
 // The Parameter tuning card's setup kept with the project the same way (src/tuningSetup.mjs): read on open, written on save, and counted
 // as unsaved work (addonDataUnsaved) when a run changes it.
@@ -2204,6 +2205,7 @@ function programReads() {
 }
 
 function updateProgramReads() {
+    programReadEndsStale = true;
     const reads = programReads();
     const wanted = new Set(reads.map((read) => read.id));
     for (const [id, object] of programReadObjects) {
@@ -2237,14 +2239,8 @@ function updateProgramReads() {
             object = { line, marker, label };
             programReadObjects.set(read.id, object);
         }
-        const start = fromObject.position.clone();
-        const end = read.to.implementation?.kind === 'fmi' ? fmuInputEnd(toObject) : toObject.position.clone();
-        object.line.geometry.dispose();
-        object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
-        object.line.computeLineDistances();
-        const curve = new THREE.LineCurve3(start, end);
-        positionDirectionMarker(object.marker, curve);
-        object.label.position.copy(start.clone().lerp(end, 0.4));
+        object.read = { fromId: read.from.id, toId: read.to.id, inputKey: read.id.slice(read.id.indexOf(':') + 1), fmu: read.to.implementation?.kind === 'fmi' };
+        positionProgramRead(object);
         const visible = fromObject.visible !== false && toObject.visible !== false;
         object.line.visible = visible;
         object.marker.visible = visible;
@@ -2256,6 +2252,42 @@ function updateProgramReads() {
         element.title = `${read.to.title ?? read.to.name}'s ${read.input} reads ${read.from.title ?? read.from.name}.${read.state.symbol}, at the start of each step: one step late.`;
     }
 }
+
+// A read's line, from its source to where it ends: an FMU's own input terminal (fmuInputEnd), else the reading node.
+function positionProgramRead(object) {
+    const fromObject = nodeObjects.get(object.read.fromId);
+    const toObject = nodeObjects.get(object.read.toId);
+    if (!fromObject || !toObject) return;
+    const start = fromObject.position.clone();
+    const end = object.read.fmu ? fmuInputEnd(toObject, object.read.inputKey) : toObject.position.clone();
+    object.line.geometry.dispose();
+    object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
+    object.line.computeLineDistances();
+    positionDirectionMarker(object.marker, new THREE.LineCurve3(start, end));
+    object.label.position.copy(start.clone().lerp(end, 0.4));
+    object.end = end;
+}
+
+// An FMU's terminals keep their size on screen, so where each stands in the scene changes with the camera: the reads into them are
+// drawn again to their own terminal once the labels have been laid out (render, below), and only when an end has moved.
+let programReadEndsStale = false;
+function refreshProgramReadEnds() {
+    programReadEndsStale = false;
+    for (const object of programReadObjects.values()) {
+        if (!object.read?.fmu) continue;
+        const toObject = nodeObjects.get(object.read.toId);
+        if (!toObject) continue;
+        const end = fmuInputEnd(toObject, object.read.inputKey);
+        if (!object.end || end.distanceToSquared(object.end) > 1e-8) positionProgramRead(object);
+    }
+}
+
+// For the interaction tests: where each read into a node ends on screen, by the reading node and its input.
+window.__debugProgramReadEnds = () => [...programReadObjects.values()].filter((object) => object.read && object.end).map((object) => {
+    const canvas = renderer.domElement.getBoundingClientRect();
+    const point = object.end.clone().project(camera);
+    return { nodeId: object.read.toId, inputKey: object.read.inputKey, x: canvas.left + ((point.x + 1) / 2) * canvas.width, y: canvas.top + ((1 - point.y) / 2) * canvas.height };
+});
 
 // ---- FMU nodes and component instances as boxes with ports (docs/proposals/rootPorts.md, stage 5) -------------------------
 // An FMU node and a component instance are both a part with inputs and outputs: its inputs are terminals on its left edge, its
@@ -2270,12 +2302,15 @@ function knownFmuPorts(definition) {
     const ports = fmuPortsFor(implementation);
     if (ports || !implementation?.fmuId) return ports;
     const key = fmuPortsKey(implementation);
-    if (!boxPortsRequested.has(key) && !fmuPortsCache.has(key)) {
-        boxPortsRequested.add(key);
-        window.extensions.fmuPorts?.(implementation.fmuId, implementation.fmuVersion).then((loaded) => {
-            fmuPortsCache.set(key, loaded ?? { error: 'unknown' });
-            updateRelationships();
-        }, () => fmuPortsCache.set(key, { error: 'unknown' }));
+    if (shouldAskFmuPorts(fmuPortsCache.get(key), boxPortsRequested.get(key), performance.now()) && window.extensions.fmuPorts) {
+        boxPortsRequested.set(key, 'pending');
+        const settle = (loaded) => {
+            boxPortsRequested.set(key, performance.now());
+            rememberFmuPorts(key, loaded ?? { error: 'unknown' });
+            // Failed for now: asked again on a later redraw, once the wait is over.
+            if (!fmuPortsFor(implementation)) setTimeout(() => updateRelationships(), fmuPortsRetryMs + 50);
+        };
+        window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion).then(settle, () => settle(null));
     }
     return null;
 }
@@ -2369,7 +2404,8 @@ function boxTerminalColumn(box, side, terminals) {
 
 // Draws each box's terminals again when what they say changes; cheap otherwise, as it runs with every redraw of the relationships.
 function syncBoxTerminals() {
-    const boxes = activeResult && !boxTerminals.size ? [] : boxesWithPorts();
+    // Drawn in results mode too, where a drag says to close the results first (endBoxPortDrag).
+    const boxes = boxesWithPorts();
     const wanted = new Set(boxes.map((box) => box.key));
     [...boxTerminals.keys()].forEach((key) => { if (!wanted.has(key)) removeBoxTerminals(key); });
     for (const box of boxes) {
@@ -2398,10 +2434,22 @@ function syncBoxTerminals() {
     }
 }
 
-// Where a connection's line ends on an FMU node: its left edge, where its inputs stand, rather than its middle.
-function fmuInputEnd(nodeObject) {
-    if (!boxTerminals.has(`n${nodeObject.userData.id}`)) return nodeObject.position.clone();
-    return nodeObject.localToWorld(new THREE.Vector3(boxEdges(nodeObject).left, boxEdges(nodeObject).middle, 0));
+// Where a connection's line ends on an FMU node: at the input's own terminal, the point on its right edge, where it meets the box
+// (the bug hunt: every read ended at the middle of the box's left edge, so an arrow from below seemed to enter the upper terminal and
+// one from above the lower, the inputs looking swapped). The box's left edge when the terminal is not laid out yet; its middle when it
+// has no terminals.
+function fmuInputEnd(nodeObject, inputKey = null) {
+    const entry = boxTerminals.get(`n${nodeObject.userData.id}`);
+    if (!entry) return nodeObject.position.clone();
+    const edges = boxEdges(nodeObject);
+    const edge = nodeObject.localToWorld(new THREE.Vector3(edges.left, edges.middle, 0));
+    const column = entry.labels.map((label) => label.element).find((element) => element.classList.contains('left'));
+    const terminal = inputKey == null ? null : [...(column?.querySelectorAll('.boxPort') ?? [])].find((button) => button.dataset.portKey === String(inputKey));
+    const rect = terminal?.getBoundingClientRect();
+    const canvas = renderer.domElement.getBoundingClientRect();
+    if (!rect?.height || !canvas.width || !canvas.height) return edge;
+    const depth = edge.clone().project(camera).z;
+    return new THREE.Vector3(((rect.right - canvas.left) / canvas.width) * 2 - 1, -(((rect.top + rect.height / 2) - canvas.top) / canvas.height) * 2 + 1, depth).unproject(camera);
 }
 
 // ---- Dragging to connect ----
@@ -2422,7 +2470,12 @@ function startBoxPortDrag(event, box, role, terminal) {
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     const from = { x: role === 'input' ? rect.left + 6 : rect.left + 6, y: rect.top + rect.height / 2 };
-    boxPortDrag = { box, role, terminal, from, startX: event.clientX, startY: event.clientY, moved: false };
+    // The labels that show their state rows as the drag starts: only on those is a drop on a row that state. Another label opens its
+    // rows under the pointer as it passes (hover), and a drop aimed at its name would land on whichever row grew there (the bug hunt).
+    const rowsShown = new Set([...document.querySelectorAll('.node-label-container')]
+        .filter((label) => { const rows = label.querySelector('dl'); return rows && getComputedStyle(rows).display !== 'none'; })
+        .map((label) => Number(label.dataset.node)));
+    boxPortDrag = { box, role, terminal, from, startX: event.clientX, startY: event.clientY, moved: false, rowsShown };
     boxDragLine().style.display = 'none';
     window.addEventListener('pointermove', moveBoxPortDrag);
     window.addEventListener('pointerup', endBoxPortDrag, { once: true });
@@ -2445,7 +2498,7 @@ function moveBoxPortDrag(event) {
 }
 
 // What a drop landed on: a terminal, a node's state row or label, or a node on the canvas.
-function boxDropTarget(event) {
+function boxDropTarget(event, drag = null) {
     const under = document.elementFromPoint(event.clientX, event.clientY);
     const port = under?.closest('.boxPort');
     if (port) {
@@ -2457,7 +2510,7 @@ function boxDropTarget(event) {
     const label = under?.closest('.node-label-container');
     if (label) {
         const node = model.nodes.find((candidate) => candidate.id === Number(label.dataset.node) && !candidate.deleted);
-        const row = under.closest('dl > div');
+        const row = !drag || drag.rowsShown?.has(Number(label.dataset.node)) ? under.closest('dl > div') : null;
         const index = row ? [...row.parentElement.children].indexOf(row) : -1;
         return node ? { kind: 'node', node, stateId: index >= 0 ? node.states[index]?.id ?? null : null } : null;
     }
@@ -2513,7 +2566,7 @@ async function endBoxPortDrag(event) {
         $('#statusText').textContent = 'Close the results to connect.';
         return;
     }
-    const target = boxDropTarget(event);
+    const target = boxDropTarget(event, drag);
     const problem = boxDropProblem(drag, target);
     if (problem) {
         $('#statusText').textContent = problem;
@@ -2552,17 +2605,17 @@ async function endBoxPortDrag(event) {
     setStateFrom(source, settle);
 }
 
+// What Connect to… offers on the card, a drag accepts: any state of any enabled node, the FMU's own outputs included ("this."), which it
+// then reads a step late, as it reads every input.
 function connectFmuInput(box, input, source) {
-    if (source.nodeId === box.id) {
-        $('#statusText').textContent = `${box.name} cannot read its own output: connect it to another part.`;
-        return;
-    }
     const object = nodeObjects.get(box.id);
     const from = model.nodes.find((node) => node.id === source.nodeId);
     const state = from?.states.find((candidate) => candidate.id === source.stateId);
     if (!object || !state) return;
-    changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, input.key, fmuInputBinding(input.key, source)); });
-    $('#statusText').textContent = `${box.name}'s ${input.name} reads ${from.title}.${state.symbol}, at the start of each step`;
+    changeNodeModel(object, (snapshot) => { snapshot.implementation.bindings = bindPort(snapshot.implementation.bindings, input.key, fmuInputBinding(input.key, source, box.id)); });
+    $('#statusText').textContent = source.nodeId === box.id
+        ? `${box.name}'s ${input.name} reads its own ${state.symbol}, from the step before`
+        : `${box.name}'s ${input.name} reads ${from.title}.${state.symbol}, at the start of each step`;
 }
 
 function setStateFrom(source, target) {
@@ -3869,6 +3922,14 @@ let installedFmus = null;
 // to name, describe and give the start value of each row without waiting; read when the card shows the FMU.
 const fmuPortsCache = new Map();
 const fmuPortsKey = (implementation) => `${implementation?.fmuId}@${implementation?.fmuVersion}`;
+// What a lookup of an FMU's ports gave, kept; when they are newly known (none before, or a lookup that failed), the canvas is drawn
+// again: its box's terminals and the reads into them, whatever asked.
+function rememberFmuPorts(key, ports) {
+    const before = fmuPortsCache.get(key);
+    if (before && !before.error && ports?.error) return;
+    fmuPortsCache.set(key, ports);
+    if (ports && !ports.error && (!before || before.error)) updateRelationships();
+}
 function fmuPortsFor(implementation) {
     const ports = fmuPortsCache.get(fmuPortsKey(implementation));
     return ports && !ports.error ? ports : null;
@@ -4114,10 +4175,10 @@ async function renderNodeProgramFmus(node) {
         select.add(new Option(`${implementation.fmuId} ${implementation.fmuVersion} (not installed here)`, current));
     }
     select.value = current;
-    const known = fmuPortsCache.has(fmuPortsKey(implementation));
+    // Known only once a lookup gave the ports: one that failed before (the project's FMU still being installed) is not.
+    const known = Boolean(fmuPortsFor(implementation));
     const ports = implementation?.fmuId ? await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion) : null;
-    if (ports) fmuPortsCache.set(fmuPortsKey(implementation), ports);
-    if (!known && ports && !ports.error) updateProgramReads();
+    if (ports) rememberFmuPorts(fmuPortsKey(implementation), ports);
     await showFmuNotes(ports);
     const aboutLines = fmuAboutLines(ports && !ports.error ? ports.about : null);
     $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
@@ -4198,7 +4259,7 @@ async function useFmuForNode(node, guid, version) {
         $('#nodeProgramError').textContent = ports?.error ?? 'The FMU could not be read.';
         return;
     }
-    fmuPortsCache.set(`${guid}@${version}`, ports);
+    rememberFmuPorts(`${guid}@${version}`, ports);
     // The node is built from the FMU: a state per output, every parameter and input listed at the FMU's own value, the
     // untouched state a new node starts with gone, and the node named after the FMU while it has a new node's name.
     const definition = node.userData.definition;
@@ -9754,7 +9815,7 @@ function updateRunFmuSteps() {
     if (unknown.length) {
         Promise.all(unknown.map(async (node) => {
             const ports = await window.extensions.fmuPorts?.(node.implementation.fmuId, node.implementation.fmuVersion).catch(() => null);
-            fmuPortsCache.set(fmuPortsKey(node.implementation), ports ?? { error: 'unknown' });
+            rememberFmuPorts(fmuPortsKey(node.implementation), ports ?? { error: 'unknown' });
         })).then(() => { if ($('#runLaunchDialog').open) updateRunFmuSteps(); });
     }
     const check = fmuStepCheck({ globalTimeStep: Number($('#runGlobalTimeStep').value), outputInterval: Number($('#runOutputInterval').value) }, nodes);
@@ -22263,7 +22324,9 @@ function componentBlockName() {
 
 function renderComponentProjectBar() {
     const bar = $('#componentProjectBar');
-    bar.hidden = !projectComponentBlock;
+    // Said as the file says it (serializedComponentBlock): a project made a component by its ports is no longer one once their nodes
+    // are deleted, though the window keeps the ports for an undo to bring back.
+    bar.hidden = !serializedComponentBlock(new Set(model.nodes.filter((node) => !node.deleted).map((node) => node.id))).component;
     if (bar.hidden) return;
     const ports = currentRootPorts();
     const exposed = model.sharedParameters.filter((shared) => shared.exposed && shared.subsystemId == null).length;
@@ -22933,12 +22996,21 @@ function render(time) {
     }
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
+    // The reads into an FMU end at its terminals, laid out just now.
+    if ((cameraMoved || programReadEndsStale) && programReadObjects.size) {
+        refreshProgramReadEnds();
+        renderer.render(scene, camera);
+    }
     releaseSettleWaiters('frame');
     if (cameraStillFrames >= 2) {
         releaseSettleWaiters('camera');
         if (labelsRefreshed) releaseSettleWaiters('labels');
     }
 }
+
+// The status line's whole message on hover, however it was set: shortened on the bar when it is long (styles.css).
+new MutationObserver(() => { $('#validationSummary').title = $('#statusText').textContent; }).observe($('#statusText'), { childList: true, characterData: true, subtree: true });
+$('#validationSummary').title = $('#statusText').textContent;
 
 labelSystemReady = true;
 updateLabelPeek();

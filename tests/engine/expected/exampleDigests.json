@@ -1,6 +1,15 @@
 {
     "copyright": "Copyright © 2026 Zenin Easa Panthakkalakath",
     "recordedWith": "the v1.4.15 engine",
+    "recordedLater": [
+        {
+            "recordedWith": "the engine built from d805907 (its engine last changed in 0d2bf6c), not a release: the v1.4.15 engine cannot run an FMU that keeps its own start values",
+            "examples": [
+                "pidController/HeatedRoom.kjt",
+                "pidController/HeatedRoomPid.kjt"
+            ]
+        }
+    ],
     "configuration": {
         "targetTime": 5,
         "globalTimeStep": 0.01,
@@ -16,6 +25,8 @@
         "excavator.kjt": "f8f38e26f85b8f17b990b8becc37efedaba78ebe62de5a13370db072beb4c339",
         "fourBarLinkage.kjt": "3c79049bf0422af39c99543988657050d24435a0b17a3e2e7de1751d16860e83",
         "heatedWaterTank.kjt": "06ede4a50042916dcf8cdf0573f9ba33d6c21c8cd0a80b67e394c5c9f9c283a5",
+        "pidController/HeatedRoom.kjt": "4f14393dad9c1033390275dd61570b0253ecb69b8f778daef0aea393b4e9c9b2",
+        "pidController/HeatedRoomPid.kjt": "does not run alone (exit 3)",
         "positionControlledJoint.kjt": "d7ef96230ecc0dda4f4738aa8a08c69d6d77d5de9027cf1bcc46d9b87f06e652",
         "pumpSuctionHydraulics.kjt": "6eff01074064eb2a5f2929c09f4a7f62575bf7ef0bce8c52fcd797230011862a",
         "singleJointActuator.kjt": "4f0b17ae6f8907ecf23411ca01e1ebb41aeac22d71a13f93581c982b53107e06",

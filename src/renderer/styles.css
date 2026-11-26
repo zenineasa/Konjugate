@@ -591,6 +591,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     transition: background .12s ease, border-color .12s ease, color .12s ease;
 }
 .simulationReadout:hover, .simulationReadout[aria-expanded="true"] { color: #dbe7eb; background: rgb(255 255 255 / 6%); }
+/* A message made of long names never pushes Run and Add off the bar: shortened, the whole of it on hover (its title). */
+#validationSummary { min-width: 0; max-width: min(460px, 34vw); flex-shrink: 1; }
+#validationSummary #statusText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .simulationReadout i { width: 7px; height: 7px; flex-shrink: 0; background: var(--accent); border-radius: 50%; box-shadow: 0 0 8px rgb(66 201 188 / 60%); }
 .simulationReadout.warning i { background: var(--orange); box-shadow: 0 0 8px rgb(237 159 82 / 60%); }
 .simulationReadout.error i { background: #e06c75; box-shadow: 0 0 8px rgb(224 108 117 / 60%); }

@@ -322,3 +322,14 @@ test('the project window writes program and FMU bindings by key, and never reord
     assert.doesNotMatch(fmus, /\.bindings\s*=/, 'Showing an FMU\'s ports does not change its node\'s bindings.');
     assert.doesNotMatch(fmus, /\.sort\(/, 'Showing an FMU\'s ports does not re-sort its node\'s bindings.');
 });
+
+// The bug hunt: Connect to… offered a switched-off node's states, then the model failed with "Provider binding reads a state of a disabled
+// node". Not offered; an input already reading one says why in plain words; a drag onto one is refused, said why.
+test('a switched-off node\'s states are not offered, and an input reading one says it is switched off', () => {
+    const off = { id: 7, title: 'Room with Konjugate PI', enabled: false, states: [{ id: 8, symbol: 'temperature' }] };
+    const fmu = { id: 9, title: 'PidController', states: [{ id: 10, symbol: 'command' }] };
+    const labels = nodeProgramInputCandidates(fmu, [tank, off, fmu], []).map((candidate) => candidate.label);
+    assert.deepEqual(labels, ['this.command', 'Tank.level', 'Tank.effort']);
+    const implementation = { kind: 'fmi', fmuId: 'g', fmuVersion: '1', bindings: [{ key: 'measurement', kind: 'state', nodeId: 7, stateId: 8 }], outputs: [{ key: 'command', stateId: 10 }] };
+    assert.deepEqual(nodeProgramErrors(implementation, fmu, [tank, off, fmu], []).inputs, [['Room with Konjugate PI is switched off, so this cannot read it: switch it on, or choose another.']]);
+});

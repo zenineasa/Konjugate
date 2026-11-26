@@ -7,6 +7,10 @@
 //
 //   node tests/engine/exampleDigests.mjs <konjugateEngine>            compares
 //   node tests/engine/exampleDigests.mjs <konjugateEngine> --write    records them from that engine (a released one)
+//
+// Each digest says which engine it came from: `recordedWith` for all of them, except the examples listed under `recordedLater`, each
+// list with the engine it was recorded with (an example the released engine cannot run, added after it). --write records every digest
+// from the one engine given, so it leaves no `recordedLater`.
 
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -81,9 +85,15 @@ try {
     } else {
         const expected = JSON.parse(await readFile(expectedPath, 'utf8'));
         assert.deepEqual(expected.configuration, configuration, 'The digests were recorded with another configuration.');
+        const unrecorded = (expected.recordedLater ?? []).flatMap((entry) => entry.examples).filter((name) => !(name in expected.digests));
+        assert.deepEqual(unrecorded, [], 'recordedLater names examples with no digest.');
+        // The engine each example's digest came from.
+        const recordedWith = (name) => (expected.recordedLater ?? []).find((entry) => entry.examples.includes(name))?.recordedWith ?? expected.recordedWith;
         const differing = Object.keys({ ...expected.digests, ...digests }).filter((name) => expected.digests[name] !== digests[name]);
-        assert.deepEqual(differing, [], `These examples no longer give the numbers ${expected.recordedWith} gave, to the bit: ${differing.join(', ')}`);
-        console.log(`Every bundled example (${Object.keys(digests).length}) gives the numbers ${expected.recordedWith} gave, to the bit.`);
+        assert.deepEqual(differing, [], `These examples no longer give the numbers they were recorded with, to the bit: ${differing.map((name) => `${name} (${name in expected.digests ? recordedWith(name) : 'not recorded'})`).join(', ')}`);
+        const bySource = new Map();
+        for (const name of Object.keys(digests)) bySource.set(recordedWith(name), (bySource.get(recordedWith(name)) ?? 0) + 1);
+        console.log(`Every bundled example (${Object.keys(digests).length}) gives the numbers it was recorded with, to the bit: ${[...bySource].map(([source, count]) => `${count} from ${source}`).join('; ')}.`);
     }
 } finally {
     await rm(directory, { recursive: true, force: true });

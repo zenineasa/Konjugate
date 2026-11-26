@@ -41,6 +41,7 @@
 
 import { decodeResultFile, FramedEngineEventDecoder } from './engineProtocol.mjs';
 import { encodeProjectContent } from './browserProjectCodec.mjs';
+import { contentForEngine } from './components.mjs';
 import { ensureCppProvidersReady, ensurePythonProvidersReady } from './webEngineAdapter.mjs';
 import { drainStdinBytes } from './webEngineStdinBuffer.mjs';
 import { startEngineModule } from './webEngineLoad.mjs';
@@ -70,7 +71,7 @@ self.onmessage = async (startEvent) => {
         await ensureCppProvidersReady(Module, content);
         const inputPath = '/live/input.kjt';
         const configurationPath = '/live/runConfiguration.json';
-        Module.FS.writeFile(inputPath, await encodeProjectContent(content));
+        Module.FS.writeFile(inputPath, await encodeProjectContent(contentForEngine(content)));
         Module.FS.writeFile(configurationPath, JSON.stringify(configuration));
 
         const readAndPostSnapshot = () => {

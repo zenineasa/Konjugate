@@ -39,6 +39,8 @@
 import { decodeResultFile } from './engineProtocol.mjs';
 import { fitArguments } from './fitArguments.mjs';
 import { encodeProjectContent } from './browserProjectCodec.mjs';
+// An in port's test signal is applied for the engine, as on the desktop (docs/proposals/rootPorts.md, stage 6).
+import { contentForEngine } from './components.mjs';
 import { startEngineModule } from './webEngineLoad.mjs';
 
 // Python providers (docs/proposals/webEdition.md, phase 4) need a Pyodide interpreter loaded and
@@ -190,7 +192,7 @@ export async function validateWithWebEngine(engineModuleUrl, content) {
         setup: async (Module, directory) => {
             const inputPath = `${directory}/input.kjt`;
             const reportPath = `${directory}/validation.bin`;
-            Module.FS.writeFile(inputPath, await encodeProjectContent(content));
+            Module.FS.writeFile(inputPath, await encodeProjectContent(contentForEngine(content)));
             return { inputPath, reportPath };
         },
         argv: ({ inputPath, reportPath }) => ['validate', inputPath, '--report', reportPath],
@@ -248,7 +250,7 @@ export async function fitWithWebEngine(engineModuleUrl, content, csvContent, con
             const inputPath = `${directory}/input.kjt`;
             const csvPath = `${directory}/measured.csv`;
             const reportPath = `${directory}/fitting.bin`;
-            Module.FS.writeFile(inputPath, await encodeProjectContent(content));
+            Module.FS.writeFile(inputPath, await encodeProjectContent(contentForEngine(content)));
             Module.FS.writeFile(csvPath, csvContent ?? '');
             // An objective goes in a file the engine reads, exactly as the desktop engine is given it; without it the fit would be
             // against the CSV alone, which is not what was asked.
@@ -276,7 +278,7 @@ export async function runWithWebEngine(engineModuleUrl, content, configuration) 
             const inputPath = `${directory}/input.kjt`;
             const configurationPath = `${directory}/runConfiguration.json`;
             const outputPath = `${directory}/result.bin`;
-            Module.FS.writeFile(inputPath, await encodeProjectContent(content));
+            Module.FS.writeFile(inputPath, await encodeProjectContent(contentForEngine(content)));
             Module.FS.writeFile(configurationPath, JSON.stringify(configuration));
             return { inputPath, configurationPath, outputPath };
         },

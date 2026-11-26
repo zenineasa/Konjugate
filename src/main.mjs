@@ -15,6 +15,7 @@ import { decodeObjectiveRunResult, encodeObjectiveRunRequest, frame, objectiveEr
 import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, pythonProviderSdkPath, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
+import { applyRootPortSignals } from './components.mjs';
 import { stripEdgeGroups } from './edgeGroups.mjs';
 import { projectDocumentSignals, resultSignalsToCsv } from './resultExport.mjs';
 import { matchRunConfiguration, parseCliFlags } from './cliArgs.mjs';
@@ -3587,7 +3588,8 @@ async function runCliMode() {
     let execution;
     try {
         execution = await startEngineRun(
-            JSON.stringify(stripEdgeGroups(executionProjectDocument(document))), configuration, options, { retainResult: true }
+            // The project run on its own: its in ports' test signals applied (docs/proposals/rootPorts.md, stage 6).
+            JSON.stringify(stripEdgeGroups(executionProjectDocument(applyRootPortSignals(document)))), configuration, options, { retainResult: true }
         );
     } catch (error) {
         console.error(`The simulation failed: ${error.message}`);

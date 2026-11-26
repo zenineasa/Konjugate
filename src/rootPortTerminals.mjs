@@ -24,18 +24,28 @@ export const takesFromOutside = (port) => port.direction !== 'out';
 
 // What a port does when the project runs on its own: an in port nothing in the project reaches holds its start value,
 // said plainly ("nothing connected · stays at 20 °C"); '' when something reaches it or it only offers a value outside.
-export function rootPortStatus(port, startText) {
+// With a test signal (stage 6), what it does when run here instead ("nothing connected · run here, set to 21 °C").
+export function rootPortStatus(port, startText, signalText = null) {
     if (!takesFromOutside(port) || port.reached) return '';
-    return `nothing connected · stays at ${startText}`;
+    return signalText ? `nothing connected · run here, ${signalText}` : `nothing connected · stays at ${startText}`;
+}
+
+// What a port's test signal does, in a few words: "set to 21 °C", "follows its schedule" (docs/proposals/rootPorts.md, stage 6).
+export function rootPortSignalText(signal, valueText) {
+    if (signal?.kind === 'constant') return `set to ${valueText(signal.value)}`;
+    if (signal?.kind === 'schedule') return `follows its schedule (${signal.samples.length} sample${signal.samples.length === 1 ? '' : 's'})`;
+    return null;
 }
 
 // A terminal's text: `{ badge, name, detail, tooltip }`. `startText` is the port's start value written with its unit.
-export function rootPortTerminalText(port, { startText }) {
-    const status = rootPortStatus(port, startText);
+export function rootPortTerminalText(port, { startText, signalText = null }) {
+    const status = rootPortStatus(port, startText, signalText);
     const unit = port.unit ? port.unit : '';
     const detail = status || [port.symbol, unit].filter(Boolean).join(' · ');
     const kind = port.direction === 'in' ? 'Input port' : port.direction === 'out' ? 'Output port' : 'Port both ways';
-    const when = status ? ` When this model runs on its own, nothing is connected to it, so it stays at ${startText}.` : '';
+    const when = !status ? '' : signalText
+        ? ` When this model runs on its own, nothing is connected to it, and its test signal ${signalText.replace(/^set/, 'sets it')}.`
+        : ` When this model runs on its own, nothing is connected to it, so it stays at ${startText}.`;
     return {
         badge: portBadge(port.direction),
         name: port.name,

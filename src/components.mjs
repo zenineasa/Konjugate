@@ -19,6 +19,7 @@
 
 import { collectEntityIds, remapIds } from './graphClipboard.mjs';
 import { sayKindsAlike, stateKinds, termsReachingStates } from './ratesAndUpdates.mjs';
+import { scheduleError } from './parameterSchedule.mjs';
 
 const endpointNodeId = (endpoint) => Number(endpoint !== null && typeof endpoint === 'object' ? endpoint.nodeId : endpoint);
 const clone = (value) => structuredClone(value);
@@ -621,7 +622,8 @@ export function rootPorts(document) {
             name: port.name || `${node.name ?? node.title} · ${state.name ?? state.label ?? state.symbol}`, named: Boolean(port.name),
             symbol: state.symbol, unit: state.unit ?? '', direction: port.direction ?? 'both',
             kind: kinds.get(Number(state.id))?.kind ?? 'rate', startValue: Number(state.initialValue ?? 0),
-            reached: (reaching.get(Number(state.id)) ?? []).length > 0
+            reached: (reaching.get(Number(state.id)) ?? []).length > 0,
+            signal: port.signal ? clone(port.signal) : null
         };
     }).filter(Boolean);
 }
@@ -697,6 +699,99 @@ export function projectComponentDocument(document, { name = null } = {}) {
         (result.component.terminalPositions ?? []).forEach((entry) => { entry.position = moved(entry.position); });
     }
     return result;
+}
+
+// ---- Test signals for in ports (docs/proposals/rootPorts.md, stage 6) ----------------------------------------------------
+// An in port with nothing connected stays at its start when the project runs on its own; to step-test it there, it may carry a
+// signal, `{ kind: "constant", value }` or `{ kind: "schedule", interpolation, samples }` (a shared parameter's schedule's shape),
+// kept on the port in the project's own component block. The host turns it into a value-setting part on the port's state only when
+// this project is the one being run (applyRootPortSignals): a component placed elsewhere keeps its block in its definition, which
+// nothing reads, so outside drives the port there, and an FMU export never applies it. It changes numbers an older Konjugate would
+// work out differently, so a document carrying one says rootPortSignals in its `requires`, which an older engine refuses by name.
+export const rootPortSignalsRequirement = 'rootPortSignals';
+
+// Why a signal cannot be kept, or '' when it can.
+export function rootPortSignalProblem(signal) {
+    if (signal?.kind === 'constant') return Number.isFinite(Number(signal.value)) && signal.value !== '' && signal.value !== null ? '' : 'A constant needs a number.';
+    if (signal?.kind === 'schedule') return scheduleError(signal);
+    return 'A signal is a constant or a schedule.';
+}
+
+// A root port given a signal, or none (`null`: it stays at its start). Returns a new document.
+export function setRootPortSignal(document, key, signal) {
+    const next = clone(document);
+    const port = (next.component?.ports ?? []).find((item) => item.key === key);
+    if (!port) throw new Error(`No port ${key} in this project.`);
+    if (signal === null) {
+        delete port.signal;
+        return next;
+    }
+    const problem = rootPortSignalProblem(signal);
+    if (problem) throw new Error(problem);
+    port.signal = signal.kind === 'constant'
+        ? { kind: 'constant', value: Number(signal.value) }
+        : { kind: 'schedule', interpolation: signal.interpolation, samples: signal.samples.map(([time, value]) => [Number(time), Number(value)]) };
+    return next;
+}
+
+// Whether a port's signal is used when the project runs on its own: an in port (or one both ways) on an Update nothing in the model
+// reaches. A signal on any other is kept, and says why it is not used.
+export function rootPortSignalUsable(port) {
+    if (port.direction === 'out') return 'An out port offers its value outside: a signal is for an in port.';
+    if (port.kind !== 'update') return `${port.symbol} is a Rate: a signal sets a value, so it is for an in port on an Update.`;
+    if (port.reached) return `${port.symbol} is set inside the model already, so a signal would set it twice.`;
+    return '';
+}
+
+// A document's `requires`, with rootPortSignals while one of its own ports carries a signal and without it otherwise; every other
+// entry kept as it was.
+export function rootPortRequires(requires, component) {
+    const others = (requires ?? []).filter((entry) => entry !== rootPortSignalsRequirement);
+    return (component?.ports ?? []).some((port) => port.signal) ? [...others, rootPortSignalsRequirement] : others;
+}
+
+// The project as it runs on its own: each usable port signal made a value-setting part on its port's state (a constant, or a
+// shared parameter following the schedule, made for the run and named for the port), and rootPortSignals taken off `requires`,
+// since the host has applied it. A document without signals is given back as it is.
+export function applyRootPortSignals(document) {
+    const signalled = rootPorts(document).filter((port) => port.signal && !rootPortSignalUsable(port));
+    const hasRequirement = (document.requires ?? []).includes(rootPortSignalsRequirement);
+    if (!signalled.length && !hasRequirement) return document;
+    const next = clone(document);
+    const allocate = idAllocator(next);
+    const taken = new Set((next.sharedParameters ?? []).map((shared) => shared.symbol));
+    for (const port of signalled) {
+        const node = next.nodes.find((candidate) => candidate.id === port.nodeId);
+        const state = node.states.find((candidate) => candidate.id === port.stateId);
+        const termId = allocate();
+        if (port.signal.kind === 'constant') {
+            const literal = String(port.signal.value);
+            node.sourceTerms = [...(node.sourceTerms ?? []), {
+                id: termId, state: state.symbol, expression: literal, setsValue: true,
+                expressionModel: { latex: literal, output: { stateId: state.id }, bindings: [], mathJson: port.signal.value }, parameters: []
+            }];
+            continue;
+        }
+        let symbol = `${state.symbol}Signal`;
+        for (let number = 2; taken.has(symbol); number += 1) symbol = `${state.symbol}Signal${number}`;
+        taken.add(symbol);
+        const sharedId = allocate();
+        const parameterId = allocate();
+        next.sharedParameters = [...(next.sharedParameters ?? []), {
+            id: sharedId, name: `${port.name} signal`, symbol, value: port.signal.samples[0][1], unit: state.unit ?? '', mode: 'constant',
+            schedule: { interpolation: port.signal.interpolation, samples: clone(port.signal.samples) }
+        }];
+        node.sourceTerms = [...(node.sourceTerms ?? []), {
+            id: termId, state: state.symbol, expression: symbol, setsValue: true,
+            expressionModel: { latex: `\\mathrm{${symbol}}`, output: { stateId: state.id }, bindings: [{ kind: 'parameter', parameterId, symbol }], mathJson: symbol },
+            parameters: [{ id: parameterId, name: `${port.name} signal`, symbol, value: port.signal.samples[0][1], unit: state.unit ?? '', mode: 'constant', sharedParameterId: sharedId }]
+        }];
+    }
+    if (hasRequirement) {
+        next.requires = next.requires.filter((entry) => entry !== rootPortSignalsRequirement);
+        if (!next.requires.length) delete next.requires;
+    }
+    return next;
 }
 
 // The exposed parameters of an instance: `{ key, sharedParameterId, name, symbol, unit, value, defaultValue, boundTo }`,
@@ -838,6 +933,17 @@ export function stripComponents(document) {
     (flat.sharedParameters ?? []).forEach((shared) => { delete shared.subsystemId; delete shared.exposed; });
     (flat.edges ?? []).forEach((edge) => delete edge.subsystemId);
     return flat;
+}
+
+// Project content as an engine is given it: its in ports' test signals applied and rootPortSignals taken off (applyRootPortSignals),
+// so whichever way a run reaches the engine (the run, validation, a replay, the live twin, a fit; desktop or web), the project run on
+// its own runs as one. Content without signals is given back as it was, string for string.
+export function contentForEngine(content) {
+    if (typeof content === 'string' && !content.includes('"signal"') && !content.includes(rootPortSignalsRequirement)) return content;
+    const document = typeof content === 'string' ? JSON.parse(content) : content;
+    const applied = applyRootPortSignals(document);
+    if (applied === document) return content;
+    return typeof content === 'string' ? JSON.stringify(applied) : applied;
 }
 
 // ---- Linked components (docs/proposals/subsystemComponents.md#linked-files-stage-4) -----------------------------------

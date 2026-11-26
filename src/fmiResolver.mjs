@@ -31,6 +31,7 @@ import { parseModelDescription } from './fmiModelDescription.mjs';
 import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { packageKey } from './packageArchive.mjs';
 import { fmuAttachmentsRequirement, fmuStartValuesRequirement } from './nodeProgram.mjs';
+import { contentForEngine } from './components.mjs';
 import { installedFmuArchive } from './fmuPackage.mjs';
 
 export class FmiResolutionError extends Error {
@@ -355,6 +356,8 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
 // (a different storage layout, a different resolver, the same "resolve before validate" shape);
 // src/engineAdapter.mjs runs both passes before every validate/run.
 export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuKeys = [] } = {}) {
+    // An in port's test signal is the host's too, applied before anything else (docs/proposals/rootPorts.md, stage 6).
+    content = contentForEngine(content);
     const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
     let changed = false;
     // An FMU that may be loaded only once in a process (canBeInstantiatedOnlyOncePerProcess) cannot be two nodes: refused, naming them.

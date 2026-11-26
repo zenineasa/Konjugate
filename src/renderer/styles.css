@@ -2764,3 +2764,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .boxPorts.compact .boxPort small { display: none; }
 .boxPorts.compact .boxPort.unconnected i { color: #d8b878; }
 .node-label-container.hasBoxPorts .objectLabel dl, .node-label-container.hasBoxPorts .objectLabel .stateCount { display: none; }
+.portRow .portRowSignal { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: #6f8792; font-size: 7.5px; }
+.portRow .portRowSignal select { height: 22px; font-size: 8px; }
+.portRow .portRowSignal input[data-port-signal-value] { width: 72px; }
+.portRow .portRowSignalNote { flex: 1 1 100%; color: #5f7782; font-size: 7px; }
+.subsystemTerminal.rootPortTerminal.signalled .subsystemTerminalEdge small { color: #9cc1f5; }

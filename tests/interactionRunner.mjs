@@ -8682,6 +8682,49 @@ export async function runInteractionTests(driver) {
         assert.deepEqual(variables, [['command', 0, 'output'], ['setpoint', 1, 'input'], ['measurement', 2, 'input'], ['g', 3, 'parameter'], ['Counter.Count', 4, 'local']]);
     }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
+    // Test signals for in ports (docs/proposals/rootPorts.md, stage 6): a controller step-tested on its own, its setpoint given a step
+    // schedule and its measurement a constant from its Ports list, run, and read there.
+    await run('a controller is step-tested on its own: its in ports get a schedule and a constant from the Ports list, used only when it runs here', async () => {
+        await putAwayLeftovers();
+        const { portsDocument } = await import('./engine/fixtures/fmuPortsFixture.mjs');
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(portsDocument)}, 'Ported controller.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.rootPortTerminal').length === 3`, 'The ported controller did not load.');
+        await evaluate(window, `(() => { if (document.querySelector('#portsPanel').hidden) document.querySelector('#portsButton').click(); })()`);
+        await waitFor(window, `Boolean(document.querySelector('#portsList [data-port-key="1"] [data-port-signal]'))`, 'The setpoint has no "When run here".');
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('#portsList [data-port-key="3"] [data-port-signal]'))`), false, 'An out port has no test signal.');
+        // The setpoint: a schedule, through the schedule dialog, stepping from 20 to 21 at 1 s.
+        await evaluate(window, `(() => { const select = document.querySelector('#portsList [data-port-key="1"] [data-port-signal]'); select.value = 'schedule'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `document.querySelector('#scheduleDialog').open`, 'The schedule dialog did not open for the port.');
+        assert.equal(await evaluate(window, `document.querySelector('#scheduleDialogKicker').textContent`), 'In port');
+        assert.equal(await evaluate(window, `document.querySelector('#scheduleSamples').value`), '0, 20', 'A new schedule starts at the port\'s start.');
+        await evaluate(window, `(() => {
+            const interpolation = document.querySelector('#scheduleInterpolation'); interpolation.value = 'hold'; interpolation.dispatchEvent(new Event('change', { bubbles: true }));
+            const samples = document.querySelector('#scheduleSamples'); samples.value = '0, 20\\n1, 21'; samples.dispatchEvent(new Event('input', { bubbles: true }));
+            document.querySelector('#scheduleSave').click();
+        })()`);
+        await waitFor(window, `!document.querySelector('#scheduleDialog').open`, 'The schedule was not saved.');
+        // The measurement: a constant, 17.
+        await evaluate(window, `(() => { const select = document.querySelector('#portsList [data-port-key="2"] [data-port-signal]'); select.value = 'constant'; select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+        await waitFor(window, `!document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]').hidden`, 'The constant field was not offered.');
+        await typeInto(`document.querySelector('#portsList [data-port-key="2"] [data-port-signal-value]')`, '17');
+        await waitFor(window, `window.__debugProject.serialize().component.ports[1].signal?.value === 17`, 'The constant was not kept.');
+        const saved = await savedProject();
+        assert.deepEqual(saved.component.ports[0].signal, { kind: 'schedule', interpolation: 'hold', samples: [[0, 20], [1, 21]] });
+        assert.deepEqual(saved.requires, ['rootPortSignals'], 'The file says it needs a Konjugate that applies port signals.');
+        await waitFor(window, `/run here, follows its schedule/.test(${rootPortTerminal(1)}?.textContent ?? '') && /run here, set to 17 degC/.test(${rootPortTerminal(2)}?.textContent ?? '')`, 'The terminals do not say what their signals do.');
+        // Run on its own: the setpoint has stepped to 21 and the measurement holds 17; the command has risen.
+        await evaluate(window, `document.querySelector('#closePortsPanel').click()`);
+        await openRunDialog(window);
+        await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '2'; field.dispatchEvent(new Event('input', { bubbles: true })); document.querySelector('#startRun').click(); })()`);
+        await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`, `The step test did not run. ${await evaluate(window, `document.querySelector('#runLaunchError').textContent`)}`, 60000);
+        await waitFor(window, `!document.querySelector('#portsPanel').hidden && Boolean(document.querySelector('#portsList [data-port-value="1"]'))`, 'The result did not open the Ports list.');
+        assert.equal(await evaluate(window, `document.querySelector('#portsList [data-port-value="1"]').textContent`), 'now 21 degC', 'The setpoint followed its step.');
+        assert.equal(await evaluate(window, `document.querySelector('#portsList [data-port-value="2"]').textContent`), 'now 17 degC', 'The measurement held its constant.');
+        assert.match(await evaluate(window, `document.querySelector('#portsList [data-port-value="3"]').textContent`), /^now [1-9]/, 'The command rose.');
+        await putAwayLeftovers();
+        await evaluate(window, `document.querySelector('#closePortsPanel')?.click()`);
+    });
+
     // ---- FMU nodes and component instances as boxes with ports (docs/proposals/rootPorts.md, stage 5) -----------------
     // A drag from a box's terminal to a node's state row (or another terminal), as a person makes it: pressed, moved in steps, let go.
     const dragBetween = async (win, from, to) => {

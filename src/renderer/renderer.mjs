@@ -107,11 +107,12 @@ import { nodeSnapshotExcludedKeys, relationshipSnapshotExcludedKeys, snapshotDef
 import {
     componentCopyOf, componentDocumentOf, componentVersions, declarePort, pasteComponentCopy, describeComponentDocument, exposableParameters, exposeParameter, instanceCount, interfaceChanges, linkConflicts, linkCycle, refreshDefinition, instanceParameters, instancePorts,
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
-    declareRootPort, projectComponentDocument, removeRootPort, rootPorts
+    declareRootPort, projectComponentDocument, removeRootPort, rootPorts,
+    applyRootPortSignals, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
 import { fmuBoxPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, settingRefusal, settingRelationship } from '../boxPorts.mjs';
-import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
+import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortSignalText, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
     subsystemLocations, subsystemMoveTargets
@@ -1505,6 +1506,8 @@ function currentRootPorts() {
 }
 
 const portStartText = (port) => stateValueText(port.startValue, port.unit).text;
+// What a port's test signal does when the project runs on its own, when it has one it can use (stage 6); null otherwise.
+const portSignalText = (port) => (port.signal && !rootPortSignalUsable(port) ? rootPortSignalText(port.signal, (value) => stateValueText(value, port.unit).text) : null);
 
 function removeRootPortTerminals() {
     rootPortTerminals.forEach(({ object, label, line }) => {
@@ -1542,7 +1545,7 @@ function createRootPortTerminal(port, text, { position, side }) {
     object.position.fromArray(position);
     object.userData = { restPosition: object.position.clone(), kind: 'rootPortTerminal', portKey: port.key };
     const element = document.createElement('div');
-    element.className = `subsystemTerminal rootPortTerminal ${port.direction} ${side}${rootPortStatus(port, '') ? ' unconnected' : ''}`;
+    element.className = `subsystemTerminal rootPortTerminal ${port.direction} ${side}${rootPortStatus(port, '') ? ' unconnected' : ''}${portSignalText(port) ? ' signalled' : ''}`;
     element.dataset.rootPort = String(port.key);
     element.innerHTML = `<button class="subsystemTerminalEdge" type="button"><b>${text.badge}</b><strong>${escapeHtml(text.name)}</strong><small>${escapeHtml(text.detail)}</small></button>`;
     $('.subsystemTerminalEdge', element).title = text.tooltip;
@@ -1570,7 +1573,7 @@ function createRootPortTerminal(port, text, { position, side }) {
 // Draws the terminals again when the ports change, and keeps each dotted line on its node as nodes and terminals move.
 function syncRootPortTerminals() {
     const ports = activeSubsystemId === null ? currentRootPorts() : [];
-    const described = ports.map((port) => ({ port, text: rootPortTerminalText(port, { startText: portStartText(port) }) }));
+    const described = ports.map((port) => ({ port, text: rootPortTerminalText(port, { startText: portStartText(port), signalText: portSignalText(port) }) }));
     const signature = JSON.stringify([activeSubsystemId, projectComponentBlock?.terminalPositions ?? [],
         described.map(({ port, text }) => [port.key, port.nodeId, port.direction, port.reached, text.badge, text.name, text.detail])]);
     if (signature !== rootPortTerminalSignature) {
@@ -6859,7 +6862,7 @@ function scheduleEngineValidation(projectDocument = null) {
     renderValidationPending();
     engineValidationTimer = setTimeout(async () => {
         try {
-            const result = await window.engine.validate(JSON.stringify(stripEdgeGroups(executionProjectDocument(projectDocument ?? serializeProjectDocument()))), { supersede: 'model' });
+            const result = await window.engine.validate(JSON.stringify(stripEdgeGroups(executionProjectDocument(applyRootPortSignals(projectDocument ?? serializeProjectDocument())))), { supersede: 'model' });
             // A cancelled validation was superseded by a newer one, which will render its own result.
             if (result.cancelled || revision !== validationRevision) return;
             if (!result.available) {
@@ -7555,7 +7558,7 @@ function resolvedStabilityFindings() {
     let postRun = [];
     if (activeResult.lifecycle === 'completed') {
         if (cachedFingerprintFindings.result !== activeResult) {
-            const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+            const document_ = stripEdgeGroups(executionProjectDocument(applyRootPortSignals(serializeProjectDocument())));
             cachedFingerprintFindings = {
                 result: activeResult,
                 findings: detectInstabilityFingerprint(activeResult, document_).map((finding) => ({
@@ -7707,7 +7710,7 @@ async function checkNodeConvergence(nodeId) {
     if (!activeResult) return;
     convergenceCheckState.set(nodeId, { status: 'checking' });
     renderStabilityFindings();
-    const document_ = stripEdgeGroups(executionProjectDocument(serializeProjectDocument()));
+    const document_ = stripEdgeGroups(executionProjectDocument(applyRootPortSignals(serializeProjectDocument())));
     const runConfiguration = {
         name: 'stabilityConvergenceCheck',
         targetTime: activeResult.targetTime, globalTimeStep: activeResult.globalTimeStep, outputInterval: activeResult.outputInterval
@@ -8055,12 +8058,17 @@ function editParameterRow(entry, patch) {
 
 // ---- A shared parameter's stored schedule ------------------------------------------------------------------------
 let scheduleDialogParameterId = null;
+// An in port's test signal edited here as well (stage 6 of docs/proposals/rootPorts.md): its port's key, or null for a shared parameter.
+let scheduleDialogPortKey = null;
 
 function openScheduleDialog(parameterId) {
     if (activeResult) return;
     const parameter = model.sharedParameters.find((candidate) => candidate.id === parameterId);
     if (!parameter) return;
     scheduleDialogParameterId = parameterId;
+    scheduleDialogPortKey = null;
+    $('#scheduleDialogKicker').textContent = 'Shared parameter';
+    $('#scheduleDialogText').textContent = 'Its value follows these samples over simulation time, in every run, in place of a constant. One sample per line: the time, then the value, with a comma, tab or space between them, so two columns pasted from a spreadsheet work as they are.';
     $('#scheduleDialogTitle').textContent = `${parameter.name} over time`;
     $('#scheduleInterpolation').value = parameter.schedule?.interpolation ?? 'linear';
     // A new schedule starts from the constant it replaces, held from time zero.
@@ -8087,8 +8095,29 @@ function refreshScheduleDialog() {
     $('#scheduleSave').disabled = Boolean(error);
 }
 
+// An in port's schedule for when the project runs on its own: a new one starts at the port's start, held from time zero.
+function openPortScheduleDialog(port) {
+    if (activeResult) return;
+    scheduleDialogParameterId = null;
+    scheduleDialogPortKey = port.key;
+    $('#scheduleDialogKicker').textContent = 'In port';
+    $('#scheduleDialogText').textContent = 'When this model runs on its own, the port follows these samples over simulation time: a step test, say. Never where the model is placed, nor in its FMU. One sample per line: the time, then the value.';
+    $('#scheduleDialogTitle').textContent = `${port.name} when run here`;
+    $('#scheduleInterpolation').value = port.signal?.kind === 'schedule' ? port.signal.interpolation : 'hold';
+    $('#scheduleSamples').value = port.signal?.kind === 'schedule' ? scheduleText(port.signal.samples) : `0, ${port.startValue}`;
+    $('#scheduleRemove').hidden = port.signal?.kind !== 'schedule';
+    refreshScheduleDialog();
+    $('#scheduleDialog').showModal();
+    $('#scheduleSamples').focus();
+}
+
 function saveScheduleDialog() {
     const { schedule, error } = readScheduleDialog();
+    if (!error && scheduleDialogPortKey !== null) {
+        const key = scheduleDialogPortKey;
+        if (applyDocumentChange((document_) => setRootPortSignal(document_, key, { kind: 'schedule', ...schedule }), 'The port follows its schedule when run here')) $('#scheduleDialog').close();
+        return;
+    }
     if (error || scheduleDialogParameterId === null) return;
     changeSharedParameter(scheduleDialogParameterId, (target) => {
         target.schedule = schedule;
@@ -8113,6 +8142,10 @@ $('#scheduleSamples').addEventListener('keydown', (event) => {
 });
 $('#scheduleCancel').addEventListener('click', () => $('#scheduleDialog').close());
 $('#scheduleRemove').addEventListener('click', () => {
+    if (scheduleDialogPortKey !== null) {
+        const key = scheduleDialogPortKey;
+        applyDocumentChange((document_) => setRootPortSignal(document_, key, null), 'The port stays at its start when run here');
+    }
     if (scheduleDialogParameterId !== null) changeSharedParameter(scheduleDialogParameterId, (target) => { delete target.schedule; });
     $('#scheduleDialog').close();
 });
@@ -9536,7 +9569,8 @@ async function startSimulation() {
         // A tutorial's step can ask what the latest run was run with (after a change it asked for, say). The run is the latest from the
         // moment it is asked for, so nothing seen with the one before counts as seen with it while the engine is starting.
         if (tour.active) tutorialRunModel = { jobId: null, document: runDocument, finished: false };
-        const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(runDocument))), {
+        // The project run on its own: its in ports' test signals applied (stage 6); an instance or an export never applies them.
+        const execution = await window.engine.start(JSON.stringify(stripEdgeGroups(executionProjectDocument(applyRootPortSignals(runDocument)))), {
             ...configuration,
             targetTime: runLaunchSettings.targetTime,
             pacing: runLaunchSettings.pacing,
@@ -10822,7 +10856,8 @@ function serializeProjectDocument() {
         version: 1,
         metadata: { units: model.metadata.units },
         // What the model needs of the Konjugate that opens it (docs/projectSchema.md), with an FMU's start values (src/nodeProgram.mjs).
-        ...((requires) => (requires.length ? { requires } : {}))(documentRequires(model.requires, visibleNodes)),
+        // With rootPortSignals while one of its in ports carries a test signal (docs/proposals/rootPorts.md, stage 6).
+        ...((requires) => (requires.length ? { requires } : {}))(rootPortRequires(documentRequires(model.requires, visibleNodes), serializedComponentBlock(visibleNodeIds).component)),
         runConfigurations: structuredClone(model.runConfigurations),
         activeRunConfigurationId: model.activeRunConfigurationId,
         ...serializedSharedParameters(visibleNodeIds),
@@ -21874,8 +21909,9 @@ function portRow(port, locked) {
     const row = document.createElement('div');
     row.className = `portRow${portsPanelHighlight === port.key ? ' highlighted' : ''}`;
     row.dataset.portKey = String(port.key);
-    const status = rootPortStatus(port, portStartText(port));
+    const status = rootPortStatus(port, portStartText(port), portSignalText(port));
     const said = status || (takesFromOutside(port) ? 'set inside this model too' : 'offered outside');
+    const unusable = port.signal ? rootPortSignalUsable(port) : '';
     row.innerHTML = `
         <input data-port-name aria-label="Port name" placeholder="${escapeHtml(port.name)}" maxlength="80">
         <select data-port-direction aria-label="Port direction"><option value="in">In</option><option value="out">Out</option><option value="both">In and out</option></select>
@@ -21886,7 +21922,13 @@ function portRow(port, locked) {
             <span class="portRowStatus${status ? ' unconnected' : ''}" data-port-status>${escapeHtml(said)}</span>
             ${status && !locked ? '<label>starts at <input data-port-start type="number" step="any" aria-label="Start value"></label>' : ''}
             ${locked ? `<span class="portRowValue" data-port-value="${port.key}"></span>` : ''}
-        </div>`;
+        </div>
+        ${takesFromOutside(port) ? `<div class="portRowSignal">
+            <label>When run here <select data-port-signal aria-label="When this model runs on its own, ${escapeHtml(port.name)}"><option value="">stays at its start</option><option value="constant">a constant</option><option value="schedule">a schedule…</option></select></label>
+            <input data-port-signal-value type="number" step="any" aria-label="The constant ${escapeHtml(port.name)} is set to" hidden>
+            <button data-port-signal-edit type="button" hidden>Edit schedule…</button>
+            ${unusable ? `<small class="portRowSignalNote">${escapeHtml(unusable)} It is kept, and not used.</small>` : '<small class="portRowSignalNote">A test signal is used only when this model runs on its own: never where it is placed, nor in its FMU.</small>'}
+        </div>` : ''}`;
     $('[data-port-name]', row).value = port.named ? port.name : '';
     $('[data-port-direction]', row).value = port.direction;
     if ($('[data-port-start]', row)) $('[data-port-start]', row).value = String(port.startValue);
@@ -21906,6 +21948,30 @@ function portRow(port, locked) {
         });
         $('#statusText').textContent = `${port.name} starts at ${stateValueText(value, port.unit).text}`;
     });
+    // Its test signal (stage 6): stays at its start, a constant, or a schedule edited in the schedule dialog.
+    const signal = $('[data-port-signal]', row);
+    if (signal) {
+        const value = $('[data-port-signal-value]', row);
+        const edit = $('[data-port-signal-edit]', row);
+        signal.value = port.signal?.kind ?? '';
+        value.hidden = port.signal?.kind !== 'constant';
+        value.value = port.signal?.kind === 'constant' ? String(port.signal.value) : '';
+        edit.hidden = port.signal?.kind !== 'schedule';
+        [signal, value, edit].forEach((control) => { control.disabled = locked; });
+        const setSignal = (next, message) => applyDocumentChange((document_) => setRootPortSignal(document_, port.key, next), message);
+        signal.addEventListener('change', () => {
+            if (signal.value === '') setSignal(null, `${port.name} stays at its start when run here`);
+            else if (signal.value === 'constant') setSignal({ kind: 'constant', value: port.signal?.kind === 'constant' ? port.signal.value : port.startValue }, `${port.name}: set to a constant when run here`);
+            else {
+                signal.value = port.signal?.kind ?? '';
+                openPortScheduleDialog(port);
+            }
+        });
+        value.addEventListener('change', () => {
+            if (value.value.trim() !== '' && Number.isFinite(Number(value.value))) setSignal({ kind: 'constant', value: Number(value.value) }, `${port.name} is set to ${stateValueText(Number(value.value), port.unit).text} when run here`);
+        });
+        edit.addEventListener('click', () => openPortScheduleDialog(port));
+    }
     $('[data-port-node]', row).addEventListener('click', () => {
         const node = model.nodes.find((candidate) => candidate.id === port.nodeId && !candidate.deleted);
         if (!node) return;

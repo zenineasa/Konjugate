@@ -117,9 +117,9 @@
 
     <dialog id="scheduleDialog" class="passwordDialog scheduleDialog">
         <form method="dialog">
-            <span class="contextKicker">Shared parameter</span>
+            <span class="contextKicker" id="scheduleDialogKicker">Shared parameter</span>
             <strong id="scheduleDialogTitle">Schedule</strong>
-            <p>Its value follows these samples over simulation time, in every run, in place of a constant. One sample per line: the time, then the value, with a comma, tab or space between them, so two columns pasted from a spreadsheet work as they are.</p>
+            <p id="scheduleDialogText">Its value follows these samples over simulation time, in every run, in place of a constant. One sample per line: the time, then the value, with a comma, tab or space between them, so two columns pasted from a spreadsheet work as they are.</p>
             <label><span>Between samples</span><select id="scheduleInterpolation"><option value="linear">Linearly interpolated</option><option value="hold">Each value held until the next sample</option></select></label>
             <label><span>Samples (time, value)</span><textarea id="scheduleSamples" rows="10" spellcheck="false"></textarea></label>
             <p id="scheduleSummary" class="builderHint" role="status"></p>

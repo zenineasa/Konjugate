@@ -73,7 +73,10 @@ export function isHomebrewCask({ platform = process.platform, home, env, exists 
 // sets process.windowsStore for a Store app, and the AppImage runtime sets APPIMAGE to the file it is
 // running. Homebrew is checked before the AppImage: a Linux cask install is an AppImage too, but
 // `brew upgrade` is the right way to update it.
-export function installSource({ platform = process.platform, windowsStore = process.windowsStore, appImagePath = process.env.APPIMAGE, homebrew = isHomebrewCask({ platform }) } = {}) {
+// 'development' is a run from a checkout (`packaged` false: Electron's app.isPackaged), never installed at all, whatever else this machine
+// has installed (a Homebrew cask beside it made a report say "Installed from: Homebrew").
+export function installSource({ platform = process.platform, windowsStore = process.windowsStore, appImagePath = process.env.APPIMAGE, homebrew = isHomebrewCask({ platform }), packaged = true } = {}) {
+    if (!packaged) return 'development';
     if (platform === 'win32' && Boolean(windowsStore)) return 'store';
     if (Boolean(homebrew) && (platform === 'darwin' || platform === 'linux')) return 'homebrew';
     if (platform === 'linux' && typeof appImagePath === 'string' && appImagePath !== '') return 'appimage';

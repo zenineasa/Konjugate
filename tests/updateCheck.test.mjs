@@ -327,3 +327,10 @@ test('the display model imports nothing, so the Welcome window (a page without N
     const source = await readFile(new URL('../src/updatePanel.mjs', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /^\s*import\s/m);
 });
+
+// The bug hunt: a development run on a Mac with the Homebrew cask installed said "Installed from: Homebrew".
+test('installSource: a run that is not packaged is a development run, whatever else the machine has installed', () => {
+    assert.equal(installSource({ platform: 'darwin', homebrew: true, packaged: false }), 'development');
+    assert.equal(installSource({ platform: 'darwin', homebrew: true, packaged: true }), 'homebrew');
+    assert.equal(installSource({ platform: 'darwin', homebrew: false }), 'other', 'Packaged unless said otherwise.');
+});

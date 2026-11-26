@@ -85,7 +85,7 @@ import { programCheckInputs } from '../programConversion.mjs';
 import { describeAssistantProgress } from '../assistantProgress.mjs';
 import { targetTimeIsReachable, validateRunConfigurationValues } from './runConfigurationValidation.mjs';
 import { describeOutdated, heldBackSentence, heldBackText, incompatibleText, installedTypeLabels, outdatedCountsByType, outdatedEntries, summarizeUpdateAll, updatePlan } from './extensionUpdates.mjs';
-import { stateValueText } from './valueFormat.mjs';
+import { shownUnit, stateValueText } from './valueFormat.mjs';
 import { declutterAbove, declutterAbovePhone, declutterLabels } from './labelDeclutter.mjs';
 import { isPhoneLayout } from './phoneLayout.mjs';
 import { offerMissingPlugins } from './missingPlugins.mjs';
@@ -2391,9 +2391,9 @@ function boxTerminalColumn(box, side, terminals) {
         button.dataset.portKey = String(terminal.key);
         const text = side === 'left'
             ? inputTerminalText(terminal, { kind: box.kind, startText: boxTerminalStart(box, terminal) })
-            : { detail: terminal.unit || 'output', tooltip: `${terminal.name}, an output of ${box.name}. Drag it to an input, a component's in port or a Konjugate Update to connect it.` };
+            : { detail: shownUnit(terminal.unit) || 'output', tooltip: `${terminal.name}, an output of ${box.name}. Drag it to an input, a component's in port or a Konjugate Update to connect it.` };
         if (side === 'left' && (box.kind === 'fmu' ? !terminal.reads : !terminal.connected)) button.classList.add('unconnected');
-        button.innerHTML = `<i aria-hidden="true">◆</i><span><strong>${escapeHtml(terminal.name)}${side === 'left' && terminal.unit ? ` <em>${escapeHtml(terminal.unit)}</em>` : ''}</strong><small>${escapeHtml(text.detail)}</small></span>`;
+        button.innerHTML = `<i aria-hidden="true">◆</i><span><strong>${escapeHtml(terminal.name)}${side === 'left' && shownUnit(terminal.unit) ? ` <em>${escapeHtml(shownUnit(terminal.unit))}</em>` : ''}</strong><small>${escapeHtml(text.detail)}</small></span>`;
         button.title = text.tooltip;
         button.addEventListener('pointerdown', (event) => startBoxPortDrag(event, box, side === 'left' ? 'input' : 'output', terminal));
         button.addEventListener('click', (event) => event.stopPropagation());
@@ -3216,7 +3216,7 @@ function ownParts(definition, state, equations) {
 
 // The line a state reads as, closed: its name, symbol, start value and unit.
 function stateSummaryText(state) {
-    return `${state.symbol} · starts at ${formatNumber(state.initialValue ?? 0)}${state.unit ? ` ${state.unit}` : ''}`;
+    return `${state.symbol} · starts at ${formatNumber(state.initialValue ?? 0)}${shownUnit(state.unit) ? ` ${shownUnit(state.unit)}` : ''}`;
 }
 const formatNumber = (value) => (Number.isFinite(Number(value)) ? String(Number(value)) : String(value));
 
@@ -3935,7 +3935,7 @@ function fmuPortsFor(implementation) {
     return ports && !ports.error ? ports : null;
 }
 function fmuValueText(value, unit) {
-    return `${Number.isFinite(value) ? Number(value.toPrecision(12)) : value}${unit ? ` ${unit}` : ''}`;
+    return `${Number.isFinite(value) ? Number(value.toPrecision(12)) : value}${shownUnit(unit) ? ` ${shownUnit(unit)}` : ''}`;
 }
 
 async function refreshInstalledFmus() {

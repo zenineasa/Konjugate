@@ -13438,6 +13438,41 @@ export async function runInteractionTests(driver) {
         await putAwayLeftovers();
     });
 
+    // The bug hunt: under Add › FMU…, a library FMU's name was drawn over what it is ("PidControllerFMI 2.0 · in your library").
+    await run('the Add menu lists an FMU of the library with its name above what it is, not over it', async () => {
+        await putAwayLeftovers();
+        // The web edition's window.extensions can be stood in for; the desktop's is the preload's, so there the real FMU is put in the library.
+        if (driver.kind === 'playwright') {
+            await evaluate(window, `(() => { window.__realExtensionsList = window.__realExtensionsList ?? window.extensions.list; window.extensions.list = async () => [{ packageType: 'fmu', packageId: 'pid', version: '1.0.0', name: 'PidController', manifest: { fmiVersion: '2.0' } }]; })()`);
+        } else {
+            const path = await evaluate(window, `window.tutorials.fmuPath('pidController/PidController.fmu')`);
+            assert.ok(await evaluate(window, `window.extensions.addFmu(${JSON.stringify(path)}).then((added) => Boolean(added && !added.error))`), 'The FMU was not put in the library.');
+        }
+        try {
+            await evaluate(window, `document.querySelector('#addButton').click()`);
+            await waitFor(window, `!document.querySelector('#addFmuRecent').hidden && Boolean(document.querySelector('#addFmuRecent button'))`, 'The library\'s FMU was not listed.');
+            const layout = await evaluate(window, `(() => {
+                const button = document.querySelector('#addFmuRecent button');
+                const range = document.createRange();
+                range.selectNodeContents(button.firstChild);
+                const name = range.getBoundingClientRect();
+                const detail = button.querySelector('small').getBoundingClientRect();
+                return { name: [name.left, name.top, name.right, name.bottom].map(Math.round), detail: [detail.left, detail.top, detail.right, detail.bottom].map(Math.round), text: button.textContent };
+            })()`);
+            const [nameLeft, nameTop, nameRight, nameBottom] = layout.name;
+            const [detailLeft, detailTop, detailRight, detailBottom] = layout.detail;
+            const overlaps = nameLeft < detailRight && nameRight > detailLeft && nameTop < detailBottom && nameBottom > detailTop;
+            assert.equal(overlaps, false, `The name and what it is overlap: ${JSON.stringify(layout)}`);
+        } finally {
+            await evaluate(window, `(() => { if (window.__realExtensionsList) window.extensions.list = window.__realExtensionsList; })()`);
+            await putAwayLeftovers();
+            if (driver.kind !== 'playwright') {
+                const installed = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`).catch(() => []);
+                for (const [guid, version] of installed) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            }
+        }
+    });
+
     await run('an example with a tutorial offers it at the top of its guide, and the guide starts it in its window', async () => {
         const { waitForStep, clean, readAndGoOn } = tutorialHelpers();
         await clean();

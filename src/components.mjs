@@ -775,7 +775,16 @@ export function applyRootPortSignals(document) {
     if (!signalled.length && !hasRequirement) return document;
     const next = clone(document);
     const allocate = idAllocator(next);
-    const taken = new Set((next.sharedParameters ?? []).map((shared) => shared.symbol));
+    // The schedule's symbol is new to the whole model: no shared parameter, state or parameter anywhere goes by it already, so the term
+    // reading it reads that schedule and nothing else ("setpointSignal2" when a state is called "setpointSignal").
+    const taken = new Set([
+        ...(next.sharedParameters ?? []).map((shared) => shared.symbol),
+        ...(next.nodes ?? []).flatMap((node) => [
+            ...(node.states ?? []).map((state) => state.symbol),
+            ...(node.sourceTerms ?? []).flatMap((term) => (term.parameters ?? []).map((parameter) => parameter.symbol))
+        ]),
+        ...(next.edges ?? []).flatMap((edge) => (edge.parameters ?? []).map((parameter) => parameter.symbol))
+    ].filter(Boolean));
     for (const port of signalled) {
         const node = next.nodes.find((candidate) => candidate.id === port.nodeId);
         const state = node.states.find((candidate) => candidate.id === port.stateId);

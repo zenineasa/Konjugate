@@ -1129,9 +1129,11 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* The FMUs already in the library, under Add › FMU… (stage 4 of docs/proposals/fmuImportWorkflow.md). */
 .addFmuRecent { display: grid; gap: 2px; margin: 0 0 4px 34px; }
 .addFmuRecent[hidden] { display: none; }
-.addFmuRecent button { display: block; width: 100%; padding: 4px 8px; color: #aebfc7; background: transparent; border: 0; border-radius: 4px; text-align: left; font-size: 8px; cursor: pointer; }
-.addFmuRecent button:hover { background: #182832; }
-.addFmuRecent button small { margin-left: 6px; color: #60747f; }
+/* Its name, then what it is under it: not the menu's three-column rows (.addPalette > div > button), whose 29 px icon column the name
+   overflowed into the detail. */
+.addPalette .addFmuRecent button { display: block; width: 100%; min-height: 0; padding: 4px 8px; color: #aebfc7; background: transparent; border: 0; border-radius: 4px; text-align: left; font-size: 8px; cursor: pointer; }
+.addPalette .addFmuRecent button:hover { background: #182832; }
+.addPalette .addFmuRecent button small { margin: 1px 0 0; color: #60747f; }
 .runFailureMessage { padding: 0 13px 12px; color: #60747f; font-size: 8px; }
 .runFailureMessage code { display: block; margin-top: 4px; white-space: pre-wrap; word-break: break-word; user-select: text; }
 .validationIssue { display: grid; width: 100%; grid-template-columns: 8px 1fr; gap: 8px; padding: 10px 12px; color: #91a3ad; background: transparent; border: 0; border-bottom: 1px solid #23343e; text-align: left; }

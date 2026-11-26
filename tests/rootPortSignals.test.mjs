@@ -97,3 +97,16 @@ test('a constant is a finite number or text that is one; anything else is refuse
     const [term] = applyRootPortSignals(handWritten).nodes[0].sourceTerms;
     assert.deepEqual([term.expression, term.expressionModel.mathJson], ['21', 21]);
 });
+
+// The bug hunt (suspected): the schedule's symbol avoided only shared parameters' symbols, not a state of the same name.
+test('a schedule\'s symbol for the run avoids every symbol in the model, not only shared parameters\'', () => {
+    const clashing = structuredClone(portsDocument);
+    clashing.nodes[1].states.push({ id: 99, name: 'Measurement signal', symbol: 'measurementSignal', initialValue: 0, unit: '', kind: 'update' });
+    const document = setRootPortSignal(clashing, 2, step);
+    const applied = applyRootPortSignals(document);
+    const shared = applied.sharedParameters.find((item) => item.name === 'measurement signal');
+    assert.equal(shared.symbol, 'measurementSignal2');
+    assert.equal(applied.nodes[1].sourceTerms.at(-1).expression, 'measurementSignal2');
+    // Without a clash, the same symbol as before: a saved project runs as it did.
+    assert.equal(applyRootPortSignals(setRootPortSignal(portsDocument, 2, step)).sharedParameters.find((item) => item.name === 'measurement signal').symbol, 'measurementSignal');
+});

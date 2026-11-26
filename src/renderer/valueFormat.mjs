@@ -17,8 +17,15 @@ export function formatStateNumber(value) {
     return `${Number(mantissa)} × 10${[...String(Number(exponent))].map((character) => superscripts[character]).join('')}`;
 }
 
+// A unit as it is written after a number: none for a dimensionless quantity, which an FMU says as "1" ("0.53", not "0.53 1"). The unit
+// kept in the model is left as it is.
+export function shownUnit(unit) {
+    const text = String(unit ?? '').trim();
+    return text === '1' ? '' : text;
+}
+
 // The label's text and its tooltip: { text, exact }, each with the unit. The tooltip holds every digit.
 export function stateValueText(value, unit = '') {
-    const suffix = unit ? ` ${unit}` : '';
+    const suffix = shownUnit(unit) ? ` ${shownUnit(unit)}` : '';
     return { text: `${formatStateNumber(value)}${suffix}`, exact: `${Number(value)}${suffix}` };
 }

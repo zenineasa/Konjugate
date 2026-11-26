@@ -81,3 +81,7 @@ test('everything is one block: who it goes to, the subject, then the message', (
     const email = formatBugReportEmail(details);
     assert.equal(formatBugReportEmailBlock(email), `To: info@konjugate.com\nSubject: Konjugate problem report (1.2.1)\n\n${email.body}`);
 });
+
+test('a development run says so rather than naming an installer', () => {
+    assert.match(formatBugReportDetails({ version: '2.0.4', source: 'development', platform: 'darwin', arch: 'arm64', osRelease: '25.0.0', electron: '43.2.0', chromium: '140.0.1' }), /Installed from: not installed: a development run from a checkout/);
+});

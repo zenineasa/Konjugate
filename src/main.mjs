@@ -417,7 +417,7 @@ function broadcastUpdateStatus(status) {
 
 async function startUpdateChecks() {
     updateCoordinator = createUpdateCoordinator({
-        source: installSource(),
+        source: installSource({ packaged: app.isPackaged }),
         running: app.getVersion(),
         appImagePath: process.env.APPIMAGE,
         skipStore: createUpdateSkipStore({ directory: app.getPath('userData') }),
@@ -814,7 +814,7 @@ ipcMain.handle('welcomeOpenTutorials', (event) => {
     return true;
 });
 const bugReportDetails = () => ({
-    version: app.getVersion(), source: installSource(), platform: process.platform, arch: process.arch,
+    version: app.getVersion(), source: installSource({ packaged: app.isPackaged }), platform: process.platform, arch: process.arch,
     osRelease: osRelease(), electron: process.versions.electron, chromium: process.versions.chrome
 });
 // "Help & feedback": the rail button's dialog asks for the email's text and for GitHub's page to be opened; the Welcome window's button

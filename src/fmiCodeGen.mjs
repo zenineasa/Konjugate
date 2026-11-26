@@ -100,6 +100,77 @@ function assignValueReferences(model, document) {
     return { stateVariables, parameterVariables, parameterValueReferences };
 }
 
+// With ports declared at the top level (docs/proposals/rootPorts.md, stage 4; src/fmuInterface.mjs), the FMU's variables are the
+// interface the person declared, and value references follow it: the out ports (and ports both ways) first, in port key order,
+// then the in ports, then the exposed parameters, then every other state as an observable local. Renaming a port, or adding a
+// state that is not a port, never moves an interface variable's value reference, so a host's connections survive; the outputs
+// come first because the FMI 3.0 glue refuses a value set below its output count. `stateVariables` stays in the model's own state
+// order (the generated source indexes it), each with its value reference and causality; `parameterVariables` are the exposed
+// parameters, one each however many relationships link to it; every other parameter is baked into the source, as the plain export
+// bakes it. `exposedText` maps a parameter's id (before shared parameters are resolved) to the member that holds its value.
+function assignInterfaceValueReferences(model, document, fmuInterface, linkedSharedParameter) {
+    const outputs = fmuInterface.outputs;
+    const inputs = fmuInterface.inputs;
+    const valueReferenceOf = new Map();
+    let next = 0;
+    outputs.forEach((port) => valueReferenceOf.set(port.stateId, next++));
+    inputs.forEach((port) => valueReferenceOf.set(port.stateId, next++));
+    const parameterVariables = fmuInterface.parameters.map((parameter) => ({
+        valueReference: next++, causality: 'parameter', variability: 'tunable', name: parameter.symbol, unit: parameter.unit ?? '', start: parameter.value ?? 0,
+        sharedParameterId: parameter.sharedParameterId
+    }));
+    const portName = new Map([...outputs, ...inputs].map((port) => [port.stateId, port.name]));
+    const inputIds = new Set(inputs.map((port) => port.stateId));
+    const outputIds = new Set(outputs.map((port) => port.stateId));
+    const stateVariables = [];
+    for (const plan of model.nodePlans) {
+        for (const state of plan.node.states) {
+            const port = portName.has(state.id);
+            if (!port) valueReferenceOf.set(state.id, next++);
+            stateVariables.push({
+                valueReference: valueReferenceOf.get(state.id),
+                causality: inputIds.has(state.id) ? 'input' : outputIds.has(state.id) ? 'output' : 'local',
+                variability: 'continuous',
+                name: port ? portName.get(state.id) : `${plan.node.name}.${state.name}`, unit: state.unit ?? '', start: state.initialValue ?? 0,
+                nodeId: plan.node.id, stateId: state.id
+            });
+        }
+    }
+    const all = [...stateVariables, ...parameterVariables];
+    const names = all.reduce((counts, variable) => counts.set(variable.name, (counts.get(variable.name) ?? 0) + 1), new Map());
+    for (const variable of all) if (names.get(variable.name) > 1) variable.name = `${variable.name} [${variable.valueReference}]`;
+    const sharedValueReference = new Map(parameterVariables.map((variable) => [variable.sharedParameterId, variable.valueReference]));
+    const exposedText = new Map([...linkedSharedParameter].filter(([, sharedId]) => sharedValueReference.has(sharedId))
+        .map(([parameterId, sharedId]) => [parameterId, `parameterValue_${sharedValueReference.get(sharedId)}`]));
+    return { stateVariables, parameterVariables, exposedText, outputCount: outputs.length };
+}
+
+// Which shared parameter each relationship's or node's parameter links to, by the parameter's id, read before the export resolves
+// shared parameters into the terms (which takes the link away). A program's binding to a shared parameter is resolved with the
+// shared parameter's own id, so that id names itself.
+function linkedSharedParameters(document) {
+    const linked = new Map();
+    for (const edge of document.edges ?? []) for (const parameter of edge.parameters ?? []) if (parameter.sharedParameterId != null) linked.set(parameter.id, parameter.sharedParameterId);
+    for (const node of document.nodes ?? []) {
+        for (const term of node.sourceTerms ?? []) for (const parameter of term.parameters ?? []) if (parameter.sharedParameterId != null) linked.set(parameter.id, parameter.sharedParameterId);
+        for (const binding of node.implementation?.bindings ?? []) if (binding.kind === 'parameter' && binding.sharedParameterId != null) linked.set(binding.sharedParameterId, binding.sharedParameterId);
+    }
+    return linked;
+}
+
+// The exposed parameters' symbols read the members a host sets; every other parameter keeps the literal it was baked to.
+function rewriteInterfaceParameterSymbols(model, exposedText) {
+    for (const plan of model.nodePlans) {
+        for (const contribution of symbolOwners(plan)) {
+            for (const value of contribution.symbols.values()) {
+                if (!value.parameter || value.schedule !== undefined) continue;
+                const text = exposedText.get(value.parameter.id);
+                if (text) value.text = text;
+            }
+        }
+    }
+}
+
 // Every parameter symbol entry carries its baked literal text (codeExport.mjs's own export
 // target -- a standalone program has no runtime control stream at all) -- overwritten here to
 // reference a per-instance mutable member instead, the one place FMU export's codegen genuinely
@@ -168,7 +239,9 @@ function cppSettleBlocks(model, providerInfo) {
 // (stripEdgeGroups(executionProjectDocument(...))), matching every other codeExport.mjs entry
 // point. globalTimeStep is read from the model's active run configuration, exactly the way
 // generateStandaloneProgram does.
-export function generateFmiModel(document) {
+export function generateFmiModel(document, { fmuInterface = null } = {}) {
+    if (fmuInterface?.problems?.length) throw new Error(`This model's ports cannot be exported as an FMU's interface: ${fmuInterface.problems.join(' ')}`);
+    const linkedSharedParameter = fmuInterface ? linkedSharedParameters(document) : null;
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
     const globalTimeStep = runConfiguration?.globalTimeStep ?? 0.01;
     // An FMU steps with Euler node by node, or under Stiff with Rodas4 or BDF inside fmi2DoStep, each global step as the engine takes
@@ -185,8 +258,23 @@ export function generateFmiModel(document) {
         if (nodeProvider) throw new Error(`Node "${nodeProvider.node.name}" is a program of its own, which FMU export cannot write under ${integrationMethod(method).name} yet.`);
     }
     const providers = collectProviders(model, 'cpp'); // an FMU is a compiled binary -- C++ only.
-    const { stateVariables, parameterVariables, parameterValueReferences } = assignValueReferences(model, document);
-    rewriteParameterSymbols(model, parameterValueReferences);
+    let stateVariables;
+    let parameterVariables;
+    let outputCount;
+    if (fmuInterface) {
+        const assigned = assignInterfaceValueReferences(model, document, fmuInterface, linkedSharedParameter);
+        ({ stateVariables, parameterVariables, outputCount } = assigned);
+        rewriteInterfaceParameterSymbols(model, assigned.exposedText);
+    } else {
+        const assigned = assignValueReferences(model, document);
+        ({ stateVariables, parameterVariables } = assigned);
+        outputCount = stateVariables.length;
+        rewriteParameterSymbols(model, assigned.parameterValueReferences);
+    }
+    // A host's value for an in port is held as its state's value (src/fmuInterface.mjs): kept in a member as well, so starting the
+    // programs afresh before the first step, which puts every state back to its start, gives it back.
+    const inputVariables = stateVariables.filter((variable) => variable.causality === 'input');
+    const stateIndex = new Map(stateVariables.map((variable, index) => [variable.stateId, index]));
     // A program in the older format can carry arbitrary internal state across evaluate() calls with no generic way to serialize it, so
     // a model with one does not support rollback (fmi2Get/SetFMUstate; konjugate/simulationModel.hpp's supportsStateCapture()). A program
     // in the current format keeps its state in declared memory, which the FMU state carries (docs/proposals/programSdkV2.md, Export parity).
@@ -229,6 +317,7 @@ export function generateFmiModel(document) {
     const programStartMethod = programs.length ? [
         '    void startPrograms() {',
         '        state_ = initialState_;',
+        ...inputVariables.map((variable) => `        state_[${stateIndex.get(variable.stateId)}] = inputValue_${variable.valueReference};`),
         ...providers.filter((provider) => provider.program).map((provider) => {
             const info = providerInfo.get(provider);
             return `        ${info.instanceVariable}.program = ${info.namespaceName}::createProgram();\n        ${info.instanceVariable}.advanced = false;`;
@@ -268,9 +357,10 @@ export function generateFmiModel(document) {
         ].join('\n');
     }).join('\n');
 
-    const parameterSwitchCases = parameterVariables.map((variable) => (
-        `            case ${variable.valueReference}: parameterValue_${variable.valueReference} = value; break;`
-    )).join('\n');
+    const parameterSwitchCases = [
+        ...inputVariables.map((variable) => `            case ${variable.valueReference}: inputValue_${variable.valueReference} = value; state_[${stateIndex.get(variable.stateId)}] = value; break;`),
+        ...parameterVariables.map((variable) => `            case ${variable.valueReference}: parameterValue_${variable.valueReference} = value; break;`)
+    ].join('\n');
     // getOutput answers fmi2GetReal for ANY value reference, not just state outputs -- a host
     // reading back what it just set via fmi2SetReal, or a parameter's current value, needs a real
     // answer here too, not the default 0.0.
@@ -278,7 +368,10 @@ export function generateFmiModel(document) {
         ...stateVariables.map((variable, index) => `            case ${variable.valueReference}: return state_[${index}];`),
         ...parameterVariables.map((variable) => `            case ${variable.valueReference}: return parameterValue_${variable.valueReference};`)
     ].join('\n');
-    const parameterMembers = parameterVariables.map((variable) => `    double parameterValue_${variable.valueReference} = ${doubleLiteral(variable.start)};`).join('\n');
+    const parameterMembers = [
+        ...inputVariables.map((variable) => `    double inputValue_${variable.valueReference} = ${doubleLiteral(variable.start)};`),
+        ...parameterVariables.map((variable) => `    double parameterValue_${variable.valueReference} = ${doubleLiteral(variable.start)};`)
+    ].join('\n');
 
     const stateCaptureMethods = supportsStateCapture ? [
         '',
@@ -294,6 +387,7 @@ export function generateFmiModel(document) {
         '    void restoreState(const std::vector<double>& snapshot) override {',
         '        for (std::size_t index = 0; index < state_.size(); ++index) state_[index] = snapshot[index];',
         parameterVariables.map((variable, index) => `        parameterValue_${variable.valueReference} = snapshot[state_.size() + ${index}];`).join('\n'),
+        inputVariables.map((variable) => `        inputValue_${variable.valueReference} = state_[${stateIndex.get(variable.stateId)}];`).join('\n'),
         programMemoryRestore ? `        std::size_t cursor = state_.size() + ${parameterVariables.length};\n${programMemoryRestore}` : '',
         '    }'
     ].filter(Boolean).join('\n') : '';
@@ -372,7 +466,7 @@ export function generateFmiModel(document) {
         ...(stiff ? [
             ...stiffPieces.members,
             '    // Every input a host may set, for BDF to tell whether one changed between steps.',
-            `    std::vector<double> currentInputs() const { return { ${parameterVariables.map((variable) => `parameterValue_${variable.valueReference}`).join(', ')} }; }`
+            `    std::vector<double> currentInputs() const { return { ${[...inputVariables.map((variable) => `inputValue_${variable.valueReference}`), ...parameterVariables.map((variable) => `parameterValue_${variable.valueReference}`)].join(', ')} }; }`
         ] : []),
         '    bool started_ = false;',
         `    std::vector<double> state_ = { ${stateVariables.map((variable) => doubleLiteral(variable.start)).join(', ')} };`,
@@ -389,5 +483,5 @@ export function generateFmiModel(document) {
         ''
     ].join('\n');
 
-    return { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep };
+    return { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep, outputCount };
 }

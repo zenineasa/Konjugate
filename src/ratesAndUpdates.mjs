@@ -181,8 +181,8 @@ export function sayKindsAlike(existingNodes, incomingNodes, edges) {
 }
 
 // The same model as a file that says no kind, which is what code export writes: `{ nodes, edges }`, or `{ reason }` when it
-// cannot be said that way -- an Update worked out once per step, a relationship's single equation setting a value, or an
-// Update that reads itself.
+// cannot be said that way -- an Update something sets worked out once per step, a relationship's single equation setting a value,
+// or an Update that reads itself.
 export function withoutKinds(nodes, edges) {
     if (!saysKinds(nodes)) return { nodes, edges };
     const reaching = termsReachingStates(nodes, edges);
@@ -191,7 +191,9 @@ export function withoutKinds(nodes, edges) {
     const stateName = new Map();
     for (const node of nodes) for (const state of node.states ?? []) stateName.set(Number(state.id), `${nodeName(node)} · ${state.name ?? state.label ?? state.symbol}`);
     for (const node of copies) {
-        const holdsUpdate = (node.states ?? []).some((state) => kinds.get(Number(state.id))?.kind === 'update');
+        // An Update nothing reaches never changes, worked out once per step or settled alike (an FMU's input port, held by the host,
+        // docs/proposals/rootPorts.md): written as a state nothing changes, its numbers are the same.
+        const holdsUpdate = (node.states ?? []).some((state) => kinds.get(Number(state.id))?.kind === 'update' && (reaching.get(Number(state.id)) ?? []).length > 0);
         if (holdsUpdate && node.updates !== 'settle') {
             return { reason: `Node "${nodeName(node)}" works its updates out once per step` };
         }

@@ -8636,6 +8636,52 @@ export async function runInteractionTests(driver) {
         }
     });
 
+    // FMU export with ports declared (docs/proposals/rootPorts.md, stage 4): the dialog says the interface a host gets, refuses an
+    // in port it cannot offer, offers the baked constant parameters with Expose them, and the FMU written has that interface.
+    await run('a model with ports exports its declared interface as an FMU: the dialog says it, refuses a Rate in port, and exposes baked parameters', async () => {
+        await putAwayLeftovers();
+        const { portsDocument } = await import('./engine/fixtures/fmuPortsFixture.mjs');
+        const openFmuExport = async () => {
+            await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+            await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'The export dialog did not open.');
+            await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = 'fmu'; format.dispatchEvent(new Event('change')); })()`);
+        };
+        const summary = () => evaluate(window, `[...document.querySelectorAll('#exportFmuSummary li')].map((item) => item.textContent)`);
+        // A Rate in port is refused, naming it and why, before anything is built.
+        const rate = structuredClone(portsDocument);
+        rate.nodes[0].states[0].kind = 'rate';
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(rate)}, 'Ported controller.kjt')`);
+        await openFmuExport();
+        assert.match((await summary())[0], /^Not exported: “setpoint” is an in port on a Rate state/);
+        await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+        await waitFor(window, `/“setpoint” is an in port on a Rate state/.test(document.querySelector('#exportCodeError').textContent)`, 'Exporting a Rate in port was not refused.');
+        await evaluate(window, `document.querySelector('#exportCodeDialog').close()`);
+
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(portsDocument)}, 'Ported controller.kjt')`);
+        await waitFor(window, `document.querySelectorAll('.rootPortTerminal').length === 3`, 'The ported controller did not load.');
+        await openFmuExport();
+        const lines = await summary();
+        assert.equal(lines[0], 'Inputs: setpoint (degC), measurement (degC) · Outputs: command · Parameters: g (tunable) · 1 other state observable · Steps: whole multiples of 0.1 s');
+        assert.ok(lines.some((line) => /^1 live parameter is baked at its value/.test(line)), 'The live rate is said to be baked.');
+        assert.ok(lines.some((line) => /^1 constant parameter not exposed is baked in/.test(line)), 'The constant rate is said to be baked.');
+        // Expose them: the counter's constant rate becomes an exposed parameter, offered to a host; undone, it is baked again.
+        await evaluate(window, `document.querySelector('#exportExposeParameters').click()`);
+        await waitFor(window, `!document.querySelector('#exportExposeParameters') && document.querySelector('#exportFmuSummary li').textContent.includes('Parameters: g, a (tunable)')`, 'Expose them did not offer the constant rate.');
+        assert.ok((await savedProject()).sharedParameters.some((shared) => shared.symbol === 'a' && shared.exposed), 'The rate is an exposed parameter of the model.');
+        await evaluate(window, `document.querySelector('#exportCodeDialog').close()`);
+        await undoRedo('undo');
+        await openFmuExport();
+        assert.ok(await evaluate(window, `Boolean(document.querySelector('#exportExposeParameters'))`), 'Undone, the rate is baked again.');
+        // The FMU written offers exactly the interface: the in ports as inputs, the out port as its output, the gain, the counter observable.
+        const { bytes } = await driver.captureExport(async () => {
+            await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+            await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, 'The FMU was not exported.', 60000);
+        }, { extension: 'fmu', maxAttempts: 400 });
+        const xml = Buffer.from(unzipSync(bytes)['modelDescription.xml']).toString('utf8');
+        const variables = [...xml.matchAll(/<ScalarVariable name="([^"]+)" valueReference="(\d+)" causality="(\w+)"/g)].map((match) => [match[1], Number(match[2]), match[3]]);
+        assert.deepEqual(variables, [['command', 0, 'output'], ['setpoint', 1, 'input'], ['measurement', 2, 'input'], ['g', 3, 'parameter'], ['Counter.Count', 4, 'local']]);
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
+
     // ---- Everything a toolbox can write, a user can write in the canvas ------------------------------------------------
     // A small model of two nodes joined by one edge, loaded into this window, for the scenarios below.
     const loadAuthoringProject = async (overrides = {}) => {

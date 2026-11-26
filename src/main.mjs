@@ -2672,10 +2672,10 @@ ipcMain.handle('projectExportGeneratedProgram', async (event, { suggestedFilenam
     return { path, fileName: basename(path) };
 });
 
-ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName, fmiVersion = '2.0', stopTime = null }) => {
+ipcMain.handle('projectExportFmu', async (event, { suggestedFilename, document, modelName, fmiVersion = '2.0', stopTime = null, fmuInterface = null }) => {
     const targetWindow = getWindowFromEvent(event);
     const buffer = await generateFmuPackage(document, {
-        modelName, fmiVersion, stopTime,
+        modelName, fmiVersion, stopTime, fmuInterface,
         engineOptions: { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged }
     });
     const result = await dialog.showSaveDialog(targetWindow, {

@@ -21,6 +21,11 @@ function escapeXml(text) {
     return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// An output, and a local (a state a model with ports offers to be observed, docs/proposals/rootPorts.md), starts exactly at its value.
+const exactStart = (variable) => variable.causality === 'output' || variable.causality === 'local';
+// The variables in value reference order: a model without ports has its states then its parameters, already in that order.
+const inValueReferenceOrder = (variables) => [...variables].sort((a, b) => a.valueReference - b.valueReference);
+
 function scalarVariablesXml(variables) {
     // causality="output" defaults to initial="calculated", which the standard forbids from
     // carrying a start value -- confirmed against a real validator (FMPy), not assumed.
@@ -31,7 +36,7 @@ function scalarVariablesXml(variables) {
     // resolve to -- declaring them properly is a real, separate scope item, not something to
     // fake with an undeclared unit= attribute (which a validator correctly rejects).
     return variables.map((variable) => (
-        `        <ScalarVariable name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="${variable.variability}"${variable.causality === 'output' ? ' initial="exact"' : ''}>\n`
+        `        <ScalarVariable name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="${variable.variability}"${exactStart(variable) ? ' initial="exact"' : ''}>\n`
         + `            <Real start="${variable.start}"/>\n`
         + `        </ScalarVariable>`
     )).join('\n');
@@ -98,11 +103,11 @@ export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVar
     <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true"
         canGetAndSetFMUstate="${rollback}" canSerializeFMUstate="${rollback}" providesDirectionalDerivative="false"/>
 ${defaultExperimentXml(defaultExperiment)}    <ModelVariables>
-${scalarVariablesXml([...stateVariables, ...parameterVariables])}
+${scalarVariablesXml(inValueReferenceOrder([...stateVariables, ...parameterVariables]))}
     </ModelVariables>
     <ModelStructure>
         <Outputs>
-${stateVariables.map((_variable, index) => `            <Unknown index="${index + 1}"/>`).join('\n')}
+${inValueReferenceOrder([...stateVariables, ...parameterVariables]).map((variable, index) => (variable.causality === 'output' ? `            <Unknown index="${index + 1}"/>` : null)).filter(Boolean).join('\n')}
         </Outputs>
     </ModelStructure>
 </fmiModelDescription>
@@ -119,7 +124,7 @@ ${stateVariables.map((_variable, index) => `            <Unknown index="${index 
 function float64VariablesXml(variables) {
     return variables.map((variable) => (
         `        <Float64 name="${escapeXml(variable.name)}" valueReference="${variable.valueReference}" causality="${variable.causality}" variability="${variable.variability}"`
-        + `${variable.causality === 'output' ? ' initial="exact"' : ''}${variable.unit ? ` unit="${escapeXml(variable.unit)}"` : ''} start="${variable.start}"/>`
+        + `${exactStart(variable) ? ' initial="exact"' : ''}${variable.unit ? ` unit="${escapeXml(variable.unit)}"` : ''} start="${variable.start}"/>`
     )).join('\n');
 }
 
@@ -129,7 +134,7 @@ export function modelDescription3Xml({
 }) {
     const rollback = supportsStateCapture ? 'true' : 'false';
     const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
-    const variables = [...stateVariables, ...parameterVariables];
+    const variables = inValueReferenceOrder([...stateVariables, ...parameterVariables]);
     const units = [...new Set(['s', ...variables.map((variable) => variable.unit).filter(Boolean)])];
     // No Event Mode, no early return, no intermediate update: fmi3DoStep (engine/src/fmi3Glue.cpp)
     // always takes the whole communication step (FMI 3.0 section 4.2). fixedInternalStepSize is the
@@ -152,7 +157,7 @@ ${defaultExperimentXml(defaultExperiment)}    <ModelVariables>
 ${float64VariablesXml(variables)}
     </ModelVariables>
     <ModelStructure>
-${stateVariables.map((variable) => `        <Output valueReference="${variable.valueReference}"/>`).join('\n')}
+${variables.filter((variable) => variable.causality === 'output').map((variable) => `        <Output valueReference="${variable.valueReference}"/>`).join('\n')}
     </ModelStructure>
 </fmiModelDescription>
 `;
@@ -175,9 +180,10 @@ function fmi3IdentitySource({ instantiationToken, timeValueReference, outputCoun
 // The model's C++ source, its modelIdentifier and its modelDescription.xml, as an export writes them: pure JS, no compiler, so a
 // test can check an FMU made earlier against what the exporter writes now (tests/fmiExamples.test.mjs).
 // fmiVersion is '2.0' (the default) or '3.0'; the model and its value references are the same for both.
-export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime = null } = {}) {
+// `fmuInterface` (src/fmuInterface.mjs) is the interface a project with ports declares; without it, every state is an output, as before.
+export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime = null, fmuInterface = null } = {}) {
     checkedFmiVersion(fmiVersion);
-    const { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep } = generateFmiModel(document);
+    const { source, stateVariables, parameterVariables, supportsStateCapture, globalTimeStep, outputCount } = generateFmiModel(document, { fmuInterface });
     // The output interval the model's active run configuration records at, else its global step; and the run's end when known.
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];
     const stepSize = Number.isFinite(runConfiguration?.outputInterval) && runConfiguration.outputInterval > 0 ? runConfiguration.outputInterval : globalTimeStep;
@@ -185,7 +191,7 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime 
     const modelIdentifier = (modelName || 'model').replace(/[^A-Za-z0-9_]/g, '_').replace(/^(?=\d)/, '_');
     if (fmiVersion === '3.0') {
         const timeValueReference = stateVariables.length + parameterVariables.length;
-        const identity = { timeValueReference, outputCount: stateVariables.length };
+        const identity = { timeValueReference, outputCount };
         const instantiationToken = `{${deterministicGuid(modelIdentifier, `${source}${fmi3IdentitySource({ ...identity, instantiationToken: '' })}`)}}`;
         const fmi3Source = `${source}${fmi3IdentitySource({ ...identity, instantiationToken })}`;
         const xml = modelDescription3Xml({
@@ -205,11 +211,11 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime 
 // every other codeExport.mjs/fmiCodeGen.mjs entry point. engineOptions is the same
 // {applicationPath, resourcesPath, packaged} shape resolveEnginePath()/cppProviderSdkPath() take
 // elsewhere. fmiVersion is '2.0' (the default) or '3.0'. Returns a Buffer -- the finished .fmu file's bytes.
-export async function generateFmuPackage(document, { modelName, engineOptions, fmiVersion = '2.0', stopTime = null }) {
+export async function generateFmuPackage(document, { modelName, engineOptions, fmiVersion = '2.0', stopTime = null, fmuInterface = null }) {
     const executable = await resolveEnginePath(engineOptions);
     if (!executable) throw new Error('The Konjugate engine binary could not be found -- FMU export needs it to compile the generated model.');
 
-    const { source, modelIdentifier, xml } = describeFmu(document, modelName, { fmiVersion, stopTime });
+    const { source, modelIdentifier, xml } = describeFmu(document, modelName, { fmiVersion, stopTime, fmuInterface });
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuExport-'));
     try {
         const sourcePath = join(directory, 'model.cpp');

@@ -109,6 +109,7 @@ import {
     migrateLegacySubsystems, placeAnotherInstance, placeComponent, removePort, separateInstance, setInstanceParameter, subsystemPath, syncDefinitions,
     declareRootPort, projectComponentDocument, removeRootPort, rootPorts
 } from '../components.mjs';
+import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -8632,12 +8633,17 @@ async function exportFmu(fmiVersion = '2.0') {
         // engine binary to actually compile the model into a shared library (see src/fmiExport.mjs).
         // The run's end, when this model has been run, as the FMU's default experiment's stop time.
         const stopTime = Number.isFinite(projectRunUntil) && projectRunUntil > 0 ? projectRunUntil : null;
-        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName, fmiVersion, stopTime);
+        // With ports declared, the FMU offers exactly that interface (docs/proposals/rootPorts.md, stage 4); a port it cannot offer is
+        // refused here, said with why, before anything is built.
+        const fmuInterface = projectFmuInterface();
+        if (fmuInterface?.problems.length) throw new Error(fmuInterface.problems.join(' '));
+        const outcome = await window.projectFiles.exportFmu(`${modelName}.fmu`, document_, modelName, fmiVersion, stopTime, fmuInterface);
+        if (outcome && fmuInterface && projectOpenedAsComponent) markFmuInterfaceNoticeSeen();
         $('#exportCodeDialog').close();
         if (outcome) $('#statusText').textContent = `Exported ${outcome.fileName}`;
         if (outcome) {
             let original = null;
-            try { original = exportComparison(document_, activeResult?.samples ?? keptComparisonSamples); } catch { original = null; }
+            try { original = exportComparison(document_, activeResult?.samples ?? keptComparisonSamples, fmuInterface); } catch { original = null; }
             lastExportedFmu = { path: outcome.path, original };
             showExportFmuNotice(outcome, original);
         }
@@ -8855,12 +8861,62 @@ function updateExportCodeFields() {
         ? 'One run of this model as a Functional Mock-up Unit other tools can run (Simulink, Dymola, OpenModelica, FMPy, or Konjugate itself), its numbers Konjugate\'s own.'
         : 'Generate a standalone program that reproduces one run of this model, with no runtime dependency on Konjugate itself.';
     $('#exportFmuSummary').hidden = !isFmu;
-    if (isFmu) $('#exportFmuSummary').replaceChildren(...exportFmuSummaryLines().map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+    if (isFmu) $('#exportFmuSummary').replaceChildren(...exportFmuSummaryLines().map((line) => (line instanceof Element ? line : Object.assign(document.createElement('li'), { textContent: line }))));
+}
+
+// The interface this project's FMU offers when it declares ports (src/fmuInterface.mjs), read before the document is flattened.
+function projectFmuInterface() {
+    return projectComponentBlock?.ports?.length ? fmuExportInterface(serializeProjectDocument()) : null;
+}
+
+// A component file's FMU changed what it offers when ports came to the top (stage 4): said once for each file, the first time.
+const fmuInterfaceNoticeKey = () => `konjugate.fmuInterfaceNotice:${currentProjectPath ?? currentProjectFilename}`;
+function fmuInterfaceNoticeSeen() {
+    try { return localStorage.getItem(fmuInterfaceNoticeKey()) === 'seen'; } catch { return true; }
+}
+function markFmuInterfaceNoticeSeen() {
+    try { localStorage.setItem(fmuInterfaceNoticeKey(), 'seen'); } catch { /* kept for this export only */ }
+}
+
+// What a host gets from the FMU of a model with ports, and what the export leaves out of the interface (baked), with the one click
+// that offers the constant ones to a host after all.
+function exportFmuInterfaceLines(fmuInterface) {
+    const { stateVariables, globalTimeStep } = generateFmiModel(stripEdgeGroups(executionProjectDocument(serializeProjectDocument())), { fmuInterface });
+    const lines = [fmuInterfaceSummary(fmuInterface, { stateCount: stateVariables.length, globalTimeStep })];
+    if (fmuInterface.bothWays.length) lines.push(`${fmuInterface.bothWays.join(', ')} ${fmuInterface.bothWays.length === 1 ? 'is a port' : 'are ports'} in and out: an FMU has no variable both ways, so ${fmuInterface.bothWays.length === 1 ? 'it is an output' : 'they are outputs'}.`);
+    if (projectOpenedAsComponent && !fmuInterfaceNoticeSeen()) {
+        lines.push(`This component's FMU now offers its ${countText(fmuInterface.inputs.length + fmuInterface.outputs.length, 'port')} and ${countText(fmuInterface.parameters.length, 'exposed parameter')}; before, every state and live parameter.`);
+    }
+    const { constant, live } = fmuInterface.baked;
+    if (live) lines.push(`${countText(live, 'live parameter')} ${live === 1 ? 'is' : 'are'} baked at ${live === 1 ? 'its' : 'their'} value: a live parameter is a person's knob, and a port is the FMU's input.`);
+    if (constant) {
+        const item = document.createElement('li');
+        item.dataset.exportBaked = String(constant);
+        item.append(`${countText(constant, 'constant parameter')} not exposed ${constant === 1 ? 'is' : 'are'} baked in, so a host cannot tune ${constant === 1 ? 'it' : 'them'}. `);
+        const expose = document.createElement('button');
+        expose.type = 'button';
+        expose.id = 'exportExposeParameters';
+        expose.textContent = 'Expose them';
+        expose.title = 'Make every constant parameter an exposed parameter of this model, tunable by an FMU\'s host and set per instance when placed';
+        expose.disabled = Boolean(activeResult);
+        expose.addEventListener('click', () => {
+            if (applyDocumentChange((document_) => exposeBakedParameters(document_, allocateModelEntityId), `${countText(constant, 'parameter')} exposed: a host can tune ${constant === 1 ? 'it' : 'them'}`)) updateExportCodeFields();
+        });
+        item.append(expose);
+        lines.push(item);
+    }
+    return lines;
 }
 
 // What a host gets from the FMU of this model: its outputs, parameters and inputs, the steps it takes, and where it runs.
 function exportFmuSummaryLines() {
     try {
+        const fmuInterface = projectFmuInterface();
+        if (fmuInterface?.problems.length) return fmuInterface.problems.map((problem) => `Not exported: ${problem}`);
+        if (fmuInterface) {
+            return [...exportFmuInterfaceLines(fmuInterface),
+                'Runs on: this computer\'s system only. Export it on each other system, then Merge platform FMUs… joins them into one.'];
+        }
         const { stateVariables, parameterVariables, globalTimeStep } = generateFmiModel(stripEdgeGroups(executionProjectDocument(serializeProjectDocument())));
         const count = (items, one, many) => `${items.length} ${items.length === 1 ? one : many}`;
         const parameters = parameterVariables.filter((variable) => variable.causality === 'parameter');
@@ -8881,9 +8937,9 @@ function exportFmuSummaryLines() {
 // keptComparisonSamples, lastExportedFmu and originalComparison are declared at the top, with projectRunUntil.
 
 // The original's run by the exported FMU's output names (generateFmiModel names each state as the export does).
-function exportComparison(document_, samples) {
+function exportComparison(document_, samples, fmuInterface = null) {
     if (!samples?.length) return null;
-    const { stateVariables } = generateFmiModel(document_);
+    const { stateVariables } = generateFmiModel(document_, { fmuInterface });
     const outputs = {};
     for (const variable of stateVariables) {
         const values = samples.map((sample) => sample.states.find((state) => state.stateId === variable.stateId)?.value);

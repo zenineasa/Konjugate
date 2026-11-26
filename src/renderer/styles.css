@@ -2738,3 +2738,5 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .relationshipRowLine { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 /* A parameter's display symbol sits on a line of its own, after the rest of its row. */
 .editorParameterRow .parameterField:has([data-field="displaySymbol"]), #groupParameterRows .parameterField:has([data-field="displaySymbol"]) { order: 1; grid-column: 1 / 3; }
+.exportFmuSummary li button { margin-left: 4px; padding: 2px 8px; color: #d9e8ec; background: rgb(17 43 51 / 94%); border: 1px solid #4aa99f; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.exportFmuSummary li button:disabled { opacity: .5; cursor: default; }

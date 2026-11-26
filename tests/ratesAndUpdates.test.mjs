@@ -166,3 +166,10 @@ test('a node in a subsystem that settles settles, with the largest limit given, 
     assert.deepEqual(nodeUpdates({ subsystemId: null }, true, subsystems), { updates: 'oncePerStep', limit: 1000, setBy: null });
     assert.deepEqual(nodeUpdates({ subsystemId: 8 }, true, [{ ...subsystems[0], updates: undefined }, subsystems[1]]).updates, 'oncePerStep');
 });
+
+test('an Update nothing reaches is written as a state nothing changes, however its node works its updates out', () => {
+    const nodes = [{ id: 1, name: 'Setpoint', states: [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 20, kind: 'update' }], sourceTerms: [] }];
+    const back = withoutKinds(nodes, []);
+    assert.equal(back.reason, undefined, 'An input held by a host is not refused.');
+    assert.deepEqual(back.nodes[0].states, [{ id: 2, name: 'Setpoint', symbol: 'setpoint', initialValue: 20 }]);
+});

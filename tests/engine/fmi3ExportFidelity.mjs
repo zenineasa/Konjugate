@@ -29,7 +29,7 @@ import { parseModelDescription } from '../../src/fmiModelDescription.mjs';
 import { engineReference, exportDocument, fmiExamples } from '../../scripts/fmiExamples.mjs';
 import {
     communicationStepSize, document as fixtureDocument, execute, globalTimeStep, runRealEngine, stateNameByStateId, targetTime
-} from './fixtures/fmuFidelityFixture.mjs';
+, fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 
 const root = join(import.meta.dirname, '..', '..');
 const executable = process.argv[2] ?? join(root, 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
@@ -40,6 +40,7 @@ const engineOptions = { applicationPath: root, resourcesPath: '', packaged: fals
 // Python's repr, which round-trips, so the numbers compared here are FMPy's own bits.
 const driver = `
 import json, shutil, sys
+${fmpyPlatforms}
 from fmpy import extract, read_model_description, simulate_fmu
 from fmpy.validation import validate_fmu
 request = json.loads(sys.argv[1])

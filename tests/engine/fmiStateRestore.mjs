@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { generateFmuPackage } from '../../src/fmiExport.mjs';
 import { executionProjectDocument } from '../../src/subsystems.mjs';
 import { stripEdgeGroups } from '../../src/edgeGroups.mjs';
+import { fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 
 const root = join(import.meta.dirname, '..', '..');
 const python = process.env.PYTHON || 'python3';
@@ -56,6 +57,7 @@ const document = {
 // the first instance's next step with the same conductance. Prints the two rooms and the room before.
 const script = `
 import json, sys
+${fmpyPlatforms}
 from fmpy import read_model_description, extract
 from fmpy.fmi2 import FMU2Slave
 from fmpy.fmi3 import FMU3Slave

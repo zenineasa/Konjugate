@@ -16,6 +16,14 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Fuse a multiply and an add only within one source expression, as Clang does by default, so the engine rounds as the FMUs and
+# C++ providers it compiles (cppToolchain.cpp, at -O1) do. GCC's C++ default (fast) fuses across statements from -O2 but not at
+# -O1, which made an FMU differ from the engine in the last bit on aarch64 Linux. No effect under Clang/AppleClang (already their
+# default) or on x86-64 without FMA; MSVC does not take the flag.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(-ffp-contract=on)
+endif()
+
 find_package(ZLIB REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(Protobuf REQUIRED)

@@ -17,6 +17,10 @@ import { decodeResultFile } from '../../../src/engineProtocol.mjs';
 import { decodeValidationReport } from '../../../src/reportProtocol.mjs';
 import { addScheduledNode } from './scheduledNodeFixture.mjs';
 
+// The Python line an FMPy driver runs before it uses FMPy, so FMPy also runs an FMU's binary for an ARM processor on Linux or
+// Windows (binaries/aarch64-linux), which FMPy does not know by itself; see fmpyPlatforms.py. Changes nothing elsewhere.
+export const fmpyPlatforms = `import sys as _sys; _sys.path.insert(0, ${JSON.stringify(import.meta.dirname)}); import fmpyPlatforms`;
+
 export function execute(executable, args, options = {}) {
     return new Promise((resolve, reject) => {
         const child = spawn(executable, args, { stdio: ['ignore', 'pipe', 'inherit'], ...options });

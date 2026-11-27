@@ -21,7 +21,7 @@ import { generateFmuPackage } from '../../src/fmiExport.mjs';
 import { fmuExportInterface } from '../../src/fmuInterface.mjs';
 import { executionProjectDocument } from '../../src/subsystems.mjs';
 import { stripEdgeGroups } from '../../src/edgeGroups.mjs';
-import { execute, runRealEngine, targetTime } from './fixtures/fmuFidelityFixture.mjs';
+import { execute, runRealEngine, targetTime, fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 import { portsDocument, portsStateIds } from './fixtures/fmuPortsFixture.mjs';
 
 const executable = process.argv[2] ?? join(import.meta.dirname, '..', '..', 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
@@ -44,6 +44,7 @@ try {
         const driverPath = join(directory, 'drive.py');
         await writeFile(driverPath, `
 import json, sys
+${fmpyPlatforms}
 from fmpy import simulate_fmu
 from fmpy.validation import validate_fmu
 request = json.loads(sys.argv[1])

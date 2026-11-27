@@ -30,7 +30,7 @@ import { generateFmuPackage } from '../../src/fmiExport.mjs';
 import { encodeProjectFile } from '../../src/projectFile.mjs';
 import {
     absoluteTolerance, closeEnough, communicationStepSize, document, execute,
-    globalTimeStep, orderedStateNames, relativeTolerance, runRealEngine, stateIds, stateNameByStateId, targetTime
+    globalTimeStep, orderedStateNames, relativeTolerance, runRealEngine, stateIds, stateNameByStateId, targetTime, fmpyPlatforms
 } from './fixtures/fmuFidelityFixture.mjs';
 import { verletDocument } from './fixtures/verletFixture.mjs';
 
@@ -65,6 +65,7 @@ try {
         const driverPath = join(directory, 'driveFmu.py');
         await writeFile(driverPath, `
 import json
+${fmpyPlatforms}
 from fmpy import simulate_fmu, read_model_description
 
 md = read_model_description(${JSON.stringify(fmuPath)})
@@ -102,6 +103,7 @@ print(json.dumps(rows))
         const rollbackDriverPath = join(directory, 'driveRollback.py');
         await writeFile(rollbackDriverPath, `
 import json, shutil
+${fmpyPlatforms}
 from fmpy import read_model_description, extract
 from fmpy.fmi2 import FMU2Slave
 
@@ -154,6 +156,7 @@ print(json.dumps({'captured': captured, 'moved': moved, 'restored': restored}))
 
         const tunedDriverPath = join(directory, 'driveTuned.py');
         await writeFile(tunedDriverPath, `
+${fmpyPlatforms}
 from fmpy import simulate_fmu
 result = simulate_fmu(${JSON.stringify(fmuPath)}, start_time=0.0, stop_time=${targetTime},
     output_interval=${communicationStepSize}, start_values={'k': 0.2, 'c': ${tunedCoupling}},
@@ -221,6 +224,7 @@ print(float(result[-1]['Coupled.Value']))
             const pidDriverPath = join(directory, 'drivePid.py');
             await writeFile(pidDriverPath, `
 import json, shutil
+${fmpyPlatforms}
 from fmpy import read_model_description, extract
 from fmpy.fmi2 import FMU2Slave
 
@@ -284,6 +288,7 @@ print(json.dumps({'rows': rows, 'onwards': onwards, 'again': again}))
         const verletDriverPath = join(directory, 'driveVerlet.py');
         await writeFile(verletDriverPath, `
 import json
+${fmpyPlatforms}
 from fmpy import simulate_fmu
 names = ['Drive.D', 'Mass.V', 'Mass.X', 'Pendulum.Angle', 'Pendulum.Rate']
 result = simulate_fmu(${JSON.stringify(verletFmuPath)}, start_time=0.0, stop_time=${targetTime}, output_interval=${communicationStepSize}, output=names)
@@ -323,6 +328,7 @@ print(json.dumps([dict(zip(result.dtype.names, [float(v) for v in row])) for row
             const stiffDriverPath = join(directory, `drive${run.method}.py`);
             await writeFile(stiffDriverPath, `
 import json
+${fmpyPlatforms}
 from fmpy import simulate_fmu, read_model_description
 md = read_model_description(${JSON.stringify(stiffFmuPath)})
 names = [v.name for v in md.modelVariables]

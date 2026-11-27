@@ -12,7 +12,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateFmuPackage } from '../../src/fmiExport.mjs';
-import { document } from './fixtures/fmuFidelityFixture.mjs';
+import { document, fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 
 const root = join(import.meta.dirname, '..', '..');
 const python = process.env.PYTHON || 'python3';
@@ -29,6 +29,7 @@ const execute = (command, args) => new Promise((resolve, reject) => {
 // Starts the FMU at `path` under its own identity and under another: prints whether each gave an instance.
 const script = `
 import json, sys
+${fmpyPlatforms}
 from fmpy import read_model_description, extract
 from fmpy.fmi2 import FMU2Slave
 from fmpy.fmi3 import FMU3Slave

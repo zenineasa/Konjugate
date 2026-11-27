@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateStandaloneProgram } from '../../src/codeExport.mjs';
 import { generateFmuPackage } from '../../src/fmiExport.mjs';
-import { runRealEngine } from './fixtures/fmuFidelityFixture.mjs';
+import { runRealEngine, fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 
 const root = join(import.meta.dirname, '..', '..');
 const executable = process.argv[2] ?? join(root, 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
@@ -118,6 +118,7 @@ try {
         const script = join(directory, 'simulate.py');
         await writeFile(script, `
 import json, sys
+${fmpyPlatforms}
 from fmpy import simulate_fmu, read_model_description
 names = json.loads(sys.argv[2])
 result = simulate_fmu(sys.argv[1], stop_time=${targetTime}, step_size=0.1, output_interval=0.1, output=names)

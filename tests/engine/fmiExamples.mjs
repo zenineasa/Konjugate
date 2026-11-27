@@ -24,6 +24,7 @@ import { generateFmuPackage } from '../../src/fmiExport.mjs';
 import {
     engineOptions, engineReference, enginePath, exampleFolder, examplesDirectory, execute, exportDocument, fmiExamples, fmiVersions, parseReferenceCsv
 } from '../../scripts/fmiExamples.mjs';
+import { fmpyPlatforms } from './fixtures/fmuFidelityFixture.mjs';
 
 const executable = process.argv[2] ?? enginePath();
 const python = process.env.PYTHON || 'python3';
@@ -41,6 +42,7 @@ function largestDifference(rows, reference) {
 }
 
 const simulateScript = `
+${fmpyPlatforms}
 import json, sys, fmpy
 from fmpy import simulate_fmu
 from fmpy.validation import validate_fmu

@@ -339,7 +339,9 @@ void buildNativeArtifact(const std::filesystem::path& sourcePathArgument, const 
         }
 #endif
     } else {
-        arguments = {"-std=c++20", "-O1"};
+        // -ffp-contract=on, as engine/CMakeLists.txt builds the engine: GCC's default fuses multiply-adds at -O2 but not at -O1,
+        // so without it an FMU or provider built here rounds differently from the engine on aarch64 Linux.
+        arguments = {"-std=c++20", "-O1", "-ffp-contract=on"};
         if (!includeDirectory.empty()) arguments.push_back("-I" + includeDirectory.string());
         if (sharedLibrary) {
             arguments.push_back("-shared");

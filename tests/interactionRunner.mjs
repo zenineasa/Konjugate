@@ -8557,7 +8557,11 @@ export async function runInteractionTests(driver) {
         await addPortFromMenu('#addInputPort', 'setpoint', '°C');
         await waitFor(window, `!document.querySelector('#componentProjectBar').hidden && Boolean(window.__debugProject.serialize().component)`, 'The port did not make the project a component.');
         const portNodeId = (await savedProject()).component.ports[0].nodeId ?? (await savedProject()).nodes.find((node) => node.id !== 1).id;
-        await evaluate(window, `document.querySelector('.node-label-container[data-node="${portNodeId}"] .objectLabel').click()`);
+        // The new node's label is put on the page when the labels are next drawn, a frame later (later still for a window not in front):
+        // clicked before then, there was none (the test failed now and then with "Script failed to execute").
+        const portLabel = `document.querySelector('.node-label-container[data-node="${portNodeId}"] .objectLabel')`;
+        await waitFor(window, `Boolean(${portLabel})`, 'The port\'s node has no label.');
+        await evaluate(window, `${portLabel}.click()`);
         await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })); })()`);
         await waitFor(window, `!window.__debugProject.serialize().nodes.some((node) => node.id === ${portNodeId})`, 'The port\'s node was not deleted.');
         assert.equal(await evaluate(window, `window.__debugProject.serialize().component`), undefined, 'The file is no longer a component.');

@@ -38,6 +38,39 @@ struct ResolvedAttribution {
     std::string phrase;
 };
 
+// The document's states, relationships and source terms by id, gathered in one pass, for the stability pass's lookups below: it may
+// resolve a finding for every node, and searching the document for each one made validating a model of n flagged nodes take n² id
+// parses (35 s of a 10,000-node grid's 45 s run). Where an id appears twice, the first in document order is kept, as the search found.
+struct DocumentEntities {
+    std::unordered_map<EntityId, const boost::property_tree::ptree*> states, edges, sourceTerms;
+
+    explicit DocumentEntities(const boost::property_tree::ptree& document) {
+        if (const auto edgeList = document.get_child_optional("edges")) {
+            for (const auto& edgeEntry : *edgeList) edges.emplace(idValue(edgeEntry.second, "id"), &edgeEntry.second);
+        }
+        if (const auto nodes = document.get_child_optional("nodes")) {
+            for (const auto& nodeEntry : *nodes) {
+                if (const auto stateList = nodeEntry.second.get_child_optional("states")) {
+                    for (const auto& stateEntry : *stateList) states.emplace(idValue(stateEntry.second, "id"), &stateEntry.second);
+                }
+                if (const auto terms = nodeEntry.second.get_child_optional("sourceTerms")) {
+                    for (const auto& termEntry : *terms) sourceTerms.emplace(idValue(termEntry.second, "id"), &termEntry.second);
+                }
+            }
+        }
+    }
+};
+
+// The parameter with this id among an entity's parameters, or null.
+const boost::property_tree::ptree* findParameter(const boost::property_tree::ptree& entity, EntityId parameterId) {
+    if (const auto parameters = entity.get_child_optional("parameters")) {
+        for (const auto& parameterEntry : *parameters) {
+            if (idValue(parameterEntry.second, "id") == parameterId) return &parameterEntry.second;
+        }
+    }
+    return nullptr;
+}
+
 // Resolves a ParameterAttribution (an opaque sourceId/parameterId pair from the compiled plan --
 // see stabilityAnalysis.hpp) back to both a human-facing phrase for the issue's own message text,
 // and a structured AttributedParameter for precise click-to-focus navigation (see
@@ -47,43 +80,25 @@ struct ResolvedAttribution {
 // here. Returns std::nullopt if the ids can't be resolved -- defensive only; should not happen for
 // a ParameterAttribution produced from this same document's own compiled plan, but a warning
 // message silently degrading is better than this pass throwing over it.
-std::optional<ResolvedAttribution> resolveAttributedParameter(const boost::property_tree::ptree& document, const ParameterAttribution& attribution) {
-    if (const auto edges = document.get_child_optional("edges")) {
-        for (const auto& edgeEntry : *edges) {
-            if (idValue(edgeEntry.second, "id") != attribution.sourceId) continue;
-            if (const auto parameters = edgeEntry.second.get_child_optional("parameters")) {
-                for (const auto& parameterEntry : *parameters) {
-                    if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
-                    const auto edgeName = value(edgeEntry.second, "name");
-                    std::ostringstream description;
-                    description << "the relationship" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(parameterEntry.second, "name") << "' parameter";
-                    return ResolvedAttribution{
-                        {"edge", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
-                        description.str()
-                    };
-                }
-            }
-            return std::nullopt;
-        }
+std::optional<ResolvedAttribution> resolveAttributedParameter(const DocumentEntities& entities, const ParameterAttribution& attribution) {
+    if (const auto edge = entities.edges.find(attribution.sourceId); edge != entities.edges.end()) {
+        const auto parameter = findParameter(*edge->second, attribution.parameterId);
+        if (!parameter) return std::nullopt;
+        const auto edgeName = value(*edge->second, "name");
+        std::ostringstream description;
+        description << "the relationship" << (edgeName.empty() ? "" : " \"" + edgeName + "\"") << "'s '" << value(*parameter, "name") << "' parameter";
+        return ResolvedAttribution{
+            {"edge", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
+            description.str()
+        };
     }
-    if (const auto nodes = document.get_child_optional("nodes")) {
-        for (const auto& nodeEntry : *nodes) {
-            const auto terms = nodeEntry.second.get_child_optional("sourceTerms");
-            if (!terms) continue;
-            for (const auto& termEntry : *terms) {
-                if (idValue(termEntry.second, "id") != attribution.sourceId) continue;
-                if (const auto parameters = termEntry.second.get_child_optional("parameters")) {
-                    for (const auto& parameterEntry : *parameters) {
-                        if (idValue(parameterEntry.second, "id") != attribution.parameterId) continue;
-                        return ResolvedAttribution{
-                            {"sourceTerm", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
-                            "this node's own '" + value(parameterEntry.second, "name") + "' source-term parameter"
-                        };
-                    }
-                }
-                return std::nullopt;
-            }
-        }
+    if (const auto term = entities.sourceTerms.find(attribution.sourceId); term != entities.sourceTerms.end()) {
+        const auto parameter = findParameter(*term->second, attribution.parameterId);
+        if (!parameter) return std::nullopt;
+        return ResolvedAttribution{
+            {"sourceTerm", std::to_string(attribution.sourceId), std::to_string(attribution.parameterId)},
+            "this node's own '" + value(*parameter, "name") + "' source-term parameter"
+        };
     }
     return std::nullopt;
 }
@@ -91,17 +106,9 @@ std::optional<ResolvedAttribution> resolveAttributedParameter(const boost::prope
 // Same defensive-empty-string convention as resolveAttributedParameter above, and the same
 // reason: dominantStateId comes from the compiled plan, which never sees the document, so
 // resolving it to a human-facing symbol can only happen here.
-std::string stateSymbol(const boost::property_tree::ptree& document, EntityId stateId) {
-    if (const auto nodes = document.get_child_optional("nodes")) {
-        for (const auto& nodeEntry : *nodes) {
-            const auto states = nodeEntry.second.get_child_optional("states");
-            if (!states) continue;
-            for (const auto& stateEntry : *states) {
-                if (idValue(stateEntry.second, "id") == stateId) return value(stateEntry.second, "symbol");
-            }
-        }
-    }
-    return {};
+std::string stateSymbol(const DocumentEntities& entities, EntityId stateId) {
+    const auto state = entities.states.find(stateId);
+    return state == entities.states.end() ? std::string() : value(*state->second, "symbol");
 }
 
 // The stability pass under a whole-model method (assessWholeModelStability): one finding for the model, on its run settings, where
@@ -145,7 +152,7 @@ void addWholeModelStability(ValidationResult& result, const boost::property_tree
         integration.method);
     if (!assessment) return;
     const auto configurationId = document.get<std::string>("activeRunConfigurationId", "");
-    const auto symbol = stateSymbol(document, assessment->dominantStateId);
+    const auto symbol = stateSymbol(DocumentEntities(document), assessment->dominantStateId);
     const auto judged = assessment->perNode
         ? " (Judged node by node, each node's neighbours held: the model has " + std::to_string(assessment->stateCount) +
           " integrated states, more than the whole-model check takes.)" : std::string();
@@ -1292,18 +1299,20 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
             if (activeIntegration.method != IntegrationMethod::nodeByNode) {
                 addWholeModelStability(result, document, plan, *activeGlobalTimeStep, activeIntegration);
             }
+            std::optional<DocumentEntities> entities;
             if (activeIntegration.method == IntegrationMethod::nodeByNode) for (const auto& node : plan.nodes) {
                 const auto assessment = assessNodeStability(node, plan.initialStates, *activeGlobalTimeStep, plan.algebraicStateIndexes);
                 if (!assessment) continue;
                 const auto nodeId = std::to_string(assessment->nodeId);
+                if (!entities) entities.emplace(document);
                 if (!assessment->stable) {
                     const auto resolved = assessment->dominantParameter
-                        ? resolveAttributedParameter(document, *assessment->dominantParameter) : std::nullopt;
+                        ? resolveAttributedParameter(*entities, *assessment->dominantParameter) : std::nullopt;
                     std::ostringstream message;
                     message << "This node's dynamics may be unstable at its current substep count (amplification factor "
                             << assessment->maxAmplificationFactor << " > 1 per global step)";
                     if (resolved) message << " -- driven mainly by " << resolved->phrase;
-                    const auto symbol = stateSymbol(document, assessment->dominantStateId);
+                    const auto symbol = stateSymbol(*entities, assessment->dominantStateId);
                     if (assessment->undampedOscillation) {
                         // An undamped oscillation, not a growing mode (docs/proposals/integrators.md, decision 1): a fix is one click
                         // away, on this warning and on the node's Numerics tab. Its own code, so the app can offer it.

@@ -16,8 +16,8 @@
 // KONJUGATE_FMPY_REFERENCE=here makes FMPy's runs here on Apple Silicon too; KONJUGATE_REFERENCE_FMUS_FROM_SOURCES=1 installs the
 // FMUs with their binaries taken out, so they are built here and FMPy runs those builds, as on an Intel Mac.
 //
-// The release zip is not in the repository: it is downloaded once, checked against its SHA-256, and kept in the
-// system's temporary directory (or read from KONJUGATE_REFERENCE_FMUS_ZIP, a path to the same zip, for a machine
+// The release zip is not in the repository: it is downloaded once (tried again on a network failure), checked against its SHA-256,
+// and kept in the system's temporary directory (or read from KONJUGATE_REFERENCE_FMUS_ZIP, a path to the same zip, for a machine
 // without network access).
 
 import assert from 'node:assert/strict';
@@ -32,6 +32,7 @@ import { describeInstalledFmuPorts } from '../../../src/fmiResolver.mjs';
 import { runWithEngine } from '../../../src/engineAdapter.mjs';
 import { buildInstalledFmu } from '../../../src/fmuBuilds.mjs';
 import { findCCompiler } from '../../../src/fmuSourceBuild.mjs';
+import { downloadVerified } from './downloadVerified.mjs';
 
 const root = join(import.meta.dirname, '..', '..', '..');
 const here = join(import.meta.dirname, 'referenceFmus');
@@ -47,14 +48,11 @@ let releaseZip;
 async function referenceReleaseZip() {
     if (releaseZip) return releaseZip;
     const cached = process.env.KONJUGATE_REFERENCE_FMUS_ZIP || join(tmpdir(), `konjugateReferenceFmus-${referenceCases.release}.zip`);
+    // The copy kept in the temporary directory, checked against its SHA-256, serves every check of a run after the first: only when
+    // there is none, or it is not the release's, is the zip downloaded (with retries, downloadVerified.mjs) and kept for the next.
     let bytes = await readFile(cached).catch(() => null);
     if (!bytes || sha256(bytes) !== referenceCases.sha256) {
-        const response = await fetch(referenceCases.url);
-        if (!response.ok) throw new Error(`Downloading the FMI Reference FMUs from ${referenceCases.url} failed: HTTP ${response.status}.`);
-        bytes = Buffer.from(await response.arrayBuffer());
-        if (sha256(bytes) !== referenceCases.sha256) {
-            throw new Error(`The downloaded FMI Reference FMUs zip does not have the expected SHA-256 ${referenceCases.sha256}.`);
-        }
+        bytes = await downloadVerified(referenceCases.url, referenceCases.sha256, { what: `the FMI Reference FMUs ${referenceCases.release}` });
         if (!process.env.KONJUGATE_REFERENCE_FMUS_ZIP) {
             const partial = `${cached}.${process.pid}.partial`;
             await writeFile(partial, bytes);

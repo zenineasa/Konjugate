@@ -11453,15 +11453,9 @@ export async function runInteractionTests(driver) {
         let guid = null;
         let version = null;
         try {
-            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
-            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
-            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-tab="fmu"]').click()`);
-            const asked = await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
-                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
-                await waitFor(window, `window.extensions.list().then((entries) => entries.some((entry) => entry.packageType === 'fmu' && entry.name === 'Feedthrough'))`, 'The FMU was not installed.', 15000);
-            });
-            assert.equal(asked.length, 2, 'Installing asks for the file and to confirm.');
-            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            // Put in the library as Add › FMU… puts it there (FMUs are no longer installed from Extensions).
+            const added = await evaluate(window, `window.extensions.addFmu(${JSON.stringify(fmuPath)})`);
+            assert.ok(added && !added.error, `The FMU was not put in the library: ${JSON.stringify(added)}`);
             ({ guid, version } = await evaluate(window, `window.extensions.list().then((entries) => { const entry = entries.find((item) => item.packageType === 'fmu' && item.name === 'Feedthrough'); return { guid: entry.packageId, version: entry.version }; })`));
             const ports = await evaluate(window, `window.extensions.fmuPorts(${JSON.stringify(guid)}, ${JSON.stringify(version)})`);
             // Every input at 0, as a new state starts.
@@ -11500,17 +11494,9 @@ export async function runInteractionTests(driver) {
         let guid = null;
         let version = null;
         try {
-            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
-            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
-            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-tab="fmu"]').click()`);
-            await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
-                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
-                await waitFor(window, `window.extensions.list().then((entries) => entries.some((entry) => entry.packageType === 'fmu' && entry.name === 'Dahlquist'))`, 'The FMU was not installed.', 15000);
-            });
-            // Said by its name, with where to add it (stage 4), not by its guid.
-            await waitFor(window, `document.querySelector('#extensionsRestartNotice').textContent.startsWith('Installed Dahlquist.')`, 'The install was not said by the FMU\'s name.');
-            assert.equal(await evaluate(window, `document.querySelector('#extensionsRestartNotice').textContent`), 'Installed Dahlquist. Add it to a model with Add to model below, or Add › FMU on the canvas.');
-            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            // Put in the library as Add › FMU… puts it there (FMUs are no longer installed from Extensions).
+            const added = await evaluate(window, `window.extensions.addFmu(${JSON.stringify(fmuPath)})`);
+            assert.ok(added && !added.error, `The FMU was not put in the library: ${JSON.stringify(added)}`);
             ({ guid, version } = await evaluate(window, `window.extensions.list().then((entries) => { const entry = entries.find((item) => item.packageType === 'fmu' && item.name === 'Dahlquist'); return { guid: entry.packageId, version: entry.version }; })`));
             const project = {
                 format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
@@ -11579,14 +11565,9 @@ export async function runInteractionTests(driver) {
         let version = null;
         try {
             await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);
-            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
-            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
-            await evaluate(window, `document.querySelector('.extensionsTab[data-extensions-tab="fmu"]').click()`);
-            await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
-                await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
-                await waitFor(window, `window.extensions.list().then((entries) => entries.some((entry) => entry.packageType === 'fmu' && entry.name === 'Dahlquist'))`, 'The FMU was not installed.', 15000);
-            });
-            await evaluate(window, `document.querySelector('#extensionsDialog').close()`);
+            // Put in the library as Add › FMU… puts it there (FMUs are no longer installed from Extensions).
+            const added = await evaluate(window, `window.extensions.addFmu(${JSON.stringify(fmuPath)})`);
+            assert.ok(added && !added.error, `The FMU was not put in the library: ${JSON.stringify(added)}`);
             ({ guid, version } = await evaluate(window, `window.extensions.list().then((entries) => { const entry = entries.find((item) => item.packageType === 'fmu' && item.name === 'Dahlquist'); return { guid: entry.packageId, version: entry.version }; })`));
 
             await evaluate(window, `document.querySelector('#addButton').click(); document.querySelector('[data-add-kind="node"]').click()`);
@@ -11636,6 +11617,59 @@ export async function runInteractionTests(driver) {
             await rm(folder, { recursive: true, force: true });
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
+    // FMUs are added to a model in one way (the single FMU workflow, stage 2): Extensions › Install… does not install one, picked or dropped
+    // on its dialog, and says to use Add › FMU…, with a button that does; on the desktop that adds the FMU as a node, on the web it says
+    // FMUs run in the desktop app.
+    await run('Extensions does not install an FMU: picked or dropped there, it says to use Add › FMU…, and its button does', async () => {
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
+        const fmuPath = join(folder, 'Dahlquist.fmu');
+        await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
+        const fmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`);
+        // On the web, which has no FMUs, it says they run in the desktop app instead, as its Add › FMU… does.
+        const said = driver.kind === 'electron' ? '#extensionsFmuNoticeDesktop' : '#extensionsFmuNoticeWeb';
+        const fmuNotice = `!document.querySelector('#extensionsFmuNotice').hidden && !document.querySelector('${said}').hidden && document.querySelector('${said}').textContent.startsWith(${JSON.stringify(driver.kind === 'electron' ? 'FMUs are added to a model: use Add › FMU…' : 'FMUs run in the desktop app.')})`;
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);
+            for (const [guid, version] of await fmus()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`);
+            await evaluate(window, `document.querySelector('#extensionsButton').click()`);
+            await waitFor(window, `document.querySelector('#extensionsDialog').open`, 'Extensions did not open.');
+            // Dropped on the dialog: said, nothing installed.
+            await evaluate(window, `(() => {
+                const transfer = new DataTransfer();
+                transfer.items.add(new File([new Uint8Array([80, 75, 3, 4])], 'Dahlquist.fmu'));
+                document.querySelector('#extensionsDialog').dispatchEvent(new DragEvent('drop', { dataTransfer: transfer, bubbles: true, cancelable: true }));
+            })()`);
+            await waitFor(window, fmuNotice, 'A dropped FMU was not said to go through Add › FMU….');
+            assert.deepEqual(await fmus(), [], 'A dropped FMU is not installed.');
+            if (driver.kind === 'electron') {
+                // Picked in Install… anyway: said the same way, installed nowhere, with no review.
+                await evaluate(window, `document.querySelector('#extensionsFmuNotice').hidden = true`);
+                const asked = await driver.answerDialogs({ open: fmuPath, button: 'Install' }, async () => {
+                    await evaluate(window, `document.querySelector('#extensionsInstall').click()`);
+                    await waitFor(window, fmuNotice, 'A picked FMU was not said to go through Add › FMU….');
+                });
+                assert.deepEqual(asked.map((entry) => entry.kind), ['open'], 'Nothing is reviewed or installed.');
+                assert.deepEqual(await fmus(), []);
+                // The button is Add › FMU…: Extensions closes, the file is picked, and the FMU is a node.
+                await driver.answerDialogs({ open: fmuPath }, async () => {
+                    await evaluate(window, `document.querySelector('#extensionsOpenAddFmu').click()`);
+                    await waitFor(window, `window.__debugProject.serialize().nodes.some((node) => node.implementation?.kind === 'fmi')`, 'The button did not add the FMU.', 15000);
+                });
+                assert.equal(await evaluate(window, `document.querySelector('#extensionsDialog').open`), false, 'Extensions closed.');
+            } else {
+                assert.equal(await evaluate(window, `document.querySelector('#extensionsFmuNoticeDesktop').hidden`), true, 'The web edition does not point to Add › FMU….');
+                assert.equal(await evaluate(window, `document.querySelector('#extensionsFmuDownload').href`), await evaluate(window, `document.querySelector('#fmuNoticeDownload').href`), 'The same link as Add › FMU… gives.');
+            }
+        } finally {
+            await evaluate(window, `document.querySelector('#extensionsDialog').open && document.querySelector('#extensionsDialog').close()`).catch(() => {});
+            await evaluate(window, `document.querySelector('#fmuNotice').hidden = true`).catch(() => {});
+            await leaveCleanProject();
+            for (const [guid, version] of await fmus().catch(() => [])) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    });
 
     // Where a person finds FMUs (docs/proposals/fmuImportWorkflow.md, stage 4): Add › FMU… picks a file and places a node built from
     // it, run and plotted in five actions; the library's FMUs are offered under it; the same FMU added again is not installed again;

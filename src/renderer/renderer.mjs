@@ -18572,6 +18572,7 @@ function extensionsPackageKey(entry) {
 const restartToActivate = document.documentElement.hasAttribute('data-web-edition') ? 'It is ready to use now.' : 'Restart Konjugate to activate it.';
 
 function showExtensionsNotice(message, type = null) {
+    $('#extensionsFmuNotice').hidden = true;
     const notice = $('#extensionsRestartNotice');
     notice.textContent = message;
     notice.classList.toggle('error', type === 'error');
@@ -19202,6 +19203,10 @@ $('#extensionsInstall').addEventListener('click', async () => {
     try {
         const installed = await window.extensions.install();
         if (!installed) return;
+        if (installed.fmu) {
+            showExtensionsFmuNotice();
+            return;
+        }
         extensionsMode = 'installed';
         extensionsTab = installed.packageType;
         extensionsSelectedKey = `${installed.packageType}:${installed.packageId}:${installed.version}`;
@@ -19212,12 +19217,40 @@ $('#extensionsInstall').addEventListener('click', async () => {
         $$('#extensionsTabs .extensionsTab').forEach((tab) => tab.classList.toggle('active', tab.dataset.extensionsTab === extensionsTab));
         renderExtensionsResults();
         renderExtensionsDetail();
-        showExtensionsNotice(installed.packageType === 'fmu'
-            ? `${installed.reused ? `${installed.name ?? installed.packageId} is already in your library, as version ${installed.version}: this very file.` : `Installed ${installed.name ?? installed.packageId}${fmuBesideNote(installed)}.`} Add it to a model with Add to model below, or Add › FMU on the canvas.`
-            : `Installed ${installed.packageId} ${installed.version}. ${restartToActivate}`);
+        showExtensionsNotice(`Installed ${installed.packageId} ${installed.version}. ${restartToActivate}`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);
     }
+});
+
+// FMUs are added to a model in one way (the single FMU workflow): one picked in Install…, or dropped on this dialog, is not installed, and
+// the dialog says where it goes, with a button that does it. The web edition has no FMUs: it says they run in the desktop app, with where
+// to get it, as its Add › FMU… and a .fmu dropped on its canvas say.
+function showExtensionsFmuNotice() {
+    const web = document.documentElement.hasAttribute('data-web-edition');
+    $('#extensionsFmuNoticeDesktop').hidden = web;
+    $('#extensionsFmuNoticeWeb').hidden = !web;
+    $('#extensionsRestartNotice').hidden = true;
+    $('#extensionsFmuNotice').hidden = false;
+}
+$('#extensionsOpenAddFmu').addEventListener('click', () => {
+    $('#extensionsFmuNotice').hidden = true;
+    $('#extensionsDialog').close();
+    hideCards();
+    addFmuToModel();
+});
+$('#extensionsDialog').addEventListener('dragover', (event) => {
+    if ([...(event.dataTransfer?.items ?? [])].some((item) => item.kind === 'file')) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'copy';
+    }
+});
+$('#extensionsDialog').addEventListener('drop', (event) => {
+    if (!(event.dataTransfer?.files?.length)) return;
+    // Taken here whatever the file, so a dropped file never replaces the page.
+    event.preventDefault();
+    if ([...event.dataTransfer.files].some((file) => file.name.toLowerCase().endsWith('.fmu'))) showExtensionsFmuNotice();
+    else showExtensionsNotice('Install… installs a .kja add-on or a .kjp plugin: choose it there.');
 });
 
 $('#extensionsDiscoverInstall').addEventListener('click', async () => {

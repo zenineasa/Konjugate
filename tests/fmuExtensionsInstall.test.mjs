@@ -1,17 +1,15 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
-// Extensions › Install… with an .fmu does as Add › FMU does since FMI review #1: an FMU whose build differs from the one in the library
-// with the same ID is installed beside it, and said; the very same archive is the library's copy, reused. It refused a newer build with
-// the same ID as "already installed" (installFmuArchive at its default version 1.0.0). The handler runs in the Electron main process,
-// which a unit test cannot start, so this reads the sources and checks the pieces agree; tests/fmuInstallOrReuse.test.mjs checks
-// installOrReuseFmu itself.
+// FMUs are added to a model in one way, Add › FMU… or a .fmu dropped on the canvas (the single FMU workflow, stage 2): Extensions ›
+// Install… no longer takes one, desktop or web. Picked anyway, or dropped on the Extensions dialog, it says "FMUs are added to a model:
+// use Add › FMU…", with a button that does so, and installs nothing. The handlers run in the Electron main process and the browser shim,
+// which a unit test cannot start, so this reads the sources and checks the pieces agree.
 
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
-// The source of the handler or listener beginning at `start`, up to the next one at the same indentation.
 const block = (source, start, next) => {
     const from = source.indexOf(start);
     assert.ok(from >= 0, `${start} not found.`);
@@ -19,19 +17,31 @@ const block = (source, start, next) => {
     return source.slice(from, to < 0 ? undefined : to);
 };
 
-test('Extensions › Install… installs an .fmu as Add › FMU does: beside a differing build with the same ID, reusing the same archive', async () => {
-    const main = await read('src/main.mjs');
-    const install = block(main, "ipcMain.handle('packageInstall'", 'ipcMain.handle(');
-    const fmuPart = block(install, "if (lowerPath.endsWith('.fmu'))", "const extension = ");
-    assert.doesNotMatch(fmuPart, /installFmuArchive\(/, 'An .fmu is not installed at a fixed version, which refuses a newer build with the same ID.');
-    assert.match(fmuPart, /installOrReuseFmu\(/, 'An .fmu goes through installOrReuseFmu, as Add › FMU does.');
-    assert.match(fmuPart, /reused:\s*installed\.reused/, 'The window is told the library\'s copy was reused.');
-    assert.match(fmuPart, /besideVersion:\s*installed\.besideVersion/, 'The window is told which build it went beside.');
+test('desktop: Install… offers no .fmu, and one picked anyway is not installed but said to go through Add › FMU…', async () => {
+    const install = block(await read('src/main.mjs'), "ipcMain.handle('packageInstall'", 'ipcMain.handle(');
+    assert.doesNotMatch(install, /extensions: \[[^\]]*'fmu'/, 'The file picker does not offer FMUs.');
+    assert.doesNotMatch(install, /installOrReuseFmu\(|installFmuArchive\(/, 'Nothing installs an FMU here.');
+    assert.match(install, /\.endsWith\('\.fmu'\)\) return \{ fmu: true \}/, 'A picked .fmu is answered with { fmu: true }.');
 });
 
-test('the Extensions window says when an installed FMU went beside another build, or was already in the library', async () => {
-    const renderer = await read('src/renderer/renderer.mjs');
+test('web: Install… offers no .fmu, and one picked anyway is answered the same way', async () => {
+    const install = block(await read('src/renderer/webShims/packages.mjs'), 'install: async () => {', '    uninstall:');
+    assert.match(install, /\.endsWith\('\.fmu'\)\) return \{ fmu: true \}/, 'A picked .fmu is answered with { fmu: true }.');
+});
+
+test('the Extensions dialog says FMUs are added to a model, with a button that opens Add › FMU…, for one picked or dropped', async () => {
+    const [html, renderer] = await Promise.all([read('src/renderer/index.html'), read('src/renderer/renderer.mjs')]);
+    const notice = block(html, 'id="extensionsFmuNotice"', '</p>');
+    assert.match(notice, /FMUs are added to a model: use Add › FMU…/);
+    assert.match(notice, /id="extensionsOpenAddFmu"/);
+    // The web edition has no FMUs: it says they run in the desktop app, with the link its Add › FMU… gives, and offers no Add › FMU….
+    const web = block(notice, 'id="extensionsFmuNoticeWeb"', '</span>');
+    assert.match(web, /FMUs run in the desktop app\. <a id="extensionsFmuDownload" href="https:\/\/github\.com\/zenineasa\/Konjugate\/releases\/latest"/);
+    assert.doesNotMatch(web, /Add › FMU/);
+    assert.match(block(renderer, 'function showExtensionsFmuNotice()', '\n}'), /data-web-edition/, 'Which text shows depends on the edition.');
     const listener = block(renderer, "$('#extensionsInstall').addEventListener('click'", "$('#extensionsDiscoverInstall')");
-    assert.match(listener, /fmuBesideNote\(installed\)/, 'A build kept beside another with the same ID is said, as Add › FMU says it.');
-    assert.match(listener, /installed\.reused/, 'An FMU already in the library is said to be the library\'s copy.');
+    assert.match(listener, /installed\.fmu\) \{\s*showExtensionsFmuNotice\(\)/, 'A picked .fmu shows the notice.');
+    assert.match(renderer, /\$\('#extensionsDialog'\)\.addEventListener\('drop'/, 'A file dropped on the dialog is handled there.');
+    const button = block(renderer, "$('#extensionsOpenAddFmu').addEventListener('click'", '});');
+    assert.match(button, /addFmuToModel\(\)/, 'The button is Add › FMU…: it picks a file and adds it to the model.');
 });

@@ -65,8 +65,11 @@ export const extensions = {
         const file = await chooseFile();
         if (!file) return null;
         const lower = file.name.toLowerCase();
+        // FMUs are added to a model with Add › FMU…, not installed here: the window says so (in the web edition, Add › FMU… then says
+        // FMUs run in the desktop app).
+        if (lower.endsWith('.fmu')) return { fmu: true };
         const extension = lower.endsWith('.kja') ? '.kja' : lower.endsWith('.kjp') ? '.kjp' : null;
-        if (!extension) throw new Error(lower.endsWith('.fmu') ? 'FMUs run in the desktop app only.' : 'Only .kja add-ons and .kjp plugins can be installed.');
+        if (!extension) throw new Error('Only .kja add-ons and .kjp plugins can be installed.');
         const store = await packageStore();
         const archive = new Uint8Array(await file.arrayBuffer());
         // Refused before the review if this Konjugate cannot use it, or if the web edition cannot run it (inspect throws or says why).

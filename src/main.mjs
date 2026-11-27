@@ -63,8 +63,7 @@ import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
-import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
-import { buildInformationLine } from './nodeProgram.mjs';
+import { chooseFmuBinary } from './fmiBinary.mjs';
 import { buildInstalledFmu, buildLog, buildsKept, fmuWithThisComputersBinary, removeBuilds, setBuildPreferred } from './fmuBuilds.mjs';
 import { findCCompiler } from './fmuSourceBuild.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
@@ -1982,38 +1981,15 @@ ipcMain.handle('packageInstall', async (event) => {
     const result = await dialog.showOpenDialog(targetWindow, {
         title: 'Install Konjugate package',
         properties: ['openFile'],
-        filters: [{ name: 'Konjugate packages and FMUs', extensions: ['kja', 'kjp', 'fmu'] }]
+        filters: [{ name: 'Konjugate add-ons and plugins', extensions: ['kja', 'kjp'] }]
     });
     if (result.canceled) return null;
     const [path] = result.filePaths;
     const lowerPath = path.toLowerCase();
 
-    if (lowerPath.endsWith('.fmu')) {
-        const archive = await readFile(path);
-        const inspected = inspectFmuArchive(archive);
-        const chosen = await chooseFmuBinary(inspected.description, async (name) => inspected.files[name] ?? null);
-        const detail = [
-            `${inspected.description.modelName} (FMI ${inspected.description.fmiVersion}, run in Co-Simulation)`,
-            `guid: ${inspected.description.guid}`,
-            `Platforms in this file: ${inspected.platforms.join(', ') || 'none'}`,
-            describeChosenBinary(chosen, inspected.description.fmiVersion),
-            buildInformationLine(inspected.build, { runsHere: !chosen.error })
-        ].filter(Boolean).join('\n');
-        const confirmation = await dialog.showMessageBox(targetWindow, {
-            type: 'question',
-            buttons: ['Cancel', 'Install'],
-            defaultId: 1,
-            cancelId: 0,
-            title: 'Review FMU installation',
-            message: `Install ${inspected.description.modelName}?`,
-            detail
-        });
-        if (confirmation.response !== 1) return null;
-        // As Add › FMU does (FMI review #1): the library's copy only when it is this very archive; a different build that kept its ID goes
-        // beside it, rather than being refused as already installed.
-        const installed = await installOrReuseFmu(join(app.getPath('userData'), 'packages'), archive, { sourceFileName: basename(path) });
-        return { packageType: 'fmu', packageId: installed.guid, version: installed.version, name: installed.displayName, reused: installed.reused, besideVersion: installed.besideVersion };
-    }
+    // FMUs are added to a model with Add › FMU… or a drop on the canvas, not installed here (the single FMU workflow): the window says
+    // so, with a button that opens Add › FMU….
+    if (lowerPath.endsWith('.fmu')) return { fmu: true };
 
     const extension = lowerPath.endsWith('.kja') ? '.kja' : lowerPath.endsWith('.kjp') ? '.kjp' : null;
     if (!extension) throw new Error('Only .kja add-ons, .kjp plugins and .fmu files can be installed.');

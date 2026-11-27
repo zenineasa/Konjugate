@@ -5,20 +5,19 @@
 //   1. With no bindings at all, every input and parameter keeps the FMU's own start value: the run equals, bit for bit, the
 //      same FMU with each one bound to a constant state holding that start value, the way a file had to wire it before.
 //   2. Values given in the file (`{ key, kind: "value", value }`) are set when the run starts: with each case's values given
-//      that way, every output at every communication point equals FMPy's run of the case, bit for bit.
+//      that way, every output at every communication point equals FMPy's run of the case on the same binary, bit for bit
+//      (fmpyReferenceRuns in tests/engine/fixtures/referenceFmuFidelity.mjs).
 //   3. Where a case's values are the FMU's own start values, the run with no bindings equals FMPy's too.
 // The documents say `requires: ["fmuStartValues"]`, which the host takes off before the engine sees it.
 //
 //   node tests/engine/fmiStartValues.mjs [path/to/konjugateEngine]
 
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runWithEngine } from '../../src/engineAdapter.mjs';
-import { engineOptionsFor, installReferenceFmu, referenceCases } from './fixtures/referenceFmuFidelity.mjs';
-
-const fmpyReference = JSON.parse(await readFile(join(import.meta.dirname, 'fixtures', 'referenceFmus', 'fmpyReference.json'), 'utf8'));
+import { engineOptionsFor, fmpyReferenceRuns, fmpyReferenceSource, installReferenceFmu, referenceCases } from './fixtures/referenceFmuFidelity.mjs';
 
 function hostDocument({ installed, ports, bindingFor, extraStates = [] }) {
     const outputStates = ports.outputs.map((port, index) => ({ id: 200 + index, name: port.name, symbol: `o${index}`, initialValue: 0, unit: '' }));
@@ -60,6 +59,7 @@ function assertSameBits(actual, expected, what) {
 const packagesDirectory = await mkdtemp(join(tmpdir(), 'konjugateFmiStartValues-'));
 const lines = [];
 try {
+    const fmpyReference = await fmpyReferenceRuns(packagesDirectory);
     for (const fmiVersion of ['2.0', '3.0']) {
         for (const testCase of referenceCases.cases) {
             const what = `FMI ${fmiVersion} ${testCase.name}`;
@@ -76,7 +76,7 @@ try {
 
             // 2. The case's values given in the file, against FMPy.
             const expected = fmpyReference.runs.find((entry) => entry.fmiVersion === fmiVersion && entry.name === testCase.name);
-            assert.ok(expected, `fmpyReference.json has no ${what} run.`);
+            assert.ok(expected, `FMPy's reference has no ${what} run.`);
             const fmpySeries = (count) => ports.outputs.map((port) => {
                 const reference = expected.outputs[port.name];
                 assert.ok(reference, `${what}: FMPy has no output '${port.name}'.`);
@@ -87,7 +87,7 @@ try {
             const given = await run(hostDocument({ installed, ports, bindingFor: (port) => ({ key: port.key, kind: 'value', value: valueFor(port) }) }),
                 testCase, packagesDirectory, `${what} with given values`);
             const givenSeries = outputSeries(given, ports);
-            assertSameBits(givenSeries, fmpySeries(givenSeries[0]?.length ?? 0), `${what}, given values against FMPy ${fmpyReference.fmpy}`);
+            assertSameBits(givenSeries, fmpySeries(givenSeries[0]?.length ?? 0), `${what}, given values against ${fmpyReferenceSource(fmpyReference)}`);
 
             // 3. Where the case is the FMU's defaults, no bindings at all agree with FMPy as well.
             const caseIsDefaults = ports.inputs.every((port) => Object.is(valueFor(port), port.start));
@@ -95,7 +95,7 @@ try {
             lines.push(`${what} (${ports.inputs.length === 1 ? 'one input or parameter' : `${ports.inputs.length} inputs and parameters`}${caseIsDefaults ? ', its defaults also against FMPy' : ''})`);
         }
     }
-    console.log(`FMU start values: left to the FMU equals bound to them, and given values equal FMPy ${fmpyReference.fmpy}, bit for bit: ${lines.join('; ')}.`);
+    console.log(`FMU start values: left to the FMU equals bound to them, and given values equal ${fmpyReferenceSource(fmpyReference)}, bit for bit: ${lines.join('; ')}.`);
 } finally {
     await rm(packagesDirectory, { recursive: true, force: true });
 }

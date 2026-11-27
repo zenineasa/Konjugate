@@ -308,7 +308,7 @@ MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
 void buildNativeArtifact(const std::filesystem::path& sourcePathArgument, const std::filesystem::path& gluePathArgument,
                           const std::filesystem::path& includeDirectoryArgument, const std::filesystem::path& artifactPathArgument,
                           bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext,
-                          bool needsDynamicLoaderLibrary) {
+                          bool needsDynamicLoaderLibrary, bool selfContained) {
     const std::string compiler = resolveCompiler(compilerOverride);
 
     // The compiler runs in the artifact's directory (see runCppCompiler), so every path handed to it
@@ -325,6 +325,7 @@ void buildNativeArtifact(const std::filesystem::path& sourcePathArgument, const 
     std::vector<std::string> arguments;
     if (isMsvc) {
         arguments = {"/std:c++20", "/O1", "/EHsc", "/nologo"};
+        if (selfContained) arguments.push_back("/MT"); // cl.exe's default, said outright: no vcruntime140.dll to find
         if (!includeDirectory.empty()) arguments.push_back("/I" + includeDirectory.string());
         if (sharedLibrary) arguments.push_back("/LD");
         arguments.push_back(sourcePath.string());
@@ -365,6 +366,10 @@ void buildNativeArtifact(const std::filesystem::path& sourcePathArgument, const 
         arguments.push_back(gluePath.string());
         arguments.push_back("-o");
         arguments.push_back(artifactPath.string());
+#ifdef _WIN32
+        // MinGW-w64's runtime (libstdc++, libgcc, winpthread) linked in, so the DLL needs nothing but Windows' own DLLs.
+        if (selfContained) arguments.push_back("-static");
+#endif
 #if !defined(_WIN32) && !defined(__APPLE__)
         if (!sharedLibrary) {
             // shm_open/sem_open historically require linking librt on Linux (folded into

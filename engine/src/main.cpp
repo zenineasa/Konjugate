@@ -269,7 +269,8 @@ int main(int argc, char** argv) {
         const auto compilerOption = optionPath(argc, argv, "--compiler").string();
         konjugate::cppToolchain::buildNativeArtifact(sourcePath, gluePath,
             sdkPathOption.empty() ? std::filesystem::path() : std::filesystem::path(sdkPathOption) / "include",
-            outputOption, /*sharedLibrary=*/true, compilerOption, "the shared library");
+            outputOption, /*sharedLibrary=*/true, compilerOption, "the shared library", /*needsDynamicLoaderLibrary=*/false,
+            /*selfContained=*/true);
         std::_Exit(0);
     }
     // A shared library built from an FMU's own C or C++ sources (docs/proposals/sourceFmuImport.md): `buildFmuSources <plan.json>

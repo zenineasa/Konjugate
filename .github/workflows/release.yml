@@ -298,8 +298,8 @@ jobs:
     # in them: it builds just the engine and runs the checks (about ten minutes of checks), while each build job packages the app and
     # runs the interaction tests for far longer, so the release waits no longer for it; the release job needs both. On every runner the
     # builds use. Open MPI is installed on Linux only, and required there, so its modes are checked on every release and said to be
-    # skipped elsewhere. Windows has MSVC only: the checks that compile with GCC/Clang-style flags themselves (C++ code export, a fixture
-    # FMU) are skipped there, each named with why in the summary, and every other check runs, FMU export compiling with MSVC.
+    # skipped elsewhere. On Windows the runner's MinGW-w64 g++ (c++ on PATH) runs the checks that compile with GCC/Clang-style flags and
+    # builds the FMUs the checks export (their DLLs carry its runtime, so FMPy loads them); MSVC builds the engine and FMUs from sources.
     releaseChecks:
         strategy:
             fail-fast: false
@@ -316,7 +316,7 @@ jobs:
             - uses: actions/setup-python@v5
               with:
                   python-version: '3.x'
-            # As in the build job: MSVC for the engine and for the FMUs the checks export and build from their sources.
+            # As in the build job: MSVC for the engine and for the FMUs the checks build from their sources.
             - uses: ilammy/msvc-dev-cmd@v1
               if: runner.os == 'Windows'
             # See the build job: vcpkg's cache in GitHub's own Actions cache needs these two variables.

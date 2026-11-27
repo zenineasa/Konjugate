@@ -24,11 +24,15 @@ std::string resolveCompiler(const std::string& overrideCompiler);
 // on Linux (a no-op everywhere else -- macOS's dlopen lives in libSystem, Windows uses
 // LoadLibrary): only an artifact whose own glue code dlopen()s a further, external library (e.g.
 // providerInProcessNodeShim.cpp dlopening an imported FMU's binary) needs it. Throws
-// std::runtime_error, with the compiler's captured stdout+stderr, on a nonzero exit.
+// std::runtime_error, with the compiler's captured stdout+stderr, on a nonzero exit. selfContained
+// links the compiler's own runtime into the artifact on Windows, for a library another program
+// loads (an exported FMU's DLL): MinGW-w64's g++ otherwise links libstdc++-6.dll, libgcc_s_seh-1.dll
+// and libwinpthread-1.dll, which Konjugate finds on PATH but a host such as FMPy (Python's ctypes,
+// which does not search PATH) does not; MSVC is asked for its static runtime (/MT) explicitly.
 void buildNativeArtifact(const std::filesystem::path& sourcePath, const std::filesystem::path& gluePath,
     const std::filesystem::path& includeDirectory, const std::filesystem::path& artifactPath,
     bool sharedLibrary, const std::string& compilerOverride, const std::string& failureContext,
-    bool needsDynamicLoaderLibrary = false);
+    bool needsDynamicLoaderLibrary = false, bool selfContained = false);
 
 // ---- A shared library built from someone else's C or C++ sources (docs/proposals/sourceFmuImport.md) --------------------------
 // Each source file set is compiled file by file with its own language, standard, definitions and include directories, then all

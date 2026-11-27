@@ -497,7 +497,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
 
     const completion = new Promise((resolve, reject) => {
         let finalized = false;
-        const finalize = async (code, processError = null) => {
+        const finalize = async (code, processError = null, signal = null) => {
             if (finalized) return;
             finalized = true;
             childExited = true;
@@ -508,7 +508,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             let failure = processError;
             try {
                 if (failure) throw failure;
-                if (code !== 0) throw new Error(diagnostics.trim() || `The simulation engine exited with code ${code}.`);
+                if (code !== 0) throw new Error(diagnostics.trim() || (signal ? `The simulation engine was stopped by ${signal}.` : `The simulation engine exited with code ${code}.`));
                 if (!result) throw new Error(lastSnapshotError
                     ? `The simulation engine result could not be read: ${lastSnapshotError.message}`
                     : 'The simulation engine did not produce a result.');
@@ -526,7 +526,7 @@ export async function startEngineRun(content, configuration, options, { onUpdate
             else resolve(result);
         };
         child.once('error', (error) => { void finalize(null, error); });
-        child.once('exit', (code) => { void finalize(code); });
+        child.once('exit', (code, signal) => { void finalize(code, null, signal); });
     });
 
     // A run that ends closes its end of the pipe: a command written as it finishes fails with EPIPE (ENOTCONN on macOS, where the

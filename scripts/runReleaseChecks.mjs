@@ -16,8 +16,9 @@
 // Without a tool, what needs it is skipped and said so, here and in the summary, never silently: a check that runs nothing says
 // "(skipping <why>)" and is counted as skipped, not passed. The C++ checks need a C++ compiler with GCC/Clang-style flags (CXX, default
 // c++), and OpenMP (on macOS, Homebrew's libomp); Python ones need python3 (PYTHON); FMUs built from their sources need a C compiler (on
-// Windows, MSVC). On macOS and Linux a missing C++ compiler fails the run; on Windows, which has MSVC only, the checks that compile with
-// GCC/Clang-style flags are skipped, named, and every other check runs (FMU export compiles with the engine's own toolchain, MSVC there).
+// Windows, MSVC). On macOS and Linux a missing C++ compiler fails the run; on a Windows computer with MSVC only, the checks that compile
+// with GCC/Clang-style flags are skipped, named, and every other check runs. FMU export compiles with the engine's own compiler choice:
+// c++ on PATH (on GitHub's Windows runners, MinGW-w64's g++, its runtime linked into the FMU's DLL), else cl.exe given with --compiler.
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync } from 'node:fs';
@@ -156,9 +157,12 @@ if (problems.length) {
         // A check that skipped everything it does (FMPy missing, say) did not pass: it did not run.
         const ranNothing = run.code === 0 && skipped.length > 0 && !/✓/.test(run.output);
         const outcome = run.timedOut ? 'failed' : run.code !== 0 ? 'failed' : ranNothing ? 'skipped' : 'passed';
+        // The error thrown (AssertionError, FmiResolutionError, Error, ...), else a line saying what went wrong; never what the engine
+        // wrote to stderr or a check that passed: a check that makes an FMU refuse a value on purpose prints the refusal on its way.
+        const said = run.output.split('\n').map((line) => line.trim()).filter((line) => line && !line.startsWith('[Engine stderr]') && !line.startsWith('✓'));
         const failure = run.timedOut
             ? `did not finish within ${checkTimeoutMilliseconds / 60000} minutes`
-            : (run.output.match(/^\s*(AssertionError[^\n]*|Error[^\n]*|[^\n]*(?:diverges|must|did not)[^\n]*)$/m)?.[1]?.trim() ?? `exited with status ${run.code}`);
+            : (said.find((line) => /^\w*Error\b/.test(line)) ?? said.find((line) => /diverges|must|did not/.test(line)) ?? `exited with status ${run.code}`);
         results.push({ ...check, outcome, seconds, skipped, failure: outcome === 'failed' ? failure : null, tail: outcome === 'failed' ? run.output.trim().split('\n').slice(-25).join('\n') : '' });
         if (outcome === 'failed' && inActions) console.log(`::error title=${check.name} failed::${failure}`);
     }

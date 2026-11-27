@@ -29,7 +29,6 @@ import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
-import { packageKey } from './packageArchive.mjs';
 import { fmuAttachmentsRequirement, fmuStartValuesRequirement } from './nodeProgram.mjs';
 import { contentForEngine } from './components.mjs';
 import { installedFmuArchive } from './fmuPackage.mjs';
@@ -168,15 +167,13 @@ ${valueRows.join(',\n')}
 // FMUs live under `${fmuDirectory}/fmus/<fmuId>/<fmuVersion>/`. Returns a resolved
 // `{...implementation, kind:"cpp", providerApiVersion:1, source, bindings}` object; `outputs` is
 // returned unchanged, since FMI import requires it to already name every FMU output exactly.
-export async function resolveFmiSource(implementation, fmuDirectory, disabledFmuKeys = []) {
+// An FMU is not switched off on its own (its node is): a list of disabled FMUs an older caller passes is not read.
+export async function resolveFmiSource(implementation, fmuDirectory) {
     if (!fmuDirectory) throw new FmiResolutionError('FMI import requires an installed FMU directory.', 'FMU_DIRECTORY_MISSING');
     const guid = implementation.fmuId;
     const version = implementation.fmuVersion;
     if (typeof guid !== 'string' || !guid || typeof version !== 'string' || !versionPattern.test(version)) {
         throw new FmiResolutionError('An fmi implementation requires fmuId and fmuVersion.', 'FMU_REFERENCE_INVALID');
-    }
-    if (disabledFmuKeys.includes(packageKey('fmu', guid, version))) {
-        throw new FmiResolutionError(`FMU ${guid} is disabled. Enable it from Extensions before running this model.`, 'FMU_DISABLED');
     }
 
     const fmusRoot = resolve(fmuDirectory, 'fmus');
@@ -403,7 +400,7 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
 // on an edge or source term. Kept as its own pass rather than folded into resolveInstalledPlugins
 // (a different storage layout, a different resolver, the same "resolve before validate" shape);
 // src/engineAdapter.mjs runs both passes before every validate/run.
-export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuKeys = [] } = {}) {
+export async function resolveInstalledFmus(content, { fmuDirectory } = {}) {
     // An in port's test signal is the host's too, applied before anything else (docs/proposals/rootPorts.md, stage 6).
     content = contentForEngine(content);
     const document = typeof content === 'string' ? JSON.parse(content) : structuredClone(content);
@@ -440,7 +437,7 @@ export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuK
     for (const node of document.nodes ?? []) {
         if (node.implementation?.kind !== 'fmi') continue;
         changed = true;
-        node.implementation = await resolveFmiSource(node.implementation, fmuDirectory, disabledFmuKeys);
+        node.implementation = await resolveFmiSource(node.implementation, fmuDirectory);
     }
     // Start values are the host's to apply, here: the engine never sees the requirement (src/nodeProgram.mjs).
     // So are the FMUs a project keeps (stage 8): installed in the library when the project was opened.

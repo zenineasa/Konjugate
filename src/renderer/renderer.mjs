@@ -3951,7 +3951,7 @@ function fmuValueText(value, unit) {
 
 async function refreshInstalledFmus() {
     try {
-        installedFmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false);
+        installedFmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu');
     } catch {
         installedFmus = [];
     }
@@ -14880,7 +14880,7 @@ async function renderAddFmuRecent() {
     const holder = $('#addFmuRecent');
     let fmus = [];
     try {
-        fmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false);
+        fmus = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu');
     } catch { /* none to offer */ }
     holder.replaceChildren(...fmus.slice(0, 8).map((fmu) => {
         const button = document.createElement('button');
@@ -18685,7 +18685,8 @@ function renderExtensionsDetail() {
     installCompatible.hidden = !entry.incompatible;
     installCompatible.disabled = false;
     installCompatible.textContent = 'Install compatible version';
-    $('#extensionsToggleEnabled').hidden = Boolean(entry.incompatible);
+    // An FMU is switched off by switching its node off, not here.
+    $('#extensionsToggleEnabled').hidden = Boolean(entry.incompatible) || entry.packageType === 'fmu';
     $('#extensionsToggleEnabled').textContent = entry.enabled ? 'Disable' : 'Enable';
     $('#extensionsUninstall').hidden = entry.source === 'bundled';
 }
@@ -22144,7 +22145,7 @@ async function openReplaceWithFmu(id) {
     // The FMUs of the library whose ports match, each a click from the comparison: an FMU exported from it and tried as a node is there.
     let entries = [];
     try {
-        entries = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false).slice(0, 24);
+        entries = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu').slice(0, 24);
     } catch { /* none to offer */ }
     const document_ = serializeProjectDocument();
     const matching = [];

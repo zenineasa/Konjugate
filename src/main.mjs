@@ -2204,9 +2204,8 @@ ipcMain.handle('packageList', async () => {
             ...(verdict ? { incompatible: { required: verdict.required, running: verdict.running } } : {})
         };
     });
-    const fmus = (await listInstalledFmus(join(app.getPath('userData'), 'packages'))).map((entry) => ({
-        ...entry, enabled: !disabledKeys.includes(packageKey('fmu', entry.packageId, entry.version))
-    }));
+    // Always enabled: an FMU is switched off by switching its node off, whatever an older settings file says.
+    const fmus = (await listInstalledFmus(join(app.getPath('userData'), 'packages'))).map((entry) => ({ ...entry, enabled: true }));
     return [...bundled, ...installed, ...fmus];
 });
 
@@ -2228,6 +2227,7 @@ ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, vers
 });
 
 ipcMain.handle('packageSetEnabled', async (_event, { packageType, packageId, version, enabled }) => {
+    if (packageType === 'fmu') throw new Error('An FMU is not switched off on its own: switch off the node that uses it.');
     await extensionStateStore.setEnabled(packageKey(packageType, packageId, version), enabled);
     await discoverAddons();
     await discoverComponentLibrary();
@@ -3592,11 +3592,9 @@ const engineOptions = async () => {
         pluginDirectory: packagesDirectory,
         disabledPluginKeys: disabledExtensionKeys,
         incompatiblePluginKeys,
-        // Same root and the same disabled-key list as plugins above -- packageKey()'s type
-        // prefix ("fmu:"/"plugin:"/...) is what keeps one shared disabled-extension list
-        // unambiguous across every installed package kind.
+        // Same root as plugins above. An FMU is not switched off on its own (its node is), so an "fmu:" key an older Konjugate left in
+        // the shared disabled-extension list is not read.
         fmuDirectory: packagesDirectory,
-        disabledFmuKeys: disabledExtensionKeys,
         providerToolchains: {
             cpp: { compilerPath: resolvedCpp?.compiler ?? '' },
             python: { interpreterPath: resolvedPython ?? '', chosen: Boolean((await providerToolchainStore.get()).python.interpreterPath) },

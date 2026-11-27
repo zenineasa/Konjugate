@@ -237,16 +237,17 @@ test('an FMU with no binary for this computer installs, and running it is refuse
     }, { binaryPath: 'binaries/riscv64-linux/decayModel.so' });
 });
 
-test('rejects a disabled FMU', async () => {
+// An FMU is no longer switched off in Extensions (switching its node off does that), so a settings file from an older Konjugate that
+// lists one as disabled changes nothing: the model runs.
+test('an FMU an older Konjugate listed as disabled still resolves', async () => {
     await withInstalledFmu(async (directory, installed) => {
-        await assert.rejects(
-            resolveFmiSource(
-                { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [{ key: 'k', kind: 'state', stateId: 11 }], outputs: [{ key: 'decayLevel', stateId: 12 }] },
-                directory,
-                [packageKey('fmu', installed.guid, installed.version)]
-            ),
-            (error) => error instanceof FmiResolutionError && error.code === 'FMU_DISABLED'
-        );
+        const implementation = { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [{ key: 'k', kind: 'state', stateId: 11 }], outputs: [{ key: 'decayLevel', stateId: 12 }] };
+        const olderList = [packageKey('fmu', installed.guid, installed.version)];
+        const resolved = await resolveFmiSource(implementation, directory, olderList);
+        assert.equal(resolved.kind, 'cpp', 'The FMU runs as a node program.');
+        const content = JSON.stringify({ format: 'konjugate', version: 1, nodes: [{ id: 1, name: 'Decay', states: [{ id: 11, symbol: 'k' }, { id: 12, symbol: 'level' }], sourceTerms: [], implementation }], edges: [] });
+        const document = JSON.parse(await resolveInstalledFmus(content, { fmuDirectory: directory, disabledFmuKeys: olderList }));
+        assert.equal(document.nodes[0].implementation.kind, 'cpp', 'resolveInstalledFmus runs it too, whatever disabledFmuKeys an older caller passes.');
     });
 });
 

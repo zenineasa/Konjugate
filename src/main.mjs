@@ -61,7 +61,7 @@ import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLo
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
-import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
+import { inspectFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { buildInformationLine } from './nodeProgram.mjs';
@@ -2009,11 +2009,10 @@ ipcMain.handle('packageInstall', async (event) => {
             detail
         });
         if (confirmation.response !== 1) return null;
-        const installed = await installFmuArchive(archive, {
-            directory: join(app.getPath('userData'), 'packages'),
-            sourceFileName: basename(path)
-        });
-        return { packageType: 'fmu', packageId: installed.guid, version: installed.version, name: installed.displayName };
+        // As Add › FMU does (FMI review #1): the library's copy only when it is this very archive; a different build that kept its ID goes
+        // beside it, rather than being refused as already installed.
+        const installed = await installOrReuseFmu(join(app.getPath('userData'), 'packages'), archive, { sourceFileName: basename(path) });
+        return { packageType: 'fmu', packageId: installed.guid, version: installed.version, name: installed.displayName, reused: installed.reused, besideVersion: installed.besideVersion };
     }
 
     const extension = lowerPath.endsWith('.kja') ? '.kja' : lowerPath.endsWith('.kjp') ? '.kjp' : null;

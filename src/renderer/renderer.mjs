@@ -19202,7 +19202,7 @@ $('#extensionsInstall').addEventListener('click', async () => {
         renderExtensionsResults();
         renderExtensionsDetail();
         showExtensionsNotice(installed.packageType === 'fmu'
-            ? `Installed ${installed.name ?? installed.packageId}. Add it to a model with Add to model below, or Add › FMU on the canvas.`
+            ? `${installed.reused ? `${installed.name ?? installed.packageId} is already in your library, as version ${installed.version}: this very file.` : `Installed ${installed.name ?? installed.packageId}${fmuBesideNote(installed)}.`} Add it to a model with Add to model below, or Add › FMU on the canvas.`
             : `Installed ${installed.packageId} ${installed.version}. ${restartToActivate}`);
     } catch (error) {
         showExtensionsNotice(`Installation failed: ${error.message}`);

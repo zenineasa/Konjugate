@@ -10,7 +10,7 @@
 // an archive on this computer (decision 3); `confirmed.json` keeps the archives it may build.
 
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { parseModelDescription } from './fmiModelDescription.mjs';
@@ -22,6 +22,20 @@ import { fmiStandardHeadersDirectory, fmuSourceBuildPlan, runProgram } from './f
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const libraryExtension = (platform = process.platform) => (platform === 'win32' ? '.dll' : platform === 'darwin' ? '.dylib' : '.so');
 const staleLockMs = 10 * 60 * 1000;
+
+// A small file the cache rewrites (the archives confirmed, an archive's pointer) written whole: to a file of its own, then renamed over
+// the old one, so a build reading it meanwhile (another window, or two builds at once) reads the old file or the new one, never a
+// half-written one. writeFile alone truncates first, which once failed a build with an empty confirmed.json.
+async function writeJsonWhole(path, value) {
+    const partial = `${path}.${process.pid}.${randomUUID()}.partial`;
+    try {
+        await writeFile(partial, JSON.stringify(value));
+        await rename(partial, path);
+    } catch (error) {
+        await rm(partial, { force: true });
+        throw error;
+    }
+}
 
 export function buildsDirectoryOf(fmuDirectory) {
     return resolve(fmuDirectory, 'fmuBuilds');
@@ -107,7 +121,7 @@ export async function setBuildPreferred(fmuDirectory, archiveSha256, preferred) 
     const builds = buildsDirectoryOf(fmuDirectory);
     const pointer = await readPointer(builds, archiveSha256);
     if (!pointer) return false;
-    await writeFile(resolve(builds, 'byArchive', `${archiveSha256}.json`), JSON.stringify({ key: pointer.key, ...(preferred ? { preferred: true } : {}) }));
+    await writeJsonWhole(resolve(builds, 'byArchive', `${archiveSha256}.json`), { key: pointer.key, ...(preferred ? { preferred: true } : {}) });
     return true;
 }
 
@@ -139,8 +153,15 @@ export async function buildsKept(fmuDirectory) {
     return { count, bytes };
 }
 
-async function confirmedArchives(builds) {
+export async function confirmedArchives(builds) {
     return new Set(JSON.parse(await readFile(resolve(builds, 'confirmed.json'), 'utf8').catch(() => '[]')));
+}
+
+// The archives this computer may build without asking, with `archiveSha256` added.
+export async function rememberConfirmedArchive(builds, archiveSha256) {
+    const confirmed = await confirmedArchives(builds);
+    confirmed.add(archiveSha256);
+    await writeJsonWhole(resolve(builds, 'confirmed.json'), [...confirmed]);
 }
 
 // Takes the lock for `key`, or waits for the build that holds it (another window building the same FMU) and returns false then.
@@ -232,7 +253,7 @@ export async function buildInstalledFmu({
         const pointTo = async () => {
             const preferred = prefer || Boolean((await readPointer(builds, fmu.archiveSha256))?.preferred);
             await mkdir(resolve(builds, 'byArchive'), { recursive: true });
-            await writeFile(resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`), JSON.stringify({ key, ...(preferred ? { preferred: true } : {}) }));
+            await writeJsonWhole(resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`), { key, ...(preferred ? { preferred: true } : {}) });
         };
         if (!force) {
             const kept = await cachedBuild(builds, key);
@@ -251,8 +272,7 @@ export async function buildInstalledFmu({
                 hasOwnBinary: prefer
             };
             if (!await confirm(summary)) return { status: 'declined', name };
-            confirmed.add(fmu.archiveSha256);
-            await writeFile(resolve(builds, 'confirmed.json'), JSON.stringify([...confirmed]));
+            await rememberConfirmedArchive(builds, fmu.archiveSha256);
         }
         lock = await takeLock(builds, key, signal);
         if (!lock) return { status: 'cancelled', name };
@@ -313,5 +333,5 @@ export async function removeBuilds(fmuDirectory, archiveSha256 = null) {
     }
     await rm(resolve(builds, 'byArchive', `${archiveSha256}.json`), { force: true });
     const confirmed = await confirmedArchives(builds);
-    if (confirmed.delete(archiveSha256)) await writeFile(resolve(builds, 'confirmed.json'), JSON.stringify([...confirmed]));
+    if (confirmed.delete(archiveSha256)) await writeJsonWhole(resolve(builds, 'confirmed.json'), [...confirmed]);
 }

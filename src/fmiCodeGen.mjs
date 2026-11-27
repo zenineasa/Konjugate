@@ -20,7 +20,7 @@ import {
     buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, cppStiffFmuPieces, doubleLiteral,
     cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude,
     cppProgramAdvanceLines, cppProgramInstantLines, cppProgramStartLines, emitCppNodeProgram, programEntries, programRuntimeCpp,
-    shareProgramInstances, updateStateIndexes
+    refuseFmuNodes, shareProgramInstances, updateStateIndexes
 } from './codeExport.mjs';
 import { programSdkCpp } from './programSdkSources.mjs';
 
@@ -240,6 +240,7 @@ function cppSettleBlocks(model, providerInfo) {
 // point. globalTimeStep is read from the model's active run configuration, exactly the way
 // generateStandaloneProgram does.
 export function generateFmiModel(document, { fmuInterface = null } = {}) {
+    refuseFmuNodes(document);
     if (fmuInterface?.problems?.length) throw new Error(`This model's ports cannot be exported as an FMU's interface: ${fmuInterface.problems.join(' ')}`);
     const linkedSharedParameter = fmuInterface ? linkedSharedParameters(document) : null;
     const runConfiguration = (document.runConfigurations ?? []).find((item) => item.id === document.activeRunConfigurationId) ?? document.runConfigurations?.[0];

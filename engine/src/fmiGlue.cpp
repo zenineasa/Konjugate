@@ -12,6 +12,7 @@
 #include "konjugate/simulationModel.hpp"
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -28,10 +29,31 @@ struct FmuInstance {
     std::unique_ptr<konjugate::sdk::v1::SimulationModel> model;
     double currentTime = 0.0;
     std::string lastError;
+    std::string instanceName;
+    fmi2CallbackLogger logger = nullptr;
+    fmi2ComponentEnvironment environment = nullptr;
 };
 
 FmuInstance* asInstance(fmi2Component c) {
     return static_cast<FmuInstance*>(c);
+}
+
+// Every refusal says why through the host's logger (FMI 2.0.4 section 2.1.5, category "logStatusError"), whether or not debug logging
+// is on, as the FMI 3.0 glue does: a refused call is never silent (FMI review #4).
+fmi2Status fail(FmuInstance* instance, const std::string& message) {
+    if (instance) instance->lastError = message;
+    if (instance && instance->logger) instance->logger(instance->environment, instance->instanceName.c_str(), fmi2Error, "logStatusError", "%s", message.c_str());
+    return fmi2Error;
+}
+
+std::string describe(const std::exception& error) {
+    return error.what();
+}
+
+std::string number(double value) {
+    char text[32];
+    std::snprintf(text, sizeof text, "%.15g", value);
+    return text;
 }
 
 } // namespace
@@ -47,7 +69,7 @@ const char* fmi2GetVersion(void) {
 }
 
 fmi2Status fmi2SetDebugLogging(fmi2Component, fmi2Boolean, size_t, const fmi2String[]) {
-    return fmi2OK; // Konjugate-exported FMUs don't route through the host's logger callback.
+    return fmi2OK; // Errors are always logged (fail() above); there are no debug messages to turn on or off.
 }
 
 fmi2Component fmi2Instantiate(fmi2String instanceName, fmi2Type fmuType, fmi2String fmuGUID, fmi2String, const fmi2CallbackFunctions* functions, fmi2Boolean, fmi2Boolean) {
@@ -61,9 +83,17 @@ fmi2Component fmi2Instantiate(fmi2String instanceName, fmi2Type fmuType, fmi2Str
         return nullptr;
     }
     try {
-        auto* instance = new FmuInstance();
+        auto instance = std::make_unique<FmuInstance>();
+        instance->instanceName = instanceName ? instanceName : "";
+        if (functions) {
+            instance->logger = functions->logger;
+            instance->environment = functions->componentEnvironment;
+        }
         instance->model = konjugate::sdk::v1::createSimulationModel();
-        return instance;
+        return instance.release();
+    } catch (const std::exception& error) {
+        if (functions && functions->logger) functions->logger(functions->componentEnvironment, instanceName ? instanceName : "", fmi2Error, "logStatusError", "%s", error.what());
+        return nullptr;
     } catch (...) {
         return nullptr;
     }
@@ -99,8 +129,10 @@ fmi2Status fmi2Reset(fmi2Component c) {
         instance->model = konjugate::sdk::v1::createSimulationModel();
         instance->currentTime = 0.0;
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2Reset: " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2Reset failed.");
     }
 }
 
@@ -110,8 +142,10 @@ fmi2Status fmi2GetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     try {
         for (size_t index = 0; index < nvr; ++index) value[index] = instance->model->getOutput(static_cast<int>(vr[index]));
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2GetReal: " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2GetReal failed.");
     }
 }
 
@@ -121,8 +155,10 @@ fmi2Status fmi2SetReal(fmi2Component c, const fmi2ValueReference vr[], size_t nv
     try {
         for (size_t index = 0; index < nvr; ++index) instance->model->setInput(static_cast<int>(vr[index]), value[index]);
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2SetReal: " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2SetReal failed.");
     }
 }
 
@@ -137,7 +173,9 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
         // tolerance the project schema already enforces elsewhere -- a host requesting a
         // communication step that isn't a whole multiple of the model's own fixed step has no
         // well-defined answer here, since Konjugate always advances in whole globalTimeStep ticks.
-        if (steps < 1 || std::abs(stepsExact - static_cast<double>(steps)) > 1e-6) return fmi2Error;
+        if (steps < 1 || std::abs(stepsExact - static_cast<double>(steps)) > 1e-6) {
+            return fail(instance, "fmi2DoStep: the communication step size " + number(communicationStepSize) + " is not a whole number of this FMU's fixed internal step " + number(globalTimeStep) + ".");
+        }
         double time = currentCommunicationPoint;
         for (long long step = 0; step < steps; ++step) {
             instance->model->doStep(time, globalTimeStep);
@@ -145,8 +183,10 @@ fmi2Status fmi2DoStep(fmi2Component c, fmi2Real currentCommunicationPoint, fmi2R
         }
         instance->currentTime = time;
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2DoStep at t = " + number(currentCommunicationPoint) + ": " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2DoStep at t = " + number(currentCommunicationPoint) + " failed.");
     }
 }
 
@@ -162,23 +202,30 @@ fmi2Status fmi2CancelStep(fmi2Component c) {
 
 fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
     auto* instance = asInstance(c);
-    if (!instance || !FMUstate || !instance->model->supportsStateCapture()) return fmi2Error;
+    if (!instance) return fmi2Error;
+    if (!FMUstate) return fail(instance, "fmi2GetFMUstate: no place for the FMU state given.");
+    if (!instance->model->supportsStateCapture()) return fail(instance, "fmi2GetFMUstate is not supported: this FMU declares canGetAndSetFMUstate=\"false\" in its modelDescription.xml.");
     try {
         *FMUstate = new std::vector<double>(instance->model->captureState());
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2GetFMUstate: " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2GetFMUstate failed.");
     }
 }
 
 fmi2Status fmi2SetFMUstate(fmi2Component c, fmi2FMUstate FMUstate) {
     auto* instance = asInstance(c);
-    if (!instance || !FMUstate) return fmi2Error;
+    if (!instance) return fmi2Error;
+    if (!FMUstate) return fail(instance, "fmi2SetFMUstate: no FMU state given.");
     try {
         instance->model->restoreState(*static_cast<const std::vector<double>*>(FMUstate));
         return fmi2OK;
+    } catch (const std::exception& error) {
+        return fail(instance, "fmi2SetFMUstate: " + describe(error));
     } catch (...) {
-        return fmi2Error;
+        return fail(instance, "fmi2SetFMUstate failed.");
     }
 }
 
@@ -189,23 +236,23 @@ fmi2Status fmi2FreeFMUstate(fmi2Component, fmi2FMUstate* FMUstate) {
     return fmi2OK;
 }
 
-fmi2Status fmi2SerializedFMUstateSize(fmi2Component, fmi2FMUstate FMUstate, size_t* size) {
-    if (!FMUstate || !size) return fmi2Error;
+fmi2Status fmi2SerializedFMUstateSize(fmi2Component c, fmi2FMUstate FMUstate, size_t* size) {
+    if (!FMUstate || !size) return fail(asInstance(c), "fmi2SerializedFMUstateSize: no FMU state given.");
     *size = static_cast<const std::vector<double>*>(FMUstate)->size() * sizeof(double);
     return fmi2OK;
 }
 
-fmi2Status fmi2SerializeFMUstate(fmi2Component, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size) {
-    if (!FMUstate || !serializedState) return fmi2Error;
+fmi2Status fmi2SerializeFMUstate(fmi2Component c, fmi2FMUstate FMUstate, fmi2Byte serializedState[], size_t size) {
+    if (!FMUstate || !serializedState) return fail(asInstance(c), "fmi2SerializeFMUstate: no FMU state given.");
     const auto* snapshot = static_cast<const std::vector<double>*>(FMUstate);
     const size_t needed = snapshot->size() * sizeof(double);
-    if (size < needed) return fmi2Error;
+    if (size < needed) return fail(asInstance(c), "fmi2SerializeFMUstate: " + std::to_string(size) + " bytes given, " + std::to_string(needed) + " needed.");
     std::memcpy(serializedState, snapshot->data(), needed);
     return fmi2OK;
 }
 
-fmi2Status fmi2DeSerializeFMUstate(fmi2Component, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate) {
-    if (!serializedState || !FMUstate || size % sizeof(double) != 0) return fmi2Error;
+fmi2Status fmi2DeSerializeFMUstate(fmi2Component c, const fmi2Byte serializedState[], size_t size, fmi2FMUstate* FMUstate) {
+    if (!serializedState || !FMUstate || size % sizeof(double) != 0) return fail(asInstance(c), "fmi2DeSerializeFMUstate: " + std::to_string(size) + " bytes are not a state serialized by this FMU.");
     auto* snapshot = new std::vector<double>(size / sizeof(double));
     std::memcpy(snapshot->data(), serializedState, size);
     *FMUstate = snapshot;
@@ -222,9 +269,9 @@ fmi2Status fmi2SetInteger(fmi2Component, const fmi2ValueReference[], size_t nvr,
 fmi2Status fmi2SetBoolean(fmi2Component, const fmi2ValueReference[], size_t nvr, const fmi2Boolean[]) { return nvr == 0 ? fmi2OK : fmi2Error; }
 fmi2Status fmi2SetString(fmi2Component, const fmi2ValueReference[], size_t nvr, const fmi2String[]) { return nvr == 0 ? fmi2OK : fmi2Error; }
 
-fmi2Status fmi2GetDirectionalDerivative(fmi2Component, const fmi2ValueReference[], size_t, const fmi2ValueReference[], size_t, const fmi2Real[], fmi2Real[]) { return fmi2Error; }
-fmi2Status fmi2SetRealInputDerivatives(fmi2Component, const fmi2ValueReference[], size_t, const fmi2Integer[], const fmi2Real[]) { return fmi2Error; }
-fmi2Status fmi2GetRealOutputDerivatives(fmi2Component, const fmi2ValueReference[], size_t, const fmi2Integer[], fmi2Real[]) { return fmi2Error; }
+fmi2Status fmi2GetDirectionalDerivative(fmi2Component c, const fmi2ValueReference[], size_t, const fmi2ValueReference[], size_t, const fmi2Real[], fmi2Real[]) { return fail(asInstance(c), "fmi2GetDirectionalDerivative is not supported: this FMU declares no such capability in its modelDescription.xml."); }
+fmi2Status fmi2SetRealInputDerivatives(fmi2Component c, const fmi2ValueReference[], size_t, const fmi2Integer[], const fmi2Real[]) { return fail(asInstance(c), "fmi2SetRealInputDerivatives is not supported: this FMU declares no such capability in its modelDescription.xml."); }
+fmi2Status fmi2GetRealOutputDerivatives(fmi2Component c, const fmi2ValueReference[], size_t, const fmi2Integer[], fmi2Real[]) { return fail(asInstance(c), "fmi2GetRealOutputDerivatives is not supported: this FMU declares no such capability in its modelDescription.xml."); }
 
 fmi2Status fmi2GetStatus(fmi2Component, const int, fmi2Status*) { return fmi2Discard; }
 fmi2Status fmi2GetRealStatus(fmi2Component, const int, fmi2Real*) { return fmi2Discard; }

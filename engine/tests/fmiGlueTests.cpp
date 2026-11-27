@@ -4,6 +4,8 @@
 #include "konjugate/simulationModel.hpp"
 
 #include <cmath>
+#include <cstdarg>
+#include <cstdio>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -113,6 +115,33 @@ void doStepRejectsANonIntegerMultipleCommunicationStep() {
     // 0.15 is not a whole multiple of the model's 0.1 globalTimeStep.
     require(fmi2DoStep(c, 0.0, 0.15, fmi2False) == fmi2Error,
         "fmi2DoStep should reject a communicationStepSize that is not a whole multiple of globalTimeStep.");
+    fmi2FreeInstance(c);
+}
+
+// FMI review #4: every refusal says why, through the host's logger, as the FMI 3.0 glue does ("logStatusError").
+std::vector<std::string> loggedMessages;
+void recordMessage(fmi2ComponentEnvironment, fmi2String, fmi2Status status, fmi2String category, fmi2String message, ...) {
+    va_list arguments;
+    va_start(arguments, message);
+    char text[1024];
+    std::vsnprintf(text, sizeof text, message, arguments);
+    va_end(arguments);
+    loggedMessages.push_back(std::string(category ? category : "") + "|" + std::to_string(status) + "|" + text);
+}
+
+void refusalsSayWhyThroughTheHostsLogger() {
+    const fmi2CallbackFunctions functions{recordMessage, nullptr, nullptr, nullptr, nullptr};
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "guid", "", &functions, fmi2False, fmi2False);
+    require(c != nullptr, "fmi2Instantiate failed.");
+    require(fmi2SetupExperiment(c, fmi2False, 0, 0.0, fmi2False, 0) == fmi2OK, "fmi2SetupExperiment failed.");
+    loggedMessages.clear();
+    require(fmi2DoStep(c, 0.0, 0.15, fmi2False) == fmi2Error, "fmi2DoStep should refuse 0.15 with a 0.1 global step.");
+    require(loggedMessages.size() == 1 && loggedMessages[0].rfind("logStatusError|3|fmi2DoStep: the communication step size 0.15 is not a whole number of this FMU's fixed internal step 0.1", 0) == 0,
+        "A refused fmi2DoStep must say why through the logger; it said: " + (loggedMessages.empty() ? std::string("nothing") : loggedMessages[0]));
+    loggedMessages.clear();
+    require(fmi2SetFMUstate(c, nullptr) == fmi2Error, "fmi2SetFMUstate with no state should be refused.");
+    require(loggedMessages.size() == 1 && loggedMessages[0].find("fmi2SetFMUstate: no FMU state given") != std::string::npos,
+        "A refused fmi2SetFMUstate must say why through the logger; it said: " + (loggedMessages.empty() ? std::string("nothing") : loggedMessages[0]));
     fmi2FreeInstance(c);
 }
 
@@ -228,6 +257,7 @@ void serializeAndDeserializeFMUstateRoundTrips() {
 int main() {
     instantiateRejectsModelExchange();
     instantiateRejectsAnotherModelsGuid();
+    refusalsSayWhyThroughTheHostsLogger();
     fullLifecycleMatchesHandComputedEuler();
     doStepRejectsANonIntegerMultipleCommunicationStep();
     resetReturnsTheModelToItsInitialState();

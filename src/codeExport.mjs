@@ -760,8 +760,16 @@ function pythonProviderClassName(source, entityLabel) {
 
 const parallelismModes = ['serial', 'openmp', 'stdThread', 'mpi'];
 
+// A model with an FMU node cannot be exported yet (FMI review #8): said by the node's name, before anything else is looked at, in every
+// export (C++, Python and an FMU). A switched-off FMU node is not run, and does not stop the export.
+export function refuseFmuNodes(document) {
+    const node = (document.nodes ?? []).find((item) => item.enabled !== false && item.implementation?.kind === 'fmi');
+    if (node) throw new Error(`Node "${node.name}" runs an FMU, and a model with an FMU node cannot be exported yet: export blocked. Switch the node off to export the rest of the model.`);
+}
+
 export function generateStandaloneProgram(document, kind, options = {}) {
     if (kind !== 'cpp' && kind !== 'python') throw new Error(`Unknown export kind "${kind}" -- expected "cpp" or "python".`);
+    refuseFmuNodes(document);
     const parallelism = options.parallelism ?? 'serial';
     if (!parallelismModes.includes(parallelism)) {
         throw new Error(`Unknown parallelism option "${parallelism}" -- expected one of ${parallelismModes.join(', ')}.`);

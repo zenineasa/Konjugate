@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { unzipSync, zipSync } from 'fflate';
-import { buildInstalledFmu, buildKey, buildsDirectoryOf, cachedBuild, currentBuildFor, firstError, portableSteps, removeBuilds } from '../src/fmuBuilds.mjs';
+import { buildInstalledFmu, confirmedArchives, rememberConfirmedArchive, buildKey, buildsDirectoryOf, cachedBuild, currentBuildFor, firstError, portableSteps, removeBuilds } from '../src/fmuBuilds.mjs';
 import { installFmuArchive, uninstallFmu } from '../src/fmuPackage.mjs';
 import { platformTuple } from '../src/fmiBinary.mjs';
 
@@ -79,5 +79,37 @@ test('what cannot be built is refused before anything runs: no build information
         assert.match(refused.message, /^Konjugate cannot build PidController: it needs the library sundials/);
     } finally {
         await rm(directory, { recursive: true, force: true });
+    }
+});
+
+// The one fmuSourceImport failure (FMI review group 2): two builds at once, one rewriting confirmed.json while the other read it, read it
+// empty. Whatever is read while files are being written is a whole file.
+test('the archives confirmed, read while another build writes them, are always a whole list', async () => {
+    const builds = await mkdtemp(join(tmpdir(), 'konjugateFmuBuildsRace-'));
+    try {
+        // A long list, as a computer that has built many FMUs keeps: the longer the file, the longer a write that is not whole takes.
+        await writeFile(join(builds, 'confirmed.json'), JSON.stringify(Array.from({ length: 20000 }, (_, index) => `f${index.toString(16).padStart(63, '0')}`)));
+        await rememberConfirmedArchive(builds, 'a'.repeat(64));
+        // Writers one after another, as builds that confirm in turn; readers reading the whole time, as a build starting meanwhile.
+        let writing = true;
+        const writers = (async () => {
+            try {
+                for (let index = 0; index < 30; index += 1) await rememberConfirmedArchive(builds, index.toString(16).padStart(64, '0'));
+            } finally {
+                writing = false;
+            }
+        })();
+        const readers = Array.from({ length: 2 }, async () => {
+            try {
+                while (writing) await confirmedArchives(builds);
+            } catch (error) {
+                writing = false;
+                throw error;
+            }
+        });
+        await Promise.all([writers, ...readers]);
+        assert.ok((await confirmedArchives(builds)).has('a'.repeat(64)));
+    } finally {
+        await rm(builds, { recursive: true, force: true });
     }
 });

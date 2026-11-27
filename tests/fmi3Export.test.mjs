@@ -148,7 +148,10 @@ test('both FMI versions say the run a host starts with, from 0 in steps of the o
     for (const fmiVersion of fmiVersions) {
         const known = describeFmu(configured, 'fixture', { fmiVersion, stopTime: 12.5 }).xml;
         const unknown = describeFmu(configured, 'fixture', { fmiVersion }).xml;
-        assert.ok(known.includes('    <DefaultExperiment startTime="0" stopTime="12.5" stepSize="0.05"/>\n    <ModelVariables>'), `FMI ${fmiVersion}: just before the variables.`);
+        // FMI 2.0 puts its vendor annotations (Konjugate's fixed step, FMI review #4) between them, as its schema orders them.
+        const next = fmiVersion === '3.0' ? '<ModelVariables>' : '<VendorAnnotations>';
+        assert.ok(known.includes(`    <DefaultExperiment startTime="0" stopTime="12.5" stepSize="0.05"/>\n    ${next}`), `FMI ${fmiVersion}: just before the ${fmiVersion === '3.0' ? 'variables' : 'vendor annotations'}.`);
+        if (fmiVersion === '2.0') assert.ok(known.includes('    </VendorAnnotations>\n    <ModelVariables>'), 'FMI 2.0: its vendor annotations just before the variables.');
         assert.ok(unknown.includes('    <DefaultExperiment startTime="0" stepSize="0.05"/>\n'), `FMI ${fmiVersion}: no stop time when the run's end is not known.`);
         assert.ok(describeFmu(fixtureDocument, 'fixture', { fmiVersion }).xml.includes('    <DefaultExperiment startTime="0" stepSize="0.01"/>\n'), 'With no run configuration, the global step it is exported with.');
         const without = (xml) => xml.split('\n').filter((line) => !line.includes('<DefaultExperiment')).join('\n');

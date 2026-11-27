@@ -117,6 +117,13 @@ function variableDetails({ description, unit, declaredType, min, max }, unitsByT
     }).filter(([, value]) => value !== undefined));
 }
 
+// The fixed step an FMI 2.0 FMU exported by Konjugate says in its vendor annotation (<Tool name="Konjugate"><CoSimulation
+// fixedInternalStepSize="…"/>), or undefined: another tool's annotations are not read.
+function konjugateFixedStep(root) {
+    const tool = asArray(root.VendorAnnotations?.Tool).find((item) => item?.['@_name'] === 'Konjugate');
+    return numberAttribute(asArray(tool?.CoSimulation)[0]?.['@_fixedInternalStepSize']);
+}
+
 // document must already be the parsed <fmiModelDescription> root object.
 function parseFmi2(root) {
     if (!root.CoSimulation) {
@@ -175,6 +182,8 @@ function parseFmi2(root) {
         // when no buildDescription.xml says more (docs/proposals/sourceFmuImport.md).
         ...(root.CoSimulation.SourceFiles ? { sourceFiles: asArray(root.CoSimulation.SourceFiles.File).map((file) => textAttribute(file?.['@_name'])).filter(Boolean) } : {}),
         coSimulation: {
+            // FMI 2.0 has no fixedInternalStepSize; Konjugate's own exports say it in their vendor annotation (FMI review #4).
+            ...(konjugateFixedStep(root) !== undefined ? { fixedInternalStepSize: konjugateFixedStep(root) } : {}),
             canHandleVariableCommunicationStepSize: flag(root.CoSimulation['@_canHandleVariableCommunicationStepSize']),
             canSerializeFMUState: flag(root.CoSimulation['@_canSerializeFMUstate']),
             canBeInstantiatedOnlyOncePerProcess: flag(root.CoSimulation['@_canBeInstantiatedOnlyOncePerProcess']),

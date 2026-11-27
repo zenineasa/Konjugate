@@ -94,7 +94,10 @@ function defaultExperimentXml(defaultExperiment) {
     return `    <DefaultExperiment${attributes}/>\n`;
 }
 
-export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership = null, defaultExperiment = null }) {
+// `globalTimeStep`, when given, is said in a Konjugate vendor annotation (FMI 2.0.4 §2.2.6, <VendorAnnotations>): FMI 2.0 has no
+// fixedInternalStepSize, and the export refuses a communication step that is not a whole number of it, so a host (Konjugate's Run
+// dialog) can warn before a run, as FMI 3.0's attribute lets it (FMI review #4).
+export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership = null, defaultExperiment = null, globalTimeStep = null }) {
     const rollback = supportsStateCapture ? 'true' : 'false';
     // The project's author, copyright and license (docs/proposals/modelOwnership.md), as the attributes FMI has for exactly these.
     const rights = Object.entries(fmiAttributes(ownership)).map(([name, value]) => ` ${name}="${escapeXml(value.replace(/[\r\n]+/g, ' '))}"`).join('');
@@ -102,7 +105,12 @@ export function modelDescriptionXml({ modelName, guid, modelIdentifier, stateVar
 <fmiModelDescription fmiVersion="2.0" modelName="${escapeXml(modelName)}" guid="${guid}"${rights} generationTool="Konjugate">
     <CoSimulation modelIdentifier="${escapeXml(modelIdentifier)}" canHandleVariableCommunicationStepSize="true"
         canGetAndSetFMUstate="${rollback}" canSerializeFMUstate="${rollback}" providesDirectionalDerivative="false"/>
-${defaultExperimentXml(defaultExperiment)}    <ModelVariables>
+${defaultExperimentXml(defaultExperiment)}${Number.isFinite(globalTimeStep) ? `    <VendorAnnotations>
+        <Tool name="Konjugate">
+            <CoSimulation fixedInternalStepSize="${globalTimeStep}"/>
+        </Tool>
+    </VendorAnnotations>
+` : ''}    <ModelVariables>
 ${scalarVariablesXml(inValueReferenceOrder([...stateVariables, ...parameterVariables]))}
     </ModelVariables>
     <ModelStructure>
@@ -209,7 +217,7 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime 
     const guid = deterministicGuid(modelIdentifier, source);
     const xml = modelDescriptionXml({
         modelName: modelName || 'model', guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership,
-        defaultExperiment
+        defaultExperiment, globalTimeStep
     });
     // `modelSource`: the model before either version's identity, the same for FMI 2.0 and 3.0.
     return { source: `${source}${fmi2IdentitySource(guid)}`, modelSource: source, modelIdentifier, xml, fmiVersion };

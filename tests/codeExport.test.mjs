@@ -515,10 +515,12 @@ test('code export writes atan2 and the other inverse functions, and refuses what
     assert.equal(generateStandaloneProgram(rated, 'python'), plain, 'A Rate said as a rate exports as it did unsaid.');
     const oncePerStep = singleNodeSourceTermModel();
     oncePerStep.nodes[0].states[0].kind = 'update';
-    assert.throws(() => generateStandaloneProgram(oncePerStep, 'python'), /Node "Tank" works its updates out once per step, which code export cannot write yet/);
+    // Worked out once per step (FMI review #3), after every node has stepped, reading itself as it was at the step's start.
+    assert.match(generateStandaloneProgram(oncePerStep, 'python'), /# Updates worked out once per step/);
     const settling = structuredClone(oncePerStep);
     settling.nodes[0].updates = 'settle';
-    assert.throws(() => generateStandaloneProgram(settling, 'python'), /"Tank · Pressure" reads itself, which code export cannot write yet/);
+    assert.throws(() => generateStandaloneProgram(settling, 'python'),
+        /"Tank · Pressure" reads itself in a node that settles its Updates within the step, which code export cannot write yet\. To export it, set "Tank"'s Updates to "Once per step"/);
     // An Update set from a constant, settling, exports as the setsValue term it was before.
     const constant = (document) => {
         Object.assign(document.nodes[0].sourceTerms[0].expressionModel, { latex: '5', bindings: [], mathJson: 5 });

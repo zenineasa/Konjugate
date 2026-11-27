@@ -20,12 +20,12 @@ import {
     buildModel, collectProviders, cppScheduleLines, cppSdkNamespace, cppStiffFmuPieces, doubleLiteral,
     cppAlgebraicLines, cppNodeSubstepLines, emitCppAlgebraicTask, emitCppProviderContribution, emitCppRegularContribution, stripLeadingCppInclude,
     cppProgramAdvanceLines, cppProgramInstantLines, cppProgramStartLines, emitCppNodeProgram, programEntries, programRuntimeCpp,
-    refuseFmuNodes, shareProgramInstances, updateStateIndexes
+    cppOncePerStepLines, refuseFmuNodes, shareProgramInstances, updateStateIndexes
 } from './codeExport.mjs';
 import { programSdkCpp } from './programSdkSources.mjs';
 
 // The symbols of every term, and of a node's own program in the current format, that a parameter can reach.
-const symbolOwners = (plan) => [...plan.algebraic, ...plan.contributions, ...(plan.nodeProvider?.program ? [plan.nodeProvider] : [])];
+const symbolOwners = (plan) => [...plan.algebraic, ...plan.oncePerStep, ...plan.contributions, ...(plan.nodeProvider?.program ? [plan.nodeProvider] : [])];
 
 // Assigns a stable FMI valueReference to every state (as an "output") and every parameter --
 // live (mode: "live") as causality="input"/variability="continuous", constant otherwise as
@@ -452,6 +452,8 @@ export function generateFmiModel(document, { fmuInterface = null } = {}) {
         '        started_ = true;',
         stiff ? '' : '        const std::vector<double> snapshot = state_;',
         stepBlocks,
+        // A node's Updates worked out once per step, after every node has stepped (codeExport.mjs); nothing at all in a model without.
+        ...(!stiff && model.oncePerStep ? [cppOncePerStepLines(model, { state: 'state_', indent: '    ' })] : []),
         programStepEnd,
         '    }',
         '',

@@ -24,7 +24,7 @@
 
 import { resolveSharedParameters } from './sharedParameters.mjs';
 import { exportNoticeLines } from './ownership.mjs';
-import { saysKinds, stateKinds, withoutKinds } from './ratesAndUpdates.mjs';
+import { saysKinds, sourceTermStateId, stateKinds, termsReachingStates } from './ratesAndUpdates.mjs';
 import { integrationMethod, methodOf, stepsPerGlobalStepOf, toleranceOf } from './integrationMethods.mjs';
 import { differentiateNode } from './expressionDerivative.mjs';
 import { bdfCpp, bdfPython, dormandPrince54Cpp, dormandPrince54Python, tsit5Cpp, tsit5Python, eventsCpp, eventsPython, linearSolveCpp, rodas4Cpp, rodas4Python, rodas5pCpp, rodas5pPython, rungeKutta4Cpp,
@@ -254,6 +254,62 @@ function latchConditions(model) {
 // ---- graph build: mirrors engine/src/executionPlan.cpp's compileExecutionPlan exactly enough to
 // reproduce its numerics, without needing any of its parallel-execution/checkpoint machinery. ----
 
+// How proceeding is said when code export cannot write a node's Updates (FMI review #3): what to switch, and that it changes timing.
+const toSettle = (node) => `To export it, set "${node}"'s Updates to "Settle within the step" (its Numerics tab): its Updates then read each other within `
+    + 'the step instead of as they were at its start, which changes when they see each other\'s new values, so its numbers can differ from this run\'s.';
+const toOncePerStep = (node) => `To export it, set "${node}"'s Updates to "Once per step" (its Numerics tab), the default: its Updates then read each other `
+    + 'as they were at the step\'s start, which changes when they see each other\'s new values, so its numbers can differ from this run\'s.';
+
+// A model that says its kinds, as code export writes it (docs/proposals/ratesAndUpdates.md): every Update's terms set its value; a node
+// that settles its Updates within the step is written as a file that says no kind runs (each node settling, in its own block); a node
+// that works them out once per step (the default) has its Updates worked out together after every node has stepped, as the engine's
+// applyUpdates does, from the Rates the step reached, the Updates as they were at its start and the step's end time, each the sum of
+// what sets it -- its own terms, and a relationship's single equation, negated at the far end of a two-way one. Returns { nodes (kinds
+// taken off), onceNodeIds, settleUpdateIds }, or throws saying why and how to proceed: an Update reading itself in a node that settles,
+// and a relationship's single equation setting the value of a settling node's Update.
+function exportKinds(nodes, edges) {
+    const reaching = termsReachingStates(nodes, edges);
+    const kinds = stateKinds(nodes, edges);
+    const isUpdate = (stateId) => kinds.get(Number(stateId))?.kind === 'update';
+    const names = new Map();
+    const ownerOf = new Map();
+    for (const node of nodes) for (const state of node.states ?? []) {
+        names.set(Number(state.id), `${node.name} · ${state.name ?? state.symbol}`);
+        ownerOf.set(Number(state.id), node);
+    }
+    const copies = structuredClone(nodes);
+    const onceNodeIds = new Set();
+    const settleUpdateIds = new Set();
+    for (const node of copies) {
+        const settles = node.updates === 'settle';
+        const holdsUpdate = (node.states ?? []).some((state) => isUpdate(state.id) && (reaching.get(Number(state.id)) ?? []).length > 0);
+        if (holdsUpdate && !settles) onceNodeIds.add(node.id);
+        for (const state of node.states ?? []) if (settles && isUpdate(state.id)) settleUpdateIds.add(Number(state.id));
+        for (const term of node.sourceTerms ?? []) {
+            const stateId = sourceTermStateId(node, term);
+            if (!isUpdate(stateId)) continue;
+            term.setsValue = true;
+            const reads = (term.expressionModel?.bindings ?? []).some((binding) => binding.kind === 'state' && Number(binding.stateId) === Number(stateId));
+            if (reads && settles) {
+                throw new Error(`State "${names.get(Number(stateId))}" reads itself in a node that settles its Updates within the step, which code export cannot write yet. ${toOncePerStep(node.name)}`);
+            }
+        }
+        for (const state of node.states ?? []) delete state.kind;
+        delete node.updates;
+        delete node.updatesLimit;
+    }
+    for (const [stateId, terms] of reaching) {
+        if (!isUpdate(stateId)) continue;
+        const node = ownerOf.get(stateId);
+        const single = terms.find((term) => term.type === 'relationship' && term.outputIndex === undefined && !term.off);
+        if (single && node?.updates === 'settle') {
+            const edge = edges.find((candidate) => candidate.id === single.edgeId);
+            throw new Error(`Relationship "${edge?.name ?? single.edgeId}" sets the value of "${names.get(stateId)}" with a single equation, in a node that settles its Updates within the step, which code export cannot write yet. ${toOncePerStep(node.name)}`);
+        }
+    }
+    return { nodes: copies, onceNodeIds, settleUpdateIds };
+}
+
 // `options.wholeModel`: the model is run by a whole-model method, under which a node's integration does not apply.
 export function buildModel(sourceDocument, options = {}) {
     // Standalone programs have no runtime notion of sharing: bake each link to its shared value.
@@ -264,11 +320,12 @@ export function buildModel(sourceDocument, options = {}) {
     // The Update states, as the file says them, before its kinds are taken away: a node's program in the current format sets one at the
     // update instant rather than adding a rate to it (docs/proposals/programSdkV2.md).
     const updateStateIds = new Set();
-    if (saysKinds(document.nodes ?? [])) {
+    let onceNodeIds = new Set();
+    let settleUpdateIds = new Set();
+    const saidKinds = saysKinds(document.nodes ?? []);
+    if (saidKinds) {
         for (const [stateId, entry] of stateKinds(document.nodes ?? [], document.edges ?? [])) if (entry?.kind === 'update') updateStateIds.add(Number(stateId));
-        const legacy = withoutKinds(document.nodes ?? [], document.edges ?? []);
-        if (legacy.reason) throw new Error(`${legacy.reason}, which code export cannot write yet.`);
-        document.nodes = legacy.nodes;
+        ({ nodes: document.nodes, onceNodeIds, settleUpdateIds } = exportKinds(document.nodes ?? [], document.edges ?? []));
     }
     const enabledNodes = (document.nodes ?? []).filter((node) => node.enabled !== false);
     const disabledNodeIds = new Set((document.nodes ?? []).filter((node) => node.enabled === false).map((node) => node.id));
@@ -291,6 +348,10 @@ export function buildModel(sourceDocument, options = {}) {
         // setsValue source terms (Updates): held through the step's substeps, then worked out and
         // written directly once after it, never integrated (see applyUpdates in engine/src/executionPlan.cpp).
         algebraic: [],
+        // A node that works its Updates out once per step (exportKinds): what sets them, its own terms and relationships', worked out
+        // together after every node has stepped (cppOncePerStepLines).
+        updatesOncePerStep: onceNodeIds.has(node.id),
+        oncePerStep: [],
         nodeProvider: null
     }));
     const nodePlanById = new Map(nodePlans.map((plan) => [plan.node.id, plan]));
@@ -300,7 +361,7 @@ export function buildModel(sourceDocument, options = {}) {
     for (const plan of nodePlans) {
         for (const term of plan.node.sourceTerms ?? []) {
             const programmable = term.implementation != null;
-            (term.setsValue === true ? plan.algebraic : plan.contributions).push(buildContribution({
+            (term.setsValue === true ? (plan.updatesOncePerStep ? plan.oncePerStep : plan.algebraic) : plan.contributions).push(buildContribution({
                 entityLabel: `source term on node "${plan.node.name}"`, ownerPlan: plan, alwaysLocal: true,
                 algebraic: term.setsValue === true,
                 bindings: programmable ? term.implementation.bindings : term.expressionModel.bindings,
@@ -339,9 +400,12 @@ export function buildModel(sourceDocument, options = {}) {
         const mathJson = programmable ? null : edge.equationModel.mathJson;
         const identifierField = programmable ? 'key' : 'symbol';
         const owner = { id: edge.id, text: `relationship ${nodeById.get(edge.source.nodeId)?.name} → ${nodeById.get(edge.target.nodeId)?.name}`, seed: edge.implementation?.seed ?? 0 };
+        // Into an Update (a file that says its kinds), the relationship's single equation sets the value: worked out once per step with the
+        // node's other values (exportKinds refused it in a settling node).
+        const setsValue = (stateId) => saidKinds && updateStateIds.has(Number(stateId));
         if (outputPlan) {
-            outputPlan.contributions.push(buildContribution({
-                entityLabel: `relationship "${edge.name}"`, ownerPlan: outputPlan, alwaysLocal: false,
+            (setsValue(outputStateId) ? outputPlan.oncePerStep : outputPlan.contributions).push(buildContribution({
+                entityLabel: `relationship "${edge.name}"`, ownerPlan: outputPlan, alwaysLocal: false, algebraic: setsValue(outputStateId),
                 bindings, outputStateId, mathJson, implementation: edge.implementation ?? null, negate: false,
                 parameters: edge.parameters ?? [], identifierField, owner
             }, stateRecord, schedules));
@@ -357,8 +421,11 @@ export function buildModel(sourceDocument, options = {}) {
                     otherStateId = otherNode.states[0]?.id;
                 }
                 if (otherStateId == null) throw new Error(`Bidirectional relationship "${edge.name}" has an endpoint with no states.`);
-                otherPlan.contributions.push(buildContribution({
-                    entityLabel: `relationship "${edge.name}"`, ownerPlan: otherPlan, alwaysLocal: false,
+                if (setsValue(otherStateId) && !otherPlan.updatesOncePerStep) {
+                    throw new Error(`Relationship "${edge.name}" sets the value of "${otherNode.name}"'s Update at its far end, in a node that settles its Updates within the step, which code export cannot write yet. ${toOncePerStep(otherNode.name)}`);
+                }
+                (setsValue(otherStateId) ? otherPlan.oncePerStep : otherPlan.contributions).push(buildContribution({
+                    entityLabel: `relationship "${edge.name}"`, ownerPlan: otherPlan, alwaysLocal: false, algebraic: setsValue(otherStateId),
                     bindings, outputStateId: otherStateId, mathJson, implementation: edge.implementation ?? null, negate: true,
                     parameters: edge.parameters ?? [], identifierField, owner
                 }, stateRecord, schedules));
@@ -370,7 +437,34 @@ export function buildModel(sourceDocument, options = {}) {
     if (!options.wholeModel) {
         for (const plan of nodePlans) if (plan.node.numerics?.integration === 'verlet') plan.verletKicked = verletParts(plan);
     }
-    return { nodePlans, globalStateCount: globalIndex, stateRecord, schedules: schedules.list, updateStateIds };
+    const oncePerStep = oncePerStepPlan(nodePlans, stateRecord, settleUpdateIds, options);
+    return { nodePlans, globalStateCount: globalIndex, stateRecord, schedules: schedules.list, updateStateIds, oncePerStep };
+}
+
+// The Updates worked out once per step, in the engine's order (each node in turn, its own terms then the relationships setting its
+// values, edge by edge), every state each reads taken from `read`: the states as the step left them, but a settling node's Updates as
+// they were at the step's start, since the engine works those out after these. Null when there are none. What code export does not
+// write yet beside them is refused, saying how to proceed: a whole-model method, a program setting such a value, a program in the
+// current format anywhere in the model (whose values the engine puts in place in a different order).
+function oncePerStepPlan(nodePlans, stateRecord, settleUpdateIds, options) {
+    const tasks = nodePlans.flatMap((plan) => plan.oncePerStep);
+    if (!tasks.length) return null;
+    const first = tasks[0].plan.node.name;
+    if (options.wholeModel) {
+        throw new Error(`Node "${first}" works its Updates out once per step, which code export writes under Euler, node by node only, so far: choose it in the Run settings, or set its Updates to "Settle within the step" (its Numerics tab), which changes when its Updates see each other's new values, so its numbers can differ from this run's.`);
+    }
+    const program = tasks.find((task) => task.implementation);
+    if (program) throw new Error(`The ${program.entityLabel} is a program setting an Update that is worked out once per step, which code export cannot write yet. ${toSettle(program.plan.node.name)}`);
+    const version2 = nodePlans.find((plan) => [...plan.contributions, ...plan.algebraic, ...(plan.nodeProvider ? [plan.nodeProvider] : [])]
+        .some((task) => task.implementation?.providerApiVersion === 2));
+    if (version2) throw new Error(`Node "${first}" works its Updates out once per step beside a program in the current format (on "${version2.node.name}"), which code export cannot write yet. ${toSettle(first)}`);
+    for (const task of tasks) {
+        task.symbols = new Map([...task.symbols].map(([key, value]) => [key, value.globalIndex !== undefined ? { ...value, text: `read[${value.globalIndex}]` } : value]));
+        task.outputGlobalIndex = stateRecord.get(task.outputStateId).globalIndex;
+    }
+    const writes = [...new Set(tasks.map((task) => task.outputGlobalIndex))];
+    const settled = [...settleUpdateIds].filter((stateId) => stateRecord.has(stateId)).map((stateId) => stateRecord.get(stateId).globalIndex);
+    return { tasks, writes, settled };
 }
 
 // A Verlet node's two parts, as engine/src/executionPlan.cpp's assignVerletParts finds them: the states before the first one whose
@@ -981,6 +1075,55 @@ export function emitCppRegularContribution(contribution) {
         `            derivative[${contribution.outputLocalIndex}] += contributionValue;`,
         '        }'
     ].filter(Boolean).join('\n');
+}
+
+// The Updates worked out once per step (oncePerStepPlan), after every node has stepped, as the engine's applyUpdates does: every one
+// reads `read` (the states as the step left them, a settling node's Updates as they were at its start) and the step's end time; each
+// state is set to 0 and then the sum of what sets it, in the engine's order. `state` names the program's state vector ("globalState" in
+// a standalone program, "state_" in an FMU), `snapshot` the step's start.
+export function cppOncePerStepLines(model, { state = 'globalState', indent = '        ' } = {}) {
+    if (!model.oncePerStep) return '';
+    const { tasks, writes, settled } = model.oncePerStep;
+    const inner = `${indent}    `;
+    return [
+        `${indent}{`,
+        `${inner}// Updates worked out once per step: from the states the step reached, the Updates as they were at its start, at its end time.`,
+        `${inner}std::vector<double> read = ${state};`,
+        ...settled.map((index) => `${inner}read[${index}] = snapshot[${index}];`),
+        `${inner}const double algebraicTime = currentTime + globalTimeStep;`,
+        ...writes.map((index) => `${inner}${state}[${index}] = 0.0;`),
+        ...tasks.flatMap((task) => [
+            `${inner}{`,
+            ...commentLines(task.symbols, `${inner}    `, '//'),
+            `${inner}    double updateValue = ${emitExpression(compileExpressionNode(task.mathJson), symbolTexts(task.symbols, 'cpp'), cppOperators)};`,
+            task.negate ? `${inner}    updateValue = -updateValue;` : '',
+            `${inner}    if (!std::isfinite(updateValue)) throw std::runtime_error("An Update produced a non-finite value.");`,
+            `${inner}    ${state}[${task.outputGlobalIndex}] += updateValue;`,
+            `${inner}}`
+        ].filter(Boolean)),
+        `${indent}}`
+    ].join('\n');
+}
+
+// The same in Python, in the step loop's body.
+function pythonOncePerStepLines(model) {
+    if (!model.oncePerStep) return '';
+    const { tasks, writes, settled } = model.oncePerStep;
+    const indent = '        ';
+    return [
+        `${indent}# Updates worked out once per step: from the states the step reached, the Updates as they were at its start, at its end time.`,
+        `${indent}read = list(global_state)`,
+        ...settled.map((index) => `${indent}read[${index}] = snapshot[${index}]`),
+        `${indent}algebraic_time = current_time + global_time_step`,
+        ...writes.map((index) => `${indent}global_state[${index}] = 0.0`),
+        ...tasks.flatMap((task) => [
+            ...commentLines(task.symbols, indent, '#'),
+            `${indent}update_value = ${emitExpression(compileExpressionNode(task.mathJson), symbolTexts(task.symbols, 'python'), pythonOperators)}`,
+            task.negate ? `${indent}update_value = -update_value` : '',
+            `${indent}if not math.isfinite(update_value): raise RuntimeError("An Update produced a non-finite value.")`,
+            `${indent}global_state[${task.outputGlobalIndex}] += update_value`
+        ].filter(Boolean))
+    ].join('\n');
 }
 
 // An algebraic state is a plain replacement: g(x, t) from the node's states at one instant.
@@ -1933,6 +2076,7 @@ function generateCpp(model, providers, meta, document) {
             nodeLambdas.split('\n').map((line) => `    ${line}`).join('\n'),
             `        std::vector<std::function<void()>> nodeIntegrators = { ${nodeIntegratorList} };`,
             dispatchLines.join('\n'),
+            ...(model.oncePerStep ? [cppOncePerStepLines(model)] : []),
             ...cppProgramStepEndLines(model, providerInfo),
             '        if ((step + 1) % outputEveryStep == 0) writeRow((step + 1) * globalTimeStep);',
             '    }'
@@ -2450,6 +2594,7 @@ function generatePython(model, providers, meta, document) {
             '        current_time = step * global_time_step',
             nodeBlocks.split('\n').map((line) => `    ${line}`).join('\n'),
             ...gatherLines,
+            ...(model.oncePerStep ? [pythonOncePerStepLines(model)] : []),
             ...pythonProgramStepEndLines(model, providerInfo)
         ]),
         '        if (step + 1) % output_every_step == 0:',

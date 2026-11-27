@@ -29,7 +29,8 @@ const defaultTimeoutMilliseconds = 5 * 60_000;
 // for on both 127.0.0.1 and ::1 because a browser may resolve it to either. A request that is not the callback, or whose
 // `state` differs from the one sent, is answered and ignored (another page on this computer could send one); a callback
 // without `state` is accepted only when `requireState` is false, which is safe where the code is useless without the PKCE
-// verifier that never leaves this process. Resolves to { code, verifier, redirectUri }.
+// verifier that never leaves this process. Resolves to { code, verifier, redirectUri, params }, `params` being everything the
+// callback carried (a provider may send more than the code: OpenAI sends the client it registered and the scopes granted).
 export async function loopbackAuthorization({
     authorizationUrl, openExternal, signal, host = '127.0.0.1', path = '/callback',
     requireState = true, timeoutMilliseconds = defaultTimeoutMilliseconds
@@ -65,7 +66,7 @@ export async function loopbackAuthorization({
         const code = url.searchParams.get('code');
         if (!code) return answer(400, page('Not signed in', 'The provider sent no sign-in code.'));
         answer(200, signedInPage);
-        settle.resolve(code);
+        settle.resolve({ code, params: Object.fromEntries(url.searchParams) });
         return undefined;
     };
 
@@ -96,8 +97,8 @@ export async function loopbackAuthorization({
         timer = setTimeout(() => settle.reject(new AssistantProviderError(
             `Signing in was not finished within ${Math.round(timeoutMilliseconds / 60_000)} minutes. Try again when you are ready.`, 'signInTimedOut')), timeoutMilliseconds);
         await openExternal(authorizationUrl(redirectUri, { challenge, state }));
-        const code = await finished;
-        return { code, verifier, redirectUri };
+        const { code, params } = await finished;
+        return { code, verifier, redirectUri, params };
     } finally {
         clearTimeout(timer);
         signal?.removeEventListener('abort', onAbort);

@@ -23,39 +23,47 @@ export function createAIProviderRegistry(providers = []) {
         descriptors() {
             // `reasoningSetting`: whether the provider can be told to reason before answering, or not (a configuration's `think`).
             // `signIn`: whether a person can sign in to it in their browser instead of pasting a key, described by
-            // `signInDescription`. `keyPage`: where its keys are made, for a person who will paste one, offered as `keyPageLabel`.
-            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInDescription = '', keyPage = '', keyPageLabel = '' }) => ({
+            // `signInDescription`; `signInOnly` when a key cannot be typed in for it (ChatGPT plan usage). `keyPage`: where its keys are made, for a person who will paste one, offered as `keyPageLabel`.
+            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInOnly = false, signInDescription = '', keyPage = '', keyPageLabel = '' }) => ({
                 id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting,
-                signIn: typeof signIn === 'function', signInDescription, keyPage, keyPageLabel: keyPage ? keyPageLabel || `Get a key from ${name} ›` : ''
+                signIn: typeof signIn === 'function', signInOnly, signInDescription, keyPage, keyPageLabel: keyPage ? keyPageLabel || `Get a key from ${name} ›` : ''
             }));
         },
-        // Signs in to a provider in the person's browser; resolves to { credential }. `openExternal` opens the browser.
-        async signIn({ provider: id, openExternal, signal }) {
+        // Signs in to a provider in the person's browser; resolves to { credential, account? }. `openExternal` opens the browser,
+        // `hostId` names this installation, and `previous` is the credential of an earlier sign-in being renewed, if any.
+        async signIn({ provider: id, openExternal, signal, hostId, previous }) {
             const provider = registry.get(id);
             if (typeof provider?.signIn !== 'function') throw new AIProviderRegistryError(`Signing in to “${id}” is not available.`, 'signInUnavailable');
-            const result = await provider.signIn({ openExternal, signal });
+            const result = await provider.signIn({ openExternal, signal, hostId, previous });
             if (typeof result?.credential !== 'string' || !result.credential) throw new AIProviderRegistryError('The provider did not return a credential.', 'invalidProviderResponse');
             return result;
         },
         // The model a configuration starts with when the person has not chosen one: the provider's pick from `models`, or the first.
+        // Ends a sign-in at the provider as well, where it can; false where there is nothing to end.
+        async signOut({ provider: id, credential, signal }) {
+            const provider = registry.get(id);
+            if (typeof provider?.signOut !== 'function' || !credential) return false;
+            return provider.signOut({ credential, signal });
+        },
         suggestModel(id, models) {
             const provider = registry.get(id);
             return provider?.suggestModel ? provider.suggestModel(models) : models[0]?.id ?? '';
         },
-        async testConnection({ configuration, credential, signal }) {
+        // `onCredential(value)`, where given, saves a credential the provider renewed on the way (a refreshed sign-in).
+        async testConnection({ configuration, credential, onCredential, signal }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             if (signal?.aborted) throw new DOMException('The request was cancelled.', 'AbortError');
-            if (provider.testConnection) return provider.testConnection({ configuration, credential, signal });
+            if (provider.testConnection) return provider.testConnection({ configuration, credential, onCredential, signal });
             return { connected: true, provider: provider.id };
         },
-        async listModels({ configuration, credential, signal }) {
+        async listModels({ configuration, credential, onCredential, signal }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             if (!provider.listModels) return [];
-            return provider.listModels({ configuration, credential, signal });
+            return provider.listModels({ configuration, credential, onCredential, signal });
         },
-        async generate({ configuration, credential, context, request, history, signal, onProgress }) {
+        async generate({ configuration, credential, onCredential, context, request, history, signal, onProgress }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             // What the panel shows while this runs: which attempt, what stage, and the latest of what the
@@ -82,7 +90,7 @@ export function createAIProviderRegistry(providers = []) {
                     publish();
                     try {
                         response = await generateAssistantProposal(provider, {
-                            configuration, credential, context, request, history, repair, signal, onEvent
+                            configuration, credential, onCredential, context, request, history, repair, signal, onEvent
                         });
                     } catch (error) {
                         // Only what the model itself got wrong is worth asking it to fix: JSON that does not parse, or

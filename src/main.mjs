@@ -3424,11 +3424,18 @@ ipcMain.handle('providerExecutionModeSet', async (event, executionMode) => {
 const aiCredentialOptions = (provider) => ({
     useCredential: aiProviderRegistry.descriptors().find((descriptor) => descriptor.id === provider)?.credentialRequired !== false
 });
+// A provider may renew the saved credential on the way (a sign-in's access token refreshed); `onCredential` saves the new one
+// over the configuration's. A key typed into a draft is not the saved one, so nothing is saved for it.
 const resolveAIConfiguration = async (uuid) => {
     const { configuration } = await aiConfigurationStore.resolve(uuid, { useCredential: false });
-    return aiConfigurationStore.resolve(uuid, aiCredentialOptions(configuration.provider));
+    const resolved = await aiConfigurationStore.resolve(uuid, aiCredentialOptions(configuration.provider));
+    return { ...resolved, onCredential: (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value) };
 };
-const resolveAIDraft = (configuration, credential) => aiConfigurationStore.resolveDraft(configuration, credential, aiCredentialOptions(configuration?.provider));
+const resolveAIDraft = async (configuration, credential) => {
+    const resolved = await aiConfigurationStore.resolveDraft(configuration, credential, aiCredentialOptions(configuration?.provider));
+    const typed = typeof credential === 'string' && Boolean(credential.trim());
+    return { ...resolved, onCredential: typed ? undefined : (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value) };
+};
 
 ipcMain.handle('aiListConfigurations', async (event) => {
     requireProjectWindow(event);
@@ -3450,6 +3457,15 @@ ipcMain.handle('aiSaveConfiguration', async (event, configuration, credential) =
 
 ipcMain.handle('aiRemoveConfiguration', async (event, configurationUuid) => {
     requireProjectWindow(event);
+    // A signed-in configuration is also signed out at the provider where it can be (ChatGPT revokes its refresh token), within
+    // ten seconds and as best it can: it is removed from this computer either way.
+    const { configurations } = await aiConfigurationStore.list();
+    const removing = configurations.find((item) => item.uuid === configurationUuid);
+    if (removing?.credentialSource === 'signIn') {
+        await aiConfigurationStore.resolve(configurationUuid)
+            .then(({ credential }) => aiProviderRegistry.signOut({ provider: removing.provider, credential, signal: AbortSignal.timeout(10_000) }))
+            .catch(() => false);
+    }
     return aiConfigurationStore.remove(configurationUuid);
 });
 
@@ -3481,15 +3497,18 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
     const abort = () => controller.abort();
     event.sender.once('destroyed', abort);
     try {
-        const { credential } = await aiProviderRegistry.signIn({
-            provider, signal: controller.signal, openExternal: (url) => shell.openExternal(url)
-        });
         const { configurations } = await aiConfigurationStore.list();
         const earlier = configurations.find((item) => item.provider === provider && item.credentialSource === 'signIn');
+        // Signing in again renews the earlier sign-in (ChatGPT reuses the client it issued for that account).
+        const previous = earlier ? await aiConfigurationStore.resolve(earlier.uuid).then(({ credential }) => credential).catch(() => null) : null;
+        const { credential, account = '' } = await aiProviderRegistry.signIn({
+            provider, signal: controller.signal, openExternal: (url) => shell.openExternal(url),
+            hostId: await aiConfigurationStore.hostIdentifier(), previous
+        });
         const configuration = {
             uuid: earlier?.uuid, name: earlier?.name ?? descriptor.name, provider, endpoint: earlier?.endpoint ?? '',
             model: earlier?.model ?? '', timeoutSeconds: earlier?.timeoutSeconds ?? descriptor.defaultTimeoutSeconds,
-            think: earlier?.think ?? null, credentialSource: 'signIn'
+            think: earlier?.think ?? null, credentialSource: 'signIn', account
         };
         if (!configuration.model) {
             // A model list that does not come is no reason to lose the sign-in: the configuration is kept, and a model chosen on its page.

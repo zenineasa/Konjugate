@@ -176,7 +176,7 @@ Nothing now: the assistant is not in the web edition yet. When it is, OpenRouter
 
 1. **Built: direct sign-in plumbing and OpenRouter** (`src/aiOAuth.mjs`, the OpenRouter adapter, **Sign in to a provider** at the top of the settings page; described in the [provider architecture](../aiProviderArchitecture.md#signing-in-to-a-provider) and the [guide](../aiAssistantGuide.md#sign-in-to-a-provider)). An OpenRouter key is an ordinary key, so the sign-in record with a refresh token waits for ChatGPT plan usage, the first provider that needs it.
 2. **Built: Anthropic with an API key**, through the Messages API with Anthropic's SDK and structured outputs, and a link to each provider's key page under **API key** ("Get a free key from Google AI Studio ›" for Gemini).
-3. **ChatGPT plan usage**, with the Responses API request path, once OpenAI confirms eligibility.
+3. **Built: ChatGPT plan usage**, with the Responses API request path, dynamic registration and refresh-token rotation, as OpenAI documents it for open-source, locally run apps. Whether OpenAI counts Konjugate among those apps (it is also distributed through app stores) is still to be confirmed with OpenAI before it is announced.
 4. **Detection and vendor-tool providers**, with the Claude Code bridge built behind a switch that stays off until Anthropic answers, and the Copilot provider once GitHub's terms are confirmed.
 5. **Installing vendor tools** from the settings page, for the tools whose vendors have said yes.
 6. **Hugging Face sign-in**, after the token is shown to work for inference.

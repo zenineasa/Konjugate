@@ -49,8 +49,10 @@ function normalizeConfiguration(input, existing, uuidFactory) {
         model,
         timeoutSeconds,
         think,
-        // 'signIn' when the saved key came from signing in to the provider in the browser, null when it was typed in.
+        // 'signIn' when the saved key came from signing in to the provider in the browser, null when it was typed in, and
+        // `account` the account signed in to, as the provider named it (an email), for showing who is signed in.
         credentialSource: existing?.credentialSource ?? null,
+        account: existing?.account ?? '',
         credentialUuid: existing?.credentialUuid ?? null
     };
 }
@@ -146,6 +148,7 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
                     throw new AIConfigurationError('Secure credential storage is unavailable. The API key was not saved.', 'secureStorageUnavailable');
                 }
                 configuration.credentialSource = input.credentialSource === 'signIn' ? 'signIn' : null;
+                configuration.account = configuration.credentialSource === 'signIn' && typeof input.account === 'string' ? input.account.trim().slice(0, 200) : '';
                 configuration.credentialUuid ??= uuidFactory();
                 const encrypted = await credentialVault.encrypt(credential);
                 await writeAtomically(join(credentialsDirectory, `${configuration.credentialUuid}.bin`), encrypted, { mode: 0o600 });
@@ -167,6 +170,24 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             });
             await persist();
             return true;
+        },
+        // A credential the provider renewed (a refreshed sign-in), saved over the configuration's own; nothing else changes.
+        async replaceCredential(uuid, credential) {
+            await initialize();
+            const configuration = find(uuid);
+            if (!configuration?.credentialUuid || typeof credential !== 'string' || !credential) return false;
+            await writeAtomically(join(credentialsDirectory, `${configuration.credentialUuid}.bin`), await credentialVault.encrypt(credential), { mode: 0o600 });
+            return true;
+        },
+        // This installation's own id for providers that tell computers apart (ChatGPT plan usage's host id): made once and kept,
+        // so every sign-in from this computer names the same host. It identifies nothing else and is not a secret.
+        async hostIdentifier() {
+            await initialize();
+            if (typeof state.hostId !== 'string' || !state.hostId) {
+                state.hostId = `urn:uuid:${randomUUID()}`;
+                await persist();
+            }
+            return state.hostId;
         },
         async setActive(uuid) {
             await initialize();

@@ -22,7 +22,20 @@ The assistant needs a model. Until one is set up, its panel says so and **Set up
 
 ## Sign in to a provider
 
-At the top of **Settings › Model assistant**, **Sign in to a provider** sets the assistant up without making or pasting an API key. Today it offers [OpenRouter](https://openrouter.ai/), one account for models from Anthropic (Claude), OpenAI (GPT), Google (Gemini) and many others, paid for per use from credits on your OpenRouter account.
+At the top of **Settings › Model assistant**, **Sign in to a provider** sets the assistant up without making or pasting an API key. It offers:
+
+- **ChatGPT**: your ChatGPT Plus or Pro plan pays for the assistant's requests, within the plan's limits, with no API key and no separate bill.
+- **OpenRouter**: one account for models from Anthropic (Claude), OpenAI (GPT), Google (Gemini) and many others, paid for per use from credits on your OpenRouter account.
+
+### ChatGPT
+
+**Sign in with ChatGPT** opens OpenAI's sign-in page in your browser. The first time, it asks you to allow Konjugate to use your ChatGPT plan; allow it, and the browser comes back to Konjugate, which makes a **ChatGPT** configuration with the first model your plan offers and puts it in use. Konjugate is registered with your account as "Konjugate" and appears in ChatGPT's settings among the apps you have connected, where it can also be disconnected. If you sign in but do not allow plan usage, Konjugate says so and keeps nothing.
+
+Plan usage needs a Plus or Pro plan, and a workspace plan only where its owner allows it. Requests count against your plan's limits (on Plus, a limit shared with your other uses of ChatGPT over five hours). When the limit is reached, the assistant says so and links to [chatgpt.com/settings/usage](https://chatgpt.com/settings/usage); use another configuration until then. OpenAI offers plan usage as a preview for open-source apps that run on your own computer, and may change it.
+
+Konjugate keeps the sign-in encrypted on this computer and renews it by itself (the access OpenAI gives lasts an hour and is renewed for up to thirty days at a time each time it is used). **Sign in again** renews an ended sign-in with the same account. Deleting the configuration also signs Konjugate out at OpenAI. The configuration has no API key field: a ChatGPT plan is reached only by signing in. Konjugate sends OpenAI only what the assistant needs for the request, and asks it not to keep the conversation (`store: false`).
+
+### OpenRouter
 
 **Sign in with OpenRouter** opens OpenRouter's own page in your browser, where you sign in (or make an account) and allow Konjugate; the page can also set a spending limit and an expiry for what Konjugate is given. While it waits, the section says "Waiting for your browser…" and **Cancel** stops it; it gives up by itself after five minutes. When you allow it, the browser comes back to Konjugate on this computer, Konjugate is given a key for your account, and it makes an **OpenRouter** configuration with a model chosen for you and puts it in use, so the assistant is ready. The model chosen is the newest Claude Sonnet your account can use, or else the newest GPT, or else the newest Gemini Pro: strong at the assistant's job and priced for everyday use. The largest models cost several times more per request, so they are left for you to choose on the configuration's page.
 

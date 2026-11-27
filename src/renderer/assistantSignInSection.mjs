@@ -63,7 +63,7 @@ export function createAssistantSignInSection({ root, api, providers = () => [], 
         const existing = signedInConfiguration(provider.id);
         text.append(element('span', 'settingsItemLabel', provider.name));
         text.append(element('small', 'settingsItemHint', existing
-            ? `Signed in${existing.model ? ` · ${existing.model}` : ''}` : provider.signInDescription));
+            ? `Signed in${existing.account ? ` as ${existing.account}` : ''}${existing.model ? ` · ${existing.model}` : ''}` : provider.signInDescription));
         const control = element('div', 'settingsItemControl');
         if (waitingFor === provider.id) {
             control.append(element('small', 'assistantSignInWaiting', 'Waiting for your browser…'));

@@ -14308,7 +14308,8 @@ function renderAssistantConfigurationList() {
         title.textContent = configuration.name;
         const details = document.createElement('small');
         details.className = 'settingsItemHint';
-        details.textContent = `${provider?.name ?? configuration.provider}${configuration.credentialSource === 'signIn' ? ' · signed in' : ''} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        const signedIn = configuration.credentialSource === 'signIn' ? ` · signed in${configuration.account ? ` as ${configuration.account}` : ''}` : '';
+        details.textContent = `${provider?.name ?? configuration.provider}${signedIn} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
         text.append(title, details);
         const control = document.createElement('span');
         control.className = 'settingsItemControl';
@@ -14361,13 +14362,14 @@ function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
     if (replaceEndpoint && !$('#assistantConfigurationUuid').value) {
         $('#assistantConfigurationTimeout').value = provider.defaultTimeoutSeconds ?? 60;
     }
-    $('#assistantCredentialField').hidden = !provider.credentialRequired;
+    // A provider reached only by signing in (ChatGPT plan usage) has no key to type.
+    $('#assistantCredentialField').hidden = !provider.credentialRequired || provider.signInOnly;
     $('#assistantKeyPage').hidden = !provider.keyPage;
     $('#assistantKeyPage').textContent = provider.keyPageLabel ?? '';
     $('#assistantThinkField').hidden = !provider.reasoningSetting;
     syncAssistantThinkNote();
     const existing = assistantConfigurationCatalog.configurations.find((item) => item.uuid === $('#assistantConfigurationUuid').value);
-    $('#assistantConfigurationCredential').required = provider.credentialRequired && !existing?.credentialConfigured;
+    $('#assistantConfigurationCredential').required = provider.credentialRequired && !provider.signInOnly && !existing?.credentialConfigured;
 }
 
 function syncAssistantThinkNote() {
@@ -14379,6 +14381,9 @@ function syncAssistantThinkNote() {
 function populateAssistantConfiguration(configuration = null) {
     assistantDiscoveryRevision += 1;
     const providers = assistantConfigurationCatalog.providers;
+    // A provider reached only by signing in is offered here only for the configuration a sign-in made.
+    $('#assistantConfigurationProvider').replaceChildren(...providers.filter((provider) => !provider.signInOnly || provider.id === configuration?.provider)
+        .map((provider) => new Option(provider.name, provider.id)));
     const initialProvider = configuration?.provider ?? providers.find((provider) => provider.id === 'ollama')?.id ?? providers[0]?.id ?? '';
     $('#assistantConfigurationUuid').value = configuration?.uuid ?? '';
     $('#assistantConfigurationName').value = configuration?.name ?? 'My local model';
@@ -14412,7 +14417,7 @@ function populateAssistantConfiguration(configuration = null) {
 async function prepareAssistantConfigurationPage() {
     await refreshAssistantConfigurations();
     const providers = assistantConfigurationCatalog.providers;
-    $('#assistantConfigurationProvider').replaceChildren(...providers.map((provider) => new Option(provider.name, provider.id)));
+    $('#assistantConfigurationProvider').replaceChildren(...providers.filter((provider) => !provider.signInOnly).map((provider) => new Option(provider.name, provider.id)));
     assistantDiscoveryRevision += 1;
     clearTimeout(assistantDiscoveryTimer);
     assistantConfigurationBaseline = '';

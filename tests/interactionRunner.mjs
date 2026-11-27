@@ -1020,9 +1020,24 @@ export async function runInteractionTests(driver) {
         await assert.rejects(fetch(`http://127.0.0.1:${callback.port}/callback`), 'Konjugate still listened after Cancel.');
         assert.equal((await evaluate(window, `window.aiProviders.listConfigurations()`)).configurations.length, before, 'A cancelled sign-in added a configuration.');
 
+        // ChatGPT is offered too: a first sign-in registers Konjugate, from this computer's loopback address on 127.0.0.1.
+        assert.match(await evaluate(window, `document.querySelector('[data-sign-in-row="chatGpt"]').textContent`), /ChatGPT.*Plus or Pro plan.*Sign in with ChatGPT/);
+        const chatGptOpened = driver.waitForDialog({ kind: 'external', includes: 'https://auth.openai.com/api/accounts/authorize?' });
+        await evaluate(window, `document.querySelector('[data-sign-in="chatGpt"]').click()`);
+        const chatGptAuthorization = new URL((await chatGptOpened).url).searchParams;
+        assert.equal(chatGptAuthorization.get('client_id'), 'dynamic_agent_client');
+        assert.equal(chatGptAuthorization.get('agent_name_hint'), 'Konjugate');
+        assert.match(chatGptAuthorization.get('ext_agent_host_id'), /^urn:uuid:/);
+        assert.match(chatGptAuthorization.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/);
+        assert.match(chatGptAuthorization.get('scope'), /chatgpt\.tokens\.use\.direct/);
+        await waitFor(window, `Boolean(document.querySelector('[data-sign-in-cancel="chatGpt"]'))`, 'The page did not say it is waiting for the browser.');
+        await evaluate(window, `document.querySelector('[data-sign-in-cancel="chatGpt"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-sign-in="chatGpt"]'))`, 'Cancel did not end the ChatGPT sign-in.');
+
         // A configuration with a key says where its provider's keys are made, and opens only that page.
         await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
         await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden`, 'Add configuration… did not open a form.');
+        assert.equal(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].some((option) => option.value === 'chatGpt')`), false, 'ChatGPT, reached only by signing in, was offered for a key.');
         const chooseProvider = (id) => evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationProvider'); select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change')); })()`);
         await chooseProvider('gemini');
         assert.equal(await evaluate(window, `document.querySelector('#assistantKeyPage').textContent`), 'Get a free key from Google AI Studio ›');

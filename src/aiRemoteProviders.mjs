@@ -4,6 +4,7 @@ import { AssistantProviderError } from './assistantProviders.mjs';
 import { isStreamingResponse, newlineDelimitedJson, serverSentEvents, streamLines } from './aiStreaming.mjs';
 import { loopbackAuthorization } from './aiOAuth.mjs';
 import Anthropic from '@anthropic-ai/sdk';
+import { randomBytes } from 'node:crypto';
 
 const defaults = Object.freeze({
     ollama: 'http://127.0.0.1:11434',
@@ -35,10 +36,17 @@ async function responseOk(fetchImpl, url, options = {}, { unauthorizedHint = '' 
     if (!response.ok) {
         const text = await response.text();
         let detail = text.slice(0, 500);
-        try { detail = JSON.parse(text).error?.message ?? JSON.parse(text).message ?? detail; } catch { /* use bounded text */ }
+        let providerCode = null;
+        try {
+            const body = JSON.parse(text);
+            detail = String(body.error?.message ?? body.message ?? body.detail ?? detail).slice(0, 500);
+            providerCode = typeof body.error?.code === 'string' ? body.error.code : null;
+        } catch { /* use bounded text */ }
         const hint = response.status === 401 && unauthorizedHint ? ` ${unauthorizedHint}` : '';
         const failure = new AssistantProviderError(`The AI provider returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}${hint}`, 'providerHttpError');
         failure.status = response.status;
+        // The provider's own name for what went wrong (OpenAI's `error.code`), for an adapter that explains some of them.
+        failure.providerCode = providerCode;
         throw failure;
     }
     return response;
@@ -449,6 +457,253 @@ function anthropicProvider() {
     };
 }
 
+// ChatGPT plan usage (https://developers.openai.com/siwc/token-sharing-open-source): a person signs in with their ChatGPT
+// account and Konjugate's requests are paid for by their Plus or Pro plan, within its limits, instead of by an API key.
+// OpenAI documents it for open-source apps that run on the person's own computer, which Konjugate is; it is a preview.
+// The first sign-in registers Konjugate with the account (client_id=dynamic_agent_client, a stable host id for this
+// installation and the app's name), and the callback names the client OpenAI issued, which every later request uses.
+// The credential is that client, the account and the tokens, kept together as one JSON string in the configuration's
+// encrypted credential: an access token for an hour, and a refresh token for thirty days that is replaced by each refresh.
+const chatGptAuth = 'https://auth.openai.com';
+const chatGptResource = 'https://api.openai.com/v1';
+const chatGptScopes = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct';
+const chatGptPlanScope = 'chatgpt.tokens.use.direct';
+const chatGptUsagePage = 'https://chatgpt.com/settings/usage';
+
+const decodeJwtPayload = (token) => {
+    try { return JSON.parse(Buffer.from(String(token).split('.')[1], 'base64url').toString('utf8')); } catch { return null; }
+};
+
+function readChatGptCredential(credential) {
+    let record = null;
+    try { record = JSON.parse(credential); } catch { /* not a sign-in */ }
+    if (record?.kind !== 'chatGptSignIn' || typeof record.accessToken !== 'string' || typeof record.clientId !== 'string') {
+        throw new AssistantProviderError('This ChatGPT configuration has no sign-in. Sign in with ChatGPT in Settings › Model assistant.', 'credentialRequired');
+    }
+    return record;
+}
+
+// What OpenAI's own error codes mean for the person, and what to do. Anything else is reported as it came.
+function chatGptFailure(error) {
+    const plain = (message, code) => Object.assign(new AssistantProviderError(message, code), { status: error.status, providerCode: error.providerCode });
+    switch (error.providerCode) {
+        case 'subscription_sharing_usage_limit_exceeded':
+            return plain(`Your ChatGPT plan's limit for Konjugate is reached for now. See what is left at ${chatGptUsagePage}, or use another model configuration until then.`, 'planLimitReached');
+        case 'subscription_sharing_user_not_eligible':
+            return plain('Your ChatGPT plan cannot be used by apps such as Konjugate: it needs a Plus or Pro plan, and a workspace that allows it.', 'planNotEligible');
+        case 'subscription_sharing_usage_unavailable':
+        case 'subscription_sharing_user_unavailable':
+            return plain('ChatGPT could not check your plan just now. Try again in a moment.', 'planTemporarilyUnavailable');
+        case 'subscription_sharing_invalid_user':
+            return plain('ChatGPT no longer accepts this sign-in. Sign in with ChatGPT again in Settings › Model assistant.', 'signInExpired');
+        case 'subscription_sharing_unsupported_capability':
+            return plain(`ChatGPT plan usage does not support part of this request${error.message ? ` (${error.message})` : ''}. Choose another model.`, 'unsupportedCapability');
+        default:
+            if (error.status === 401) return plain('ChatGPT did not accept this sign-in. Sign in with ChatGPT again in Settings › Model assistant.', 'signInExpired');
+            if (error.status === 503) return plain('ChatGPT plan usage is not available just now. Try again in a moment.', 'planTemporarilyUnavailable');
+            return error;
+    }
+}
+
+const terminalRefreshErrors = new Set(['invalid_grant', 'invalid_refresh_token', 'token_expired', 'refresh_token_expired', 'refresh_token_invalidated', 'refresh_token_reused']);
+
+function chatGptProvider() {
+    // One refresh at a time per refresh token: OpenAI replaces the refresh token on each use, so two at once would race.
+    const refreshing = new Map();
+
+    async function tokenRequest(fetchImpl, fields, signal) {
+        let response;
+        try {
+            response = await fetchImpl(`${chatGptAuth}/api/accounts/oauth/token`, {
+                method: 'POST', signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields).toString()
+            });
+        } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            throw new AssistantProviderError(`Could not connect to ChatGPT: ${error.message}`, 'connectionFailed');
+        }
+        const text = await response.text();
+        let body = null;
+        try { body = JSON.parse(text); } catch { /* reported below */ }
+        if (!response.ok) {
+            const code = typeof body?.error === 'string' ? body.error : body?.error?.code ?? null;
+            const failure = new AssistantProviderError(`ChatGPT refused the sign-in (HTTP ${response.status}${code ? `, ${code}` : ''}).`, 'signInFailed');
+            failure.status = response.status;
+            failure.providerCode = code;
+            throw failure;
+        }
+        if (!body || typeof body.access_token !== 'string') throw new AssistantProviderError('ChatGPT returned an unexpected sign-in response.', 'invalidProviderResponse');
+        return body;
+    }
+
+    // The credential with an access token good for at least another minute, refreshing (and saving through `onCredential`) if not.
+    async function current({ credential, onCredential, signal, fetchImpl }) {
+        const record = readChatGptCredential(credential);
+        if (record.expiresAt - Date.now() > 60_000) return record;
+        if (!record.refreshToken) throw new AssistantProviderError('Your ChatGPT sign-in has ended. Sign in with ChatGPT again in Settings › Model assistant.', 'signInExpired');
+        let pending = refreshing.get(record.refreshToken);
+        if (!pending) {
+            pending = (async () => {
+                try {
+                    const body = await tokenRequest(fetchImpl, {
+                        grant_type: 'refresh_token', client_id: record.clientId, refresh_token: record.refreshToken, resource: chatGptResource
+                    }, signal);
+                    const renewed = {
+                        ...record, accessToken: body.access_token, refreshToken: body.refresh_token ?? record.refreshToken,
+                        expiresAt: Date.now() + (Number(body.expires_in) || 3600) * 1000, scope: body.scope ?? record.scope
+                    };
+                    await onCredential?.(JSON.stringify(renewed));
+                    return renewed;
+                } catch (error) {
+                    if (terminalRefreshErrors.has(error.providerCode)) {
+                        throw new AssistantProviderError('Your ChatGPT sign-in has ended. Sign in with ChatGPT again in Settings › Model assistant.', 'signInExpired');
+                    }
+                    throw error;
+                } finally {
+                    refreshing.delete(record.refreshToken);
+                }
+            })();
+            refreshing.set(record.refreshToken, pending);
+        }
+        return pending;
+    }
+
+    const apiBase = (configuration) => baseUrl({ ...configuration, provider: 'chatGpt', endpoint: configuration.endpoint || defaults.openAi });
+
+    return {
+        id: 'chatGpt', name: 'ChatGPT', defaultEndpoint: defaults.openAi, defaultTimeoutSeconds: 120, credentialRequired: true, locality: 'online',
+        signInOnly: true,
+        signInDescription: 'Use your ChatGPT Plus or Pro plan, within its limits. No API key.',
+        // The models the plan offers, in OpenAI's own order: its first is the one a sign-in starts with.
+        suggestModel: (models) => models[0]?.id ?? '',
+        async signIn({ openExternal, signal, fetchImpl, hostId, previous }) {
+            if (typeof hostId !== 'string' || !hostId) throw new Error('Signing in to ChatGPT needs this installation\'s host id.');
+            // Signing in again to an account Konjugate is registered with uses the client OpenAI issued for it, and skips the account choice.
+            let earlier = null;
+            try { earlier = previous ? readChatGptCredential(previous) : null; } catch { /* a first sign-in */ }
+            const nonce = randomBytes(16).toString('base64url');
+            const { code, verifier, redirectUri, params } = await loopbackAuthorization({
+                host: '127.0.0.1', path: '/auth/callback', openExternal, signal,
+                authorizationUrl: (redirect, { challenge, state }) => `${chatGptAuth}/api/accounts/authorize?${new URLSearchParams({
+                    client_id: earlier?.clientId ?? 'dynamic_agent_client', ext_agent_host_id: hostId,
+                    ...(earlier ? (earlier.idToken ? { id_token_hint: earlier.idToken } : {}) : { agent_name_hint: 'Konjugate' }),
+                    response_type: 'code', redirect_uri: redirect, scope: chatGptScopes, resource: chatGptResource,
+                    state, nonce, code_challenge: challenge, code_challenge_method: 'S256'
+                })}`
+            });
+            const clientId = earlier?.clientId ?? params.client_id;
+            if (!clientId) throw new AssistantProviderError('ChatGPT did not finish registering Konjugate. Try signing in again.', 'signInFailed');
+            if (earlier && params.client_id && params.client_id !== earlier.clientId) throw new AssistantProviderError('ChatGPT answered for a different registration of Konjugate. Try signing in again.', 'signInFailed');
+            const body = await tokenRequest(fetchImpl, {
+                grant_type: 'authorization_code', client_id: clientId, code, code_verifier: verifier, redirect_uri: redirectUri, resource: chatGptResource
+            }, signal);
+            // The ID token came straight from OpenAI's token endpoint over TLS, which OpenID Connect accepts in place of checking its
+            // signature; what it says is still checked against this sign-in.
+            const claims = decodeJwtPayload(body.id_token);
+            const audiences = [claims?.aud].flat();
+            if (!claims || claims.iss !== chatGptAuth || !audiences.includes(clientId) || claims.nonce !== nonce) {
+                throw new AssistantProviderError('ChatGPT\'s sign-in response did not match this sign-in. Try again.', 'signInFailed');
+            }
+            const scope = String(body.scope ?? params.scope ?? '');
+            if (!scope.split(/[\s+]+/).includes(chatGptPlanScope)) {
+                throw new AssistantProviderError('You signed in, but using your ChatGPT plan in Konjugate was not allowed. Sign in again and allow it, or use another way to reach a model.', 'planUsageNotAllowed');
+            }
+            const record = {
+                kind: 'chatGptSignIn', clientId, hostId, sub: claims.sub ?? null, email: typeof claims.email === 'string' ? claims.email : null,
+                idToken: body.id_token, accessToken: body.access_token, refreshToken: body.refresh_token ?? null,
+                expiresAt: Date.now() + (Number(body.expires_in) || 3600) * 1000, scope
+            };
+            return { credential: JSON.stringify(record), account: record.email ?? '' };
+        },
+        // Ends the sign-in at OpenAI too (the registration stays, for a later sign-in). Best effort: the caller removes it here regardless.
+        async signOut({ credential, signal, fetchImpl }) {
+            const record = readChatGptCredential(credential);
+            if (!record.refreshToken) return false;
+            const discovery = await responseJson(fetchImpl, `${chatGptAuth}/.well-known/openid-configuration`, { signal });
+            if (typeof discovery?.revocation_endpoint !== 'string' || !discovery.revocation_endpoint.startsWith(`${chatGptAuth}/`)) return false;
+            await responseOk(fetchImpl, discovery.revocation_endpoint, {
+                method: 'POST', signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ token: record.refreshToken, token_type_hint: 'refresh_token', client_id: record.clientId }).toString()
+            });
+            return true;
+        },
+        async listModels({ configuration, credential, onCredential, signal, fetchImpl }) {
+            requireCredential(credential, 'ChatGPT');
+            const record = await current({ credential, onCredential, signal, fetchImpl });
+            let result;
+            try {
+                result = await responseJson(fetchImpl, `${apiBase(configuration)}/v1/models`, { headers: { Authorization: `Bearer ${record.accessToken}` }, signal });
+            } catch (error) { throw chatGptFailure(error); }
+            return (result.models ?? result.data ?? [])
+                .filter((model) => (model.visibility ?? 'list') === 'list')
+                .map((model) => ({ id: model.slug ?? model.id, name: model.display_name ?? model.slug ?? model.id }))
+                .filter((model) => typeof model.id === 'string' && model.id);
+        },
+        async testConnection(input) {
+            const models = await this.listModels(input);
+            return { connected: true, provider: 'chatGpt', modelCount: models.length };
+        },
+        async generateProposal({ configuration, credential, onCredential, context, request, history, repair, signal, fetchImpl, operationSchema, onEvent }) {
+            requireCredential(credential, 'ChatGPT');
+            if (!configuration.model) throw new AssistantProviderError('Select a model before generating a proposal.', 'modelRequired');
+            const record = await current({ credential, onCredential, signal, fetchImpl });
+            const attempt = async (constrained) => {
+                const response = await responseOk(fetchImpl, `${apiBase(configuration)}/v1/responses`, {
+                    method: 'POST', signal,
+                    headers: { Authorization: `Bearer ${record.accessToken}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: configuration.model,
+                        instructions: 'You are the Konjugate modelling assistant. Return only JSON matching the supplied schema -- either a proposal or, if the request is ambiguous or missing information, a clarification.',
+                        input: [...historyMessages(history), { role: 'user', content: proposalPrompt(operationSchema, context, request, repair) }],
+                        // Plan usage requires both: nothing is kept at OpenAI, and the reply streams.
+                        store: false, stream: true,
+                        ...(constrained ? { text: { format: { type: 'json_schema', name: 'konjugate_proposal', strict: false, schema: operationSchema } } } : {})
+                    })
+                });
+                if (!isStreamingResponse(response)) throw new AssistantProviderError('ChatGPT did not stream its reply.', 'invalidProviderResponse');
+                let output = '';
+                let completed = false;
+                for await (const event of serverSentEvents(streamLines(response, () => onEvent?.({ type: 'activity' })))) {
+                    if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+                        output += event.delta;
+                        if (output.length > maximumOutputCharacters) throw new AssistantProviderError('The AI provider response is too large.', 'responseTooLarge');
+                        onEvent?.({ type: 'output', text: event.delta });
+                    } else if (/^response\.reasoning(_summary)?_text\.delta$/.test(event.type) && typeof event.delta === 'string') {
+                        onEvent?.({ type: 'thinking', text: event.delta });
+                    } else if (event.type === 'response.completed') {
+                        completed = true;
+                    } else if (event.type === 'response.failed' || event.type === 'error') {
+                        const failed = event.response?.error ?? event.error ?? {};
+                        const failure = new AssistantProviderError(`ChatGPT stopped: ${String(failed.message ?? failed.code ?? 'unknown error').slice(0, 300)}`, 'providerHttpError');
+                        failure.providerCode = failed.code ?? null;
+                        throw chatGptFailure(failure);
+                    } else if (event.type === 'response.incomplete') {
+                        const reason = event.response?.incomplete_details?.reason;
+                        throw new AssistantProviderError(`ChatGPT stopped before finishing${reason ? ` (${reason})` : ''}.`, 'providerIncomplete');
+                    }
+                }
+                // Only a reply that says it finished is a reply: a stream that just ends was cut off.
+                if (!completed) throw new AssistantProviderError('ChatGPT\'s reply ended before it finished.', 'invalidProviderResponse');
+                return output === '' ? undefined : output;
+            };
+            let text;
+            try {
+                try {
+                    text = await attempt(true);
+                } catch (error) {
+                    // Whether plan usage takes a schema for the reply is not documented: if it refuses that, ask in plain JSON instead.
+                    const refusedFormat = (error.status === 400 || error.providerCode === 'subscription_sharing_unsupported_capability') && /text|format|schema|json/i.test(`${error.message} ${error.providerCode ?? ''}`);
+                    if (!refusedFormat) throw error;
+                    text = await attempt(false);
+                }
+            } catch (error) {
+                if (error.name === 'AbortError') throw error;
+                throw chatGptFailure(error);
+            }
+            return parseProposal(text);
+        }
+    };
+}
+
 export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operationSchema } = {}) {
     if (typeof fetchImpl !== 'function' || !operationSchema) throw new Error('Remote AI providers require fetch and an operation schema.');
     const bind = (provider) => Object.freeze({
@@ -456,10 +711,12 @@ export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operatio
         listModels: (input) => provider.listModels({ ...input, fetchImpl, operationSchema }),
         testConnection: (input) => provider.testConnection({ ...input, fetchImpl, operationSchema }),
         generateProposal: (input) => provider.generateProposal({ ...input, fetchImpl, operationSchema }),
-        ...(provider.signIn ? { signIn: (input) => provider.signIn({ ...input, fetchImpl }) } : {})
+        ...(provider.signIn ? { signIn: (input) => provider.signIn({ ...input, fetchImpl }) } : {}),
+        ...(provider.signOut ? { signOut: (input) => provider.signOut({ ...input, fetchImpl }) } : {})
     });
     return [
         ollamaProvider(),
+        chatGptProvider(),
         openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true, extra: { keyPage: 'https://platform.openai.com/api-keys' } }),
         openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia, extra: { keyPage: 'https://build.nvidia.com/settings/api-keys' } }),
         openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace, extra: { keyPage: 'https://huggingface.co/settings/tokens' } }),

@@ -19,7 +19,7 @@ test('provider registry dispatches generation without exposing provider details 
     assert.equal(result.summary, 'Build it:true');
     assert.deepEqual(registry.descriptors().find((item) => item.id === 'testProvider'), {
         id: 'testProvider', name: 'Test provider', defaultEndpoint: '', defaultTimeoutSeconds: 60,
-        credentialRequired: false, locality: 'local', reasoningSetting: false, signIn: false, signInDescription: '', keyPage: '', keyPageLabel: ''
+        credentialRequired: false, locality: 'local', reasoningSetting: false, signIn: false, signInOnly: false, signInDescription: '', keyPage: '', keyPageLabel: ''
     });
 });
 
@@ -210,4 +210,19 @@ test('The registry says which providers can be signed in to, and passes a sign-i
     await assert.rejects(registry.signIn({ provider: 'keyOnly', openExternal: async () => {} }), { code: 'signInUnavailable' });
     assert.equal(registry.suggestModel('withSignIn', [{ id: 'a' }, { id: 'b' }]), 'b');
     assert.equal(registry.suggestModel('keyOnly', [{ id: 'a' }, { id: 'b' }]), 'a');
+});
+
+test('A sign-in is given the installation\'s host id and the earlier credential, and signing out reaches only a provider that can', async () => {
+    const { createAIProviderRegistry } = await import('../src/aiProviderRegistry.mjs');
+    let given;
+    const signedOut = [];
+    const registry = createAIProviderRegistry([
+        { id: 'withSignOut', name: 'A', generateProposal: async () => ({}), signIn: async (input) => { given = input; return { credential: 'c', account: 'a@example.com' }; }, signOut: async ({ credential }) => { signedOut.push(credential); return true; } },
+        { id: 'plain', name: 'B', generateProposal: async () => ({}) }
+    ]);
+    assert.deepEqual(await registry.signIn({ provider: 'withSignOut', openExternal: async () => {}, hostId: 'urn:uuid:h', previous: 'old' }), { credential: 'c', account: 'a@example.com' });
+    assert.deepEqual({ hostId: given.hostId, previous: given.previous }, { hostId: 'urn:uuid:h', previous: 'old' });
+    assert.equal(await registry.signOut({ provider: 'withSignOut', credential: 'c' }), true);
+    assert.equal(await registry.signOut({ provider: 'plain', credential: 'c' }), false);
+    assert.deepEqual(signedOut, ['c']);
 });

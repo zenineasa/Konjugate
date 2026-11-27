@@ -418,3 +418,163 @@ test('Cancelling an Anthropic request ends it as a cancel, not an error', async 
     controller.abort();
     await assert.rejects(pending, { name: 'AbortError' });
 });
+
+// ChatGPT plan usage. A fake of OpenAI's sign-in: the "browser" follows the authorization address back to Konjugate with a
+// code (and, on a first registration, the client OpenAI issued); the token endpoint answers with an ID token for that sign-in.
+const jwt = (claims) => `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.sig`;
+function fakeChatGpt({ scope = 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct', issued = 'oaiapp_123', claims = {}, onRequest = () => null } = {}) {
+    const seen = { authorizations: [], tokenRequests: [], requests: [] };
+    let nonce = null;
+    const fetchImpl = async (url, options = {}) => {
+        const address = String(url);
+        seen.requests.push({ url: address, options });
+        const answered = await onRequest(address, options);
+        if (answered) return answered;
+        if (address.endsWith('/api/accounts/oauth/token')) {
+            const fields = Object.fromEntries(new URLSearchParams(options.body));
+            seen.tokenRequests.push(fields);
+            return jsonResponse({
+                access_token: `access-${seen.tokenRequests.length}`, refresh_token: `refresh-${seen.tokenRequests.length}`, expires_in: 3600, token_type: 'Bearer', scope,
+                id_token: jwt({ iss: 'https://auth.openai.com', aud: fields.client_id, nonce, sub: 'user-1', email: 'person@example.com', ...claims })
+            });
+        }
+        throw new Error(`unexpected request ${address}`);
+    };
+    const openExternal = async (address) => {
+        const authorization = new URL(address);
+        seen.authorizations.push(authorization);
+        nonce = authorization.searchParams.get('nonce');
+        const back = new URL(authorization.searchParams.get('redirect_uri'));
+        back.searchParams.set('code', 'code-1');
+        back.searchParams.set('state', authorization.searchParams.get('state'));
+        back.searchParams.set('scope', scope.replaceAll(' ', '+'));
+        if (authorization.searchParams.get('client_id') === 'dynamic_agent_client') back.searchParams.set('client_id', issued);
+        setImmediate(() => fetch(back).catch(() => {}));
+    };
+    return { fetchImpl, openExternal, seen };
+}
+const chatGptCredential = (overrides = {}) => JSON.stringify({ kind: 'chatGptSignIn', clientId: 'oaiapp_123', hostId: 'urn:uuid:host', sub: 'user-1', email: 'person@example.com', idToken: 'id-1', accessToken: 'access-1', refreshToken: 'refresh-1', expiresAt: Date.now() + 3_600_000, scope: '', ...overrides });
+const responsesStream = (events) => new Response(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+
+test('Signing in with ChatGPT registers Konjugate for this installation and keeps the issued client, account and tokens', async () => {
+    const fake = fakeChatGpt();
+    const result = await provider('chatGpt', fake.fetchImpl).signIn({ openExternal: fake.openExternal, hostId: 'urn:uuid:host' });
+    const authorization = fake.seen.authorizations[0];
+    assert.equal(authorization.origin + authorization.pathname, 'https://auth.openai.com/api/accounts/authorize');
+    const parameters = Object.fromEntries(authorization.searchParams);
+    assert.equal(parameters.client_id, 'dynamic_agent_client');
+    assert.equal(parameters.ext_agent_host_id, 'urn:uuid:host');
+    assert.equal(parameters.agent_name_hint, 'Konjugate');
+    assert.match(parameters.redirect_uri, /^http:\/\/127\.0\.0\.1:\d+\/auth\/callback$/);
+    assert.equal(parameters.scope, 'openid profile email offline_access resource.invoke chatgpt.tokens.use.direct');
+    assert.equal(parameters.resource, 'https://api.openai.com/v1');
+    assert.equal(parameters.code_challenge_method, 'S256');
+    assert.ok(parameters.nonce && parameters.state);
+    const exchange = fake.seen.tokenRequests[0];
+    assert.deepEqual({ grant_type: exchange.grant_type, client_id: exchange.client_id, code: exchange.code, redirect_uri: exchange.redirect_uri, resource: exchange.resource },
+        { grant_type: 'authorization_code', client_id: 'oaiapp_123', code: 'code-1', redirect_uri: parameters.redirect_uri, resource: 'https://api.openai.com/v1' });
+    assert.equal(fake.seen.requests[0].options.headers['Content-Type'], 'application/x-www-form-urlencoded');
+    const record = JSON.parse(result.credential);
+    assert.equal(result.account, 'person@example.com');
+    assert.deepEqual({ clientId: record.clientId, accessToken: record.accessToken, refreshToken: record.refreshToken, sub: record.sub, hostId: record.hostId },
+        { clientId: 'oaiapp_123', accessToken: 'access-1', refreshToken: 'refresh-1', sub: 'user-1', hostId: 'urn:uuid:host' });
+    assert.ok(record.expiresAt > Date.now() + 3_500_000);
+});
+
+test('Signing in with ChatGPT again uses the issued client and the earlier account, without registering again', async () => {
+    const fake = fakeChatGpt();
+    await provider('chatGpt', fake.fetchImpl).signIn({ openExternal: fake.openExternal, hostId: 'urn:uuid:host', previous: chatGptCredential({ clientId: 'oaiapp_987' }) });
+    const parameters = Object.fromEntries(fake.seen.authorizations[0].searchParams);
+    assert.equal(parameters.client_id, 'oaiapp_987');
+    assert.equal(parameters.id_token_hint, 'id-1');
+    assert.equal('agent_name_hint' in parameters, false);
+    assert.equal(fake.seen.tokenRequests[0].client_id, 'oaiapp_987');
+});
+
+test('A ChatGPT sign-in without plan usage, or whose ID token is not for this sign-in, is refused', async () => {
+    const withoutPlan = fakeChatGpt({ scope: 'openid profile email offline_access' });
+    await assert.rejects(provider('chatGpt', withoutPlan.fetchImpl).signIn({ openExternal: withoutPlan.openExternal, hostId: 'urn:uuid:host' }), { code: 'planUsageNotAllowed' });
+    const otherNonce = fakeChatGpt({ claims: { nonce: 'someone-else' } });
+    await assert.rejects(provider('chatGpt', otherNonce.fetchImpl).signIn({ openExternal: otherNonce.openExternal, hostId: 'urn:uuid:host' }), { code: 'signInFailed' });
+    const otherIssuer = fakeChatGpt({ claims: { iss: 'https://example.com' } });
+    await assert.rejects(provider('chatGpt', otherIssuer.fetchImpl).signIn({ openExternal: otherIssuer.openExternal, hostId: 'urn:uuid:host' }), { code: 'signInFailed' });
+});
+
+test('ChatGPT lists the plan\'s models in its own order, refreshing an expired access token and saving the replacement', async () => {
+    const saved = [];
+    const requests = [];
+    const adapter = provider('chatGpt', async (url, options = {}) => {
+        requests.push({ url: String(url), options });
+        if (String(url).endsWith('/oauth/token')) return jsonResponse({ access_token: 'access-2', refresh_token: 'refresh-2', expires_in: 3600, scope: 'chatgpt.tokens.use.direct' });
+        return jsonResponse({ models: [{ slug: 'gpt-6.2-sol', display_name: 'GPT-6.2 Sol', visibility: 'list' }, { slug: 'internal', visibility: 'hide' }, { slug: 'gpt-6.1-sol', display_name: 'GPT-6.1 Sol', visibility: 'list' }] });
+    });
+    const models = await adapter.listModels(input('chatGpt', { credential: chatGptCredential({ expiresAt: Date.now() - 1 }), onCredential: (value) => saved.push(JSON.parse(value)) }));
+    assert.deepEqual(models, [{ id: 'gpt-6.2-sol', name: 'GPT-6.2 Sol' }, { id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol' }]);
+    const refresh = Object.fromEntries(new URLSearchParams(requests[0].options.body));
+    assert.deepEqual(refresh, { grant_type: 'refresh_token', client_id: 'oaiapp_123', refresh_token: 'refresh-1', resource: 'https://api.openai.com/v1' });
+    assert.equal(saved[0].refreshToken, 'refresh-2');
+    assert.equal(requests[1].options.headers.Authorization, 'Bearer access-2');
+    assert.equal(requests[1].url, 'https://api.openai.com/v1/models');
+
+    const ended = provider('chatGpt', async () => jsonResponse({ error: 'refresh_token_reused' }, 400));
+    await assert.rejects(ended.listModels(input('chatGpt', { credential: chatGptCredential({ expiresAt: 0 }) })), { code: 'signInExpired' });
+    await assert.rejects(ended.listModels(input('chatGpt', { credential: 'sk-not-a-sign-in' })), { code: 'credentialRequired' });
+});
+
+test('ChatGPT proposals use the Responses API as plan usage requires, and only a completed reply counts', async () => {
+    let body;
+    const events = [];
+    const adapter = provider('chatGpt', async (url, options = {}) => {
+        body = JSON.parse(options.body);
+        return responsesStream([
+            { type: 'response.created' },
+            { type: 'response.reasoning_summary_text.delta', delta: 'Thinking it over.' },
+            { type: 'response.output_text.delta', delta: JSON.stringify(proposal).slice(0, 12) },
+            { type: 'response.output_text.delta', delta: JSON.stringify(proposal).slice(12) },
+            { type: 'response.completed', response: { status: 'completed' } }
+        ]);
+    });
+    assert.deepEqual(await adapter.generateProposal(input('chatGpt', { credential: chatGptCredential(), onEvent: (event) => events.push(event) })), proposal);
+    assert.equal(body.store, false);
+    assert.equal(body.stream, true);
+    assert.match(body.instructions, /Konjugate modelling assistant/);
+    assert.equal(body.input.at(-1).role, 'user');
+    assert.equal(body.text.format.type, 'json_schema');
+    for (const omitted of ['temperature', 'max_output_tokens', 'metadata', 'previous_response_id', 'user']) assert.equal(omitted in body, false);
+    assert.deepEqual(events.filter((event) => event.type === 'thinking').map((event) => event.text), ['Thinking it over.']);
+
+    const cut = provider('chatGpt', async () => responsesStream([{ type: 'response.output_text.delta', delta: '{"proposalVersion"' }]));
+    await assert.rejects(cut.generateProposal(input('chatGpt', { credential: chatGptCredential() })), /ended before it finished/);
+});
+
+test('ChatGPT plan limits and refusals of the reply format are explained, not reported raw', async () => {
+    const limited = provider('chatGpt', async () => responsesStream([{ type: 'response.failed', response: { error: { code: 'subscription_sharing_usage_limit_exceeded', message: 'limit' } } }]));
+    await assert.rejects(limited.generateProposal(input('chatGpt', { credential: chatGptCredential() })), (error) => error.code === 'planLimitReached' && /chatgpt\.com\/settings\/usage/.test(error.message));
+    const notEligible = provider('chatGpt', async () => jsonResponse({ error: { code: 'subscription_sharing_user_not_eligible', message: 'no' } }, 403));
+    await assert.rejects(notEligible.generateProposal(input('chatGpt', { credential: chatGptCredential() })), { code: 'planNotEligible' });
+    const detailOnly = provider('chatGpt', async () => jsonResponse({ detail: 'Unauthorized' }, 401));
+    await assert.rejects(detailOnly.generateProposal(input('chatGpt', { credential: chatGptCredential() })), { code: 'signInExpired' });
+
+    const bodies = [];
+    const plain = provider('chatGpt', async (url, options) => {
+        bodies.push(JSON.parse(options.body));
+        if (bodies.length === 1) return jsonResponse({ error: { code: 'subscription_sharing_unsupported_capability', param: 'text.format', message: 'text.format is not supported' } }, 400);
+        return responsesStream([{ type: 'response.output_text.delta', delta: JSON.stringify(proposal) }, { type: 'response.completed' }]);
+    });
+    assert.deepEqual(await plain.generateProposal(input('chatGpt', { credential: chatGptCredential() })), proposal);
+    assert.equal('text' in bodies[1], false);
+});
+
+test('Signing out of ChatGPT revokes the refresh token at the address OpenAI publishes', async () => {
+    const requests = [];
+    const adapter = provider('chatGpt', async (url, options = {}) => {
+        requests.push({ url: String(url), options });
+        if (String(url).endsWith('/.well-known/openid-configuration')) return jsonResponse({ revocation_endpoint: 'https://auth.openai.com/oauth/revoke' });
+        return new Response('', { status: 200 });
+    });
+    assert.equal(await adapter.signOut({ credential: chatGptCredential() }), true);
+    assert.equal(requests[1].url, 'https://auth.openai.com/oauth/revoke');
+    assert.deepEqual(Object.fromEntries(new URLSearchParams(requests[1].options.body)), { token: 'refresh-1', token_type_hint: 'refresh_token', client_id: 'oaiapp_123' });
+    const elsewhere = provider('chatGpt', async () => jsonResponse({ revocation_endpoint: 'https://example.com/revoke' }));
+    assert.equal(await elsewhere.signOut({ credential: chatGptCredential() }), false, 'A revocation address off OpenAI\'s own site was used.');
+});

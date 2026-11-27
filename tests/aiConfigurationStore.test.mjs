@@ -203,3 +203,19 @@ test('a key from signing in is marked as such, and a key typed in later clears t
     const ignored = await store.save({ name: 'Ollama', provider: 'ollama', credentialSource: 'signIn' });
     assert.equal(ignored.credentialSource, null);
 }));
+
+test('a renewed sign-in replaces only the credential, the account is kept for display, and the host id stays the same', () => withStore(async (store, directory) => {
+    const saved = await store.save({ name: 'ChatGPT', provider: 'chatGpt', model: 'gpt-6.2-sol', credentialSource: 'signIn', account: 'person@example.com' }, '{"token":1}');
+    assert.equal(saved.account, 'person@example.com');
+    assert.equal(await store.replaceCredential(saved.uuid, '{"token":2}'), true);
+    assert.equal((await store.resolve(saved.uuid)).credential, '{"token":2}');
+    assert.equal((await store.list()).configurations[0].account, 'person@example.com');
+    assert.equal(await store.replaceCredential('00000000-0000-4000-8000-999999999999', 'x'), false);
+    const typed = await store.save({ name: 'Key', provider: 'openAi', account: 'someone@example.com' }, 'sk-1');
+    assert.equal(typed.account, '', 'An account is only kept for a sign-in.');
+    const host = await store.hostIdentifier();
+    assert.match(host, /^urn:uuid:[0-9a-f-]{36}$/);
+    assert.equal(await store.hostIdentifier(), host);
+    const again = createAIConfigurationStore({ directory, credentialVault: memoryVault(), uuidFactory: uuidFactory() });
+    assert.equal(await again.hostIdentifier(), host, 'The host id changed when the store was opened again.');
+}));

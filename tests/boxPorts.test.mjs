@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
+import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalLineEnd, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
 import { fmiNodeFromPorts } from '../src/nodeProgram.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -138,4 +138,38 @@ test('a terminal dropped on a switched-off node is refused, said why', () => {
     const drag = { box: { key: 'n1', name: 'PidController' }, role: 'input', terminal: { key: 'measurement', name: 'measurement' } };
     assert.equal(boxDropProblem(drag, { kind: 'node', node: { id: 3, title: 'Room with Konjugate PI', enabled: false } }),
         'Nothing was connected: Room with Konjugate PI is switched off. Switch it on to connect PidController\'s measurement to it.');
+});
+
+// A blog writer's reading of examples/pidController/HeatedRoomPid.kjt: Setpoint's arrow seemed to feed "measurement" and Room's
+// "setpoint". The wiring was right, but each line ended at the right edge of its own input's label, against the box, so a line from a
+// source on the left passed behind the other label first. A line now ends at the edge of its terminal that faces its source. On screen
+// (pixels, y down): the two inputs' labels stacked, the setpoint's above; Setpoint below them on the left, Room above them on the left.
+const crosses = (from, to, rect) => {
+    // Whether the segment from `from` to `to` passes through `rect` (sampled finely enough for these sizes).
+    for (let step = 0; step <= 1000; step += 1) {
+        const x = from.x + ((to.x - from.x) * step) / 1000;
+        const y = from.y + ((to.y - from.y) * step) / 1000;
+        if (x > rect.left && x < rect.right && y > rect.top && y < rect.bottom) return true;
+    }
+    return false;
+};
+
+test('a read\'s line ends at the edge of its input\'s terminal that faces its source, so it never passes behind another input', () => {
+    const setpoint = { left: 100, right: 180, top: 90, bottom: 110, width: 80, height: 20 };
+    const measurement = { left: 100, right: 180, top: 115, bottom: 135, width: 80, height: 20 };
+    const setpointSource = { x: 0, y: 300 };
+    const roomSource = { x: 0, y: -100 };
+    const setpointEnd = inputTerminalLineEnd(setpoint, setpointSource.x);
+    const roomEnd = inputTerminalLineEnd(measurement, roomSource.x);
+    assert.deepEqual(setpointEnd, { x: 100, y: 100 }, 'From the left: the left edge of its own terminal, at its middle.');
+    assert.deepEqual(roomEnd, { x: 100, y: 125 });
+    assert.equal(crosses(setpointSource, setpointEnd, measurement), false, 'Setpoint\'s line does not pass behind "measurement".');
+    assert.equal(crosses(roomSource, roomEnd, setpoint), false, 'Room\'s line does not pass behind "setpoint".');
+    // What it did before: to the right edge, each line crossed the other input on its way.
+    assert.equal(crosses(setpointSource, { x: 180, y: 100 }, measurement), true);
+    assert.equal(crosses(roomSource, { x: 180, y: 125 }, setpoint), true);
+    // From the right (a source beside the box): the right edge, which faces it.
+    assert.deepEqual(inputTerminalLineEnd(measurement, 400), { x: 180, y: 125 });
+    // Straight above or below its middle counts as the right, the side the box is on, as before.
+    assert.deepEqual(inputTerminalLineEnd(setpoint, 140), { x: 180, y: 100 });
 });

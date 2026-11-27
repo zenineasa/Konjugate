@@ -318,7 +318,7 @@ test('the project window writes program and FMU bindings by key, and never reord
     assert.doesNotMatch(renderer, /implementation\.bindings\[index\]/, 'A row writes the binding it was drawn for by its key, not its drawn place.');
     assert.doesNotMatch(renderer, /implementation\.outputs\[index\]/, 'An output row writes by its key, not its drawn place.');
     assert.doesNotMatch(renderer, /bindings\.splice\(index, 1\)/, 'A row removes the entry it was drawn for, not whatever stands at its place.');
-    const fmus = renderer.slice(renderer.indexOf('async function renderNodeProgramFmus('), renderer.indexOf('function megabytes('));
+    const fmus = renderer.slice(renderer.indexOf('async function renderNodeProgramFmus('), renderer.indexOf('function renderFmuKeep('));
     assert.doesNotMatch(fmus, /\.bindings\s*=/, 'Showing an FMU\'s ports does not change its node\'s bindings.');
     assert.doesNotMatch(fmus, /\.sort\(/, 'Showing an FMU\'s ports does not re-sort its node\'s bindings.');
 });

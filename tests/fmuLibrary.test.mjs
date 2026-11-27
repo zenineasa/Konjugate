@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fmuLibraryRows, fmuRemovalQuestion } from '../src/fmuLibrary.mjs';
+import { fmuLibraryRows, fmuRemovalQuestion, fmuSizeText } from '../src/fmuLibrary.mjs';
 
 const installed = [
     { packageId: 'guid-b', version: '1.0.0', name: 'Boiler', manifest: { archiveBytes: 2 * 1024 * 1024, modelName: 'Boiler' } },
@@ -67,4 +67,17 @@ test('Settings › Providers lists the library from every open window\'s answer,
 test('an FMU node\'s card says which version of the library it uses', async () => {
     const renderer = await read('src/renderer/renderer.mjs');
     assert.match(renderer, /In your library as version \$\{implementation\.fmuVersion\}/);
+});
+
+// A small FMU said as "0.0 MB" on its card (a blog reviewer): one way of saying an FMU's size, wherever it is said (its card's Kept in this
+// project's file, Settings' library list and FMU builds), in KB below a megabyte and never as nothing.
+test('an FMU size is said in KB below a megabyte, in MB above, and never as 0.0', () => {
+    assert.equal(fmuSizeText(300), '1 KB', 'Less than a kilobyte is still something.');
+    assert.equal(fmuSizeText(40 * 1024), '40 KB');
+    assert.equal(fmuSizeText(1000 * 1024), '1000 KB');
+    assert.equal(fmuSizeText(1024 * 1024 - 1), '1.0 MB', 'What rounds to a megabyte is said as one.');
+    assert.equal(fmuSizeText(1024 * 1024), '1.0 MB');
+    assert.equal(fmuSizeText(2.25 * 1024 * 1024), '2.3 MB');
+    assert.equal(fmuSizeText(16 * 1024 * 1024), '16 MB', 'Whole megabytes from ten up.');
+    for (const nothing of [0, -1, NaN, undefined]) assert.equal(fmuSizeText(nothing), null);
 });

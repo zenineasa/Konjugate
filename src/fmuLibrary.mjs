@@ -39,10 +39,15 @@ export function fmuUsage(project, document, historyReferences = []) {
     return { project, fmus, history: distinctReferences(historyReferences).filter((reference) => !used.has(referenceKey(reference))) };
 }
 
-const sizeText = (bytes) => {
+// An FMU's size in words, wherever one is said (its card, Settings' library list and FMU builds): whole KB below a megabyte (never under
+// 1 KB), MB with one decimal below ten and whole from ten. Null for no size.
+export function fmuSizeText(bytes) {
     if (!Number.isFinite(bytes) || bytes <= 0) return null;
-    return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-};
+    const kilobytes = Math.max(1, Math.round(bytes / 1024));
+    if (kilobytes < 1024) return `${kilobytes} KB`;
+    const megabytes = bytes / (1024 * 1024);
+    return `${megabytes.toFixed(megabytes < 9.95 ? 1 : 0)} MB`;
+}
 
 // `installed`: the library's FMUs (listInstalledFmus). `usages`: one entry per open project window, { project, fmus: [{ guid, version }],
 // history: [{ guid, version }] } (fmuUsage), or null for a window that did not answer, whose model may use any of them. Returns one row
@@ -61,7 +66,7 @@ export function fmuLibraryRows(installed, usages) {
                 guid: entry.packageId,
                 version: entry.version,
                 name: entry.name || entry.manifest?.modelName || entry.packageId,
-                size: sizeText(entry.manifest?.archiveBytes),
+                size: fmuSizeText(entry.manifest?.archiveBytes),
                 usedBy,
                 heldForUndoBy,
                 removable: !usedBy.length && !heldForUndoBy.length && !unanswered,

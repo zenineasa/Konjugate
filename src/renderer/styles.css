@@ -1911,7 +1911,10 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .fmuAbout { margin: 4px 0 8px; color: #8fa3ac; font-size: 8px; }
 .fmuAbout summary { cursor: pointer; color: #9fb4bd; }
 .fmuKeep[hidden] { display: none; }
-.fmuKeep button { margin: 2px 4px 0 0; padding: 2px 8px; color: #7cd9cc; background: #17262f; border: 1px solid #2f5850; border-radius: 4px; cursor: pointer; font-size: inherit; }
+/* The FMU card's buttons, those under About this FMU (Build from its sources / Rebuild, Show build log, Use its own binary, Save FMU with
+   this computer's binary…) as those beside Kept in this project's file: inside About's grey text they looked switched off. */
+.fmuKeep button, .fmuBuildActions button { margin: 2px 4px 0 0; padding: 2px 8px; color: #7cd9cc; background: #17262f; border: 1px solid #2f5850; border-radius: 4px; cursor: pointer; font-size: inherit; }
+.fmuKeep button:disabled, .fmuBuildActions button:disabled { color: #566b77; border-color: #263640; cursor: default; }
 .fmuAbout ul { margin: 4px 0 0; padding-left: 14px; line-height: 1.5; user-select: text; }
 /* What a program or an FMU reads from another node (stage 5): a small label on the dashed arrow, hidden with relationship labels. */
 .programReadLabel { padding: 1px 5px; color: #9fe3d9; background: rgb(13 24 32 / 88%); border: 1px dashed #2f5850; border-radius: 4px; font-size: 8px; white-space: nowrap; cursor: pointer; pointer-events: auto; }
@@ -2786,5 +2789,5 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .subsystemTerminal.rootPortTerminal.signalled .subsystemTerminalEdge small { color: #9cc1f5; }
 
 /* An FMU built from its sources (docs/proposals/sourceFmuImport.md): the card's actions and the build's log. */
-.fmuBuildActions { display: flex; gap: 6px; margin-top: 6px; }
+.fmuBuildActions { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
 .fmuBuildLog { max-height: 220px; overflow: auto; margin: 6px 0; padding: 6px; font-size: 8px; white-space: pre-wrap; color: #c9d6db; background: rgb(0 0 0 / 25%); border-radius: 4px; }

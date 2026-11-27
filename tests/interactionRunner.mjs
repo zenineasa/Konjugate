@@ -12267,7 +12267,7 @@ export async function runInteractionTests(driver) {
                 await waitFor(window, `window.__debugProject.serialize().nodes[0]?.implementation?.kind === 'fmi'`, 'The FMU was not added.', 20000);
             });
             await waitFor(window, `!document.querySelector('#nodeProgramFmuKeep').hidden`, 'The card does not say where the FMU is kept.', 10000);
-            assert.match(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepText').textContent`), /^Kept in this project's file \([\d.]+ MB\), so the project runs on another computer\.$/);
+            assert.match(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepText').textContent`), /^Kept in this project's file \([\d.]+ (?:KB|MB)\), so the project runs on another computer\.$/);
             assert.equal(await evaluate(window, `document.querySelector('#nodeProgramFmuKeepToggle').textContent`), 'Link to the library instead');
             const archive = await referenceFmuArchive('3.0', 'Dahlquist');
             const { createHash } = await import('node:crypto');
@@ -13776,7 +13776,8 @@ export async function runInteractionTests(driver) {
             const path = await evaluate(window, `window.tutorials.fmuPath('pidController/PidController.fmu')`);
             assert.ok(await evaluate(window, `window.__debugFmuDrop(${JSON.stringify(path)}, 900, 400)`), 'The FMU was not added.');
             await waitFor(window, `window.__debugProject.serialize().nodes.some((node) => node.name === 'PidController')`, 'The FMU node was not made.', 30000);
-            // Measurement reads the room (below), setpoint the setpoint (above): the bug hunt's picture.
+            // Measurement reads the room (below), setpoint the setpoint (above): the bug hunt's picture. Both sources are on the left, so each
+            // read ends at its terminal's left edge, the one facing it (a blog writer's reading of HeatedRoomPid.kjt).
             const document_ = await savedProject();
             const pid = document_.nodes.find((node) => node.name === 'PidController');
             pid.position = [4, 0, 0];
@@ -13794,7 +13795,7 @@ export async function runInteractionTests(driver) {
                 return { key: end.inputKey, x: end.x, y: end.y, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
             })`);
             for (const end of ends) {
-                assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.right) <= 3, `The read into ${end.key} does not end at its own terminal: ${JSON.stringify(end)}`);
+                assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.left) <= 3, `The read into ${end.key} does not end at its own terminal's edge facing its source (on the left): ${JSON.stringify(end)}`);
             }
             // A terminal laid out again with the camera still (here the column spaced out, so each moves along it) takes its read's end with
             // it: the ends followed the camera alone, so one stayed beside a terminal that had moved for another reason.
@@ -13809,7 +13810,7 @@ export async function runInteractionTests(driver) {
                 const middle = (end) => (end.top + end.bottom) / 2;
                 assert.ok(moved.some((end) => Math.abs(middle(end) - middle(ends.find((before) => before.key === end.key))) > end.bottom - end.top), `The terminals did not move: ${JSON.stringify({ ends, moved })}`);
                 for (const end of moved) {
-                    assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.right) <= 3, `Laid out again, the read into ${end.key} does not end at its own terminal: ${JSON.stringify(end)}`);
+                    assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.left) <= 3, `Laid out again, the read into ${end.key} does not end at its own terminal's edge facing its source: ${JSON.stringify(end)}`);
                 }
             } finally {
                 await evaluate(window, `document.querySelector('#tallerTerminals')?.remove()`);

@@ -48,7 +48,7 @@ import {
     documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuInputRows, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
-import { fmuInUseText, fmuRemovalQuestion, fmuUsage, modelFmuReferences } from '../fmuLibrary.mjs';
+import { fmuInUseText, fmuRemovalQuestion, fmuSizeText, fmuUsage, modelFmuReferences } from '../fmuLibrary.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
 import { generateFmiModel } from '../fmiCodeGen.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -115,7 +115,7 @@ import {
     applyRootPortSignals, constantSignalNumber, portNameAsKept, portNameLimit, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
-import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
+import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalLineEnd, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortSignalText, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -2262,7 +2262,7 @@ function positionProgramRead(object) {
     const toObject = nodeObjects.get(object.read.toId);
     if (!fromObject || !toObject) return;
     const start = fromObject.position.clone();
-    const end = object.read.fmu ? fmuInputEnd(toObject, object.read.inputKey) : toObject.position.clone();
+    const end = object.read.fmu ? fmuInputEnd(toObject, object.read.inputKey, start) : toObject.position.clone();
     object.line.geometry.dispose();
     object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
     object.line.computeLineDistances();
@@ -2284,8 +2284,9 @@ function refreshProgramReadEnds() {
     for (const object of programReadObjects.values()) {
         if (!object.read?.fmu) continue;
         const toObject = nodeObjects.get(object.read.toId);
-        if (!toObject) continue;
-        const end = fmuInputEnd(toObject, object.read.inputKey);
+        const fromObject = nodeObjects.get(object.read.fromId);
+        if (!toObject || !fromObject) continue;
+        const end = fmuInputEnd(toObject, object.read.inputKey, fromObject.position);
         if (!object.end || end.distanceToSquared(object.end) > 1e-8) {
             positionProgramRead(object);
             moved = true;
@@ -2447,11 +2448,12 @@ function syncBoxTerminals() {
     }
 }
 
-// Where a connection's line ends on an FMU node: at the input's own terminal, the point on its right edge, where it meets the box
-// (the bug hunt: every read ended at the middle of the box's left edge, so an arrow from below seemed to enter the upper terminal and
-// one from above the lower, the inputs looking swapped). The box's left edge when the terminal is not laid out yet; its middle when it
-// has no terminals.
-function fmuInputEnd(nodeObject, inputKey = null) {
+// Where a connection's line ends on an FMU node: at the input's own terminal (the bug hunt: every read ended at the middle of the box's
+// left edge, so an arrow from below seemed to enter the upper terminal and one from above the lower, the inputs looking swapped), on
+// the terminal's edge that faces the read's source (`from`, a point in the scene; inputTerminalLineEnd), so a line from the left stops
+// at its own label rather than passing behind the others to its right edge. The box's left edge when the terminal is not laid out yet;
+// its middle when it has no terminals.
+function fmuInputEnd(nodeObject, inputKey = null, from = null) {
     const entry = boxTerminals.get(`n${nodeObject.userData.id}`);
     if (!entry) return nodeObject.position.clone();
     const edges = boxEdges(nodeObject);
@@ -2462,7 +2464,9 @@ function fmuInputEnd(nodeObject, inputKey = null) {
     const canvas = renderer.domElement.getBoundingClientRect();
     if (!rect?.height || !canvas.width || !canvas.height) return edge;
     const depth = edge.clone().project(camera).z;
-    return new THREE.Vector3(((rect.right - canvas.left) / canvas.width) * 2 - 1, -(((rect.top + rect.height / 2) - canvas.top) / canvas.height) * 2 + 1, depth).unproject(camera);
+    const sourceX = from ? canvas.left + ((from.clone().project(camera).x + 1) / 2) * canvas.width : rect.right;
+    const end = inputTerminalLineEnd(rect, sourceX);
+    return new THREE.Vector3(((end.x - canvas.left) / canvas.width) * 2 - 1, -((end.y - canvas.top) / canvas.height) * 2 + 1, depth).unproject(camera);
 }
 
 // ---- Dragging to connect ----
@@ -4257,9 +4261,6 @@ $('#nodeProgramFmuBuildLog').addEventListener('click', async () => {
 // Where the node's FMU is kept (stage 8 of docs/proposals/fmuImportWorkflow.md): in the project's file, so it runs on another computer,
 // or linked to this computer's library; switched here, and Replace FMU… swaps in another FMU (a newer export), keeping matching states,
 // values and connections.
-function megabytes(bytes) {
-    return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
-}
 function renderFmuKeep(node, ports) {
     const implementation = node.userData.definition.implementation;
     const line = $('#nodeProgramFmuKeep');
@@ -4269,8 +4270,8 @@ function renderFmuKeep(node, ports) {
     const kept = fmuKeptInProject(implementation);
     const over = Number.isFinite(size) && size > fmuKeepLimitBytes;
     $('#nodeProgramFmuKeepText').textContent = kept
-        ? `Kept in this project's file${Number.isFinite(size) ? ` (${megabytes(size)})` : ''}, so the project runs on another computer.`
-        : `Linked to this computer's library: elsewhere the project needs the FMU installed to run${over ? ` (it is ${megabytes(size)}, over the ${megabytes(fmuKeepLimitBytes)} kept by default)` : ''}.`;
+        ? `Kept in this project's file${fmuSizeText(size) ? ` (${fmuSizeText(size)})` : ''}, so the project runs on another computer.`
+        : `Linked to this computer's library: elsewhere the project needs the FMU installed to run${over ? ` (it is ${fmuSizeText(size)}, over the ${fmuSizeText(fmuKeepLimitBytes)} kept by default)` : ''}.`;
     const toggle = $('#nodeProgramFmuKeepToggle');
     toggle.textContent = kept ? 'Link to the library instead' : 'Keep it in the project';
     toggle.hidden = !kept && !ports?.about?.archiveSha256;
@@ -10240,7 +10241,7 @@ $('#runPartitionAlgorithm').addEventListener('change', updateExecutionConfigurat
 
 // Settings › Providers: the FMUs built from their sources kept on this computer, and Clear FMU builds (docs/proposals/sourceFmuImport.md).
 function showFmuBuildsKept({ count, bytes }) {
-    $('#fmuBuildsKept').textContent = count ? `${count} build${count === 1 ? '' : 's'}, ${(bytes / (1024 * 1024)).toFixed(1)} MB` : 'None';
+    $('#fmuBuildsKept').textContent = count ? `${count} build${count === 1 ? '' : 's'}${fmuSizeText(bytes) ? `, ${fmuSizeText(bytes)}` : ''}` : 'None';
     $('#clearFmuBuilds').disabled = !count;
 }
 async function refreshFmuBuildsKept() {

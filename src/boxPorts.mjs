@@ -158,3 +158,11 @@ export function settingRelationship({ id, source, target, nodes }) {
         parameters: []
     };
 }
+
+// Where a read's line ends on its FMU input's terminal, on screen: at the middle of the terminal's edge that faces its source (`sourceX`,
+// the source's x on screen) -- its left edge for a source to its left, its right edge, against the box, for one to its right or straight
+// above or below. Ending every line at the right edge sent a line from the left behind the other inputs' labels first, so its arrow
+// seemed to feed another input. `rect` is the terminal's on-screen box ({ left, right, top, height }); returns { x, y }.
+export function inputTerminalLineEnd(rect, sourceX) {
+    return { x: sourceX < (rect.left + rect.right) / 2 ? rect.left : rect.right, y: rect.top + rect.height / 2 };
+}

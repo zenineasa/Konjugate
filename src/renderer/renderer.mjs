@@ -14274,6 +14274,7 @@ function syncAssistantCustomModel() {
 }
 
 function setAssistantConfigurationStatus(message = '', tone = 'neutral') {
+    if (tone === 'error' && message) console.warn(`[assistant] ${message}`);
     const status = $('#assistantConfigurationStatus');
     status.textContent = message;
     status.className = `assistantConfigurationStatus ${tone}`;
@@ -14545,6 +14546,7 @@ async function discoverAssistantModels() {
 }
 
 function renderAssistantGenerationError(message) {
+    console.warn(`[assistant] ${message}`);
     pendingAssistantProposal = null;
     updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Error: ${message}`);
     pendingAssistantTurnRecord = null;

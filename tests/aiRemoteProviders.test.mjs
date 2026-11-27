@@ -618,7 +618,8 @@ test('A client ChatGPT issued is kept before the exchange, reused on the next at
     const failing = fakeChatGpt({ onRequest: (address) => (address.endsWith('/oauth/token')
         ? jsonResponse({ error: 'invalid_grant', error_description: 'The authorization code has expired.' }, 400) : null) });
     await assert.rejects(provider('chatGpt', failing.fetchImpl).signIn({ openExternal: failing.openExternal, hostId: 'urn:uuid:host', onClientIssued: (id) => issued.push(id) }),
-        (error) => error.code === 'signInFailed' && /invalid_grant\): The authorization code has expired\. Try signing in again\./.test(error.message));
+        (error) => error.code === 'signInFailed' && /invalid_grant\): The authorization code has expired\. This usually means the ChatGPT account cannot share its plan with apps: it needs ChatGPT Plus or Pro on a personal account/.test(error.message)
+            && error.responseBody.includes('"error_description":"The authorization code has expired."'));
     assert.deepEqual(issued, ['oaiapp_123'], 'The issued client was lost with the failed exchange.');
     assert.equal(failing.seen.requests[0].options.headers.Accept, 'application/json');
     const redirect = new URL(failing.seen.authorizations[0].searchParams.get('redirect_uri'));

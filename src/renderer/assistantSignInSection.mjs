@@ -46,9 +46,12 @@ export function createAssistantSignInSection({ root, api, providers = () => [], 
                 status = result?.error?.code === 'signInCancelled'
                     ? { text: '', tone: 'neutral' }
                     : { text: result?.error?.message ?? `Could not sign in to ${provider.name}.`, tone: 'error' };
+                // The page's own console too; the main process logs the whole of it in the terminal and the diagnostics panel.
+                if (status.tone === 'error') console.warn(`[assistant] signing in to ${provider.id}: ${status.text} (${result?.error?.code ?? 'error'})`);
             }
         } catch (error) {
             status = { text: error.message, tone: 'error' };
+            console.warn(`[assistant] signing in to ${provider.id}:`, error);
         } finally {
             waitingFor = null;
             render();

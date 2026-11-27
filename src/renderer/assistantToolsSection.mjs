@@ -131,6 +131,10 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
         root.hidden = !shown.length;
         find('#assistantToolList').replaceChildren(...shown.map(row));
         const line = find('#assistantToolStatus');
+        if (message.tone === 'error' && message.text && message.text !== render.lastLogged) {
+            console.warn(`[assistant] ${message.text}`);
+            render.lastLogged = message.text;
+        }
         line.textContent = message.text;
         line.className = `settingsNote assistantConfigurationStatus ${message.tone}`;
         line.hidden = !message.text;

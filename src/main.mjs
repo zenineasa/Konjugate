@@ -3435,7 +3435,10 @@ const logAIIssue = (context, error, credential = null) => {
     let message = String(error.message ?? error);
     // A provider may repeat a key it refused; the configuration's own is taken out wherever it appears.
     if (typeof credential === 'string' && credential.length >= 8) message = message.replaceAll(credential, '[redacted]');
-    console.warn(`[assistant] ${context}: ${message}${codes ? ` (${codes})` : ''}`);
+    // What the provider answered, where an adapter kept it (an error response, which carries no token), redacted the same way.
+    let body = typeof error.responseBody === 'string' && error.responseBody.trim() ? error.responseBody.trim() : '';
+    if (body && typeof credential === 'string' && credential.length >= 8) body = body.replaceAll(credential, '[redacted]');
+    console.warn(`[assistant] ${context}: ${message}${codes ? ` (${codes})` : ''}${body ? `\n  The provider answered: ${body}` : ''}`);
 };
 
 // A provider may renew the saved credential on the way (a sign-in's access token refreshed); `onCredential` saves the new one

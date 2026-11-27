@@ -531,9 +531,16 @@ function chatGptProvider() {
             const code = typeof body?.error === 'string' ? body.error : body?.error?.code ?? null;
             // OpenAI's own reason, which says more than the code (an expired code, a redirect that differs, a verifier that does not match).
             const reason = String(body?.error_description ?? body?.error?.message ?? (body ? '' : text) ?? '').trim().slice(0, 300);
-            const failure = new AssistantProviderError(`ChatGPT refused the sign-in (HTTP ${response.status}${code ? `, ${code}` : ''})${reason ? `: ${reason}` : '.'} Try signing in again.`, 'signInFailed');
+            // An exchange refused as invalid_grant is, in others' experience and with no reason given, most often an account that
+            // cannot share its plan with apps (Free, Go, or a work workspace), so the person is told that first.
+            const advice = code === 'invalid_grant' && fields.grant_type === 'authorization_code'
+                ? ' This usually means the ChatGPT account cannot share its plan with apps: it needs ChatGPT Plus or Pro on a personal account (not Free, Go or a work workspace). If it has Plus or Pro, try signing in again.'
+                : ' Try signing in again.';
+            const failure = new AssistantProviderError(`ChatGPT refused the sign-in (HTTP ${response.status}${code ? `, ${code}` : ''})${reason ? `: ${reason}` : '.'}${advice}`, 'signInFailed');
             failure.status = response.status;
             failure.providerCode = code;
+            // What OpenAI answered, for the log: an error response carries no token.
+            failure.responseBody = text.slice(0, 500);
             throw failure;
         }
         if (!body || typeof body.access_token !== 'string') throw new AssistantProviderError('ChatGPT returned an unexpected sign-in response.', 'invalidProviderResponse');

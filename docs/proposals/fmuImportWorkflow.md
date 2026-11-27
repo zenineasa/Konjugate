@@ -53,7 +53,7 @@ An FMU is a `kind: "fmi"` node implementation referring to an installed package 
 - **Add › FMU…** ("A model from another tool, or exported from Konjugate, as a node"). A file picker, then the node is placed and selected, ready to run. The FMU is kept in the project and in the library (see [Library and project](#library-and-project)).
 - **Drop a `.fmu` on the canvas**: the same, at the drop point.
 - **Add › FMU › Recent**: FMUs already in the library, so the same FMU is placed again in two clicks.
-- **Extensions › FMUs** stays for managing the library, and its detail pane gains **Add to model** and the FMU's real description.
+- **Extensions › FMUs** stays for managing the library, and its detail pane gains **Add to model** and the FMU's real description. *Later replaced (the single FMU workflow, after 2.1.1): FMUs come in only through Add › FMU… and a drop on the canvas; Extensions neither installs nor lists them and says to use Add › FMU…; what an FMU is stays on its node's card (About this FMU), the library is looked after in Settings › Providers (FMUs in your library, beside Clear FMU builds), and Disable FMU is retired in favour of switching the node off ([codeExport.md](../codeExport.md)).*
 - **Web edition**: Add › FMU… says "FMUs run in the desktop app" and links to the download page; it does not hide the entry.
 
 ### The node an FMU becomes

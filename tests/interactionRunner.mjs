@@ -11820,6 +11820,72 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
 
+    // Stage 5 of docs/proposals/sourceFmuImport.md: an FMU with a binary of its own (the FMI standard's Dahlquist) built from its sources on
+    // request runs that build in its place until Use its own binary; Save FMU with this computer's binary writes a new .fmu; Settings ›
+    // Providers says the builds kept and clears them.
+    await run('an FMU with its own binary is built from its sources on request, runs it until Use its own binary, is saved with this computer\'s binary, and its builds are cleared from Settings', async () => {
+        const fmuPath = join(import.meta.dirname, '..', 'examples', 'tutorialFmus', 'Dahlquist.fmu');
+        const installedFmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => ({ guid: entry.packageId, version: entry.version })))`);
+        const aboutLines = () => evaluate(window, `[...document.querySelectorAll('#nodeProgramFmuAboutLines li')].map((item) => item.textContent)`);
+        let savedFolder = null;
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU rebuilt.kjt')`);
+            for (const fmu of await installedFmus()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`);
+            assert.equal(await evaluate(window, `window.__debugFmuDrop(${JSON.stringify(fmuPath)}, 400, 300)`), true);
+            await waitFor(window, `!document.querySelector('#nodeProgramFmuBuildActions').hidden && document.querySelector('#nodeProgramFmuBuild').textContent === 'Build from its sources'`, 'Build from its sources is not offered for an FMU with its own binary.', 20000);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramFmuUseOwn').hidden && document.querySelector('#nodeProgramFmuSaveWithBinary').hidden`), true, 'Nothing built yet: neither Use its own binary nor Save is offered.');
+
+            // Build from its sources: asked, saying it has a binary of its own, then run in its place.
+            const asked = await driver.answerDialogs({ button: 'Build' }, async () => {
+                await evaluate(window, `document.querySelector('#nodeProgramFmuAbout').open = true; document.querySelector('#nodeProgramFmuBuild').click()`);
+                await waitFor(window, `[...document.querySelectorAll('#nodeProgramFmuAboutLines li')].some((item) => /in place of its own binary$/.test(item.textContent))`, 'About does not say its build runs in place of its own binary.', 120000);
+            });
+            assert.deepEqual(asked.map((dialog) => dialog.message), ['Build Dahlquist from its sources?']);
+            assert.match(asked[0].detail, /It has a binary of its own for this computer\. Konjugate can compile its \d+ C files? with .+ and run that build in its place here, until you choose Use its own binary\./);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramFmuBuild').textContent`), 'Rebuild');
+            await openRunDialog(window);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU did not run on its build.', 180000);
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing did not ask.');
+            await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+
+            // Use its own binary: the build is kept, and can be saved into a new .fmu.
+            const node = (await evaluate(window, `window.__debugProject.serialize()`)).nodes[0];
+            await evaluate(window, `document.querySelector('.node-label-container[data-node="${node.id}"] .objectLabel')?.click()`);
+            await waitFor(window, `!document.querySelector('#nodeProgramFmuUseOwn').hidden`, 'Use its own binary is not offered.', 20000);
+            await evaluate(window, `document.querySelector('#nodeProgramFmuUseOwn').click()`);
+            await waitFor(window, `![...document.querySelectorAll('#nodeProgramFmuAboutLines li')].some((item) => /^Built here from its sources/.test(item.textContent)) && document.querySelector('#nodeProgramFmuUseOwn').hidden`, 'Use its own binary did not go back to it.', 20000);
+            assert.equal(await evaluate(window, `document.querySelector('#nodeProgramFmuBuild').textContent`), 'Build from its sources');
+            assert.ok(!(await aboutLines()).some((line) => /Built here/.test(line)));
+            const { path, bytes } = await driver.captureExport(async () => {
+                await evaluate(window, `document.querySelector('#nodeProgramFmuSaveWithBinary').click()`);
+            }, { fileName: 'Dahlquist with this computer.fmu', maxAttempts: 400 });
+            savedFolder = join(path, '..');
+            const entries = Object.keys(unzipSync(new Uint8Array(bytes)));
+            assert.ok(entries.some((name) => name.startsWith('binaries/') && name.endsWith(process.platform === 'darwin' ? '.dylib' : process.platform === 'win32' ? '.dll' : '.so')), entries.join(' '));
+            assert.ok(entries.includes('sources/buildDescription.xml'), 'The saved FMU keeps its sources.');
+            await waitFor(window, `/^Saved Dahlquist with this computer\\.fmu, with this computer's binary in binaries\\//.test(document.querySelector('#statusText').textContent)`, 'The status line does not say it was saved.');
+
+            // Settings › Providers: the build kept, then cleared.
+            await evaluate(window, `document.querySelector('#settingsButton').click()`);
+            await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await evaluate(window, `document.querySelector('[data-settings-target="providers"]').click()`);
+            await waitFor(window, `!document.querySelector('[data-settings-page="providers"]').hidden && /^1 build, /.test(document.querySelector('#fmuBuildsKept').textContent)`, 'Settings › Providers does not say the build kept.', 10000);
+            await evaluate(window, `document.querySelector('#clearFmuBuilds').click()`);
+            await waitFor(window, `document.querySelector('#fmuBuildsKept').textContent === 'None' && document.querySelector('#clearFmuBuilds').disabled`, 'Clear FMU builds did not clear them.');
+            await evaluate(window, `document.querySelector('#settingsClose').click()`);
+            await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        } finally {
+            await evaluate(window, `document.querySelector('#settingsDialog').open && document.querySelector('#settingsClose').click()`).catch(() => {});
+            await evaluate(window, `document.querySelector('#closeFmuBuildNotice')?.click()`).catch(() => {});
+            await evaluate(window, `window.__debugProject.load({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [] }, 'empty.kjt')`).catch(() => {});
+            for (const fmu of await installedFmus().catch(() => [])) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+            if (savedFolder) await rm(savedFolder, { recursive: true, force: true });
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
+
     await run('Add › FMU… in the web edition says FMUs run in the desktop app, and where to get it', async () => {
         await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);
         await evaluate(window, `document.querySelector('#addButton').click()`);

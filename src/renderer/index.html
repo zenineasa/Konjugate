@@ -578,6 +578,13 @@
                             <p id="toolchainPythonStatus" class="settingsNote assistantConfigurationStatus"></p>
                         </section>
                         <section class="settingsSection">
+                            <h3 class="settingsSectionTitle">FMUs built from their sources</h3>
+                            <div class="settingsCard">
+                                <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Builds kept on this computer</span><small id="fmuBuildsKept" class="settingsItemHint">None</small></div><div class="settingsItemControl"><button id="clearFmuBuilds" class="settingsButton" type="button">Clear FMU builds</button></div></div>
+                            </div>
+                            <p class="settingsNote">An FMU that carries its C sources is built with the C compiler beside the C++ one above. Cleared, each is built again (asking first) when it is next used.</p>
+                        </section>
+                        <section class="settingsSection">
                             <h3 class="settingsSectionTitle">Advanced</h3>
                             <div class="settingsCard">
                                 <label class="settingsItem"><span class="settingsItemText"><span class="settingsItemLabel">How C++ code runs</span><small class="settingsItemHint">Isolated is safest; in-process is fastest</small></span>
@@ -1068,7 +1075,7 @@
                         <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
                         <p class="builderHint">Each of its outputs is a state of this node, set by the FMU. Its parameters and inputs keep the FMU's own values unless you give one a value of its own, share it, or have it read a state. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
                         <p id="nodeProgramFmuNotes" class="builderHint" hidden></p>
-                        <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul><div id="nodeProgramFmuBuildActions" class="fmuBuildActions" hidden><button id="nodeProgramFmuBuild" type="button" title="Compile its sources with this computer's C compiler, after saying what will run">Build from its sources</button><button id="nodeProgramFmuBuildLog" type="button">Show build log</button></div></details>
+                        <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul><div id="nodeProgramFmuBuildActions" class="fmuBuildActions" hidden><button id="nodeProgramFmuBuild" type="button" title="Compile its sources with this computer's C compiler, after saying what will run">Build from its sources</button><button id="nodeProgramFmuBuildLog" type="button">Show build log</button><button id="nodeProgramFmuUseOwn" type="button" title="Run the binary the FMU came with again, keeping the build for later">Use its own binary</button><button id="nodeProgramFmuSaveWithBinary" type="button" title="A new .fmu, the FMU as it came with this computer's build added to its binaries, to give to a computer that cannot build it">Save FMU with this computer's binary…</button></div></details>
                         <!-- Where the FMU is kept: in the project's file, or linked to the library, and Replace FMU… (stage 8 of
                              docs/proposals/fmuImportWorkflow.md). -->
                         <p id="nodeProgramFmuKeep" class="builderHint fmuKeep" hidden><span id="nodeProgramFmuKeepText"></span> <button id="nodeProgramFmuKeepToggle" type="button"></button> <button id="nodeProgramFmuReplace" type="button">Replace FMU…</button></p>

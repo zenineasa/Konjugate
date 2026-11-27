@@ -10,6 +10,9 @@
 //      outside the allow-list, a library, a path leaving sources/, the time limit); an FMU with neither binaries nor build information,
 //      or Model Exchange only, is refused at inspection.
 //   4. The installed FMU and a project keeping it are the same bytes before and after a build.
+//   5. Stage 5: an FMU with a binary of its own built on request runs the build in its place, and its own binary again after Use its own
+//      binary; Save FMU with this computer's binary gives an FMU that installs and runs here with no build, as the shipped one does; Clear
+//      FMU builds leaves none.
 //
 //   node tests/engine/fmuSourceImport.mjs [path/to/konjugateEngine]
 // The engine given builds (its buildFmuSources); runs use the development engine, as the app does.
@@ -21,7 +24,7 @@ import { join, relative } from 'node:path';
 import { createHash } from 'node:crypto';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { runWithEngine } from '../../src/engineAdapter.mjs';
-import { buildInstalledFmu, currentBuildFor, removeBuilds } from '../../src/fmuBuilds.mjs';
+import { buildInstalledFmu, buildsKept, currentBuildFor, fmuWithThisComputersBinary, removeBuilds, setBuildPreferred } from '../../src/fmuBuilds.mjs';
 import { inspectFmuArchive, installedFmuArchive, installFmuArchive, uninstallFmu } from '../../src/fmuPackage.mjs';
 import { describeInstalledFmuPorts } from '../../src/fmiResolver.mjs';
 import { findCCompiler } from '../../src/fmuSourceBuild.mjs';
@@ -160,6 +163,41 @@ try {
     assert.deepEqual([await folderHash(), await project()], before, 'The installed FMU and the project are the same bytes after a build.');
     await uninstallFmu({ directory: packages, guid: kept.guid, version: kept.version });
     lines.push('the installed FMU and a project keeping it are byte-identical before and after a build');
+
+    // 5. On request, in place of its own binary; saved with this computer's binary; cleared.
+    const vanDerPol = referenceCases.cases.find((item) => item.name === 'VanDerPol');
+    const ownArchive = await referenceFmuArchive('3.0', 'VanDerPol');
+    const own = await install(ownArchive);
+    const shippedRun = await runCase(own, vanDerPol);
+    const same = (one, two) => one.length === two.length && one.every((sample, index) => sample.states.every((state, at) => Object.is(state.value, two[index].states[at].value)));
+    const requested = await build(own, { prefer: true, confirm: async (summary) => { assert.equal(summary.hasOwnBinary, true); return true; } });
+    assert.equal(requested.status, 'built');
+    const preferredPorts = await describeInstalledFmuPorts(packages, own.guid, own.version);
+    assert.match(preferredPorts.binary, /Runs the build of its sources made on this computer .*, in place of its own binary\./);
+    assert.deepEqual([preferredPorts.about.hasOwnBinary, Boolean(preferredPorts.about.built), preferredPorts.about.buildKept], [true, true, true]);
+    const builtRun = await runCase(own, vanDerPol);
+    if (process.platform === 'darwin' && process.arch === 'arm64') assert.ok(same(builtRun, shippedRun), 'Its build runs as its own binary, bit for bit.');
+    await setBuildPreferred(packages, requested.record.archiveSha256, false);
+    const ownAgain = await describeInstalledFmuPorts(packages, own.guid, own.version);
+    assert.deepEqual([Boolean(ownAgain.about.built), ownAgain.about.buildKept], [false, true], 'Use its own binary keeps the build.');
+    assert.doesNotMatch(ownAgain.binary, /build of its sources/);
+    assert.ok(same(await runCase(own, vanDerPol), shippedRun));
+
+    const sourcesFirst = await install(edited(ownArchive));
+    assert.equal(await fmuWithThisComputersBinary(packages, sourcesFirst.guid, sourcesFirst.version), null, 'Nothing to save before it is built.');
+    assert.equal((await build(sourcesFirst)).status, 'built');
+    const saved = await fmuWithThisComputersBinary(packages, sourcesFirst.guid, sourcesFirst.version);
+    const savedEntries = Object.keys(unzipSync(new Uint8Array(saved.buffer)));
+    assert.ok(savedEntries.some((name) => name.startsWith(`binaries/${saved.directory}/`)), 'The saved FMU carries this computer\'s binary.');
+    assert.ok(savedEntries.includes('sources/buildDescription.xml'), 'and its sources, as it came.');
+    await removeBuilds(packages);
+    assert.deepEqual(await buildsKept(packages), { count: 0, bytes: 0 }, 'Clear FMU builds leaves none.');
+    const savedInstalled = await install(saved.buffer);
+    const savedPorts = await describeInstalledFmuPorts(packages, savedInstalled.guid, savedInstalled.version);
+    assert.deepEqual([savedPorts.about.runsHere, savedPorts.about.hasOwnBinary, Boolean(savedPorts.about.built)], [true, true, false], 'The saved FMU runs here on its own binary.');
+    const savedRun = await runCase(savedInstalled, vanDerPol);
+    if (process.platform === 'darwin' && process.arch === 'arm64') assert.ok(same(savedRun, shippedRun), 'The saved FMU runs as the shipped one, bit for bit.');
+    lines.push('built on request it runs in place of its own binary until Use its own binary; saved with this computer\'s binary it runs with no build; Clear FMU builds leaves none');
 
     console.log(`✓ Source FMU import: ${lines.join('; ')}.`);
 } finally {

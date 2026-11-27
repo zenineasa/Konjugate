@@ -135,7 +135,11 @@ contextBridge.exposeInMainWorld('extensions', {
     // Add › FMU… and a dropped .fmu: the FMU at `path` (or one the person picks) made ready to be a node, { guid, version, name, reused }.
     addFmu: (path = null) => ipcRenderer.invoke('packageAddFmu', { path }),
     // An installed FMU built from its sources on this computer (docs/proposals/sourceFmuImport.md): { status, message?, log?, record? }.
-    buildFmu: (guid, version, { force = false } = {}) => ipcRenderer.invoke('packageBuildFmu', { guid, version, force }),
+    buildFmu: (guid, version, { force = false, prefer = false } = {}) => ipcRenderer.invoke('packageBuildFmu', { guid, version, force, prefer }),
+    useOwnFmuBinary: (archiveSha256) => ipcRenderer.invoke('packageUseOwnFmuBinary', { archiveSha256 }),
+    saveFmuWithBinary: (guid, version) => ipcRenderer.invoke('packageSaveFmuWithBinary', { guid, version }),
+    fmuBuildsKept: () => ipcRenderer.invoke('packageFmuBuildsKept'),
+    clearFmuBuilds: () => ipcRenderer.invoke('packageClearFmuBuilds'),
     cancelFmuBuild: () => ipcRenderer.invoke('packageCancelFmuBuild'),
     fmuBuildLog: (archiveSha256) => ipcRenderer.invoke('packageFmuBuildLog', { archiveSha256 }),
     onFmuBuildProgress: (callback) => ipcRenderer.on('fmuBuildProgress', (_event, detail) => callback(detail)),

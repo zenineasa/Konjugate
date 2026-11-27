@@ -14,7 +14,8 @@ import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { parseModelDescription } from './fmiModelDescription.mjs';
-import { platformTuple } from './fmiBinary.mjs';
+import { binaryDirectoryCandidates, platformTuple } from './fmiBinary.mjs';
+import { unzipSync, zipSync } from 'fflate';
 import { fmuBuildInformation } from './fmuBuildInformation.mjs';
 import { fmiStandardHeadersDirectory, fmuSourceBuildPlan, runProgram } from './fmuSourceBuild.mjs';
 
@@ -85,12 +86,57 @@ export async function cachedBuild(buildsDirectory, key) {
 }
 
 // The build the resolver runs for an archive on this computer: the latest one built, checked, for this platform.
-export async function currentBuildFor(fmuDirectory, archiveSha256, tuple = platformTuple()) {
+// `preferredOnly` (an FMU that has a binary of its own for this computer): only a build the person chose to run in its place (stage 5,
+// Build from its sources on request), until Use its own binary.
+export async function currentBuildFor(fmuDirectory, archiveSha256, tuple = platformTuple(), { preferredOnly = false } = {}) {
     const builds = buildsDirectoryOf(fmuDirectory);
-    const pointer = JSON.parse(await readFile(resolve(builds, 'byArchive', `${archiveSha256}.json`), 'utf8').catch(() => 'null'));
-    if (!pointer?.key || !/^[0-9a-f]{64}$/.test(pointer.key)) return null;
+    const pointer = await readPointer(builds, archiveSha256);
+    if (!pointer || (preferredOnly && !pointer.preferred)) return null;
     const cached = await cachedBuild(builds, pointer.key);
-    return cached && cached.record.tuple === tuple && cached.record.archiveSha256 === archiveSha256 ? cached : null;
+    return cached && cached.record.tuple === tuple && cached.record.archiveSha256 === archiveSha256 ? { ...cached, preferred: Boolean(pointer.preferred) } : null;
+}
+
+async function readPointer(builds, archiveSha256) {
+    if (!/^[0-9a-f]{64}$/.test(String(archiveSha256))) return null;
+    const pointer = JSON.parse(await readFile(resolve(builds, 'byArchive', `${archiveSha256}.json`), 'utf8').catch(() => 'null'));
+    return pointer?.key && /^[0-9a-f]{64}$/.test(pointer.key) ? pointer : null;
+}
+
+// Whether an FMU's kept build runs in place of its own binary (Build from its sources) or not (Use its own binary).
+export async function setBuildPreferred(fmuDirectory, archiveSha256, preferred) {
+    const builds = buildsDirectoryOf(fmuDirectory);
+    const pointer = await readPointer(builds, archiveSha256);
+    if (!pointer) return false;
+    await writeFile(resolve(builds, 'byArchive', `${archiveSha256}.json`), JSON.stringify({ key: pointer.key, ...(preferred ? { preferred: true } : {}) }));
+    return true;
+}
+
+// The installed FMU as a new .fmu with this computer's build of it among its binaries (Save FMU with this computer's binary…): the
+// archive it was installed from, unchanged but for the library added under this computer's binaries/ folder (the FMU's own standard's
+// name), replacing one there. `{ buffer, fileName, directory }`, or null when it has no build here.
+export async function fmuWithThisComputersBinary(fmuDirectory, guid, version) {
+    const fmu = await installedFmu(fmuDirectory, guid, version);
+    const built = await currentBuildFor(fmuDirectory, fmu.archiveSha256);
+    if (!built) return null;
+    const files = unzipSync(new Uint8Array(await readFile(resolve(fmu.fmuRoot, 'archive.fmu'))));
+    const directory = binaryDirectoryCandidates(fmu.description.fmiVersion)[0];
+    files[`binaries/${directory}/${built.record.library}`] = new Uint8Array(built.library);
+    return { buffer: Buffer.from(zipSync(files, { level: 6 })), fileName: `${fmu.description.modelName}.fmu`, directory };
+}
+
+// What the builds kept on this computer take: `{ count, bytes }`, for Settings.
+export async function buildsKept(fmuDirectory) {
+    const builds = buildsDirectoryOf(fmuDirectory);
+    let count = 0;
+    let bytes = 0;
+    for (const entry of await readdir(builds, { withFileTypes: true }).catch(() => [])) {
+        if (!entry.isDirectory() || !/^[0-9a-f]{64}$/.test(entry.name)) continue;
+        count += 1;
+        for (const file of await readdir(resolve(builds, entry.name), { withFileTypes: true }).catch(() => [])) {
+            if (file.isFile()) bytes += (await stat(resolve(builds, entry.name, file.name))).size;
+        }
+    }
+    return { count, bytes };
 }
 
 async function confirmedArchives(builds) {
@@ -155,7 +201,7 @@ function runBuild(engine, args, { onProgress, signal }) {
 // (why it cannot be built); "failed" with `message` (the compiler's first error) and `log`.
 export async function buildInstalledFmu({
     fmuDirectory, guid, version, engine, sdkPath, compiler, recipe = null, force = false, confirm = async () => true,
-    onProgress = null, signal = null, timeoutSeconds = 300, tuple = platformTuple()
+    onProgress = null, signal = null, timeoutSeconds = 300, tuple = platformTuple(), prefer = false
 }) {
     const fmu = await installedFmu(fmuDirectory, guid, version);
     const name = fmu.description.modelName;
@@ -182,8 +228,12 @@ export async function buildInstalledFmu({
         if (printed.code !== 0) return { status: 'failed', name, message: firstError(printed.stderr), log: printed.stderr };
         const steps = portableSteps(JSON.parse(printed.stdout), { buildFolder: folder, headersDirectory });
         const key = buildKey({ archiveSha256: fmu.archiveSha256, compiler: compiler.compiler, banner: compiler.banner, tuple, steps, recipe, headers: await headersSha256(headersDirectory) });
-        const pointTo = () => mkdir(resolve(builds, 'byArchive'), { recursive: true })
-            .then(() => writeFile(resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`), JSON.stringify({ key })));
+        // The archive's latest build; run in place of a binary of its own when the person asked for it (`prefer`), or asked before.
+        const pointTo = async () => {
+            const preferred = prefer || Boolean((await readPointer(builds, fmu.archiveSha256))?.preferred);
+            await mkdir(resolve(builds, 'byArchive'), { recursive: true });
+            await writeFile(resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`), JSON.stringify({ key, ...(preferred ? { preferred: true } : {}) }));
+        };
         if (!force) {
             const kept = await cachedBuild(builds, key);
             if (kept) {
@@ -197,7 +247,8 @@ export async function buildInstalledFmu({
                 name, modelIdentifier: fmu.description.modelIdentifier, fmiVersion: fmu.description.fmiVersion, tuple,
                 sourceFileCount: fmu.build.sourceFileCount, language: fmu.build.language, from: fmu.build.from, exporter: fmu.build.exporter,
                 compiler: compiler.compiler, banner: compiler.banner, notes,
-                files: plan.sets.flatMap((set) => set.files), definitions: [...new Set(plan.sets.flatMap((set) => set.definitions))], recipe: recipe?.name ?? null
+                files: plan.sets.flatMap((set) => set.files), definitions: [...new Set(plan.sets.flatMap((set) => set.definitions))], recipe: recipe?.name ?? null,
+                hasOwnBinary: prefer
             };
             if (!await confirm(summary)) return { status: 'declined', name };
             confirmed.add(fmu.archiveSha256);
@@ -213,7 +264,7 @@ export async function buildInstalledFmu({
                 await pointTo();
                 return { status: 'cached', name, record: kept.record, libraryPath: kept.libraryPath, notes };
             }
-            return buildInstalledFmu({ fmuDirectory, guid, version, engine, sdkPath, compiler, recipe, force, confirm, onProgress, signal, timeoutSeconds, tuple });
+            return buildInstalledFmu({ fmuDirectory, guid, version, engine, sdkPath, compiler, recipe, force, confirm, onProgress, signal, timeoutSeconds, tuple, prefer });
         }
         const outcome = await runBuild(engine, ['buildFmuSources', join(folder, 'plan.json'), '--compiler', compiler.compiler, '--progress'], { onProgress: onProgress && ((progress) => onProgress({ ...progress, name })), signal });
         if (outcome.cancelled) return { status: 'cancelled', name };
@@ -244,9 +295,8 @@ export async function buildInstalledFmu({
 // A build's log, for Show build log.
 export async function buildLog(fmuDirectory, archiveSha256) {
     const builds = buildsDirectoryOf(fmuDirectory);
-    const pointer = JSON.parse(await readFile(resolve(builds, 'byArchive', `${archiveSha256}.json`), 'utf8').catch(() => 'null'));
-    if (!pointer?.key || !/^[0-9a-f]{64}$/.test(pointer.key)) return null;
-    return readFile(resolve(builds, pointer.key, 'build.log'), 'utf8').catch(() => null);
+    const pointer = await readPointer(builds, archiveSha256);
+    return pointer ? readFile(resolve(builds, pointer.key, 'build.log'), 'utf8').catch(() => null) : null;
 }
 
 // Removes the builds of an archive (an FMU uninstalled), or every build (Settings' Clear FMU builds, with `archiveSha256` null).

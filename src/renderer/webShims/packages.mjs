@@ -97,6 +97,10 @@ export const extensions = {
     buildFmu: async () => ({ status: 'refused', message: 'FMUs run in the desktop app only.', desktopOnly: true }),
     cancelFmuBuild: async () => true,
     fmuBuildLog: async () => null,
+    useOwnFmuBinary: async () => false,
+    saveFmuWithBinary: async () => ({ error: 'FMUs run in the desktop app only.' }),
+    fmuBuildsKept: async () => ({ count: 0, bytes: 0 }),
+    clearFmuBuilds: async () => ({ count: 0, bytes: 0 }),
     onFmuBuildProgress: () => {},
     pathForFile: () => null,
     // Nothing is restarted for in the web edition: an installed package is in effect at once.

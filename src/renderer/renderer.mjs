@@ -4185,12 +4185,18 @@ async function renderNodeProgramFmus(node) {
     $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
     // Build from its sources, or Rebuild, when it carries buildable sources and runs here only from a build (stage 3).
     const about = ports && !ports.error ? ports.about : null;
-    const buildable = Boolean(about?.build && !about.build.problems?.length && (!about.hasOwnBinary || about.built));
+    // With a binary of its own, it can still be built from its sources on request and run in its place (stage 5).
+    const buildable = Boolean(about?.build && !about.build.problems?.length);
     $('#nodeProgramFmuBuildActions').hidden = !buildable;
     $('#nodeProgramFmuBuild').textContent = about?.built ? 'Rebuild' : 'Build from its sources';
-    $('#nodeProgramFmuBuildLog').hidden = !about?.built;
-    fmuCardBuildTarget = buildable ? { guid: implementation.fmuId, version: implementation.fmuVersion, name: ports.name, archiveSha256: ports.about.archiveSha256, rebuild: Boolean(about.built) } : null;
-    if (buildable && !about.built) $('#nodeProgramFmuAbout').open = true;
+    $('#nodeProgramFmuBuildLog').hidden = !about?.buildKept;
+    $('#nodeProgramFmuUseOwn').hidden = !(about?.built && about.hasOwnBinary);
+    $('#nodeProgramFmuSaveWithBinary').hidden = !about?.buildKept;
+    fmuCardBuildTarget = buildable ? {
+        guid: implementation.fmuId, version: implementation.fmuVersion, name: ports.name, archiveSha256: ports.about.archiveSha256,
+        rebuild: Boolean(about.built), prefer: Boolean(about.hasOwnBinary)
+    } : null;
+    if (buildable && !about.built && !about.hasOwnBinary) $('#nodeProgramFmuAbout').open = true;
     $('#nodeProgramFmuAboutLines').replaceChildren(...aboutLines.map((line) => {
         const item = document.createElement('li');
         item.textContent = line;
@@ -4205,7 +4211,23 @@ async function renderNodeProgramFmus(node) {
 // The FMU the card's Build from its sources, Rebuild and Show build log act on.
 let fmuCardBuildTarget = null;
 $('#nodeProgramFmuBuild').addEventListener('click', () => {
-    if (fmuCardBuildTarget) buildFmuFromSources(fmuCardBuildTarget, { force: fmuCardBuildTarget.rebuild });
+    if (fmuCardBuildTarget) buildFmuFromSources(fmuCardBuildTarget, { force: fmuCardBuildTarget.rebuild, prefer: fmuCardBuildTarget.prefer });
+});
+$('#nodeProgramFmuUseOwn').addEventListener('click', async () => {
+    if (!fmuCardBuildTarget) return;
+    const target = fmuCardBuildTarget;
+    await window.extensions.useOwnFmuBinary?.(target.archiveSha256);
+    rememberFmuPorts(`${target.guid}@${target.version}`, await window.extensions.fmuPorts(target.guid, target.version));
+    $('#statusText').textContent = `${target.name} runs its own binary again; its build is kept`;
+    if (selectedNode) renderNodeProgram(selectedNode);
+    scheduleEngineValidation();
+});
+$('#nodeProgramFmuSaveWithBinary').addEventListener('click', async () => {
+    if (!fmuCardBuildTarget) return;
+    const saved = await window.extensions.saveFmuWithBinary?.(fmuCardBuildTarget.guid, fmuCardBuildTarget.version);
+    if (!saved) return;
+    if (saved.error) showFmuBuildFailure({ name: fmuCardBuildTarget.name, message: saved.error });
+    else $('#statusText').textContent = `Saved ${saved.fileName}, with this computer's binary in binaries/${saved.directory}: this project still keeps the FMU as it came`;
 });
 $('#nodeProgramFmuBuildLog').addEventListener('click', async () => {
     if (!fmuCardBuildTarget) return;
@@ -10189,6 +10211,20 @@ function updateExecutionConfigurationFields() {
 $('#runExecutionBackend').addEventListener('change', updateExecutionConfigurationFields);
 $('#runPartitionAlgorithm').addEventListener('change', updateExecutionConfigurationFields);
 
+// Settings › Providers: the FMUs built from their sources kept on this computer, and Clear FMU builds (docs/proposals/sourceFmuImport.md).
+function showFmuBuildsKept({ count, bytes }) {
+    $('#fmuBuildsKept').textContent = count ? `${count} build${count === 1 ? '' : 's'}, ${(bytes / (1024 * 1024)).toFixed(1)} MB` : 'None';
+    $('#clearFmuBuilds').disabled = !count;
+}
+async function refreshFmuBuildsKept() {
+    showFmuBuildsKept(await window.extensions?.fmuBuildsKept?.() ?? { count: 0, bytes: 0 });
+}
+$('#clearFmuBuilds').addEventListener('click', async () => {
+    showFmuBuildsKept(await window.extensions.clearFmuBuilds());
+    fmuPortsCache.clear();
+    scheduleEngineValidation();
+});
+
 function toolchainFields(kind) {
     const prefix = kind === 'python' ? 'toolchainPython' : 'toolchainCpp';
     return { path: $(`#${prefix}Path`), detected: $(`#${prefix}Detected`), status: $(`#${prefix}Status`) };
@@ -10253,7 +10289,7 @@ const settings = createSettingsSheet({
     opened: {
         general: refreshGeneralSettings,
         assistant: prepareAssistantConfigurationPage,
-        providers: () => Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode()]),
+        providers: () => Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode(), refreshFmuBuildsKept()]),
         controllers: renderControllerSettings,
         pushService: () => connectionsPanel?.show(),
         newProjects: refreshNewProjectSettings
@@ -14630,9 +14666,9 @@ $('#closeFmuBuildNotice').addEventListener('click', () => { $('#fmuBuildNotice')
 
 // Builds an installed FMU here, asking first (in the main process), and says how it went. Its ports are read again, so the card and the
 // box know it runs, and the model is validated again.
-async function buildFmuFromSources({ guid, version, name }, { force = false } = {}) {
+async function buildFmuFromSources({ guid, version, name }, { force = false, prefer = false } = {}) {
     fmuBuildNoticeStart(name);
-    const outcome = await window.extensions.buildFmu(guid, version, { force });
+    const outcome = await window.extensions.buildFmu(guid, version, { force, prefer });
     if (outcome.status === 'built' || outcome.status === 'cached') {
         $('#fmuBuildNotice').hidden = true;
         rememberFmuPorts(`${guid}@${version}`, await window.extensions.fmuPorts(guid, version));

@@ -199,7 +199,12 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
 
     let chosen = await chooseInstalledFmuBinary(fmuRoot, description);
     let platformBinaryPath = chosen.error ? null : resolve(fmuRoot, ...chosen.relativePath.split('/'));
-    if (chosen.error) {
+    // Built from its sources on request, it runs in place of its own binary until Use its own binary (stage 5).
+    const preferred = chosen.error ? null : await currentBuildFor(fmuDirectory, await installedArchiveSha256(fmuRoot), undefined, { preferredOnly: true });
+    if (preferred) {
+        chosen = { relativePath: `fmuBuilds/${preferred.record.key}/${preferred.record.library}`, bytes: preferred.library };
+        platformBinaryPath = preferred.libraryPath;
+    } else if (chosen.error) {
         // Built here from its sources (docs/proposals/sourceFmuImport.md, stage 3): the build kept on this computer for its archive,
         // checked against its SHA-256. The project and the installed FMU stay as they came.
         const built = await currentBuildFor(fmuDirectory, await installedArchiveSha256(fmuRoot));
@@ -373,7 +378,9 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
     const outputKeys = keyByVariableName(outputVariables, 'output');
     const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
     const archiveSha256 = await installedArchiveSha256(fmuRoot);
-    const built = chosen.error ? await currentBuildFor(fmuDirectory, archiveSha256) : null;
+    const kept = await currentBuildFor(fmuDirectory, archiveSha256);
+    // The build that runs: the only way it runs with no binary of its own, else the one the person chose (stage 5).
+    const built = kept && (chosen.error || kept.preferred) ? kept : null;
     return {
         name: description.modelName, fmiVersion: description.fmiVersion,
         inputs: inputVariables.map((variable) => ({
@@ -382,9 +389,10 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
         })),
         outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type, ...variableExtras(variable) })),
         notExposed: description.notExposed,
-        binary: built ? `Runs the build of its sources made on this computer (${built.record.library}).` : describeChosenBinary(chosen, description.fmiVersion),
+        binary: built ? `Runs the build of its sources made on this computer (${built.record.library})${chosen.error ? '' : ', in place of its own binary'}.` : describeChosenBinary(chosen, description.fmiVersion),
         about: {
             ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen, await installedBuildSummary(fmuRoot, description), built),
+            ...(kept ? { buildKept: true } : {}),
             ...await archiveFacts(fmuDirectory, guid, version)
         }
     };

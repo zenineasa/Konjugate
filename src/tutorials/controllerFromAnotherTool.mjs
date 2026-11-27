@@ -114,7 +114,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'A controller from another tool controls your model',
-        text: 'The controller came from OpenModelica as an FMU, and is a box with ports here like any part with inputs and outputs: dragged to connect, tuned on its card, run beside Konjugate\'s own. Its folder in the examples (pidController) holds its Modelica source, the script that made the FMU, and how it was checked.',
+        text: 'The controller came from OpenModelica as an FMU, and is a box with ports here like any part with inputs and outputs: dragged to connect, tuned on its card, run beside Konjugate\'s own. Its folder in the examples (pidController) holds its Modelica source, the script that made the FMU, and how it was checked. The FMU carries its C sources too: on a computer it has no binary for, Konjugate builds it from them with that computer\'s C compiler, after asking, and About this FMU says so.',
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

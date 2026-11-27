@@ -65,7 +65,7 @@ import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installProje
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { buildInformationLine } from './nodeProgram.mjs';
-import { buildInstalledFmu, buildLog } from './fmuBuilds.mjs';
+import { buildInstalledFmu, buildLog, buildsKept, fmuWithThisComputersBinary, removeBuilds, setBuildPreferred } from './fmuBuilds.mjs';
 import { findCCompiler } from './fmuSourceBuild.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
@@ -2070,7 +2070,9 @@ const fmuBuildControllers = new Map();
 async function confirmFmuBuild(window, summary) {
     const files = `${summary.sourceFileCount} ${summary.language === 'C and C++' ? 'source' : summary.language} file${summary.sourceFileCount === 1 ? '' : 's'}`;
     const detail = [
-        `It has no binary for this computer (${summary.tuple}). Konjugate can compile its ${files} with ${summary.banner} and then run it, as it runs any FMU.`,
+        summary.hasOwnBinary
+            ? `It has a binary of its own for this computer. Konjugate can compile its ${files} with ${summary.banner} and run that build in its place here, until you choose Use its own binary.`
+            : `It has no binary for this computer (${summary.tuple}). Konjugate can compile its ${files} with ${summary.banner} and then run it, as it runs any FMU.`,
         'Only build FMUs from people you trust: the code will run with your permissions, as a downloaded program would. Konjugate runs the compiler only, not the FMU\'s own build scripts, and uses no network.',
         ...summary.notes
     ].join('\n\n');
@@ -2095,7 +2097,7 @@ async function confirmFmuBuild(window, summary) {
     }
 }
 
-async function buildFmuHere(event, { guid, version, force = false }) {
+async function buildFmuHere(event, { guid, version, force = false, prefer = false }) {
     const window = getWindowFromEvent(event);
     const engineOptions = { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged };
     const engine = await resolveEnginePath(engineOptions);
@@ -2106,7 +2108,7 @@ async function buildFmuHere(event, { guid, version, force = false }) {
     fmuBuildControllers.set(event.sender.id, controller);
     try {
         return await buildInstalledFmu({
-            fmuDirectory: join(app.getPath('userData'), 'packages'), guid, version, engine, sdkPath: cppProviderSdkPath(engineOptions), compiler, force,
+            fmuDirectory: join(app.getPath('userData'), 'packages'), guid, version, engine, sdkPath: cppProviderSdkPath(engineOptions), compiler, force, prefer,
             confirm: (summary) => confirmFmuBuild(window, summary),
             onProgress: (progress) => { if (!event.sender.isDestroyed()) event.sender.send('fmuBuildProgress', { guid, version, ...progress }); },
             signal: controller.signal
@@ -2118,7 +2120,26 @@ async function buildFmuHere(event, { guid, version, force = false }) {
     }
 }
 
-ipcMain.handle('packageBuildFmu', (event, { guid, version, force = false }) => buildFmuHere(event, { guid, version, force: Boolean(force) }));
+ipcMain.handle('packageBuildFmu', (event, { guid, version, force = false, prefer = false }) => buildFmuHere(event, { guid, version, force: Boolean(force), prefer: Boolean(prefer) }));
+// Stage 5: a build run in place of the FMU's own binary goes back to that binary; the FMU saved as a new .fmu with this computer's build
+// among its binaries, where the person chooses; and the builds kept, said and cleared from Settings.
+ipcMain.handle('packageUseOwnFmuBinary', async (_event, { archiveSha256 }) => setBuildPreferred(join(app.getPath('userData'), 'packages'), String(archiveSha256 ?? ''), false));
+ipcMain.handle('packageSaveFmuWithBinary', async (event, { guid, version }) => {
+    const saved = await fmuWithThisComputersBinary(join(app.getPath('userData'), 'packages'), guid, version);
+    if (!saved) return { error: 'It has no build from its sources on this computer to save.' };
+    const result = await dialog.showSaveDialog(getWindowFromEvent(event), {
+        title: 'Save FMU with this computer\'s binary', defaultPath: saved.fileName, filters: [{ name: 'FMU', extensions: ['fmu'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    const path = result.filePath.toLowerCase().endsWith('.fmu') ? result.filePath : `${result.filePath}.fmu`;
+    await writeFile(path, saved.buffer);
+    return { path, fileName: basename(path), directory: saved.directory };
+});
+ipcMain.handle('packageFmuBuildsKept', () => buildsKept(join(app.getPath('userData'), 'packages')));
+ipcMain.handle('packageClearFmuBuilds', async () => {
+    await removeBuilds(join(app.getPath('userData'), 'packages'), null);
+    return buildsKept(join(app.getPath('userData'), 'packages'));
+});
 ipcMain.handle('packageCancelFmuBuild', (event) => { fmuBuildControllers.get(event.sender.id)?.abort(); return true; });
 ipcMain.handle('packageFmuBuildLog', (_event, { archiveSha256 }) => buildLog(join(app.getPath('userData'), 'packages'), String(archiveSha256 ?? '')));
 

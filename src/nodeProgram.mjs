@@ -323,7 +323,7 @@ export function fmuAboutLines(about) {
     if (about.built) {
         const day = new Date(about.built.builtAt);
         const date = Number.isNaN(day.getTime()) ? '' : ` on ${day.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
-        lines.push(`Built here from its sources with ${about.built.banner}${about.built.recipe ? ` (${about.built.recipe}'s recipe)` : ''}${date}`);
+        lines.push(`Built here from its sources with ${about.built.banner}${about.built.recipe ? ` (${about.built.recipe}'s recipe)` : ''}${date}${about.hasOwnBinary ? ', and run in place of its own binary' : ''}`);
     } else {
         const sources = buildInformationLine(about.build, { runsHere: about.runsHere !== false });
         if (sources) lines.push(sources);

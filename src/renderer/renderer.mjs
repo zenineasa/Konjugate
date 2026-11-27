@@ -11485,10 +11485,25 @@ function installAssistantDragging() {
     header.addEventListener('pointercancel', finish);
 }
 
+// The placeholder is for a conversation that has not begun: it goes once there is a turn, a reply or a request under way.
+function syncAssistantEmpty() {
+    $('#assistantEmpty').hidden = assistantTurnHistory.length > 0 || !$('#assistantProposal').hidden
+        || !$('#assistantClarification').hidden || !$('#assistantProgress').hidden;
+}
+
+// The newest part of the conversation in view, as a chat keeps it, once what changed has been drawn.
+function scrollAssistantToEnd() {
+    requestAnimationFrame(() => {
+        const body = $('#assistantBody');
+        body.scrollTop = body.scrollHeight;
+    });
+}
+
 function renderAssistantProposal(proposal, prepared) {
-    $('#assistantEmpty').hidden = true;
     $('#assistantClarification').hidden = true;
     $('#assistantProposal').hidden = false;
+    syncAssistantEmpty();
+    scrollAssistantToEnd();
     $('#assistantProposalSummary').textContent = proposal.summary?.trim() || 'Proposed model changes';
     const assumptions = Array.isArray(proposal.assumptions) ? proposal.assumptions.filter((item) => typeof item === 'string' && item.trim()) : [];
     $('#assistantAssumptionsSection').hidden = !assumptions.length;
@@ -11556,9 +11571,8 @@ function renderAssistantTranscript() {
         item.append(you, outcome);
         return item;
     }));
-    // Keep the most recent exchange in view rather than wherever the scroll position happened
-    // to be left (replaceChildren doesn't move it on its own), the same way a chat log would.
-    transcript.scrollTop = transcript.scrollHeight;
+    syncAssistantEmpty();
+    scrollAssistantToEnd();
 }
 
 function pushAssistantTurn(request, outcome) {
@@ -11581,9 +11595,10 @@ function resetAssistantConversation() {
 }
 
 function renderAssistantClarification(response) {
-    $('#assistantEmpty').hidden = true;
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = false;
+    syncAssistantEmpty();
+    scrollAssistantToEnd();
     $('#assistantClarificationQuestion').textContent = response.question;
     const suggestions = Array.isArray(response.suggestions) ? response.suggestions : [];
     $('#assistantClarificationOptions').hidden = !suggestions.length;
@@ -11602,7 +11617,7 @@ function dismissAssistantClarification() {
     updateAssistantTurnOutcome(pendingAssistantTurnRecord, 'You did not answer.');
     pendingAssistantTurnRecord = null;
     $('#assistantClarification').hidden = true;
-    $('#assistantEmpty').hidden = false;
+    syncAssistantEmpty();
     $('#generateAssistantProposal').textContent = 'Generate proposal';
     updateAssistantCollapsedStatus('Your model remains unchanged');
 }
@@ -11655,9 +11670,10 @@ async function previewAssistantProposal(proposal) {
     } catch (error) {
         if (revision !== assistantPreviewRevision) return { valid: false, superseded: true };
         pendingAssistantProposal = null;
-        $('#assistantEmpty').hidden = true;
         $('#assistantClarification').hidden = true;
         $('#assistantProposal').hidden = false;
+        syncAssistantEmpty();
+        scrollAssistantToEnd();
         $('#assistantProposalStatus').className = '';
         $('#assistantProposalStatus').textContent = 'Proposal rejected';
         $('#assistantError').textContent = error.message;
@@ -11681,7 +11697,7 @@ function discardAssistantProposal() {
     $('#applyAssistantProposal').disabled = true;
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = true;
-    $('#assistantEmpty').hidden = false;
+    syncAssistantEmpty();
     $('#generateAssistantProposal').textContent = 'Generate proposal';
     updateAssistantCollapsedStatus('Your model remains unchanged');
 }
@@ -14550,9 +14566,10 @@ function renderAssistantGenerationError(message) {
     pendingAssistantProposal = null;
     updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Error: ${message}`);
     pendingAssistantTurnRecord = null;
-    $('#assistantEmpty').hidden = true;
     $('#assistantClarification').hidden = true;
     $('#assistantProposal').hidden = false;
+    syncAssistantEmpty();
+    scrollAssistantToEnd();
     $('#assistantProposalSummary').textContent = 'No proposal generated';
     $('#assistantProposalStatus').className = '';
     $('#assistantProposalStatus').textContent = 'The request needs attention';
@@ -14583,6 +14600,7 @@ function setAssistantProgressText(preId, sectionId, text) {
 function renderAssistantProgress() {
     const panel = $('#assistantProgress');
     panel.hidden = !assistantProgressRequestUuid;
+    syncAssistantEmpty();
     if (!assistantProgressRequestUuid) return;
     const attemptStartedAt = assistantProgressSnapshot?.attemptStartedAt ?? assistantProgressStartedAt;
     const { headline, notes } = describeAssistantProgress(
@@ -14598,13 +14616,17 @@ function renderAssistantProgress() {
     updateAssistantCollapsedStatus(headline);
 }
 
-function startAssistantProgress(requestUuid) {
+// `request` is what was asked, shown as the person's side of the pending turn until the reply arrives.
+function startAssistantProgress(requestUuid, request = '') {
     clearInterval(assistantProgressTimer);
     assistantProgressRequestUuid = requestUuid;
     assistantProgressSnapshot = null;
     assistantProgressStartedAt = Date.now();
     assistantProgressTimer = setInterval(renderAssistantProgress, 1000);
+    $('#assistantProgressRequest').textContent = request;
+    $('#assistantProgressRequest').hidden = !request;
     renderAssistantProgress();
+    scrollAssistantToEnd();
 }
 
 function stopAssistantProgress() {
@@ -14650,10 +14672,9 @@ async function requestAssistantProposal() {
     button.disabled = true;
     button.textContent = 'Preparing…';
     updateAssistantCollapsedStatus('Preparing proposal…');
-    startAssistantProgress(requestUuid);
-    $('#assistantEmpty').hidden = false;
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = true;
+    startAssistantProgress(requestUuid, request);
     try {
         const response = await window.aiProviders.generateProposal(
             requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantTurnHistory
@@ -14664,6 +14685,7 @@ async function requestAssistantProposal() {
         // textarea. Still empties for a clarification exactly as it would for a proposal, so a
         // reply is always typed fresh rather than editing the question back down to an answer.
         $('#assistantPrompt').value = '';
+        fitAssistantPrompt();
         if (response.responseKind === 'clarification') {
             pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`);
             renderAssistantClarification(response);
@@ -14715,6 +14737,7 @@ $('#assistantClarificationOptions').addEventListener('click', (event) => {
     const button = event.target.closest('[data-suggestion]');
     if (!button) return;
     $('#assistantPrompt').value = button.dataset.suggestion;
+    fitAssistantPrompt();
     $('#assistantPrompt').focus();
 });
 $('#newAssistantConversation').addEventListener('click', () => {
@@ -14728,6 +14751,13 @@ $('#assistantPromptForm').addEventListener('submit', (event) => {
     event.preventDefault();
     requestAssistantProposal();
 });
+// The prompt grows with what is typed, from two lines up to its maximum height, then scrolls.
+function fitAssistantPrompt() {
+    const prompt = $('#assistantPrompt');
+    prompt.style.height = 'auto';
+    prompt.style.height = `${prompt.scrollHeight + 2}px`;
+}
+$('#assistantPrompt').addEventListener('input', fitAssistantPrompt);
 $('#assistantConfiguration').addEventListener('change', async () => {
     activeAssistantConfigurationUuid = $('#assistantConfiguration').value;
     assistantGenerationController?.abort();

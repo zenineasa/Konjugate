@@ -1266,8 +1266,9 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Answer');
         await evaluate(window, `document.querySelector('#dismissAssistantClarification').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#assistantClarification').hidden`), true);
-        assert.equal(await evaluate(window, `document.querySelector('#assistantEmpty').hidden`), false);
-        assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#assistantEmpty')).display`), 'grid');
+        // The conversation stays, so the placeholder for one not yet begun does not come back.
+        assert.equal(await evaluate(window, `document.querySelector('#assistantEmpty').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantTranscript').hidden`), false);
         assert.equal(await evaluate(window, `document.querySelector('#generateAssistantProposal').textContent`), 'Generate proposal');
         assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptOutcome').textContent`), /did not answer/i);
         assert.equal(await evaluate(window, `window.konjugateAssistant.getTurnHistory().length`), 1);

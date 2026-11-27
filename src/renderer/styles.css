@@ -620,83 +620,119 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .runButton:disabled, .runButton:disabled:hover { color: #495e67; background: #15232b; border-color: #21333d; box-shadow: none; cursor: not-allowed; }
 @keyframes pulse { 50% { opacity: .28; } }
 
-.assistantPanel { position: fixed; z-index: 40; width: min(390px, calc(100vw - 20px)); height: min(620px, calc(100vh - var(--title-height) - var(--tools-height) - 24px)); overflow: auto; color: #b8c7ce; background: rgb(14 25 34 / 98%); border: 1px solid #3a4d58; border-radius: 8px 8px 3px 3px; box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); }
+/* The model assistant's panel: a header, the conversation (which scrolls), and the prompt pinned below it. Four type sizes
+   (caption, body, emphasis, title) and one gutter, all here, so every edge lines up and A−/A+ scales them together. Its size
+   is set through --assistant-width and --assistant-height, which resizing writes, and the phone layouts below replace. */
+.assistantPanel {
+    --assistant-gutter: 14px;
+    --assistant-caption: 8px;
+    --assistant-body: 9.5px;
+    --assistant-emphasis: 11px;
+    --assistant-title: 12.5px;
+    position: fixed; z-index: 40; display: flex; flex-direction: column;
+    width: var(--assistant-width, min(420px, calc(100vw - 20px)));
+    height: var(--assistant-height, min(680px, calc(100vh - var(--title-height) - var(--tools-height) - 24px)));
+    min-width: min(300px, calc(100vw - 20px)); min-height: min(260px, calc(100vh - var(--title-height) - var(--tools-height) - 20px));
+    max-width: calc(100vw - 20px); max-height: calc(100vh - var(--title-height) - var(--tools-height) - 20px);
+    overflow: hidden; color: #b8c7ce; background: rgb(14 25 34 / 98%); border: 1px solid #3a4d58; border-radius: 8px;
+    box-shadow: 0 16px 38px rgb(0 0 0 / 48%); backdrop-filter: blur(12px); font-size: var(--assistant-body);
+}
 .assistantPanel[hidden] { display: none; }
-.assistantPanel > header { position: sticky; z-index: 2; top: 0; display: flex; min-height: 43px; align-items: center; justify-content: space-between; padding: 9px 10px 8px 13px; background: rgb(14 25 34 / 98%); border-bottom: 1px solid #263742; cursor: grab; user-select: none; }
+.assistantPanel > header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 46px; padding: 8px 8px 8px var(--assistant-gutter); background: rgb(14 25 34 / 98%); border-bottom: 1px solid #263742; cursor: grab; user-select: none; }
 .assistantPanel > header:active { cursor: grabbing; }
-.assistantPanel > header strong { display: block; margin-top: 3px; color: #d5e1e6; font-size: 12px; }
-.assistantPanel > header small { display: none; margin-top: 2px; color: #6f858f; font-size: 7px; font-weight: 500; }
-.assistantWindowActions { display: flex; align-items: center; gap: 2px; }
-.assistantPanel > header button { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; color: #60747f; background: transparent; border: 0; border-radius: 4px; font-size: 16px; }
+.assistantPanel > header > div { min-width: 0; }
+.assistantPanel > header .contextKicker { display: block; color: #6e828e; font-size: var(--assistant-caption); letter-spacing: .1em; text-transform: uppercase; }
+.assistantPanel > header strong { display: block; margin-top: 2px; overflow: hidden; color: #d5e1e6; font-size: var(--assistant-title); text-overflow: ellipsis; white-space: nowrap; }
+.assistantPanel > header small { display: none; margin-top: 2px; overflow: hidden; color: #6f858f; font-size: var(--assistant-caption); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.assistantWindowActions { display: flex; flex: none; align-items: center; gap: 2px; }
+.assistantPanel > header button { display: grid; width: 28px; height: 28px; place-items: center; padding: 0; color: #60747f; background: transparent; border: 0; border-radius: 4px; font-size: 15px; }
 .assistantPanel > header button:hover { color: #b9c9d0; background: #1a2a34; }
-.assistantPanel.collapsed { height: 43px; overflow: hidden; }
+.assistantPanel > header button:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(66 201 188 / 30%); }
+.assistantPanel.collapsed { height: auto; min-height: 0; }
 .assistantPanel.collapsed > :not(header) { display: none; }
 .assistantPanel.collapsed > header { border-bottom: 0; }
-.assistantPanel.collapsed > header strong { font-size: 10px; }
+.assistantPanel.collapsed > header strong { font-size: var(--assistant-emphasis); }
 .assistantPanel.collapsed > header small { display: block; }
-.assistantPromptForm { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 13px; border-bottom: 1px solid #263742; }
-.assistantPromptForm label { color: #718690; font-size: 8px; font-weight: 650; }
-.assistantPromptForm textarea { width: 100%; min-height: 76px; resize: vertical; padding: 9px 10px; color: #c9d7dc; background: #09151d; border: 1px solid #30434e; border-radius: 5px; outline: none; font: inherit; font-size: 9px; line-height: 1.5; }
-.assistantPromptForm textarea:focus { border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 8%); }
-.assistantPromptForm > div { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
-.assistantPromptForm > div select { min-width: 0; height: 27px; flex: 1; padding: 0 6px; overflow: hidden; color: #718690; background: #0a161e; border: 1px solid #293d47; border-radius: 4px; font-size: 7px; text-overflow: ellipsis; }
-.assistantPromptForm .assistantManageConfigurations { min-width: 28px; width: 28px; padding: 0; color: #78909a; background: #172630; border: 1px solid #30444e; }
-.assistantPromptForm button { min-width: 100px; height: 28px; padding: 0 10px; color: #09201e; background: var(--accent); border: 0; border-radius: 4px; font-size: 8px; font-weight: 700; }
-.assistantPromptForm button:disabled { color: #647780; background: #24343d; cursor: default; }
-.assistantTranscript { display: grid; gap: 8px; max-height: 160px; padding: 10px 13px; overflow-y: auto; list-style: none; border-bottom: 1px solid #263742; }
+
+/* The conversation: earlier turns, then the reply to the latest request, then a request under way. */
+.assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
+.assistantBody > * { flex: none; }
+.assistantTranscript { display: grid; gap: 14px; margin: 0; padding: 14px var(--assistant-gutter) 4px; list-style: none; }
 .assistantTranscript[hidden] { display: none; }
-.assistantTranscriptTurn { display: grid; gap: 3px; padding-bottom: 8px; border-bottom: 1px solid #1a2830; font-size: 8px; line-height: 1.5; }
-.assistantTranscriptTurn:last-child { padding-bottom: 0; border-bottom: 0; }
+.assistantTranscriptTurn { display: grid; gap: 8px; line-height: 1.55; }
 .assistantTranscriptYou, .assistantTranscriptOutcome { margin: 0; overflow-wrap: anywhere; user-select: text; }
-.assistantTranscriptYou { color: #b8c7ce; }
-.assistantTranscriptYou::before { margin-right: 4px; color: #4c8e8a; font-weight: 650; content: 'You:'; }
-.assistantTranscriptOutcome { color: #8ea1aa; }
-.assistantTranscriptOutcome::before { margin-right: 4px; color: #6e828e; font-weight: 650; content: 'Assistant:'; }
-.assistantEmpty { display: grid; min-height: 205px; place-content: center; justify-items: center; gap: 8px; padding: 34px; color: #607681; text-align: center; }
+/* What the person asked, as their side of a chat; what came of it, as the assistant's. */
+.assistantTranscriptYou { justify-self: end; max-width: 88%; padding: 7px 10px; color: #d0dee3; background: #132630; border: 1px solid #22404a; border-radius: 10px 10px 3px 10px; white-space: pre-wrap; }
+.assistantTranscriptOutcome { color: #9cb0b9; }
+.assistantTranscriptOutcome::before { display: block; margin-bottom: 2px; color: #5f7782; font-size: var(--assistant-caption); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; content: 'Assistant'; }
+.assistantEmpty { flex: 1 0 auto; display: grid; min-height: 180px; place-content: center; justify-items: center; gap: 8px; padding: 28px var(--assistant-gutter); color: #607681; text-align: center; }
 .assistantEmpty[hidden] { display: none; }
 .assistantEmpty > span { display: grid; width: 38px; height: 38px; place-items: center; margin-bottom: 4px; color: #83d9d1; background: rgb(66 201 188 / 10%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 50%; font-size: 18px; }
-.assistantEmpty strong { color: #aabdc5; font-size: 10px; }
-.assistantEmpty p { max-width: 260px; font-size: 8px; line-height: 1.6; }
-.assistantClarificationOptions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 13px 13px; }
+.assistantEmpty strong { color: #aabdc5; font-size: var(--assistant-emphasis); }
+.assistantEmpty p { max-width: 280px; font-size: var(--assistant-body); line-height: 1.6; }
+
+/* The reply to the latest request, a question or a proposal, is a card in the conversation; its buttons stay in sight at the
+   bottom of the conversation however long the card is. */
+#assistantClarification, #assistantProposal { margin: 10px var(--assistant-gutter) 6px; background: #0c1a22; border: 1px solid #263a44; border-radius: 6px; }
+#assistantClarification[hidden], #assistantProposal[hidden] { display: none; }
+.assistantClarificationOptions { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 12px; }
 .assistantClarificationOptions[hidden] { display: none; }
-.assistantClarificationOption { padding: 6px 10px; color: #83d9d1; background: rgb(66 201 188 / 8%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 14px; font-size: 8px; }
+.assistantClarificationOption { padding: 6px 11px; color: #83d9d1; background: rgb(66 201 188 / 8%); border: 1px solid rgb(66 201 188 / 28%); border-radius: 14px; font-size: var(--assistant-body); }
 .assistantClarificationOption:hover { background: rgb(66 201 188 / 16%); border-color: rgb(66 201 188 / 45%); }
-.assistantPanel section { padding: 13px; border-bottom: 1px solid #263742; }
-.assistantPanel section h3 { margin-bottom: 8px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
-.assistantSummary strong { color: #d4e1e5; font-size: 11px; }
-.assistantSummary p { margin-top: 5px; color: #718690; font-size: 8px; }
+.assistantPanel section { padding: 12px; border-bottom: 1px solid #1e313b; }
+.assistantPanel section h3 { margin: 0 0 8px; color: #6e828e; font-size: var(--assistant-caption); letter-spacing: .1em; text-transform: uppercase; }
+.assistantSummary strong { display: block; color: #d4e1e5; font-size: var(--assistant-emphasis); line-height: 1.4; }
+.assistantSummary p { margin: 5px 0 0; color: #8aa0aa; font-size: var(--assistant-body); line-height: 1.55; }
 .assistantSummary p.valid { color: #78cfc7; }
 .assistantSummary p.pending { color: #70a9c8; }
-.assistantPanel :is(ul, ol) { display: grid; gap: 6px; padding-left: 17px; color: #8ea1aa; font-size: 8px; line-height: 1.5; }
+.assistantPanel :is(ul, ol):not(.assistantTranscript) { display: grid; gap: 6px; margin: 0; padding-left: 17px; color: #8ea1aa; font-size: var(--assistant-body); line-height: 1.55; }
 .assistantPanel #assistantChanges { padding-left: 0; list-style: none; }
-.assistantChange > :is(button, div) { display: grid; width: 100%; gap: 6px; padding: 8px; color: #8ea1aa; background: #0a161e; border: 1px solid #263943; border-radius: 5px; text-align: left; }
+.assistantChange > :is(button, div) { display: grid; width: 100%; gap: 6px; padding: 8px 10px; color: #8ea1aa; background: #0a161e; border: 1px solid #263943; border-radius: 5px; font-size: var(--assistant-body); text-align: left; }
 .assistantChange > button:hover { background: #12232c; border-color: #3a555f; }
-.assistantChange > :is(button, div) > span { display: flex; align-items: center; gap: 7px; }
-.assistantChange b { min-width: 39px; padding: 2px 5px; color: #77cfc7; background: rgb(66 201 188 / 9%); border-radius: 8px; font-size: 6px; text-align: center; text-transform: uppercase; }
+.assistantChange > :is(button, div) > span { display: flex; align-items: baseline; gap: 8px; }
+.assistantChange b { flex: none; min-width: 48px; padding: 2px 6px; color: #77cfc7; background: rgb(66 201 188 / 9%); border-radius: 8px; font-size: var(--assistant-caption); letter-spacing: .04em; text-align: center; text-transform: uppercase; }
 .assistantChange.remove b { color: #d68a91; background: rgb(185 75 85 / 10%); }
 .assistantChange.add b { color: #83bfe0; background: rgb(83 164 205 / 10%); }
-.assistantChange strong { color: #aebfc7; font-size: 8px; font-weight: 600; }
-.assistantChange dl { display: grid; gap: 3px; margin: 0; padding-top: 5px; border-top: 1px solid #22343e; user-select: text; }
-.assistantChange dl div { display: grid; grid-template-columns: 72px 1fr; gap: 6px; }
+.assistantChange strong { color: #c0cfd5; font-size: var(--assistant-body); font-weight: 600; line-height: 1.45; }
+.assistantChange dl { display: grid; gap: 3px; margin: 0; padding-top: 6px; border-top: 1px solid #22343e; font-size: var(--assistant-caption); user-select: text; }
+.assistantChange dl div { display: grid; grid-template-columns: 80px 1fr; gap: 8px; }
 .assistantChange dt { overflow: hidden; color: #617681; text-overflow: ellipsis; white-space: nowrap; }
 .assistantChange dd { overflow-wrap: anywhere; margin: 0; color: #899da6; }
-.assistantProgress { margin: 12px; padding: 9px; background: rgb(66 201 188 / 6%); border: 1px solid rgb(66 201 188 / 22%); border-radius: 4px; }
+.assistantError { margin: 12px; padding: 9px 11px; color: #e09aa0; background: rgb(134 52 62 / 12%); border: 1px solid #633942; border-radius: 4px; font-size: var(--assistant-body); line-height: 1.5; user-select: text; }
+.assistantError[hidden] { display: none; }
+.assistantPanel footer { position: sticky; z-index: 1; bottom: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; background: #0c1a22; border-top: 1px solid #1e313b; border-radius: 0 0 6px 6px; }
+.assistantPanel footer button { height: 30px; padding: 0 12px; color: #8aa0aa; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; }
+.assistantPanel footer button.doneButton { color: #09201e; background: var(--accent); border-color: transparent; font-weight: 700; }
+.assistantPanel footer button:disabled { opacity: .45; cursor: default; }
+
+/* A request under way, as the assistant's pending turn: what was asked, and what the model is doing. */
+.assistantProgress { margin: 10px var(--assistant-gutter) 6px; padding: 10px 12px; background: rgb(66 201 188 / 6%); border: 1px solid rgb(66 201 188 / 22%); border-radius: 6px; }
 .assistantProgress[hidden] { display: none; }
-.assistantProgressHeader { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.assistantProgressHeader strong { color: #c3d6dc; font-size: 9px; font-weight: 600; }
-.assistantProgressHeader button { flex: none; height: 24px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: 8px; cursor: pointer; }
+.assistantPendingRequest { display: block; margin: 0 0 10px auto; width: fit-content; }
+.assistantPendingRequest[hidden] { display: none; }
+.assistantProgressHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.assistantProgressHeader strong { color: #c3d6dc; font-size: var(--assistant-body); font-weight: 600; line-height: 1.45; }
+.assistantProgressHeader button { flex: none; height: 28px; padding: 0 12px; color: #8aa0aa; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; }
 .assistantProgressHeader button:hover { color: #dce9ee; background: #17232c; border-color: #3d5562; }
 .assistantProgressHeader button:focus-visible { outline: none; border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 12%); }
-.assistantProgressNote { margin-top: 6px; color: #8aa0aa; font-size: 8px; line-height: 1.5; }
+.assistantProgressNote { margin: 6px 0 0; color: #8aa0aa; font-size: var(--assistant-body); line-height: 1.5; }
 .assistantProgressNote[hidden] { display: none; }
 .assistantProgress details { margin-top: 8px; }
-.assistantProgress summary { color: #70a9c8; font-size: 8px; cursor: pointer; }
-.assistantProgress h3 { margin: 8px 0 3px; color: #8aa0aa; font-size: 8px; font-weight: 600; }
-.assistantProgress pre { max-height: 140px; margin: 0; padding: 6px; overflow: auto; color: #a9bcc4; background: rgb(0 0 0 / 22%); border-radius: 3px; font-size: 8px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.assistantError { margin: 12px; padding: 9px; color: #d99096; background: rgb(134 52 62 / 12%); border: 1px solid #633942; border-radius: 4px; font-size: 8px; }
-.assistantPanel footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; gap: 7px; padding: 10px 12px; background: rgb(14 25 34 / 98%); border-top: 1px solid #263742; }
-.assistantPanel footer button { height: 28px; padding: 0 10px; color: #768b96; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: 8px; }
-.assistantPanel footer button:disabled { opacity: .45; cursor: default; }
+.assistantProgress summary { color: #70a9c8; font-size: var(--assistant-caption); cursor: pointer; }
+.assistantProgress section { padding: 0; border: 0; }
+.assistantProgress h3 { margin: 8px 0 4px; color: #8aa0aa; font-size: var(--assistant-caption); font-weight: 600; }
+.assistantProgress pre { max-height: 160px; margin: 0; padding: 7px 8px; overflow: auto; color: #a9bcc4; background: rgb(0 0 0 / 22%); border-radius: 3px; font-size: var(--assistant-caption); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The prompt, pinned below the conversation: it grows with what is typed, up to a few lines. */
+.assistantPromptForm { flex: none; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 10px var(--assistant-gutter) 12px; background: #0b1820; border-top: 1px solid #263742; }
+.assistantPromptForm label { color: #718690; font-size: var(--assistant-caption); font-weight: 650; letter-spacing: .04em; }
+.assistantPromptForm textarea { width: 100%; min-height: 48px; max-height: 168px; resize: none; padding: 8px 10px; color: #d0dde2; background: #09151d; border: 1px solid #30434e; border-radius: 5px; outline: none; font: inherit; font-size: var(--assistant-body); line-height: 1.5; }
+.assistantPromptForm textarea:focus { border-color: #4c8e8a; box-shadow: 0 0 0 2px rgb(66 201 188 / 8%); }
+.assistantPromptForm > div { display: flex; align-items: center; gap: 8px; }
+.assistantPromptForm > div select { min-width: 0; height: 30px; flex: 1; padding: 0 8px; overflow: hidden; color: #9fb2ba; background: #0a161e; border: 1px solid #293d47; border-radius: 4px; font-size: var(--assistant-caption); text-overflow: ellipsis; }
+.assistantPromptForm .assistantManageConfigurations { flex: none; min-width: 30px; width: 30px; height: 30px; padding: 0; color: #78909a; background: #172630; border: 1px solid #30444e; border-radius: 4px; font-size: var(--assistant-body); }
+.assistantPromptForm button { flex: none; min-width: 112px; height: 30px; padding: 0 12px; color: #09201e; background: var(--accent); border: 0; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 700; }
+.assistantPromptForm button:disabled { color: #647780; background: #24343d; cursor: default; }
 
 .canvas {
     position: fixed; inset: calc(var(--title-height) + var(--tools-height)) var(--dock-width) 0 var(--rail-width); overflow: hidden;
@@ -2483,7 +2519,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* With no model set up, the assistant's panel offers Settings instead of a prompt. */
 .assistantPanel.needsModel #assistantEmpty { display: none; }
 .assistantPanel.needsModel .assistantPromptForm { opacity: .55; }
-#assistantSetup .doneButton { height: 28px; margin-top: 4px; padding: 0 12px; border: 0; border-radius: 4px; font-size: 8px; }
+#assistantSetup .doneButton { height: 30px; margin-top: 4px; padding: 0 14px; border: 0; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 700; }
 .settingsGroup + .settingsGroup { margin-top: 16px; padding-top: 14px; border-top: 1px solid #1c2e37; }
 .passwordDialog .settingsValue { margin: 6px 0 10px; color: #c4d4d9; font-size: 9px; }
 .settingsRow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }

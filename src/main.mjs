@@ -3425,17 +3425,32 @@ ipcMain.handle('providerExecutionModeSet', async (event, executionMode) => {
 const aiCredentialOptions = (provider) => ({
     useCredential: aiProviderRegistry.descriptors().find((descriptor) => descriptor.id === provider)?.credentialRequired !== false
 });
+// Every assistant failure is also logged (console.warn prints it in the terminal and records it in the diagnostics panel),
+// with whatever the provider said, so a failure the page only summarises can still be read in full. Only messages and
+// codes are logged, which never carry a key or token: the registry redacts the credential from what it passes on, and no
+// adapter puts a token in a message. A cancel is not a failure and is not logged.
+const logAIIssue = (context, error, credential = null) => {
+    if (!error || error.name === 'AbortError') return;
+    const codes = [error.code, error.status && `HTTP ${error.status}`, error.providerCode].filter(Boolean).join(', ');
+    let message = String(error.message ?? error);
+    // A provider may repeat a key it refused; the configuration's own is taken out wherever it appears.
+    if (typeof credential === 'string' && credential.length >= 8) message = message.replaceAll(credential, '[redacted]');
+    console.warn(`[assistant] ${context}: ${message}${codes ? ` (${codes})` : ''}`);
+};
+
 // A provider may renew the saved credential on the way (a sign-in's access token refreshed); `onCredential` saves the new one
 // over the configuration's. A key typed into a draft is not the saved one, so nothing is saved for it.
 const resolveAIConfiguration = async (uuid) => {
     const { configuration } = await aiConfigurationStore.resolve(uuid, { useCredential: false });
     const resolved = await aiConfigurationStore.resolve(uuid, aiCredentialOptions(configuration.provider));
-    return { ...resolved, onCredential: (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value) };
+    return { ...resolved, onCredential: (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value)
+        .catch((error) => logAIIssue('saving a renewed sign-in', error)) };
 };
 const resolveAIDraft = async (configuration, credential) => {
     const resolved = await aiConfigurationStore.resolveDraft(configuration, credential, aiCredentialOptions(configuration?.provider));
     const typed = typeof credential === 'string' && Boolean(credential.trim());
-    return { ...resolved, onCredential: typed ? undefined : (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value) };
+    return { ...resolved, onCredential: typed ? undefined : (value) => aiConfigurationStore.replaceCredential(resolved.configuration.uuid, value)
+        .catch((error) => logAIIssue('saving a renewed sign-in', error)) };
 };
 
 ipcMain.handle('aiListConfigurations', async (event) => {
@@ -3448,7 +3463,8 @@ ipcMain.handle('aiListDraftModels', async (event, configuration, credential) => 
     requireProjectWindow(event);
     const resolved = await resolveAIDraft(configuration, credential);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
-        (signal) => aiProviderRegistry.listModels({ ...resolved, signal }));
+        (signal) => aiProviderRegistry.listModels({ ...resolved, signal }))
+        .catch((error) => { logAIIssue(`listing ${resolved.configuration.provider}'s models`, error, resolved.credential); throw error; });
 });
 
 ipcMain.handle('aiSaveConfiguration', async (event, configuration, credential) => {
@@ -3465,7 +3481,7 @@ ipcMain.handle('aiRemoveConfiguration', async (event, configurationUuid) => {
     if (removing?.credentialSource === 'signIn') {
         await aiConfigurationStore.resolve(configurationUuid)
             .then(({ credential }) => aiProviderRegistry.signOut({ provider: removing.provider, credential, signal: AbortSignal.timeout(10_000) }))
-            .catch(() => false);
+            .catch((error) => { logAIIssue(`signing out of ${removing.provider}`, error); return false; });
     }
     return aiConfigurationStore.remove(configurationUuid);
 });
@@ -3479,7 +3495,8 @@ ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential)
     requireProjectWindow(event);
     const resolved = await resolveAIDraft(configuration, credential);
     return withAIOperation(event.sender, resolved.configuration.timeoutSeconds,
-        (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
+        (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }))
+        .catch((error) => { logAIIssue(`testing the connection to ${resolved.configuration.provider}`, error, resolved.credential); throw error; });
 });
 
 // Signing in to a provider in the person's own browser (docs/proposals/assistantSignIn.md), one sign-in at a time, ended
@@ -3501,7 +3518,8 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
         const { configurations } = await aiConfigurationStore.list();
         const earlier = configurations.find((item) => item.provider === provider && item.credentialSource === 'signIn');
         // Signing in again renews the earlier sign-in (ChatGPT reuses the client it issued for that account).
-        const previous = earlier ? await aiConfigurationStore.resolve(earlier.uuid).then(({ credential }) => credential).catch(() => null) : null;
+        const previous = earlier ? await aiConfigurationStore.resolve(earlier.uuid).then(({ credential }) => credential)
+            .catch((error) => { logAIIssue(`reading the earlier ${provider} sign-in`, error); return null; }) : null;
         const { credential, account = '' } = await aiProviderRegistry.signIn({
             provider, signal: controller.signal, openExternal: (url) => shell.openExternal(url),
             hostId: await aiConfigurationStore.hostIdentifier(), previous,
@@ -3517,7 +3535,7 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
             // A model list that does not come is no reason to lose the sign-in: the configuration is kept, and a model chosen on its page.
             const models = await aiProviderRegistry.listModels({
                 configuration, credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
-            }).catch(() => []);
+            }).catch((error) => { logAIIssue(`listing ${provider}'s models after signing in`, error); return []; });
             configuration.model = aiProviderRegistry.suggestModel(provider, models);
         }
         const saved = await aiConfigurationStore.save(configuration, credential);
@@ -3525,8 +3543,9 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
         return { ok: true, configuration: saved };
     } catch (error) {
         const cancelled = error.name === 'AbortError';
+        logAIIssue(`signing in to ${provider}`, error);
         // A client the provider no longer accepts is forgotten, so the next sign-in registers Konjugate again.
-        if (error.providerCode === 'invalid_client') await aiConfigurationStore.rememberRegisteredClient(provider, null).catch(() => {});
+        if (error.providerCode === 'invalid_client') await aiConfigurationStore.rememberRegisteredClient(provider, null).catch((cause) => logAIIssue('forgetting a refused client', cause));
         return { ok: false, error: { message: cancelled ? 'Signing in was cancelled.' : error.message, code: cancelled ? 'signInCancelled' : error.code ?? 'signInFailed' } };
     } finally {
         event.sender.removeListener('destroyed', abort);
@@ -3568,6 +3587,7 @@ const runAIToolTask = async (event, provider, task) => {
         await task({ signal: controller.signal, onOutput });
         return { ok: true, tools: await aiProviderRegistry.detectTools() };
     } catch (error) {
+        logAIIssue(`running ${provider}'s installer or sign-in`, error);
         const cancelled = error.name === 'AbortError';
         return { ok: false, error: { message: cancelled ? 'Stopped.' : error.message, code: cancelled ? 'taskCancelled' : error.code ?? 'toolTaskFailed' } };
     } finally {
@@ -3649,6 +3669,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
                 ? `The request was stopped after ${maximumRequestSeconds / 60} minutes in total.`
                 : error.name === 'AbortError' ? 'Proposal generation was cancelled.' : error.message;
         const code = expiredBecause ? 'requestTimedOut' : error.name === 'AbortError' ? 'requestCancelled' : error.code ?? 'providerError';
+        if (code !== 'requestCancelled') logAIIssue(`generating a proposal with ${resolved.configuration.provider} (${resolved.configuration.model || 'no model'})`, { message, code, status: error.status, providerCode: error.providerCode }, resolved.credential);
         return { ok: false, error: { message, code } };
     } finally {
         watchdog.stop();

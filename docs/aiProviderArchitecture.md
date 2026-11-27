@@ -113,6 +113,8 @@ There is no built-in model. A new installation has no configuration, and the con
 
 Provider errors are converted into structured IPC results before reaching the renderer. Intentional cancellation is kept distinct from a deadline timeout.
 
+Every assistant failure the main process meets is also logged with `console.warn` as `[assistant] <what was being done>: <message> (<code>, HTTP <status>, <provider's code>)`, which prints it in the terminal and records it in the diagnostics panel. That covers generating a proposal, listing models, testing a connection, signing in and out, installing or signing in with a vendor tool, and the failures that are otherwise passed over on purpose (a model list that does not come after a sign-in, a sign-out at the provider that does not go through, a renewed sign-in that cannot be saved). Only messages and codes are logged, with the configuration's key taken out wherever a provider repeated it; cancels are not logged.
+
 ### Renderer
 
 The renderer selects configurations, collects draft fields and displays proposals. It receives public configuration metadata and proposal data only. It never receives a persisted API key.

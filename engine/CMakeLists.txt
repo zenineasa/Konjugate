@@ -215,6 +215,8 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/konjugate" DESTINATION in
 # buildCppProvider() already compiles/links relationship providers against this same include dir.
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi2" DESTINATION include)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmi3" DESTINATION include)
+# The FMI standard's full headers, which buildFmuSources compiles an FMU's own sources against (docs/proposals/sourceFmuImport.md).
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/fmiStandard" DESTINATION include)
 install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerWorker.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/providerInProcessShim.cpp"

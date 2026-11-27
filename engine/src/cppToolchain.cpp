@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <stdexcept>
@@ -23,6 +25,8 @@
 using ssize_t = intptr_t;
 using pid_t = int;
 #else
+#include <poll.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -380,6 +384,256 @@ void buildNativeArtifact(const std::filesystem::path& sourcePathArgument, const 
     if (!result.success) {
         std::filesystem::remove(artifactPath);
         throw std::runtime_error("Failed to compile " + failureContext + ":\n" + result.diagnostics);
+    }
+}
+
+// ---- A shared library built from someone else's sources (docs/proposals/sourceFmuImport.md) ---------------------------------
+
+namespace {
+
+constexpr std::size_t stepOutputLimit = 256 * 1024;
+
+bool isMsvcCompiler(const std::string& compiler) {
+    std::string lower = std::filesystem::path(compiler).filename().string();
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    return lower == "cl.exe" || lower == "cl";
+}
+
+void keepOutput(std::string& output, const char* data, std::size_t size, bool& truncated) {
+    if (output.size() < stepOutputLimit) output.append(data, std::min(size, stepOutputLimit - output.size()));
+    if (output.size() >= stepOutputLimit) truncated = true;
+}
+
+struct LimitedRunResult {
+    bool success = false;
+    bool timedOut = false;
+    std::string output;
+};
+
+#ifdef _WIN32
+LimitedRunResult runWithLimits(const std::string& compilerPath, const std::vector<std::string>& arguments,
+                               const std::filesystem::path& workingDirectory, std::chrono::steady_clock::time_point deadline) {
+    std::string commandLine = "\"" + compilerPath + "\"";
+    for (const auto& argument : arguments) commandLine += " \"" + argument + "\"";
+    HANDLE readEnd = NULL;
+    HANDLE writeEnd = NULL;
+    SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+    if (!CreatePipe(&readEnd, &writeEnd, &attributes, 0)) throw std::runtime_error("Failed to create a pipe for the build.");
+    SetHandleInformation(readEnd, HANDLE_FLAG_INHERIT, 0);
+    PROCESS_INFORMATION process{};
+    STARTUPINFOA startup{};
+    startup.cb = sizeof(STARTUPINFOA);
+    startup.hStdError = writeEnd;
+    startup.hStdOutput = writeEnd;
+    startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+    startup.dwFlags |= STARTF_USESTDHANDLES;
+    std::vector<char> buffer(commandLine.begin(), commandLine.end());
+    buffer.push_back('\0');
+    const std::string directory = workingDirectory.string();
+    const BOOL started = CreateProcessA(NULL, buffer.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, directory.c_str(), &startup, &process);
+    CloseHandle(writeEnd);
+    if (!started) {
+        CloseHandle(readEnd);
+        throw std::runtime_error("The compiler \"" + compilerPath + "\" could not be started (error " + std::to_string(GetLastError()) + ").");
+    }
+    LimitedRunResult result;
+    bool truncated = false;
+    std::array<char, 4096> chunk{};
+    for (;;) {
+        DWORD available = 0;
+        while (PeekNamedPipe(readEnd, NULL, 0, NULL, &available, NULL) && available > 0) {
+            DWORD bytesRead = 0;
+            if (!ReadFile(readEnd, chunk.data(), static_cast<DWORD>(std::min<std::size_t>(chunk.size(), available)), &bytesRead, NULL) || bytesRead == 0) break;
+            keepOutput(result.output, chunk.data(), bytesRead, truncated);
+        }
+        if (WaitForSingleObject(process.hProcess, 20) == WAIT_OBJECT_0) break;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            TerminateProcess(process.hProcess, 1);
+            WaitForSingleObject(process.hProcess, INFINITE);
+            result.timedOut = true;
+            break;
+        }
+    }
+    DWORD bytesRead = 0;
+    while (ReadFile(readEnd, chunk.data(), static_cast<DWORD>(chunk.size()), &bytesRead, NULL) && bytesRead > 0) keepOutput(result.output, chunk.data(), bytesRead, truncated);
+    CloseHandle(readEnd);
+    DWORD exitCode = 1;
+    GetExitCodeProcess(process.hProcess, &exitCode);
+    CloseHandle(process.hProcess);
+    CloseHandle(process.hThread);
+    if (truncated) result.output += "\n[… the rest of the compiler's output is left out]";
+    result.success = !result.timedOut && exitCode == 0;
+    return result;
+}
+#else
+LimitedRunResult runWithLimits(const std::string& compilerPath, const std::vector<std::string>& arguments,
+                               const std::filesystem::path& workingDirectory, std::chrono::steady_clock::time_point deadline) {
+    int outputPipe[2];
+    if (::pipe(outputPipe) != 0) throw std::runtime_error("Failed to create a pipe for the build.");
+    const pid_t pid = ::fork();
+    if (pid < 0) throw std::runtime_error("Failed to start the build.");
+    if (pid == 0) {
+        ::setpgid(0, 0);
+        ::dup2(outputPipe[1], STDERR_FILENO);
+        ::dup2(outputPipe[1], STDOUT_FILENO);
+        ::close(outputPipe[0]);
+        ::close(outputPipe[1]);
+        if (::chdir(workingDirectory.c_str()) != 0) ::_exit(126);
+        std::vector<const char*> argv;
+        argv.push_back(compilerPath.c_str());
+        for (const auto& argument : arguments) argv.push_back(argument.c_str());
+        argv.push_back(nullptr);
+        ::execvp(compilerPath.c_str(), const_cast<char* const*>(argv.data()));
+        std::perror(("The compiler " + compilerPath + " could not be started").c_str());
+        ::_exit(127);
+    }
+    ::close(outputPipe[1]);
+    LimitedRunResult result;
+    bool truncated = false;
+    std::array<char, 4096> chunk{};
+    for (;;) {
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now()).count();
+        if (remaining <= 0) {
+            // The compiler and anything it started (cc1, ld) are stopped together: they share its process group.
+            ::kill(-pid, SIGKILL);
+            ::kill(pid, SIGKILL);
+            result.timedOut = true;
+            break;
+        }
+        pollfd watched{outputPipe[0], POLLIN, 0};
+        const int ready = ::poll(&watched, 1, static_cast<int>(std::min<long long>(remaining, 1000)));
+        if (ready < 0) {
+            if (errno == EINTR) continue;
+            break;
+        }
+        if (ready == 0) continue;
+        const ssize_t bytesRead = ::read(outputPipe[0], chunk.data(), chunk.size());
+        if (bytesRead <= 0) break;
+        keepOutput(result.output, chunk.data(), static_cast<std::size_t>(bytesRead), truncated);
+    }
+    ::close(outputPipe[0]);
+    int status = 0;
+    ::waitpid(pid, &status, 0);
+    if (truncated) result.output += "\n[… the rest of the compiler's output is left out]";
+    result.success = !result.timedOut && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    return result;
+}
+#endif
+
+// MSVC's /std: for a C or C++ standard, or nothing where it has none of its own (C89, C99 and C++11 are its defaults' subsets).
+std::string msvcStandardFlag(const std::string& standard) {
+    if (standard == "c11") return "/std:c11";
+    if (standard == "c17" || standard == "c18") return "/std:c17";
+    if (standard == "c++14") return "/std:c++14";
+    if (standard == "c++17") return "/std:c++17";
+    if (standard == "c++20") return "/std:c++20";
+    return {};
+}
+
+} // namespace
+
+std::vector<BuildStep> sourceLibrarySteps(const SourceLibraryPlan& plan, const std::string& cCompilerArgument, const std::string& cxxCompilerArgument) {
+    const std::string cCompiler = cCompilerArgument.empty() ? resolveCompiler({}) : cCompilerArgument;
+    const std::string cxxCompiler = cxxCompilerArgument.empty() ? cCompiler : cxxCompilerArgument;
+    const bool msvc = isMsvcCompiler(cCompiler);
+    const auto root = std::filesystem::absolute(plan.sourceRoot);
+    const auto objects = std::filesystem::absolute(plan.objectDirectory);
+    const auto artifact = std::filesystem::absolute(plan.artifactPath);
+    std::vector<std::string> platformFlags;
+#ifdef __APPLE__
+    if (!msvc) {
+        if (const auto sysroot = resolveAppleSdkSysroot(); !sysroot.empty()) platformFlags = {"-isysroot", sysroot};
+        platformFlags.push_back("-mmacosx-version-min=11.0");
+    }
+#endif
+#ifdef _WIN32
+    const auto msvcFlags = msvc ? getMsvcEnvironmentFlags(cCompiler) : MsvcEnvironmentFlags{};
+#endif
+    std::vector<BuildStep> steps;
+    std::vector<std::string> objectPaths;
+    bool anyCxx = false;
+    std::size_t index = 0;
+    for (const auto& set : plan.sets) {
+        const bool cxx = set.language == "c++";
+        anyCxx = anyCxx || cxx;
+        std::vector<std::string> includes;
+        for (const auto& directory : plan.includeFirst) includes.push_back(std::filesystem::absolute(directory).string());
+        for (const auto& directory : set.includeDirectories) includes.push_back((root / directory).lexically_normal().string());
+        includes.push_back(root.string());
+        for (const auto& file : set.files) {
+            const auto source = (root / file).lexically_normal();
+            const auto object = objects / (std::to_string(index++) + "_" + source.stem().string() + (msvc ? ".obj" : ".o"));
+            objectPaths.push_back(object.string());
+            std::vector<std::string> arguments;
+            if (msvc) {
+                arguments = {"/nologo", "/c", cxx ? "/TP" : "/TC", "/O2", "/DNDEBUG"};
+                if (const auto standard = msvcStandardFlag(set.standard); !standard.empty()) arguments.push_back(standard);
+                if (cxx) arguments.push_back("/EHsc");
+                arguments.insert(arguments.end(), set.options.begin(), set.options.end());
+                for (const auto& directory : includes) arguments.push_back("/I" + directory);
+#ifdef _WIN32
+                arguments.insert(arguments.end(), msvcFlags.includeFlags.begin(), msvcFlags.includeFlags.end());
+#endif
+                for (const auto& definition : set.definitions) arguments.push_back("/D" + definition);
+                arguments.push_back(source.string());
+                arguments.push_back("/Fo" + object.string());
+            } else {
+                arguments = {"-c", "-x", cxx ? "c++" : "c"};
+                if (!set.standard.empty()) arguments.push_back("-std=" + set.standard);
+                arguments.insert(arguments.end(), {"-O3", "-DNDEBUG", "-fPIC"});
+                arguments.insert(arguments.end(), set.options.begin(), set.options.end());
+                arguments.insert(arguments.end(), platformFlags.begin(), platformFlags.end());
+                for (const auto& directory : includes) arguments.push_back("-I" + directory);
+                for (const auto& definition : set.definitions) arguments.push_back("-D" + definition);
+                arguments.push_back(source.string());
+                arguments.push_back("-o");
+                arguments.push_back(object.string());
+            }
+            steps.push_back({"Compiling " + std::filesystem::path(file).generic_string(), cxx ? cxxCompiler : cCompiler, arguments});
+        }
+    }
+    std::vector<std::string> link;
+    if (msvc) {
+        link = {"/nologo", "/LD"};
+        link.insert(link.end(), objectPaths.begin(), objectPaths.end());
+        link.push_back("/Fe" + artifact.string());
+        link.push_back("/link");
+#ifdef _WIN32
+        link.insert(link.end(), msvcFlags.libpathFlags.begin(), msvcFlags.libpathFlags.end());
+#endif
+        for (const auto& library : plan.libraries) {
+            if (library == "m" || library == "pthread") continue; // part of the C runtime on Windows
+            link.push_back(library + ".lib");
+        }
+    } else {
+        link = {"-shared"};
+        link.insert(link.end(), platformFlags.begin(), platformFlags.end());
+        link.insert(link.end(), objectPaths.begin(), objectPaths.end());
+        link.push_back("-o");
+        link.push_back(artifact.string());
+#if !defined(__APPLE__)
+        link.push_back("-Wl,-rpath,$ORIGIN");
+#endif
+        if (plan.threads) link.push_back("-pthread");
+        for (const auto& library : plan.libraries) link.push_back("-l" + library);
+    }
+    steps.push_back({"Linking " + artifact.filename().string(), anyCxx ? cxxCompiler : cCompiler, link});
+    return steps;
+}
+
+void buildSourceLibrary(const SourceLibraryPlan& plan, const std::vector<BuildStep>& steps) {
+    std::filesystem::create_directories(plan.objectDirectory);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(std::max(1, plan.timeoutSeconds));
+    for (const auto& step : steps) {
+        const auto result = runWithLimits(step.compiler, step.arguments, std::filesystem::absolute(plan.objectDirectory), deadline);
+        if (result.timedOut) {
+            std::filesystem::remove(plan.artifactPath);
+            throw std::runtime_error(step.what + " was stopped: the build took longer than " + std::to_string(plan.timeoutSeconds) + " s.\n" + result.output);
+        }
+        if (!result.success) {
+            std::filesystem::remove(plan.artifactPath);
+            throw std::runtime_error(step.what + " failed:\n" + result.output);
+        }
     }
 }
 

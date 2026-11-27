@@ -115,6 +115,14 @@ Konjugate does not modify their sources or binaries; the archives it ships
 leave out the binaries for platforms Konjugate does not run on (WebAssembly
 and 32-bit Windows).
 
+## FMI 2.0.4 and FMI 3.0 headers
+
+`engine/include/fmiStandard/` holds the FMI standard's own C headers (`fmi2Functions.h`, `fmi2FunctionTypes.h` and `fmi2TypesPlatform.h` of FMI 2.0.4; `fmi3Functions.h`, `fmi3FunctionTypes.h` and `fmi3PlatformTypes.h` of FMI 3.0), which an FMU carrying its sources is compiled against when Konjugate builds it on this computer, as FMI 3.0.2 §2.5.1.3 asks of an importer.
+
+Copyright (C) 2008-2011 MODELISAR consortium, 2012-2026 Modelica Association Project "FMI".
+
+They are licensed under the 2-Clause BSD License, reproduced at the top of each header. Konjugate does not modify them.
+
 ## PidController.fmu (OpenModelica 1.27.1, Modelica Standard Library 4.1.0)
 
 The example `examples/pidController` ships `PidController.fmu`, made by OpenModelica 1.27.1 from Konjugate's model `PidController.mo`, which is drawn from the Modelica Standard Library 4.1.0's blocks, and keeps it inside `HeatedRoomPid.kjt` beside it. The FMU carries, in its sources and compiled into its binaries, OpenModelica's simulation runtime (offered by its files under the BSD 3-Clause licence, AGPL 3 or the OSMC Public License 1.8 at the recipient's choice, and taken here under the BSD 3-Clause licence), the FMI 2.0 headers (BSD 2-Clause), CLAPACK and BLAS routines (BSD 3-Clause), f2c runtime routines (the AT&T, Lucent and Bellcore notice), cminpack (the Minpack licence) and uthash (BSD). Each licence is reproduced in `thirdPartyLicenses/pidControllerFmu.txt`, with the Modelica Standard Library's (BSD 3-Clause, Modelica Association). How the FMU was made, with the image digest, library version, compilers and the FMU's SHA-256, is in `examples/pidController/README.md`.

@@ -16,6 +16,7 @@
 #include "engineProtocol.pb.h"
 #include <boost/property_tree/json_parser.hpp>
 #include <filesystem>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -269,6 +270,63 @@ int main(int argc, char** argv) {
         konjugate::cppToolchain::buildNativeArtifact(sourcePath, gluePath,
             sdkPathOption.empty() ? std::filesystem::path() : std::filesystem::path(sdkPathOption) / "include",
             outputOption, /*sharedLibrary=*/true, compilerOption, "the shared library");
+        std::_Exit(0);
+    }
+    // A shared library built from an FMU's own C or C++ sources (docs/proposals/sourceFmuImport.md): `buildFmuSources <plan.json>
+    // [--compiler <C compiler>] [--cxx-compiler <C++ compiler>] [--print-steps]`. The plan (written by src/fmuSourceBuild.mjs) says
+    // the source root, the object directory, the library to write, the folders searched first (the FMI standard's headers), each
+    // source file set and the libraries; the engine turns it into the compiler's argument lists (cppToolchain.cpp, the same
+    // compiler discovery, macOS SDK and MSVC environment as buildSharedLibrary) and runs them with a time limit, never through a
+    // shell. --print-steps writes the argument lists as JSON instead of running them: what a build's cache key is made from.
+    if (argc >= 3 && std::string(argv[1]) == "buildFmuSources") {
+        boost::property_tree::ptree planTree;
+        boost::property_tree::read_json(argv[2], planTree);
+        konjugate::cppToolchain::SourceLibraryPlan plan;
+        plan.sourceRoot = planTree.get<std::string>("sourceRoot");
+        plan.objectDirectory = planTree.get<std::string>("objectDirectory");
+        plan.artifactPath = planTree.get<std::string>("output");
+        plan.threads = planTree.get<bool>("threads", false);
+        plan.timeoutSeconds = planTree.get<int>("timeoutSeconds", 300);
+        const auto strings = [](const boost::property_tree::ptree& tree, const std::string& key) {
+            std::vector<std::string> values;
+            if (const auto child = tree.get_child_optional(key)) for (const auto& item : *child) values.push_back(item.second.get_value<std::string>());
+            return values;
+        };
+        for (const auto& directory : strings(planTree, "includeFirst")) plan.includeFirst.emplace_back(directory);
+        plan.libraries = strings(planTree, "libraries");
+        if (const auto sets = planTree.get_child_optional("sets")) {
+            for (const auto& item : *sets) {
+                konjugate::cppToolchain::SourceSet set;
+                set.language = item.second.get<std::string>("language", "c");
+                set.standard = item.second.get<std::string>("standard", "");
+                set.files = strings(item.second, "files");
+                set.definitions = strings(item.second, "definitions");
+                set.includeDirectories = strings(item.second, "includeDirectories");
+                set.options = strings(item.second, "compilerOptions");
+                plan.sets.push_back(std::move(set));
+            }
+        }
+        const auto steps = konjugate::cppToolchain::sourceLibrarySteps(plan, optionPath(argc, argv, "--compiler").string(), optionPath(argc, argv, "--cxx-compiler").string());
+        if (hasFlag(argc, argv, "--print-steps")) {
+            const auto quoted = [](const std::string& text) {
+                std::string out = "\"";
+                for (const unsigned char character : text) {
+                    if (character == '"' || character == '\\') { out += '\\'; out += static_cast<char>(character); }
+                    else if (character < 0x20) { char escaped[8]; std::snprintf(escaped, sizeof escaped, "\\u%04x", character); out += escaped; }
+                    else out += static_cast<char>(character);
+                }
+                return out + "\"";
+            };
+            std::cout << "[";
+            for (std::size_t index = 0; index < steps.size(); ++index) {
+                std::cout << (index ? "," : "") << "{\"what\":" << quoted(steps[index].what) << ",\"compiler\":" << quoted(steps[index].compiler) << ",\"arguments\":[";
+                for (std::size_t argument = 0; argument < steps[index].arguments.size(); ++argument) std::cout << (argument ? "," : "") << quoted(steps[index].arguments[argument]);
+                std::cout << "]}";
+            }
+            std::cout << "]\n" << std::flush;
+            std::_Exit(0);
+        }
+        konjugate::cppToolchain::buildSourceLibrary(plan, steps);
         std::_Exit(0);
     }
     // The complementary half of buildSharedLibrary/fmiGlue.cpp: loads a compiled FMI2

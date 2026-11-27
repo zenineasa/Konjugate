@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
 import { unzipSync, zipSync } from 'fflate';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
 import { describeDialog } from './drivers/nativeDialogAnswers.mjs';
@@ -401,6 +401,7 @@ export async function runInteractionTests(driver) {
         'the assistant': [
             'with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it',
             'signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled; a key\'s provider says where keys are made',
+            'a model tool found on this computer is offered first and used in one click',
             'local assistant prepares, validates and applies one undoable transaction',
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
@@ -1058,6 +1059,47 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('a model tool found on this computer is offered first and used in one click', async () => {
+        // A fake GitHub Copilot CLI first on the PATH the app looks in (this runs in the app's main process).
+        const toolFolder = await mkdtemp(join(tmpdir(), 'konjugate-fake-copilot-'));
+        await writeFile(join(toolFolder, 'copilot'), `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ type: 'result', exitCode: 0 }) + '\\n');`);
+        await chmod(join(toolFolder, 'copilot'), 0o755);
+        const originalPath = process.env.PATH;
+        process.env.PATH = `${toolFolder}:${originalPath}`;
+        const before = await evaluate(window, `window.aiProviders.listConfigurations()`);
+        try {
+            await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-tool-row="copilotCli"]'))`, 'The Copilot CLI on this computer was not offered.');
+            assert.equal(await isRenderedVisible(window, '#assistantToolsSection'), true);
+            assert.equal(await evaluate(window, `document.querySelector('.assistantListView').firstElementChild.id`), 'assistantToolsSection', 'What the person already has is not shown first.');
+            assert.match(await evaluate(window, `document.querySelector('[data-tool-row="copilotCli"]').textContent`), /GitHub Copilot.*Installed on this computer.*Use it/);
+            assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-tool-row="claudeCode"]'))`), false, 'Claude Code was offered without its experimental switch.');
+            await evaluate(window, `document.querySelector('[data-tool-use="copilotCli"]').click()`);
+            await waitFor(window, `document.querySelector('[data-tool-row="copilotCli"] .settingsBadge')?.textContent === 'In use'`, 'Use it did not put Copilot in use.');
+            const after = await evaluate(window, `window.aiProviders.listConfigurations()`);
+            const copilot = after.configurations.find((configuration) => configuration.provider === 'copilotCli');
+            assert.deepEqual({ name: copilot.name, model: copilot.model }, { name: 'GitHub Copilot', model: 'default' });
+            assert.equal(after.activeConfigurationUuid, copilot.uuid);
+            // Its page has no endpoint and no key: the tool runs on this computer, signed in by itself.
+            await evaluate(window, `document.querySelector('[data-configuration-uuid="${copilot.uuid}"]').click()`);
+            await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden`, 'The configuration did not open.');
+            assert.equal(await evaluate(window, `getComputedStyle(document.querySelector('#assistantConfigurationEndpoint').closest('.settingsItem')).display`), 'none', 'A vendor tool was given an endpoint field.');
+            assert.equal(await isRenderedVisible(window, '#assistantCredentialField'), false);
+            // Deleted as a person would, which leaves the configuration in use before it in use again.
+            await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('#deleteAssistantConfiguration').click(); })()`);
+            await waitFor(window, `document.querySelector('#assistantConfigurationForm').hidden`, 'Delete did not return to the list.');
+            const restored = await evaluate(window, `window.aiProviders.listConfigurations()`);
+            assert.equal(restored.configurations.some((configuration) => configuration.provider === 'copilotCli'), false);
+            assert.equal(restored.activeConfigurationUuid, before.activeConfigurationUuid);
+        } finally {
+            process.env.PATH = originalPath;
+            await rm(toolFolder, { recursive: true, force: true });
+        }
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: (!driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet') || (process.platform === 'win32' && 'The fake tool is a script') });
 
     await run('local assistant prepares, validates and applies one undoable transaction', async () => {
         await freshExample(); // the assistant's model is kept from the scenario before; the battery it edits is the example's

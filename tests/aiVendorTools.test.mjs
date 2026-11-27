@@ -1,0 +1,154 @@
+/* Copyright © 2026 Zenin Easa Panthakkalakath */
+
+import assert from 'node:assert/strict';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+import { createVendorToolProviders, createVendorToolRunner } from '../src/aiVendorTools.mjs';
+
+const schema = { oneOf: [{ type: 'object', additionalProperties: false, properties: { proposalVersion: { const: 1 } } }] };
+const proposal = { responseKind: 'proposal', proposalVersion: 1, operations: [{ kind: 'addNode', ref: 'newNode', name: 'New node' }] };
+const input = (overrides = {}) => ({ configuration: { provider: 'x', model: 'default' }, context: { nodes: [], edges: [] }, request: 'Add a node', ...overrides });
+
+// Fake vendor tools: Node scripts that answer as the real tools do (shapes captured from Claude Code 2.1.332 and Copilot CLI
+// 1.0.117), chosen by FAKE_MODE, and write what they were given to FAKE_LOG.
+const fakeClaude = `
+const fs = require('fs');
+const args = process.argv.slice(2);
+const stdin = fs.readFileSync(0, 'utf8');
+fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ args, stdin, cwd: process.cwd() }));
+const mode = process.env.FAKE_MODE;
+const say = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+if (args[0] === 'auth') {
+    if (mode === 'signedOut') { say({ loggedIn: false, authMethod: 'none' }); process.exit(1); }
+    say({ loggedIn: true, authMethod: 'claude.ai', email: 'person@example.com', subscriptionType: 'pro', planTier: 'pro' });
+    process.exit(0);
+}
+say({ type: 'system', subtype: 'init', tools: ['StructuredOutput'], model: 'claude-opus-5-5' });
+if (mode === 'signedOut') {
+    say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Not logged in · Please run /login' }] }, error: 'authentication_failed' });
+    say({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' });
+    process.exit(1);
+}
+const text = ${JSON.stringify(JSON.stringify(proposal))};
+say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Planning.' } } });
+say({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: text.slice(0, 9) } } });
+say({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: text.slice(9) } } });
+say({ type: 'result', subtype: 'success', is_error: false, result: '', structured_output: JSON.parse(text) });
+`;
+const fakeCopilot = `
+const fs = require('fs');
+const args = process.argv.slice(2);
+const stdin = fs.readFileSync(0, 'utf8');
+fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ args, stdin, cwd: process.cwd() }));
+const mode = process.env.FAKE_MODE;
+const say = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+if (mode === 'signedOut') {
+    process.stderr.write('Error: No authentication information found.\\n');
+    say({ type: 'result', exitCode: 1 });
+    process.exit(1);
+}
+const text = ${JSON.stringify(JSON.stringify(proposal))};
+say({ type: 'assistant.message_delta', data: { deltaContent: text.slice(0, 10) } });
+say({ type: 'assistant.message_delta', data: { deltaContent: text.slice(10) } });
+say({ type: 'assistant.message', data: { content: text } });
+say({ type: 'result', exitCode: 0 });
+`;
+
+async function withFakes(task) {
+    const root = await mkdtemp(join(tmpdir(), 'konjugate-vendor-'));
+    const bin = join(root, 'bin');
+    await mkdir(bin);
+    for (const [name, body] of [['claude', fakeClaude], ['copilot', fakeCopilot]]) {
+        await writeFile(join(bin, name), `#!${process.execPath}\n${body}`);
+        await chmod(join(bin, name), 0o755);
+    }
+    const log = join(root, 'log.json');
+    const env = (mode = 'ok') => ({ PATH: bin, FAKE_MODE: mode, FAKE_LOG: log });
+    try {
+        await task({ root, bin, env, logged: async () => JSON.parse(await readFile(log, 'utf8')) });
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+}
+
+const providersFor = (env, home, experimental = true) => createVendorToolProviders({
+    operationSchema: schema,
+    env: experimental ? { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } : {},
+    runner: createVendorToolRunner({ env, home, platform: 'linux' })
+});
+
+const unixOnly = { skip: process.platform === 'win32' && 'The fake tools are shell scripts' };
+
+test('Claude Code is offered only with its experimental switch on; the Copilot CLI always', unixOnly, () => withFakes(async ({ env, root }) => {
+    assert.deepEqual(providersFor(env(), root, false).map((provider) => provider.id), ['copilotCli']);
+    assert.deepEqual(providersFor(env(), root, true).map((provider) => provider.id), ['claudeCode', 'copilotCli']);
+}));
+
+test('A vendor tool is found where its installer puts it, and Claude Code says who is signed in', unixOnly, () => withFakes(async ({ env, root }) => {
+    const [claude, copilot] = providersFor(env(), root);
+    assert.deepEqual(await claude.detect(), { installed: true, signedIn: true, account: 'person@example.com', plan: 'pro' });
+    assert.deepEqual(await copilot.detect(), { installed: true, signedIn: null });
+    const [signedOut] = providersFor(env('signedOut'), root);
+    assert.deepEqual(await signedOut.detect(), { installed: true, signedIn: false, account: '', plan: '' });
+    // Not on the PATH, but in ~/.local/bin, where Claude Code's own installer puts it.
+    const home = join(root, 'home');
+    await mkdir(join(home, '.local'), { recursive: true });
+    const { symlink } = await import('node:fs/promises');
+    await symlink(join(root, 'bin'), join(home, '.local', 'bin'));
+    const [fromHome] = providersFor({ ...env(), PATH: '/nonexistent' }, home);
+    assert.equal((await fromHome.detect()).installed, true);
+    const [missing] = providersFor({ ...env(), PATH: '/nonexistent' }, join(root, 'nobody'));
+    assert.deepEqual(await missing.detect(), { installed: false });
+    await assert.rejects(missing.generateProposal(input()), { code: 'toolNotInstalled' });
+}));
+
+test('Claude Code runs in print mode with no tools, the schema, the person\'s customisations off, in an empty folder', unixOnly, () => withFakes(async ({ env, root, logged }) => {
+    const [claude] = providersFor(env(), root);
+    const events = [];
+    assert.deepEqual(await claude.generateProposal(input({ onEvent: (event) => events.push(event) })), proposal);
+    const { args, stdin, cwd } = await logged();
+    assert.equal(args[0], '-p');
+    assert.equal(args[args.indexOf('--output-format') + 1], 'stream-json');
+    assert.equal(args[args.indexOf('--tools') + 1], '');
+    assert.ok(args.includes('--safe-mode'));
+    assert.equal(args.includes('--bare'), false, '--bare would drop the sign-in.');
+    assert.deepEqual(JSON.parse(args[args.indexOf('--json-schema') + 1]), { anyOf: schema.oneOf });
+    assert.equal(args.includes('--model'), false, 'The default model is Claude Code\'s own choice.');
+    assert.match(stdin, /USER REQUEST:\nAdd a node/);
+    assert.match(cwd, /konjugate-assistant-/);
+    assert.deepEqual(events.filter((event) => event.type === 'thinking').map((event) => event.text), ['Planning.']);
+    assert.equal(events.filter((event) => event.type === 'output').map((event) => event.text).join(''), JSON.stringify(proposal));
+    await claude.generateProposal(input({ configuration: { provider: 'claudeCode', model: 'opus' } }));
+    const chosen = (await logged()).args;
+    assert.equal(chosen[chosen.indexOf('--model') + 1], 'opus');
+}));
+
+test('A Claude Code that is not signed in says how to sign in', unixOnly, () => withFakes(async ({ env, root }) => {
+    const [claude] = providersFor(env('signedOut'), root);
+    await assert.rejects(claude.generateProposal(input()), (error) => error.code === 'toolNotSignedIn' && /claude auth login/.test(error.message));
+    await assert.rejects(claude.testConnection(), { code: 'toolNotSignedIn' });
+}));
+
+test('The Copilot CLI gets the prompt on standard input, with no tools and no custom instructions, and its streamed reply is read', unixOnly, () => withFakes(async ({ env, root, logged }) => {
+    const [, copilot] = providersFor(env(), root);
+    const events = [];
+    assert.deepEqual(await copilot.generateProposal(input({ onEvent: (event) => events.push(event) })), proposal);
+    const { args, stdin } = await logged();
+    assert.equal(args.includes('-p'), false, 'Piped input is ignored when -p is given.');
+    for (const flag of ['-s', '--output-format=json', '--available-tools=', '--no-ask-user', '--no-custom-instructions', '--disable-builtin-mcps']) assert.ok(args.includes(flag), flag);
+    assert.match(stdin, /Konjugate modelling assistant[\s\S]*USER REQUEST:\nAdd a node/);
+    assert.equal(events.filter((event) => event.type === 'output').map((event) => event.text).join(''), JSON.stringify(proposal));
+    const [, signedOut] = providersFor(env('signedOut'), root);
+    await assert.rejects(signedOut.generateProposal(input()), (error) => error.code === 'toolNotSignedIn' && /copilot login/.test(error.message));
+}));
+
+test('Cancelling a vendor tool ends its process', unixOnly, () => withFakes(async ({ bin, root }) => {
+    await writeFile(join(bin, 'copilot'), `#!${process.execPath}\nsetInterval(() => {}, 1000);`);
+    const [, copilot] = providersFor({ PATH: bin }, root);
+    const controller = new AbortController();
+    const pending = copilot.generateProposal(input({ signal: controller.signal }));
+    setTimeout(() => controller.abort(), 100);
+    await assert.rejects(pending, { name: 'AbortError' });
+}));

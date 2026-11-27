@@ -19,7 +19,7 @@ test('provider registry dispatches generation without exposing provider details 
     assert.equal(result.summary, 'Build it:true');
     assert.deepEqual(registry.descriptors().find((item) => item.id === 'testProvider'), {
         id: 'testProvider', name: 'Test provider', defaultEndpoint: '', defaultTimeoutSeconds: 60,
-        credentialRequired: false, locality: 'local', reasoningSetting: false, signIn: false, signInOnly: false, signInDescription: '', keyPage: '', keyPageLabel: ''
+        credentialRequired: false, locality: 'local', reasoningSetting: false, signIn: false, signInOnly: false, signInDescription: '', keyPage: '', keyPageLabel: '', vendorTool: ''
     });
 });
 
@@ -225,4 +225,18 @@ test('A sign-in is given the installation\'s host id and the earlier credential,
     assert.equal(await registry.signOut({ provider: 'withSignOut', credential: 'c' }), true);
     assert.equal(await registry.signOut({ provider: 'plain', credential: 'c' }), false);
     assert.deepEqual(signedOut, ['c']);
+});
+
+test('The registry reports what each vendor tool finds, and a tool that cannot be asked as not installed', async () => {
+    const { createAIProviderRegistry } = await import('../src/aiProviderRegistry.mjs');
+    const registry = createAIProviderRegistry([
+        { id: 'keyOnly', name: 'Key', generateProposal: async () => ({}) },
+        { id: 'toolA', name: 'Tool A', vendorTool: 'a', generateProposal: async () => ({}), detect: async () => ({ installed: true, signedIn: true, account: 'a@example.com', plan: 'pro' }) },
+        { id: 'toolB', name: 'Tool B', vendorTool: 'b', generateProposal: async () => ({}), detect: async () => { throw new Error('broken'); } }
+    ]);
+    assert.deepEqual(await registry.detectTools(), [
+        { provider: 'toolA', name: 'Tool A', account: 'a@example.com', plan: 'pro', signedIn: true, installed: true },
+        { provider: 'toolB', name: 'Tool B', account: '', plan: '', signedIn: null, installed: false }
+    ]);
+    assert.equal(registry.descriptors().find((descriptor) => descriptor.id === 'toolA').vendorTool, 'a');
 });

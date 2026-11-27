@@ -23,10 +23,12 @@ export function createAIProviderRegistry(providers = []) {
         descriptors() {
             // `reasoningSetting`: whether the provider can be told to reason before answering, or not (a configuration's `think`).
             // `signIn`: whether a person can sign in to it in their browser instead of pasting a key, described by
+            // `vendorTool`: the vendor's own tool it runs ('claude', 'copilot'), which signs in by itself and has no endpoint or key.
             // `signInDescription`; `signInOnly` when a key cannot be typed in for it (ChatGPT plan usage). `keyPage`: where its keys are made, for a person who will paste one, offered as `keyPageLabel`.
-            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInOnly = false, signInDescription = '', keyPage = '', keyPageLabel = '' }) => ({
+            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInOnly = false, signInDescription = '', keyPage = '', keyPageLabel = '', vendorTool = '' }) => ({
                 id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting,
-                signIn: typeof signIn === 'function', signInOnly, signInDescription, keyPage, keyPageLabel: keyPage ? keyPageLabel || `Get a key from ${name} ›` : ''
+                signIn: typeof signIn === 'function', signInOnly, signInDescription, keyPage, keyPageLabel: keyPage ? keyPageLabel || `Get a key from ${name} ›` : '',
+                vendorTool
             }));
         },
         // Signs in to a provider in the person's browser; resolves to { credential, account? }. `openExternal` opens the browser,
@@ -39,6 +41,15 @@ export function createAIProviderRegistry(providers = []) {
             return result;
         },
         // The model a configuration starts with when the person has not chosen one: the provider's pick from `models`, or the first.
+        // What each vendor-tool provider finds on this computer: { provider, name, installed, signedIn (true, false or null for
+        // unknown), account, plan }. A tool that cannot be asked is reported as installed with its sign-in unknown.
+        async detectTools() {
+            const tools = [...registry.values()].filter((provider) => typeof provider.detect === 'function');
+            return Promise.all(tools.map(async (provider) => ({
+                provider: provider.id, name: provider.name, account: '', plan: '', signedIn: null,
+                ...(await provider.detect().catch(() => ({ installed: false })))
+            })));
+        },
         // Ends a sign-in at the provider as well, where it can; false where there is nothing to end.
         async signOut({ provider: id, credential, signal }) {
             const provider = registry.get(id);

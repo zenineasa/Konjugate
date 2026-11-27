@@ -20,9 +20,17 @@ When a request is ambiguous or missing information the assistant needs, it can a
 
 The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: sign in to a provider ([below](#sign-in-to-a-provider)), run one on this computer for free ([Run a model on this computer](#run-a-model-on-this-computer)), or add a configuration with an API key ([Hosted providers](#hosted-providers)).
 
+## Use a model you have
+
+At the very top of **Settings › Model assistant**, **Use a model you have** lists the vendors' own model tools Konjugate finds on this computer; it is hidden when there are none. Today that is the **GitHub Copilot** command-line tool (`copilot`), which uses your Copilot subscription. **Use it** makes a configuration for it with its default model and puts it in use.
+
+Konjugate runs the tool as it is, signed in as you by the tool's own sign-in, and never sees your password or token. Each request runs the tool once, in an empty temporary folder, with no tools of its own, without your custom instructions and built-in extensions, so all it can do is write the proposal; each request uses one of your Copilot plan's premium requests. If the tool is not signed in, the assistant says so: open a terminal, run `copilot login`, and try again.
+
+Konjugate looks for the tools on your PATH and where their installers put them (for example `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), because an app opened from the Finder or the Start menu sees a shorter PATH than a terminal does.
+
 ## Sign in to a provider
 
-At the top of **Settings › Model assistant**, **Sign in to a provider** sets the assistant up without making or pasting an API key. It offers:
+Below it, **Sign in to a provider** sets the assistant up without making or pasting an API key. It offers:
 
 - **ChatGPT**: your ChatGPT Plus or Pro plan pays for the assistant's requests, within the plan's limits, with no API key and no separate bill.
 - **OpenRouter**: one account for models from Anthropic (Claude), OpenAI (GPT), Google (Gemini) and many others, paid for per use from credits on your OpenRouter account.

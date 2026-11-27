@@ -29,6 +29,7 @@ import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from 
 import { createSettingsSheet } from './settingsSheet.mjs';
 import { createLocalModelsSection } from './localModelsSection.mjs';
 import { createAssistantSignInSection } from './assistantSignInSection.mjs';
+import { createAssistantToolsSection } from './assistantToolsSection.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -14309,7 +14310,8 @@ function renderAssistantConfigurationList() {
         const details = document.createElement('small');
         details.className = 'settingsItemHint';
         const signedIn = configuration.credentialSource === 'signIn' ? ` · signed in${configuration.account ? ` as ${configuration.account}` : ''}` : '';
-        details.textContent = `${provider?.name ?? configuration.provider}${signedIn} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        const model = provider?.vendorTool && configuration.model === 'default' ? 'its default model' : configuration.model || 'No model chosen';
+        details.textContent = `${provider?.name ?? configuration.provider}${signedIn} · ${model}${configuration.think === true ? ' · reasons first, slow' : ''}`;
         text.append(title, details);
         const control = document.createElement('span');
         control.className = 'settingsItemControl';
@@ -14362,6 +14364,9 @@ function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
     if (replaceEndpoint && !$('#assistantConfigurationUuid').value) {
         $('#assistantConfigurationTimeout').value = provider.defaultTimeoutSeconds ?? 60;
     }
+    // A vendor's own tool (Claude Code, the Copilot CLI) has no endpoint: Konjugate runs it on this computer.
+    $('#assistantConfigurationEndpoint').closest('.settingsItem').hidden = Boolean(provider.vendorTool);
+    $('#assistantConfigurationEndpoint').required = !provider.vendorTool;
     // A provider reached only by signing in (ChatGPT plan usage) has no key to type.
     $('#assistantCredentialField').hidden = !provider.credentialRequired || provider.signInOnly;
     $('#assistantKeyPage').hidden = !provider.keyPage;
@@ -14425,6 +14430,7 @@ async function prepareAssistantConfigurationPage() {
     showAssistantView('list');
     localModelsSection.check();
     assistantSignInSection.render();
+    assistantToolsSection.check();
 }
 
 // The Ollama the "Run a model on this computer" section asks: that of the Ollama configuration in use, or of any, or Ollama's own.
@@ -14469,7 +14475,17 @@ async function useAssistantConfiguration(uuid) {
     renderAssistantConfigurationList();
     localModelsSection.render();
     assistantSignInSection.render();
+    assistantToolsSection.render();
 }
+
+const assistantToolsSection = createAssistantToolsSection({
+    root: $('#assistantToolsSection'),
+    api: window.aiProviders,
+    providers: () => assistantConfigurationCatalog.providers ?? [],
+    configurations: () => assistantConfigurationCatalog.configurations ?? [],
+    activeUuid: () => activeAssistantConfigurationUuid,
+    use: useAssistantConfiguration
+});
 
 const assistantSignInSection = createAssistantSignInSection({
     root: $('#assistantSignInSection'),
@@ -14769,6 +14785,7 @@ $('#deleteAssistantConfiguration').addEventListener('click', async () => {
     showAssistantView('list');
     localModelsSection.render();
     assistantSignInSection.render();
+    assistantToolsSection.render();
 });
 $('#assistantPrompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {

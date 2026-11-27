@@ -177,15 +177,15 @@ Nothing now: the assistant is not in the web edition yet. When it is, OpenRouter
 1. **Built: direct sign-in plumbing and OpenRouter** (`src/aiOAuth.mjs`, the OpenRouter adapter, **Sign in to a provider** at the top of the settings page; described in the [provider architecture](../aiProviderArchitecture.md#signing-in-to-a-provider) and the [guide](../aiAssistantGuide.md#sign-in-to-a-provider)). An OpenRouter key is an ordinary key, so the sign-in record with a refresh token waits for ChatGPT plan usage, the first provider that needs it.
 2. **Built: Anthropic with an API key**, through the Messages API with Anthropic's SDK and structured outputs, and a link to each provider's key page under **API key** ("Get a free key from Google AI Studio ›" for Gemini).
 3. **Built: ChatGPT plan usage**, with the Responses API request path, dynamic registration and refresh-token rotation, as OpenAI documents it for open-source, locally run apps. Whether OpenAI counts Konjugate among those apps (it is also distributed through app stores) is still to be confirmed with OpenAI before it is announced.
-4. **Detection and vendor-tool providers**, with the Claude Code bridge built behind a switch that stays off until Anthropic answers, and the Copilot provider once GitHub's terms are confirmed.
+4. **Built: detection and vendor-tool providers** (`src/aiVendorTools.mjs`, **Use a model you have** at the top of the settings page). The Claude Code bridge is built and registered only with `KONJUGATE_EXPERIMENTAL_CLAUDE_CODE=1` until Anthropic answers. The Copilot provider is on: GitHub's terms neither permit nor forbid an app using a person's Copilot entitlement, and GitHub's own Copilot SDK is documented for embedding Copilot "in your application" with each user's own GitHub token, which is the use made here. A signed-in Copilot run's events are read as the SDK documents them and have not been observed here.
 5. **Installing vendor tools** from the settings page, for the tools whose vendors have said yes.
 6. **Hugging Face sign-in**, after the token is shown to work for inference.
 
 ## Questions to settle before the stages that need them
 
 - **Anthropic (stage 4):** may a free, open-source desktop app run a person's own, unmodified Claude Code, signed in with their own subscription through Anthropic's flow, as the model behind one of its features, and install Claude Code for them with its official installer? Does Konjugate need to accept Anthropic's Commercial Terms to do so? This needs a written answer, sought by the maintainer.
-- **OpenAI (stage 3):** is Konjugate an eligible open-source app for ChatGPT plan usage, given it is also distributed through app stores? What do the *token reference* and *profiles and sessions* pages say about token lifetimes and refresh?
-- **GitHub (stage 4):** do the Copilot product terms allow an app to run the Copilot CLI or SDK for a person with their own sign-in?
+- **OpenAI (stage 3):** is Konjugate an eligible open-source app for ChatGPT plan usage, given it is also distributed through app stores? (Token lifetimes and refresh are now known: an hour, and a refresh token of thirty days replaced on each use.)
+- **GitHub (stage 4, answered as far as the terms go):** no clause found either way; the SDK's documentation describes this use. A signed-in run should be checked on a computer with a Copilot subscription.
 
 ## Sources
 

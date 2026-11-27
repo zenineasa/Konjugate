@@ -30,6 +30,7 @@ import {
 } from './addonHost.mjs';
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
+import { createVendorToolProviders } from './aiVendorTools.mjs';
 import { createLocalModels } from './localModels.mjs';
 import { ollamaDownloadPage } from './suggestedLocalModels.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
@@ -3538,6 +3539,12 @@ ipcMain.handle('aiOpenKeyPage', async (event, provider) => {
     return true;
 });
 
+// The vendors' own tools found on this computer, and who each is signed in as (docs/proposals/assistantSignIn.md).
+ipcMain.handle('aiDetectTools', async (event) => {
+    requireProjectWindow(event);
+    return aiProviderRegistry.detectTools();
+});
+
 ipcMain.handle('aiCancelSignIn', async (event) => {
     requireProjectWindow(event);
     if (!activeAISignIn || activeAISignIn.owner !== event.sender) return false;
@@ -4295,7 +4302,7 @@ app.whenReady().then(async () => {
         return;
     }
     const operationSchema = JSON.parse(await readFile(join(currentDir, '..', 'schemas', 'assistantOperations.schema.json'), 'utf8'));
-    aiProviderRegistry = createAIProviderRegistry(createRemoteAIProviders({ operationSchema }));
+    aiProviderRegistry = createAIProviderRegistry([...createRemoteAIProviders({ operationSchema }), ...createVendorToolProviders({ operationSchema })]);
     aiConfigurationStore = createAIConfigurationStore({
         directory: join(app.getPath('userData'), 'ai'),
         credentialVault: createElectronCredentialVault(safeStorage)

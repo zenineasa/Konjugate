@@ -35,7 +35,7 @@ const text = ${JSON.stringify(JSON.stringify(proposal))};
 say({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'Planning.' } } });
 say({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: text.slice(0, 9) } } });
 say({ type: 'stream_event', event: { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: text.slice(9) } } });
-say({ type: 'result', subtype: 'success', is_error: false, result: '', structured_output: JSON.parse(text) });
+say({ type: 'result', subtype: 'success', is_error: false, result: '', structured_output: { response: JSON.parse(text) } });
 `;
 const fakeCopilot = `
 const fs = require('fs');
@@ -73,17 +73,15 @@ async function withFakes(task) {
     }
 }
 
-const providersFor = (env, home, experimental = true) => createVendorToolProviders({
+const providersFor = (env, home) => createVendorToolProviders({
     operationSchema: schema,
-    env: experimental ? { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } : {},
     runner: createVendorToolRunner({ env, home, platform: 'linux' })
 });
 
 const unixOnly = { skip: process.platform === 'win32' && 'The fake tools are shell scripts' };
 
-test('Claude Code is offered only with its experimental switch on; the Copilot CLI always', unixOnly, () => withFakes(async ({ env, root }) => {
-    assert.deepEqual(providersFor(env(), root, false).map((provider) => provider.id), ['copilotCli']);
-    assert.deepEqual(providersFor(env(), root, true).map((provider) => provider.id), ['claudeCode', 'copilotCli']);
+test('The person\'s own Claude Code and Copilot CLI are both offered', unixOnly, () => withFakes(async ({ env, root }) => {
+    assert.deepEqual(providersFor(env(), root).map((provider) => provider.id), ['claudeCode', 'copilotCli']);
 }));
 
 test('A vendor tool is found where its installer puts it, and Claude Code says who is signed in', unixOnly, () => withFakes(async ({ env, root }) => {
@@ -114,7 +112,8 @@ test('Claude Code runs in print mode with no tools, the schema, the person\'s cu
     assert.equal(args[args.indexOf('--tools') + 1], '');
     assert.ok(args.includes('--safe-mode'));
     assert.equal(args.includes('--bare'), false, '--bare would drop the sign-in.');
-    assert.deepEqual(JSON.parse(args[args.indexOf('--json-schema') + 1]), { anyOf: schema.oneOf });
+    // A tool's input must be an object, so the choice of shapes sits in `response`.
+    assert.deepEqual(JSON.parse(args[args.indexOf('--json-schema') + 1]), { type: 'object', additionalProperties: false, required: ['response'], properties: { response: { anyOf: schema.oneOf } } });
     assert.equal(args.includes('--model'), false, 'The default model is Claude Code\'s own choice.');
     assert.match(stdin, /USER REQUEST:\nAdd a node/);
     assert.match(cwd, /konjugate-assistant-/);
@@ -169,7 +168,7 @@ const recordingRunner = ({ platform = 'linux', code = 0, lines = [], found = '/h
 
 test('Installing a tool runs its vendor\'s own published installer into the person\'s own folders', async () => {
     const runner = recordingRunner({ lines: ['Installing GitHub Copilot CLI...', '✓ GitHub Copilot CLI installed'] });
-    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema, env: { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } });
+    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema });
     const heard = [];
     assert.equal(await copilot.install({ onOutput: (line) => heard.push(line) }), true);
     assert.deepEqual(runner.runs[0], { command: '/bin/bash', args: ['-c', 'curl -fsSL https://gh.io/copilot-install | bash'], extraEnv: { PREFIX: '/home/person/.local' } });
@@ -177,18 +176,18 @@ test('Installing a tool runs its vendor\'s own published installer into the pers
     await claude.install({});
     assert.deepEqual(runner.runs[1].args, ['-c', 'curl -fsSL https://claude.ai/install.sh | bash']);
     const windows = recordingRunner({ platform: 'win32' });
-    const [copilotOnWindows] = createVendorToolProviders({ runner: windows, operationSchema: schema });
+    const [, copilotOnWindows] = createVendorToolProviders({ runner: windows, operationSchema: schema });
     await copilotOnWindows.install({});
     assert.equal(windows.runs[0].command, 'winget');
     assert.ok(windows.runs[0].args.includes('GitHub.Copilot'));
     const failing = recordingRunner({ code: 1 });
-    const [copilotFailing] = createVendorToolProviders({ runner: failing, operationSchema: schema });
+    const [, copilotFailing] = createVendorToolProviders({ runner: failing, operationSchema: schema });
     await assert.rejects(copilotFailing.install({}), (error) => error.code === 'installFailed' && /could not write/.test(error.message));
 });
 
 test('Signing in with a tool runs the tool\'s own sign-in and passes on what it prints', async () => {
     const runner = recordingRunner({ lines: ['Open https://github.com/login/device and enter ABCD-1234'] });
-    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema, env: { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } });
+    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema });
     const heard = [];
     await copilot.signInWithTool({ onOutput: (line) => heard.push(line) });
     assert.deepEqual(runner.runs[0].args, ['login', '--web-flow']);
@@ -196,6 +195,6 @@ test('Signing in with a tool runs the tool\'s own sign-in and passes on what it 
     await claude.signInWithTool({});
     assert.deepEqual(runner.runs[1].args, ['auth', 'login']);
     const notInstalled = recordingRunner({ found: null });
-    const [missing] = createVendorToolProviders({ runner: notInstalled, operationSchema: schema });
+    const [, missing] = createVendorToolProviders({ runner: notInstalled, operationSchema: schema });
     await assert.rejects(missing.signInWithTool({}), { code: 'toolNotInstalled' });
 });

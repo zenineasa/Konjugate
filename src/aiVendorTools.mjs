@@ -5,9 +5,9 @@
 // in by the vendor's own flow, and never sees a token: it finds the tool, asks it who is signed in, and runs it in print mode
 // with no tools, in an empty folder, with the person's own customisations left out, so all it can produce is the proposal.
 //
-// Claude Code is registered only when KONJUGATE_EXPERIMENTAL_CLAUDE_CODE=1: Anthropic's terms are unclear about an app using a
-// person's Claude Code as the model behind one of its features, and the proposal waits for Anthropic's written answer
-// before offering it to anyone.
+// This is how a desktop app such as Orchestrator offers a person's Claude subscription: the unmodified Claude Code, signed in
+// by Claude Code's own login, which Anthropic's terms allow a platform to host. Where those terms are unclear (an app using
+// Claude Code as the model behind one of its features), the maintainer chose to offer it (docs/proposals/assistantSignIn.md).
 
 import { spawn as spawnProcess } from 'node:child_process';
 import { access, mkdtemp, rm } from 'node:fs/promises';
@@ -146,6 +146,18 @@ function copilotInstaller(platform, home) {
         : { command: '/bin/bash', args: ['-c', 'curl -fsSL https://gh.io/copilot-install | bash'], source: 'https://gh.io/copilot-install', extraEnv: { PREFIX: join(home, '.local') } };
 }
 
+// Claude Code gives the schema to the API as the input of its StructuredOutput tool, and a tool's input must be an object,
+// so the proposal-or-clarification choice goes one level down, in `response`.
+export function claudeCodeSchema(operationSchema) {
+    const { anyOf, oneOf, $defs, ...root } = claudeOutputSchema(operationSchema);
+    const choice = anyOf ?? oneOf;
+    return {
+        type: 'object', additionalProperties: false, required: ['response'],
+        properties: { response: choice ? { anyOf: choice } : root },
+        ...($defs ? { $defs } : {})
+    };
+}
+
 function claudeCodeProvider({ runner }) {
     const notInstalled = () => new AssistantProviderError('Claude Code is not installed on this computer.', 'toolNotInstalled');
     const notSignedIn = () => new AssistantProviderError('Claude Code is not signed in. Open a terminal, run “claude auth login”, then try again.', 'toolNotSignedIn');
@@ -193,7 +205,7 @@ function claudeCodeProvider({ runner }) {
             const args = [
                 '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
                 // No tools: Claude Code then has only its StructuredOutput tool, which the JSON schema needs, and a few turns for it.
-                '--tools', '', '--json-schema', JSON.stringify(claudeOutputSchema(operationSchema)), '--max-turns', '4',
+                '--tools', '', '--json-schema', JSON.stringify(claudeCodeSchema(operationSchema)), '--max-turns', '4',
                 '--system-prompt', instructions,
                 // The person's own CLAUDE.md, hooks, skills, plugins and MCP servers stay out; the sign-in stays in (which --bare would drop).
                 '--safe-mode',
@@ -231,8 +243,10 @@ function claudeCodeProvider({ runner }) {
                 const said = typeof result.result === 'string' ? result.result : (result.errors ?? []).join(' ');
                 throw new AssistantProviderError(`Claude Code could not answer: ${String(said || result.subtype).slice(0, 300)}`, 'providerHttpError');
             }
-            // The schema-checked answer when Claude Code gives one; its text otherwise. The host validates either way.
-            return parseProposalText(result.structured_output != null ? JSON.stringify(result.structured_output) : result.result);
+            // The schema-checked answer when Claude Code gives one (inside `response`, see claudeCodeSchema); its text otherwise.
+            // The host validates either way.
+            const structured = result.structured_output?.response ?? result.structured_output;
+            return parseProposalText(structured != null ? JSON.stringify(structured) : result.result);
         }
     };
 }
@@ -309,11 +323,11 @@ function copilotProvider({ runner }) {
     };
 }
 
-// The vendor-tool providers this installation offers: Copilot always, Claude Code only with the experimental switch.
-export function createVendorToolProviders({ runner = createVendorToolRunner(), env = process.env, operationSchema } = {}) {
+// The vendor-tool providers: the person's own Claude Code and GitHub Copilot CLI.
+export function createVendorToolProviders({ runner = createVendorToolRunner(), operationSchema } = {}) {
     if (!operationSchema) throw new Error('Vendor tool providers require an operation schema.');
     return [
-        ...(env.KONJUGATE_EXPERIMENTAL_CLAUDE_CODE === '1' ? [claudeCodeProvider({ runner })] : []),
+        claudeCodeProvider({ runner }),
         copilotProvider({ runner })
     ].map((provider) => Object.freeze({ ...provider, generateProposal: (input) => provider.generateProposal({ ...input, operationSchema }) }));
 }

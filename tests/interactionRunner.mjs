@@ -1091,7 +1091,8 @@ export async function runInteractionTests(driver) {
             assert.equal(await evaluate(window, `document.querySelector('.assistantListView').firstElementChild.id`), 'assistantToolsSection', 'What the person already has is not shown first.');
             await waitFor(window, `/Installed on this computer/.test(document.querySelector('[data-tool-row="copilotCli"]').textContent)`, 'The installed Copilot CLI was not found.');
             assert.match(await evaluate(window, `document.querySelector('[data-tool-row="copilotCli"]').textContent`), /GitHub Copilot.*Installed on this computer.*Use it.*Sign in/);
-            assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-tool-row="claudeCode"]'))`), false, 'Claude Code was offered without its experimental switch.');
+            // The person's own Claude Code is offered too: found and signed in, found and not signed in, or ready to install.
+            assert.match(await evaluate(window, `document.querySelector('[data-tool-row="claudeCode"]').textContent`), /Claude \(through Claude Code\)/);
             await evaluate(window, `document.querySelector('[data-tool-use="copilotCli"]').click()`);
             await waitFor(window, `document.querySelector('[data-tool-row="copilotCli"] .settingsBadge')?.textContent === 'In use'`, 'Use it did not put Copilot in use.');
             const after = await evaluate(window, `window.aiProviders.listConfigurations()`);
@@ -1288,8 +1289,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s ⚙ did not open Settings › Model assistant.');
         assert.equal(await evaluate(window, `document.querySelector('#settingsPageTitle').textContent`), 'Model assistant');
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
-            // ChatGPT is reached only by signing in, and Claude Code only with its experimental switch, so neither is offered for a key.
-            'ollama', 'openAi', 'nvidia', 'huggingFace', 'openRouter', 'anthropic', 'gemini', 'copilotCli'
+            // ChatGPT is reached only by signing in, so it is not offered for a key; the vendor tools take none but are listed.
+            'ollama', 'openAi', 'nvidia', 'huggingFace', 'openRouter', 'anthropic', 'gemini', 'claudeCode', 'copilotCli'
         ]);
         await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#assistantCredentialField').hidden`), true);

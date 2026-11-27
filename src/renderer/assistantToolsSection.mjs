@@ -140,12 +140,25 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
         line.hidden = !message.text;
     }
 
-    // Asks the main process what is installed; a second ask while one is under way waits for that one.
+    // Asks the main process what is installed. An ask while one is under way (asking Claude Code takes a few seconds) asks
+    // again once that one ends, since a tool may have been installed or signed in to in between.
+    let askAgain = false;
     function check() {
-        checking ??= api.detectTools()
+        if (checking) {
+            askAgain = true;
+            return checking;
+        }
+        checking = api.detectTools()
             .then((found) => { tools = Array.isArray(found) ? found : []; })
             .catch(() => { tools = []; })
-            .finally(() => { checking = null; render(); });
+            .finally(() => {
+                checking = null;
+                render();
+                if (askAgain) {
+                    askAgain = false;
+                    check();
+                }
+            });
         return checking;
     }
 

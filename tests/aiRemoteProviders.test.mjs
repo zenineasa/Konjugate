@@ -390,6 +390,9 @@ test('Claude\'s output schema is the operation schema without what structured ou
         anyOf: [{ $ref: '#/$defs/a' }],
         $defs: { a: { type: 'object', additionalProperties: false, properties: { pattern: { type: 'string' }, n: { type: 'number' } } } }
     });
+    // A tuple becomes an array of its item types, which Claude Code's schema check and structured outputs both take.
+    assert.deepEqual(claudeOutputSchema({ type: 'array', prefixItems: [{ type: 'number' }, { type: 'number' }, { type: 'number' }], items: false }), { type: 'array', items: { type: 'number' } });
+    assert.deepEqual(claudeOutputSchema({ type: 'array', prefixItems: [{ type: 'number' }, { type: 'string' }] }), { type: 'array', items: { anyOf: [{ type: 'number' }, { type: 'string' }] } });
 });
 
 test('Anthropic asks again without the output format when the API refuses the schema, and reports a refusal plainly', async () => {

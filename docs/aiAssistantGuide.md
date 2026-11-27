@@ -22,13 +22,16 @@ The assistant needs a model. Until one is set up, its panel says so and **Set up
 
 ## Use a model you have
 
-At the very top of **Settings › Model assistant**, **Use a model you have** is for a subscription you already pay for that comes with the vendor's own tool. Today that is **GitHub Copilot**, through GitHub's Copilot command-line tool (`copilot`); a Copilot subscription is free for verified students and for maintainers of many popular open-source projects.
+At the very top of **Settings › Model assistant**, **Use a model you have** is for a subscription you already pay for that comes with the vendor's own tool:
 
-- If the tool is not installed, **Install…** asks first, in a dialog that names GitHub's installer, then runs it as GitHub publishes it (on macOS and Linux its script from `gh.io/copilot-install`, which installs into `~/.local/bin` for you alone; on Windows, WinGet's `GitHub.Copilot`). No administrator rights are needed; what the installer prints is shown as it runs, and **Stop** stops it.
-- **Sign in** runs the tool's own sign-in, which opens GitHub's page in your browser; if it prints a link or a code to enter, the row shows it. You can also sign in from a terminal with `copilot login`.
+- **Claude (through Claude Code)**: your Claude subscription (Pro, Max and others), through Anthropic's Claude Code. The row says who Claude Code is signed in as and on which plan.
+- **GitHub Copilot**: your Copilot subscription, through GitHub's Copilot command-line tool (`copilot`); a Copilot subscription is free for verified students and for maintainers of many popular open-source projects.
+
+- If the tool is not installed, **Install…** asks first, in a dialog that names the vendor's installer, then runs it as the vendor publishes it, into your own folders without administrator rights: for Claude Code, Anthropic's `claude.ai/install.sh` (or `install.ps1` on Windows); for the Copilot CLI, GitHub's `gh.io/copilot-install` (WinGet's `GitHub.Copilot` on Windows). What the installer prints is shown as it runs, and **Stop** stops it.
+- **Sign in** runs the tool's own sign-in, which opens the vendor's page in your browser; if it prints a link or a code to enter, the row shows it. You can also sign in from a terminal with `claude auth login` or `copilot login`.
 - **Use it** makes a configuration for it with its default model and puts it in use.
 
-Konjugate runs the tool as it is, signed in as you by the tool's own sign-in, and never sees your password or token. Each request runs the tool once, in an empty temporary folder, with no tools of its own, without your custom instructions and built-in extensions, so all it can do is write the proposal; each request uses one of your Copilot plan's premium requests. If the tool is not signed in, the assistant says so.
+Konjugate runs the tool as it is, signed in as you by the tool's own sign-in, and never sees your password or token. Each request runs the tool once, in an empty temporary folder, with no tools of its own and without your own settings (for Claude Code: your CLAUDE.md, hooks, skills, plugins and MCP servers; for Copilot: your custom instructions and built-in extensions), so all it can do is write the proposal. Requests count against your subscription's limits like any other use of the tool (each Copilot request uses one premium request). If the tool is not signed in, the assistant says so. A Claude Code configuration's model is "Default for your plan" unless you choose Claude Opus, Sonnet or Haiku on its page.
 
 Konjugate looks for the tools on your PATH and where their installers put them (for example `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), because an app opened from the Finder or the Start menu sees a shorter PATH than a terminal does.
 

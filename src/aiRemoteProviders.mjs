@@ -366,6 +366,13 @@ const unsupportedOutputKeywords = new Set(['$schema', '$id', '$comment', 'title'
 export function claudeOutputSchema(schema) {
     if (Array.isArray(schema)) return schema.map(claudeOutputSchema);
     if (!schema || typeof schema !== 'object') return schema;
+    // A tuple (`prefixItems`, draft 2020-12) becomes an array of its item types: Claude Code's schema check refuses
+    // `prefixItems`, and structured outputs take no array sizes anyway. Its length is still checked by the full schema.
+    if (Array.isArray(schema.prefixItems)) {
+        const { prefixItems, items, ...rest } = schema;
+        const kinds = [...new Map(prefixItems.map((item) => [JSON.stringify(item), item])).values()];
+        return claudeOutputSchema({ ...rest, items: kinds.length === 1 ? kinds[0] : { anyOf: kinds } });
+    }
     return Object.fromEntries(Object.entries(schema)
         .filter(([key]) => !unsupportedOutputKeywords.has(key))
         .map(([key, value]) => [key === 'oneOf' ? 'anyOf' : key, key === 'properties' || key === '$defs'

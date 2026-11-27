@@ -707,6 +707,40 @@ function chatGptProvider() {
     };
 }
 
+// Signing in to Hugging Face (https://huggingface.co/docs/hub/oauth) with the `inference-api` scope, which grants inference
+// through Inference Providers on the person's behalf. It needs Konjugate's own OAuth app, registered on Hugging Face as a
+// public app (no secret) with the redirect http://127.0.0.1/callback, whose loopback rule accepts any port. Until its client
+// id is filled in here (or given as KONJUGATE_HUGGING_FACE_CLIENT_ID), Hugging Face offers no sign-in, only a key. The access
+// token is kept as the configuration's key: the router takes it as a bearer token the same way. Hugging Face does not say how
+// long a sign-in lasts or whether it can be renewed; when it ends, its requests are refused and the person signs in again.
+export const huggingFaceClientId = '';
+const huggingFaceSite = 'https://huggingface.co';
+function huggingFaceSignIn(clientId = process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID || huggingFaceClientId) {
+    if (!clientId) return {};
+    return {
+        signInDescription: 'Your Hugging Face account, for the models its Inference Providers serve.',
+        async signIn({ openExternal, signal, fetchImpl }) {
+            const { code, verifier, redirectUri } = await loopbackAuthorization({
+                host: '127.0.0.1', path: '/callback', openExternal, signal,
+                authorizationUrl: (redirect, { challenge, state }) => `${huggingFaceSite}/oauth/authorize?${new URLSearchParams({
+                    client_id: clientId, redirect_uri: redirect, response_type: 'code', scope: 'openid profile inference-api',
+                    state, code_challenge: challenge, code_challenge_method: 'S256'
+                })}`
+            });
+            const body = await responseJson(fetchImpl, `${huggingFaceSite}/oauth/token`, {
+                method: 'POST', signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId, code, code_verifier: verifier, redirect_uri: redirectUri }).toString()
+            });
+            if (typeof body?.access_token !== 'string' || !body.access_token) throw new AssistantProviderError('Hugging Face did not return an access token.', 'invalidProviderResponse');
+            if (body.scope && !String(body.scope).split(/\s+/).includes('inference-api')) {
+                throw new AssistantProviderError('You signed in, but Konjugate was not allowed to make inference requests. Sign in again and allow it.', 'planUsageNotAllowed');
+            }
+            const claims = decodeJwtPayload(body.id_token);
+            return { credential: body.access_token, account: typeof claims?.preferred_username === 'string' ? claims.preferred_username : '' };
+        }
+    };
+}
+
 export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operationSchema } = {}) {
     if (typeof fetchImpl !== 'function' || !operationSchema) throw new Error('Remote AI providers require fetch and an operation schema.');
     const bind = (provider) => Object.freeze({
@@ -722,7 +756,7 @@ export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operatio
         chatGptProvider(),
         openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true, extra: { keyPage: 'https://platform.openai.com/api-keys' } }),
         openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia, extra: { keyPage: 'https://build.nvidia.com/settings/api-keys' } }),
-        openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace, extra: { keyPage: 'https://huggingface.co/settings/tokens' } }),
+        openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace, extra: { keyPage: 'https://huggingface.co/settings/tokens', ...huggingFaceSignIn() } }),
         openRouterProvider(),
         anthropicProvider(),
         geminiProvider()

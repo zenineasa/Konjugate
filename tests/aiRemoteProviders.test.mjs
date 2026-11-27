@@ -578,3 +578,37 @@ test('Signing out of ChatGPT revokes the refresh token at the address OpenAI pub
     const elsewhere = provider('chatGpt', async () => jsonResponse({ revocation_endpoint: 'https://example.com/revoke' }));
     assert.equal(await elsewhere.signOut({ credential: chatGptCredential() }), false, 'A revocation address off OpenAI\'s own site was used.');
 });
+
+test('Hugging Face offers no sign-in until Konjugate\'s OAuth app is filled in, then signs in with PKCE and the inference scope', async () => {
+    assert.equal(provider('huggingFace', async () => jsonResponse({})).signIn, undefined, 'Signing in was offered without a client id.');
+    const previous = process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID;
+    process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID = 'hf-client-1';
+    try {
+        const exchanges = [];
+        const adapter = provider('huggingFace', async (url, options = {}) => {
+            exchanges.push({ url: String(url), fields: Object.fromEntries(new URLSearchParams(options.body)) });
+            return jsonResponse({ access_token: 'hf_oauth_token', token_type: 'bearer', expires_in: 28800, scope: 'openid profile inference-api', id_token: `e30.${Buffer.from(JSON.stringify({ preferred_username: 'someone' })).toString('base64url')}.sig` });
+        });
+        let authorization;
+        const result = await adapter.signIn({
+            openExternal: async (address) => {
+                authorization = new URL(address);
+                const back = new URL(authorization.searchParams.get('redirect_uri'));
+                back.searchParams.set('code', 'code-1');
+                back.searchParams.set('state', authorization.searchParams.get('state'));
+                setImmediate(() => fetch(back).catch(() => {}));
+            }
+        });
+        assert.deepEqual(result, { credential: 'hf_oauth_token', account: 'someone' });
+        assert.equal(authorization.origin + authorization.pathname, 'https://huggingface.co/oauth/authorize');
+        assert.equal(authorization.searchParams.get('client_id'), 'hf-client-1');
+        assert.equal(authorization.searchParams.get('scope'), 'openid profile inference-api');
+        assert.match(authorization.searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:\d+\/callback$/);
+        assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+        assert.equal(exchanges[0].url, 'https://huggingface.co/oauth/token');
+        assert.deepEqual({ grant_type: exchanges[0].fields.grant_type, client_id: exchanges[0].fields.client_id, code: exchanges[0].fields.code }, { grant_type: 'authorization_code', client_id: 'hf-client-1', code: 'code-1' });
+        assert.ok(exchanges[0].fields.code_verifier);
+    } finally {
+        if (previous === undefined) delete process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID; else process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID = previous;
+    }
+});

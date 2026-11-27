@@ -400,7 +400,7 @@ export async function runInteractionTests(driver) {
         'the example guide': ['examples explorer loads a project copy', 'example selection opens its companion guide'],
         'the assistant': [
             'with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it',
-            'signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled',
+            'signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled; a key\'s provider says where keys are made',
             'local assistant prepares, validates and applies one undoable transaction',
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
@@ -992,7 +992,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
-    await run('signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled', async () => {
+    await run('signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled; a key\'s provider says where keys are made', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
         await evaluate(window, `document.querySelector('#manageAssistantConfigurations').click()`);
         await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s settings button did not open Settings › Model assistant.');
@@ -1019,6 +1019,25 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `Boolean(document.querySelector('[data-sign-in="openRouter"]')) && document.querySelector('#assistantSignInStatus').hidden`, 'Cancel did not end the sign-in.');
         await assert.rejects(fetch(`http://127.0.0.1:${callback.port}/callback`), 'Konjugate still listened after Cancel.');
         assert.equal((await evaluate(window, `window.aiProviders.listConfigurations()`)).configurations.length, before, 'A cancelled sign-in added a configuration.');
+
+        // A configuration with a key says where its provider's keys are made, and opens only that page.
+        await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
+        await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden`, 'Add configuration… did not open a form.');
+        const chooseProvider = (id) => evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationProvider'); select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change')); })()`);
+        await chooseProvider('gemini');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantKeyPage').textContent`), 'Get a free key from Google AI Studio ›');
+        assert.equal(await isRenderedVisible(window, '#assistantKeyPage'), true);
+        const keyPage = driver.waitForDialog({ kind: 'external', includes: 'aistudio.google.com' });
+        await evaluate(window, `document.querySelector('#assistantKeyPage').click()`);
+        assert.equal((await keyPage).url, 'https://aistudio.google.com/apikey');
+        assert.equal(await evaluate(window, `window.aiProviders.openKeyPage('ollama')`), false, 'A provider without a key page opened something.');
+        await chooseProvider('anthropic');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantKeyPage').textContent`), 'Get a key from Anthropic (Claude) ›');
+        assert.equal(await isRenderedVisible(window, '#assistantCredentialField'), true);
+        await chooseProvider('ollama');
+        assert.equal(await isRenderedVisible(window, '#assistantKeyPage'), false, 'Ollama needs no key, so no key page is offered.');
+        await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('#assistantConfigurationBack').click(); })()`);
+        await waitFor(window, `document.querySelector('#assistantConfigurationForm').hidden`, 'Back did not return to the list.');
 
         await evaluate(window, `document.querySelector('#settingsClose').click()`);
         await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');

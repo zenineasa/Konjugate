@@ -400,6 +400,8 @@ contextBridge.exposeInMainWorld('aiProviders', {
     // Signing in to a provider in the browser: { ok, configuration } with the configuration it made and put in use, or { ok: false, error }.
     signIn: (provider) => invokePlainly('aiSignIn', provider),
     cancelSignIn: () => invokePlainly('aiCancelSignIn'),
+    // Opens the page where the provider's keys are made, in the browser.
+    openKeyPage: (provider) => invokePlainly('aiOpenKeyPage', provider),
     generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
         const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
         if (result.ok) return result.proposal;

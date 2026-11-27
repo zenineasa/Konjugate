@@ -23,10 +23,10 @@ export function createAIProviderRegistry(providers = []) {
         descriptors() {
             // `reasoningSetting`: whether the provider can be told to reason before answering, or not (a configuration's `think`).
             // `signIn`: whether a person can sign in to it in their browser instead of pasting a key, described by
-            // `signInDescription`. `keyPage`: where its keys are made, for a person who will paste one.
-            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInDescription = '', keyPage = '' }) => ({
+            // `signInDescription`. `keyPage`: where its keys are made, for a person who will paste one, offered as `keyPageLabel`.
+            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInDescription = '', keyPage = '', keyPageLabel = '' }) => ({
                 id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting,
-                signIn: typeof signIn === 'function', signInDescription, keyPage
+                signIn: typeof signIn === 'function', signInDescription, keyPage, keyPageLabel: keyPage ? keyPageLabel || `Get a key from ${name} ›` : ''
             }));
         },
         // Signs in to a provider in the person's browser; resolves to { credential }. `openExternal` opens the browser.

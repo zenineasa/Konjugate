@@ -3510,6 +3510,15 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
     }
 });
 
+// The page where a provider's keys are made, from its own descriptor: no other address is opened.
+ipcMain.handle('aiOpenKeyPage', async (event, provider) => {
+    requireProjectWindow(event);
+    const page = aiProviderRegistry.descriptors().find((item) => item.id === provider)?.keyPage;
+    if (!page || !page.startsWith('https://')) return false;
+    await shell.openExternal(page);
+    return true;
+});
+
 ipcMain.handle('aiCancelSignIn', async (event) => {
     requireProjectWindow(event);
     if (!activeAISignIn || activeAISignIn.owner !== event.sender) return false;

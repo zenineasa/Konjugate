@@ -2507,6 +2507,8 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .passwordDialog.settingsSheet .settingsItemLabel { display: block; margin: 0; color: #d2e0e4; font-size: 9px; font-weight: 500; }
 .passwordDialog.settingsSheet .settingsItemHint { display: block; color: #6f848e; font-size: 7.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .passwordDialog.settingsSheet .settingsItemHint[hidden] { display: none; }
+.passwordDialog.settingsSheet .assistantKeyPage { display: block; margin-top: 2px; font-size: 7.5px; line-height: 1.45; text-align: left; }
+.passwordDialog.settingsSheet .assistantKeyPage[hidden] { display: none; }
 .settingsItemValue { color: #b8c9cf; font-size: 9px; font-variant-numeric: tabular-nums; }
 .settingsItemControl { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
 .passwordDialog.settingsSheet .settingsItem > :is(input, select), .passwordDialog.settingsSheet .settingsItemControl > :is(input, select) { flex: 0 1 260px; min-width: 0; height: 28px; font-size: 9px; }
@@ -2555,7 +2557,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .passwordDialog.settingsSheet .settingsPageBack { height: 24px; margin: -4px 0 6px -6px; padding: 0 6px; color: var(--accent); background: transparent; border: 0; border-radius: 4px; font-size: 8.5px; cursor: pointer; }
 .passwordDialog.settingsSheet .settingsDetailTitle { margin: 0 0 10px 2px; color: #d8e4e9; font-size: 11px; font-weight: 650; }
 .passwordDialog.settingsSheet .assistantDetailView fieldset { border: 1px solid #22343e; }
-.passwordDialog.settingsSheet .assistantDetailView label.settingsItem > :is(input, select), .passwordDialog.settingsSheet .assistantDetailView .configurationModelControl { flex: 0 1 300px; }
+.passwordDialog.settingsSheet .assistantDetailView :is(label.settingsItem, #assistantCredentialField) > :is(input, select), .passwordDialog.settingsSheet .assistantDetailView .configurationModelControl { flex: 0 1 300px; }
 .passwordDialog.settingsSheet .assistantDetailView .configurationModelField select { height: 28px; font-size: 9px; }
 .passwordDialog.settingsSheet .assistantDetailView .configurationModelField button { height: 28px; font-size: 8px; }
 .passwordDialog.settingsSheet .settingsDetailFooter { display: flex; align-items: center; gap: 7px; margin-top: 14px; padding: 0; border: 0; }

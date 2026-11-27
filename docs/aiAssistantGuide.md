@@ -96,9 +96,10 @@ Konjugate currently supports:
 - NVIDIA NIM;
 - Hugging Face Inference Providers;
 - OpenRouter ([or sign in instead](#sign-in-to-a-provider));
+- Anthropic (Claude);
 - Google Gemini.
 
-Create an API key through the chosen provider, enter it in the configuration manager, discover or enter a model and test the connection before saving.
+Create an API key through the chosen provider, enter it in the configuration manager, discover or enter a model and test the connection before saving. Below the **API key** field, a link opens the page where that provider's keys are made, in your browser; for Gemini it is **Get a free key from Google AI Studio ›**, since keys made there are free and come with a free tier. An Anthropic key is made in the Claude Console; a Claude subscription (Pro, Max) is not an API key and cannot be used here, but Claude models are also reachable by [signing in to OpenRouter](#sign-in-to-a-provider).
 
 Provider documentation:
 
@@ -107,6 +108,7 @@ Provider documentation:
 - [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index)
 - [Gemini API](https://ai.google.dev/gemini-api/docs)
 - [OpenRouter API](https://openrouter.ai/docs/api-reference/overview)
+- [Claude API](https://platform.claude.com/docs)
 
 Provider availability, model identifiers, account requirements and pricing are controlled by the provider and may change independently of Konjugate.
 

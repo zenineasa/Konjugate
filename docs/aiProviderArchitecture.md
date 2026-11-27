@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Model assistant provider architecture
-description: Design and security model for local (Ollama) and hosted (OpenAI, Gemini, NIM, HuggingFace, OpenRouter) model providers, and signing in to a provider in the browser.
+description: Design and security model for local (Ollama) and hosted (OpenAI, Anthropic, Gemini, NIM, HuggingFace, OpenRouter) model providers, and signing in to a provider in the browser.
 tags: [assistant, architecture, security, credentials]
 status: stable
 ---
@@ -55,6 +55,7 @@ The registry also:
 | NVIDIA | OpenAI-compatible NVIDIA NIM endpoints |
 | Hugging Face | OpenAI-compatible Inference Providers router |
 | OpenRouter | OpenAI-compatible chat completions; models from `/v1/models/user`; OAuth sign-in |
+| Anthropic | Messages API and Models API, through Anthropic's SDK (`@anthropic-ai/sdk`) |
 | Gemini | Gemini models and `generateContent` APIs |
 
 Ollama uses portable JSON mode because its structured-output schema converter does not accept every construct in Konjugate's Draft 2020-12 operation schema. The complete schema remains in the prompt and the host remains the validation authority.
@@ -68,6 +69,9 @@ Ollama uses portable JSON mode because its structured-output schema converter do
 - **Ollama.** `/api/chat` streams newline-delimited JSON by default, takes `format: "json"`, and puts reasoning in `message.thinking` only when the `think` option is enabled. The adapter sends `think` only when a configuration sets it (**Reasoning** in Settings, `think` in the configuration: true, false, or unset for the model's own default), since a model that cannot reason may refuse the field. Its descriptor says `reasoningSetting: true`, which is what shows the setting.
 
 - **OpenRouter.** Its API is OpenAI-compatible, so it is the same adapter as NVIDIA's and Hugging Face's, in plain JSON mode (structured output is supported per serving endpoint, not per model). The models listed are `/v1/models/user`, those the key may use after the account's own guardrails and privacy settings. Every request carries `HTTP-Referer` (the project's repository) and `X-OpenRouter-Title: Konjugate`, which name Konjugate on the person's activity page and change nothing about the request.
+
+- **Anthropic.** The adapter uses Anthropic's own SDK, constructed for each call with the configuration's key, endpoint and the adapters' shared `fetch` (so the tests' mocked fetch serves it too); a key passed in is the only credential the SDK uses, and it does not read `ANTHROPIC_API_KEY` or a local sign-in. It streams `messages.stream` and turns `text_delta` and `thinking_delta` events into the panel's output and thinking, and every other event into activity, which keeps the silence timeout from firing while the model thinks. Proposals are asked for with structured outputs (`output_config.format`, `json_schema`), using a copy of the operation schema reduced to what structured outputs accept (`claudeOutputSchema`: `oneOf` as `anyOf`, no string, number or array limits, no patterns); if the API answers HTTP 400 about the format, it asks again without it. No `thinking` setting is sent, since models differ in which they accept: each model's default is used, and current models think without showing it, so the panel shows no reasoning. `max_tokens` is 32,000, room for the model's thinking, billed only as used. A `refusal` stop is reported as `providerRefused`, not repaired. The SDK's errors are converted: a cancel stays an `AbortError`, an HTTP error keeps its status, a failed connection is `connectionFailed`.
+- **Key pages.** A provider's descriptor can name `keyPage`, where its keys are made, and `keyPageLabel` (by default "Get a key from …"). The configuration's page shows it under **API key**, and `aiOpenKeyPage` opens only the address in that provider's own descriptor, and only an `https:` one. Gemini's is Google AI Studio, whose keys are free and have a free tier.
 
 ### Signing in to a provider
 

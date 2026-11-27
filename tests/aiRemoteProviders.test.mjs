@@ -334,3 +334,87 @@ test('A sign-in starts with the newest model of the first family the account off
     assert.equal(suggestedModel([{ id: 'meta/llama-5' }]), 'meta/llama-5');
     assert.equal(suggestedModel([]), '');
 });
+
+// A Messages API stream as Anthropic sends it: server-sent events, each named by its type.
+const anthropicStream = (text, { thinking = '', stopReason = 'end_turn' } = {}) => {
+    const events = [
+        { type: 'message_start', message: { id: 'msg_1', type: 'message', role: 'assistant', model: 'claude-opus-5-5', content: [], stop_reason: null, usage: { input_tokens: 10, output_tokens: 0 } } },
+        { type: 'ping' },
+        ...(thinking ? [
+            { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '', signature: '' } },
+            { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking } },
+            { type: 'content_block_stop', index: 0 }
+        ] : []),
+        { type: 'content_block_start', index: 1, content_block: { type: 'text', text: '' } },
+        ...[text.slice(0, 10), text.slice(10)].map((part) => ({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: part } })),
+        { type: 'content_block_stop', index: 1 },
+        { type: 'message_delta', delta: { stop_reason: stopReason, stop_sequence: null }, usage: { output_tokens: 20 } },
+        { type: 'message_stop' }
+    ];
+    return new Response(events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+};
+
+test('Anthropic lists models through its own API with the key, and streams a proposal with the schema as its output format', async () => {
+    const calls = [];
+    const events = [];
+    const adapter = provider('anthropic', async (url, options = {}) => {
+        calls.push({ url: String(url), options });
+        if (String(url).includes('/v1/models')) return jsonResponse({ data: [{ type: 'model', id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', created_at: '2026-10-01T00:00:00Z' }], has_more: false, first_id: 'claude-opus-5-5', last_id: 'claude-opus-5-5' });
+        return anthropicStream(JSON.stringify(proposal), { thinking: 'Considering the node.' });
+    });
+    assert.deepEqual(await adapter.listModels(input('anthropic')), [{ id: 'claude-opus-5-5', name: 'Claude Opus 5.5' }]);
+    assert.match(calls[0].url, /^https:\/\/api\.anthropic\.com\/v1\/models/);
+    const headers = new Headers(calls[0].options.headers);
+    // The SDK sends a Console key as a bearer token; the key passed in is the only credential it uses.
+    assert.equal(headers.get('authorization'), 'Bearer secret');
+    assert.ok(headers.get('anthropic-version'));
+    assert.deepEqual(await adapter.generateProposal(input('anthropic', { onEvent: (event) => events.push(event) })), proposal);
+    assert.equal(calls[1].url, 'https://api.anthropic.com/v1/messages');
+    const body = JSON.parse(calls[1].options.body);
+    assert.equal(body.model, 'test-model');
+    assert.equal(body.stream, true);
+    assert.equal(body.output_config.format.type, 'json_schema');
+    assert.equal('thinking' in body, false);
+    assert.match(body.messages.at(-1).content, /OPERATION SCHEMA/);
+    assert.deepEqual(events.filter((event) => event.type === 'thinking').map((event) => event.text), ['Considering the node.']);
+    assert.equal(events.filter((event) => event.type === 'output').map((event) => event.text).join(''), JSON.stringify(proposal));
+});
+
+test('Claude\'s output schema is the operation schema without what structured outputs do not take', async () => {
+    const { claudeOutputSchema } = await import('../src/aiRemoteProviders.mjs');
+    const reduced = claudeOutputSchema({
+        $schema: 'https://json-schema.org/draft/2020-12/schema', title: 'T', oneOf: [{ $ref: '#/$defs/a' }],
+        $defs: { a: { type: 'object', additionalProperties: false, properties: { pattern: { type: 'string', pattern: '^x', minLength: 1 }, n: { type: 'number', minimum: 0 } } } }
+    });
+    assert.deepEqual(reduced, {
+        anyOf: [{ $ref: '#/$defs/a' }],
+        $defs: { a: { type: 'object', additionalProperties: false, properties: { pattern: { type: 'string' }, n: { type: 'number' } } } }
+    });
+});
+
+test('Anthropic asks again without the output format when the API refuses the schema, and reports a refusal plainly', async () => {
+    const bodies = [];
+    const adapter = provider('anthropic', async (url, options = {}) => {
+        bodies.push(JSON.parse(options.body));
+        if (bodies.length === 1) return jsonResponse({ type: 'error', error: { type: 'invalid_request_error', message: 'output_config.format: schema is too complex' } }, 400);
+        return anthropicStream(JSON.stringify(proposal));
+    });
+    assert.deepEqual(await adapter.generateProposal(input('anthropic')), proposal);
+    assert.equal('output_config' in bodies[1], false);
+
+    const declining = provider('anthropic', async () => anthropicStream('', { stopReason: 'refusal' }));
+    await assert.rejects(declining.generateProposal(input('anthropic')), { code: 'providerRefused' });
+    const unauthorized = provider('anthropic', async () => jsonResponse({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }, 401));
+    await assert.rejects(unauthorized.listModels(input('anthropic')), (error) => error.code === 'providerHttpError' && error.status === 401 && /invalid x-api-key/.test(error.message));
+    await assert.rejects(provider('anthropic', async () => jsonResponse({})).generateProposal(input('anthropic', { credential: '' })), { code: 'credentialRequired' });
+});
+
+test('Cancelling an Anthropic request ends it as a cancel, not an error', async () => {
+    const controller = new AbortController();
+    const adapter = provider('anthropic', (url, options) => new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    }));
+    const pending = adapter.generateProposal(input('anthropic', { signal: controller.signal }));
+    controller.abort();
+    await assert.rejects(pending, { name: 'AbortError' });
+});

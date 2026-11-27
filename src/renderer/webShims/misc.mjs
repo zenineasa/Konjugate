@@ -396,6 +396,7 @@ export const aiProviders = {
     testDraftConnection: async () => ({ available: false }),
     signIn: async () => ({ ok: false, error: { message: 'Signing in to a provider needs the desktop app.', code: 'signInUnavailable' } }),
     cancelSignIn: async () => false,
+    openKeyPage: async () => false,
     generateProposal: async () => {
         throw new Error('AI-assisted authoring is not available in the web edition yet.');
     },

@@ -3,6 +3,7 @@
 import { AssistantProviderError } from './assistantProviders.mjs';
 import { isStreamingResponse, newlineDelimitedJson, serverSentEvents, streamLines } from './aiStreaming.mjs';
 import { loopbackAuthorization } from './aiOAuth.mjs';
+import Anthropic from '@anthropic-ai/sdk';
 
 const defaults = Object.freeze({
     ollama: 'http://127.0.0.1:11434',
@@ -10,6 +11,7 @@ const defaults = Object.freeze({
     nvidia: 'https://integrate.api.nvidia.com',
     huggingFace: 'https://router.huggingface.co',
     openRouter: 'https://openrouter.ai/api',
+    anthropic: 'https://api.anthropic.com',
     gemini: 'https://generativelanguage.googleapis.com'
 });
 
@@ -246,6 +248,8 @@ function geminiProvider() {
     return {
         id: 'gemini', name: 'Google Gemini', defaultEndpoint: defaults.gemini, defaultTimeoutSeconds: 60,
         credentialRequired: true, locality: 'online',
+        // Keys made in Google AI Studio are free and have a free tier, the shortest way to a working Gemini configuration.
+        keyPage: 'https://aistudio.google.com/apikey', keyPageLabel: 'Get a free key from Google AI Studio ›',
         async listModels({ configuration, credential, signal, fetchImpl }) {
             requireCredential(credential, 'Google Gemini');
             const result = await responseJson(fetchImpl, `${baseUrl({ ...configuration, provider: 'gemini' })}/v1beta/models`, {
@@ -343,6 +347,108 @@ function openRouterProvider() {
     });
 }
 
+// What Claude's structured outputs accept of the operation schema: a copy with `oneOf` as `anyOf` (the two shapes are told
+// apart by `responseKind`, so either reads the same), and without the keywords structured outputs do not take (string
+// and number limits, patterns, array sizes) or that describe the document rather than the value. Only the request is
+// constrained by the copy: the host still validates the proposal against the full schema.
+const unsupportedOutputKeywords = new Set(['$schema', '$id', '$comment', 'title', 'minLength', 'maxLength', 'pattern', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf', 'minItems', 'maxItems', 'uniqueItems']);
+export function claudeOutputSchema(schema) {
+    if (Array.isArray(schema)) return schema.map(claudeOutputSchema);
+    if (!schema || typeof schema !== 'object') return schema;
+    return Object.fromEntries(Object.entries(schema)
+        .filter(([key]) => !unsupportedOutputKeywords.has(key))
+        .map(([key, value]) => [key === 'oneOf' ? 'anyOf' : key, key === 'properties' || key === '$defs'
+            ? Object.fromEntries(Object.entries(value).map(([name, entry]) => [name, claudeOutputSchema(entry)]))
+            : claudeOutputSchema(value)]));
+}
+
+// The SDK's failures as the adapters' own: a cancel stays an AbortError (which the main process tells from a timeout), an
+// HTTP refusal keeps its status, and a connection that never opened says so.
+function fromAnthropicError(error) {
+    if (error instanceof Anthropic.APIUserAbortError || error?.name === 'AbortError') return new DOMException('The request was cancelled.', 'AbortError');
+    if (error instanceof Anthropic.APIConnectionError) return new AssistantProviderError(`Could not connect to the AI provider: ${error.message}`, 'connectionFailed');
+    if (error instanceof Anthropic.APIError && error.status) {
+        const detail = String(error.error?.error?.message ?? error.message ?? '').slice(0, 500);
+        const failure = new AssistantProviderError(`The AI provider returned HTTP ${error.status}${detail ? `: ${detail}` : '.'}`, 'providerHttpError');
+        failure.status = error.status;
+        return failure;
+    }
+    return error;
+}
+
+// Anthropic (Claude) with an API key from the Claude Console, through Anthropic's own SDK, given this module's fetch so
+// requests are made the same way as every other provider's. Proposals are asked for with structured outputs and the
+// reduced schema above; a model or schema the API will not constrain (HTTP 400 naming the format) is asked again without
+// it, as OpenAI's schema mode is. No `thinking` setting is sent: each model's own default is used, since models differ in
+// which settings they accept, so the panel shows no reasoning (current models think without showing it by default).
+function anthropicProvider() {
+    const client = ({ configuration, credential, fetchImpl }) => new Anthropic({
+        apiKey: credential, baseURL: baseUrl({ ...configuration, provider: 'anthropic' }), fetch: fetchImpl
+    });
+    return {
+        id: 'anthropic', name: 'Anthropic (Claude)', defaultEndpoint: defaults.anthropic, defaultTimeoutSeconds: 120,
+        credentialRequired: true, locality: 'online', keyPage: 'https://platform.claude.com/settings/keys',
+        async listModels({ configuration, credential, signal, fetchImpl }) {
+            requireCredential(credential, 'Anthropic');
+            const models = [];
+            try {
+                for await (const model of client({ configuration, credential, fetchImpl }).models.list({}, { signal })) {
+                    models.push({ id: model.id, name: model.display_name || model.id });
+                }
+            } catch (error) { throw fromAnthropicError(error); }
+            return models;
+        },
+        async testConnection(input) {
+            const models = await this.listModels(input);
+            return { connected: true, provider: 'anthropic', modelCount: models.length };
+        },
+        async generateProposal({ configuration, credential, context, request, history, repair, signal, fetchImpl, operationSchema, onEvent }) {
+            requireCredential(credential, 'Anthropic');
+            if (!configuration.model) throw new AssistantProviderError('Select a Claude model before generating a proposal.', 'modelRequired');
+            const anthropic = client({ configuration, credential, fetchImpl });
+            const attempt = async (constrained) => {
+                const stream = anthropic.messages.stream({
+                    model: configuration.model,
+                    // A proposal is a few hundred tokens; the room is for the model's own thinking, which is billed as used.
+                    max_tokens: 32000,
+                    system: 'You are the Konjugate modelling assistant. Return only JSON matching the supplied schema -- either a proposal or, if the request is ambiguous or missing information, a clarification.',
+                    messages: [...historyMessages(history), { role: 'user', content: proposalPrompt(operationSchema, context, request, repair) }],
+                    ...(constrained ? { output_config: { format: { type: 'json_schema', schema: claudeOutputSchema(operationSchema) } } } : {})
+                }, { signal });
+                let output = '';
+                for await (const event of stream) {
+                    if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+                        output += event.delta.text;
+                        if (output.length > maximumOutputCharacters) throw new AssistantProviderError('The AI provider response is too large.', 'responseTooLarge');
+                        onEvent?.({ type: 'output', text: event.delta.text });
+                    } else if (event.type === 'content_block_delta' && event.delta.type === 'thinking_delta' && event.delta.thinking) {
+                        onEvent?.({ type: 'thinking', text: event.delta.thinking });
+                    } else {
+                        // Any other event (a ping, a block starting) still shows the request is alive.
+                        onEvent?.({ type: 'activity' });
+                    }
+                }
+                const message = await stream.finalMessage();
+                if (message.stop_reason === 'refusal') {
+                    throw new AssistantProviderError('Claude declined this request. Rephrase it, or choose another model or provider.', 'providerRefused');
+                }
+                return output === '' ? undefined : output;
+            };
+            let text;
+            try {
+                try {
+                    text = await attempt(true);
+                } catch (error) {
+                    const failure = fromAnthropicError(error);
+                    if (failure.status !== 400 || !/output_config|output_format|json_schema|schema|structured/i.test(failure.message)) throw failure;
+                    text = await attempt(false);
+                }
+            } catch (error) { throw fromAnthropicError(error); }
+            return parseProposal(text);
+        }
+    };
+}
+
 export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operationSchema } = {}) {
     if (typeof fetchImpl !== 'function' || !operationSchema) throw new Error('Remote AI providers require fetch and an operation schema.');
     const bind = (provider) => Object.freeze({
@@ -354,10 +460,11 @@ export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operatio
     });
     return [
         ollamaProvider(),
-        openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true }),
-        openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia }),
-        openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace }),
+        openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true, extra: { keyPage: 'https://platform.openai.com/api-keys' } }),
+        openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia, extra: { keyPage: 'https://build.nvidia.com/settings/api-keys' } }),
+        openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace, extra: { keyPage: 'https://huggingface.co/settings/tokens' } }),
         openRouterProvider(),
+        anthropicProvider(),
         geminiProvider()
     ].map(bind);
 }

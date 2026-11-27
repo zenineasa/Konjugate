@@ -14362,6 +14362,8 @@ function syncAssistantProviderFields({ replaceEndpoint = false } = {}) {
         $('#assistantConfigurationTimeout').value = provider.defaultTimeoutSeconds ?? 60;
     }
     $('#assistantCredentialField').hidden = !provider.credentialRequired;
+    $('#assistantKeyPage').hidden = !provider.keyPage;
+    $('#assistantKeyPage').textContent = provider.keyPageLabel ?? '';
     $('#assistantThinkField').hidden = !provider.reasoningSetting;
     syncAssistantThinkNote();
     const existing = assistantConfigurationCatalog.configurations.find((item) => item.uuid === $('#assistantConfigurationUuid').value);
@@ -14711,6 +14713,7 @@ $('#assistantConfiguration').addEventListener('change', async () => {
     await window.aiProviders.setActiveConfiguration(activeAssistantConfigurationUuid).catch((error) => renderAssistantGenerationError(error.message));
 });
 $('#manageAssistantConfigurations').addEventListener('click', () => openSettings('assistant'));
+$('#assistantKeyPage').addEventListener('click', () => { window.aiProviders.openKeyPage($('#assistantConfigurationProvider').value).catch(() => {}); });
 $('#assistantConfigurationProvider').addEventListener('change', () => {
     syncAssistantProviderFields({ replaceEndpoint: true });
     setAssistantModelChoices([]);

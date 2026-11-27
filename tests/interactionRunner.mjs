@@ -9705,12 +9705,21 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#subsystemEditorComponent').hidden`), false);
         assert.match(await evaluate(window, `document.querySelector('#subsystemEditorUsage').textContent`), /^Used once in this model/);
 
-        // Another instance, renamed so the two can be told apart.
+        // Another instance, numbered as a placement from a file is, so the two can be told apart, and placed clear of the first, in view.
         await evaluate(window, `document.querySelector('#subsystemPlaceAnother').click()`);
-        await waitFor(window, `[...document.querySelectorAll('.subsystemLabel strong')].filter((name) => name.textContent === 'Plant' && getComputedStyle(name.closest('.subsystem-label')).display !== 'none').length === 2`, 'No second instance appeared.');
+        await waitFor(window, `Boolean(${proxy('Plant 2')}) && getComputedStyle(${proxy('Plant 2')}.closest('.subsystem-label')).display !== 'none'`, 'No second instance named Plant 2 appeared.');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemEditorHeading').textContent`), 'Plant 2', 'The new instance\'s card is open.');
         assert.match(await evaluate(window, `document.querySelector('#subsystemEditorUsage').textContent`), /^Used 2 times/);
-        await typeIn(`document.querySelector('#subsystemEditorName')`, 'Plant 2');
-        await waitFor(window, `Boolean(${proxy('Plant 2')})`, 'The new instance was not renamed.');
+        // Brought into view by fitting it, which moves the camera over a moment.
+        await waitForCanvasAtRest(window);
+        const boxRect = (name) => `(() => {
+            const canvas = document.querySelector('#canvas').getBoundingClientRect();
+            const rect = ${proxy(name)}.getBoundingClientRect();
+            return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, inView: rect.left >= canvas.left && rect.right <= canvas.right && rect.top >= canvas.top && rect.bottom <= canvas.bottom };
+        })()`;
+        const placedBoxes = [await evaluate(window, boxRect('Plant')), await evaluate(window, boxRect('Plant 2'))];
+        assert.ok(placedBoxes.every((rect) => rect.inView), `Both instances are in view: ${JSON.stringify(placedBoxes)}`);
+        assert.ok(placedBoxes[1].left >= placedBoxes[0].right || placedBoxes[1].top >= placedBoxes[0].bottom || placedBoxes[1].bottom <= placedBoxes[0].top, `Plant 2's label is clear of Plant's: ${JSON.stringify(placedBoxes)}`);
         const tanks = async () => (await saved()).nodes.filter((item) => item.name.startsWith('Tank') && item.subsystemId != null).map((item) => item.name).sort();
         assert.deepEqual(await tanks(), ['Tank', 'Tank']);
 

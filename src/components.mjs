@@ -478,17 +478,30 @@ export function pasteComponentCopy(document, copy, { parentSubsystemId = null, p
     return { document: expanded, subsystemId, definitionId: existing.id };
 }
 
-// Another instance of the same local definition, beside the first.
-export function placeAnotherInstance(document, subsystemId, { offset = [3.5, 0, 0] } = {}) {
+// The name of another instance of `name` among `takenNames`: numbered as placing from a file or the library numbers it ("Plant" gives
+// "Plant 2", then "Plant 3"), and a name already numbered goes on from its number ("Stage 1" gives "Stage 2", "Plant 2" gives "Plant 3"),
+// so the card, the endpoint list and the results say which box is meant.
+export function anotherInstanceName(name, takenNames) {
+    const taken = new Set(takenNames);
+    const numbered = /^(.*\S) (\d+)$/.exec(name);
+    if (!numbered) return distinctPartName(name, taken);
+    for (let number = Number(numbered[2]) + 1; ; number += 1) if (!taken.has(`${numbered[1]} ${number}`)) return `${numbered[1]} ${number}`;
+}
+
+// Another instance of the same local definition, beside the first: numbered (anotherInstanceName), at `position` when the caller has
+// found a place clear of what is drawn, else `offset` from the first.
+export function placeAnotherInstance(document, subsystemId, { offset = [3.5, 0, 0], position = null } = {}) {
     const next = clone(document);
     syncDefinitions(next);
     const record = next.subsystems.find((subsystem) => subsystem.id === subsystemId);
     if (record?.definitionId == null) throw new Error('Only an instance of a component can be placed again.');
     const allocate = idAllocator(next);
     const instanceId = allocate();
+    const parentSubsystemId = record.parentSubsystemId ?? null;
+    const siblingNames = next.subsystems.filter((subsystem) => !subsystem.deleted && (subsystem.parentSubsystemId ?? null) === parentSubsystemId).map((subsystem) => subsystem.name);
     next.subsystems.push({
-        id: instanceId, name: record.name, parentSubsystemId: record.parentSubsystemId ?? null,
-        position: record.position.map((value, index) => Number(value) + Number(offset[index] ?? 0)), definitionId: record.definitionId,
+        id: instanceId, name: anotherInstanceName(record.name, siblingNames), parentSubsystemId,
+        position: position ? position.map(Number) : record.position.map((value, index) => Number(value) + Number(offset[index] ?? 0)), definitionId: record.definitionId,
         ...(record.parameterValues ? { parameterValues: clone(record.parameterValues) } : {})
     });
     const { document: expanded } = expandInstance(next, instanceId, { allocateId: allocate });

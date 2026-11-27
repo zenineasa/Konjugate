@@ -77,21 +77,21 @@ const steps = Object.freeze([
     {
         id: 'another',
         title: 'Place it again',
-        text: 'Press "Place another instance" in the card. The second box is the same component: change something inside either, and the other follows.',
+        text: `Press "Place another instance" in the card. The second box, "${values.subsystem} 2", is the same component: change something inside either, and the other follows.`,
         target: (ui) => (ui.subsystemCardFor ? '#subsystemPlaceAnother' : ui.subsystemLabelOf(values.subsystem)), skip: 'placeAnotherInstance', subsystem: values.subsystem,
         done: ({ document }) => twoInstances(document)
     },
     {
         id: 'ownValue',
         title: 'Give the second its own conductance',
-        text: `In the second box's card, set ${values.parameter.name} to ${values.parameter.secondValue} W/K. The first keeps 50: what is exposed is each instance's own.`,
+        text: `In ${values.subsystem} 2's card, set ${values.parameter.name} to ${values.parameter.secondValue} W/K. The first keeps 50: what is exposed is each instance's own.`,
         target: (ui) => (ui.subsystemCardFor ? '#subsystemEditorParameterList [data-parameter-value]' : '#canvas'), skip: 'setInstanceParameter', symbol: values.parameter.symbol, value: values.parameter.secondValue,
         done: ({ document }) => ownValue(document)
     },
     {
         id: 'connect',
         title: 'Connect the two',
-        text: `Open the Add menu and choose Relationship. The boxes hide the nodes inside them, so choose its ends from the list in the bar at the top, which names each by where it is: the first box's ${values.link.from}, then the second box's ${values.link.to}. Its card opens: write its equation there. Heat now flows from one component to the other.`,
+        text: `Open the Add menu and choose Relationship. The boxes hide the nodes inside them, so choose its ends from the list in the bar at the top, which names each by where it is: ${values.subsystem}'s ${values.link.from}, then ${values.subsystem} 2's ${values.link.to}. Its card opens: write its equation there. Heat now flows from one component to the other.`,
         target: (ui) => (ui.endpointPick ? '#endpointPickList' : '#addButton'), skip: 'connectInstances', ...values.link,
         done: ({ document }) => connected(document)
     },
@@ -105,7 +105,7 @@ const steps = Object.freeze([
     {
         id: 'library',
         title: 'Keep it in your library',
-        text: `Close the results, click a "${values.subsystem}" box to select it, and press "Save to my library" (⊞) in the toolbar, then Save. It is kept as a component, with its port and parameter, to place in any model.`,
+        text: `Close the results, click the "${values.subsystem}" box to select it, and press "Save to my library" (⊞) in the toolbar, then Save. It is kept as a component, with its port and parameter, to place in any model.`,
         // What can be done next: the results closed, a box selected, then Save to my library (off until both are done).
         target: (ui) => (ui.templateDialogOpen ? '#templateSubmit' : ui.hasResult ? (ui.closeResultsDialogOpen ? '#confirmCloseResults' : '#closeResults')
             : ui.saveToLibraryReady ? '#saveTemplateButton' : ui.subsystemLabelOf(values.subsystem)),

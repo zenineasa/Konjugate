@@ -14636,6 +14636,23 @@ function bringIntoViewWithLabel(object) {
     if (outside(object.position) || outside(object.position.clone().add(new THREE.Vector3(3, 0, 0)))) fitCurrentView();
 }
 
+// Moves the view sideways so that `object`'s label, drawn past the canvas's left or right edge, stands inside it, with a margin.
+function panLabelIntoView(object, margin = 24) {
+    const label = object.userData.labelElement?.getBoundingClientRect();
+    const canvas = renderer.domElement.getBoundingClientRect();
+    if (!label?.width) return;
+    const shiftPx = label.right + margin > canvas.right ? label.right + margin - canvas.right : label.left - margin < canvas.left ? label.left - margin - canvas.left : 0;
+    if (!shiftPx) return;
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    const screenX = (point) => ((point.clone().project(camera).x + 1) / 2) * canvas.width;
+    const pixelsPerUnit = Math.abs(screenX(object.position.clone().add(right)) - screenX(object.position));
+    if (!(pixelsPerUnit > 1)) return;
+    const move = right.multiplyScalar(shiftPx / pixelsPerUnit);
+    camera.position.add(move);
+    orbitControls.target.add(move);
+    orbitControls.update();
+}
+
 // Where an FMU added from a menu goes when it is not dropped: to the right of the rightmost node in view, so several FMUs added one
 // after another stand side by side rather than on top of each other, and the arrows between them can be seen.
 function besideVisibleNodes() {
@@ -21868,16 +21885,23 @@ $('#subsystemPlaceAnother').addEventListener('click', () => {
     const id = currentSubsystemCardId();
     if (id === null) return;
     let placed = null;
+    // Clear of the first and of every label and terminal drawn, as a component placed from a file or the library is.
+    const first = subsystemObjects.get(id)?.position;
+    const position = first ? [xClearOfDrawnModel(first, 3.5), first.y, first.z] : null;
     applyDocumentChange((document) => {
-        const result = placeAnotherInstance(document, id);
+        const result = placeAnotherInstance(document, id, { position });
         placed = result.subsystemId;
         return result.document;
-    }, 'Another instance placed beside it: a change inside one reaches both');
+    }, (after) => `${after.subsystems.find((subsystem) => subsystem.id === placed)?.name ?? 'Another instance'} placed beside it: a change inside one reaches both`);
     if (placed !== null) {
         // Placed clear of what is drawn, it may stand outside the view: brought into it, with its label.
-        if (subsystemObjects.get(placed)) bringIntoViewWithLabel(subsystemObjects.get(placed));
+        const object = subsystemObjects.get(placed);
+        if (object) bringIntoViewWithLabel(object);
         selectSubsystem(placed);
         openSubsystemEditor(placed);
+        // A fit frames the boxes, not their labels: one placed at the right may stand in view with its label past the canvas's edge, drawn
+        // on the next frame. The view is then moved along by as much.
+        if (object) requestAnimationFrame(() => requestAnimationFrame(() => panLabelIntoView(object)));
     }
 });
 $('#subsystemMakeSeparate').addEventListener('click', () => {

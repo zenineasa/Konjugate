@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    componentDocumentOf, declarePort, describeComponentDocument, expandInstance, exposeParameter, extractComponent, instanceCount,
+    anotherInstanceName, componentDocumentOf, declarePort, describeComponentDocument, expandInstance, exposeParameter, extractComponent, instanceCount,
     instanceParameters, instancePorts, migrateLegacySubsystems, placeAnotherInstance, placeComponent, portNameAsKept, portNameLimit, separateInstance, declareRootPort,
     refreshDefinition, setInstanceParameter, stripComponents, subsystemPath, syncDefinitions
 } from '../src/components.mjs';
@@ -58,6 +58,26 @@ test('a project from before components becomes an instance of a local definition
     assert.equal(after.nodes.find((item) => item.id === 1).definitionKey, 1);
     assert.equal(after.nodes.find((item) => item.id === 5).definitionKey, undefined, 'Outside nodes are not keyed.');
     assert.deepEqual(flat(after), flat(before), 'The engine sees the same flat graph.');
+});
+
+test('another instance is numbered as a placement from a file is, and placed where the caller found room', () => {
+    let document = migrateLegacySubsystems(project());
+    const second = placeAnotherInstance(document, 20);
+    const named = (placed) => placed.document.subsystems.find((item) => item.id === placed.subsystemId);
+    assert.equal(named(second).name, 'Plant 2');
+    assert.deepEqual(named(second).position, [3.5, 0, 0], 'Without a place found, it is offset from the first.');
+    document = second.document;
+    // From the first or from the second, the next is Plant 3: never a name already used.
+    assert.equal(named(placeAnotherInstance(document, 20)).name, 'Plant 3');
+    const third = placeAnotherInstance(document, second.subsystemId, { position: [12, 1, -2] });
+    assert.equal(named(third).name, 'Plant 3');
+    assert.deepEqual(named(third).position, [12, 1, -2], 'A place clear of what is drawn is used as given.');
+    assert.equal(instanceCount(third.document, 20), 3);
+
+    assert.equal(anotherInstanceName('Plant', ['Plant', 'Heater']), 'Plant 2');
+    assert.equal(anotherInstanceName('Stage 1', ['Stage 1']), 'Stage 2');
+    assert.equal(anotherInstanceName('Plant 2', ['Plant', 'Plant 2', 'Plant 3']), 'Plant 4');
+    assert.equal(anotherInstanceName('Plant', ['Heater']), 'Plant', 'A name not in use is kept.');
 });
 
 test('expanding an instance again keeps every id, and another instance gets the same ids every time', () => {

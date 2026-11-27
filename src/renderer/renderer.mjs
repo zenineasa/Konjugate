@@ -2269,19 +2269,29 @@ function positionProgramRead(object) {
     object.end = end;
 }
 
-// An FMU's terminals keep their size on screen, so where each stands in the scene changes with the camera: the reads into them are
-// drawn again to their own terminal once the labels have been laid out (render, below), and only when an end has moved.
+// An FMU's terminals keep their size on screen, so where each stands in the scene changes with the camera, and with anything else
+// that lays them out again: a column drawn afresh, the canvas resized as a card opens or closes, a label's text. The reads into them
+// are checked against their own terminal every frame once the labels have been laid out (render, below), and drawn again only when an
+// end has moved. Following the camera alone left an end beside its terminal after the terminal moved for another reason (an
+// interaction test saw it 2 runs in 5): an end worked out while the canvas was being resized is mapped with a width the labels were
+// not drawn with (a frame's drawing comes before its layout), and nothing redrew it once the camera stopped.
 let programReadEndsStale = false;
 function refreshProgramReadEnds() {
     programReadEndsStale = false;
+    let moved = false;
     for (const object of programReadObjects.values()) {
         if (!object.read?.fmu) continue;
         const toObject = nodeObjects.get(object.read.toId);
         if (!toObject) continue;
         const end = fmuInputEnd(toObject, object.read.inputKey);
-        if (!object.end || end.distanceToSquared(object.end) > 1e-8) positionProgramRead(object);
+        if (!object.end || end.distanceToSquared(object.end) > 1e-8) {
+            positionProgramRead(object);
+            moved = true;
+        }
     }
+    return moved;
 }
+const readsIntoFmus = () => [...programReadObjects.values()].some((object) => object.read?.fmu);
 
 // For the interaction tests: where each read into a node ends on screen, by the reading node and its input.
 window.__debugProgramReadEnds = () => [...programReadObjects.values()].filter((object) => object.read && object.end).map((object) => {
@@ -23376,9 +23386,8 @@ function render(time) {
     }
     renderer.render(scene, camera);
     labelRenderer.render(scene, camera);
-    // The reads into an FMU end at its terminals, laid out just now.
-    if ((cameraMoved || programReadEndsStale) && programReadObjects.size) {
-        refreshProgramReadEnds();
+    // The reads into an FMU end at its terminals, laid out just now: drawn again when one has moved, for whatever reason.
+    if ((programReadEndsStale || readsIntoFmus()) && programReadObjects.size && (refreshProgramReadEnds() || cameraMoved)) {
         renderer.render(scene, camera);
     }
     releaseSettleWaiters('frame');

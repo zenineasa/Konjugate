@@ -13693,6 +13693,25 @@ export async function runInteractionTests(driver) {
             for (const end of ends) {
                 assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.right) <= 3, `The read into ${end.key} does not end at its own terminal: ${JSON.stringify(end)}`);
             }
+            // A terminal laid out again with the camera still (here the column spaced out, so each moves along it) takes its read's end with
+            // it: the ends followed the camera alone, so one stayed beside a terminal that had moved for another reason.
+            await evaluate(window, `(() => { const style = document.createElement('style'); style.id = 'tallerTerminals'; style.textContent = '.boxPorts.left { gap: 80px !important; }'; document.head.appendChild(style); })()`);
+            try {
+                await waitForCanvasAtRest(window);
+                await new Promise((resolve) => setTimeout(resolve, 300));
+                const moved = await evaluate(window, `window.__debugProgramReadEnds().filter((end) => end.nodeId === ${id}).map((end) => {
+                    const rect = document.querySelector('.boxPort[data-box="n${id}"][data-box-port="input"][data-port-key="' + end.inputKey + '"]').getBoundingClientRect();
+                    return { key: end.inputKey, x: end.x, y: end.y, left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+                })`);
+                const middle = (end) => (end.top + end.bottom) / 2;
+                assert.ok(moved.some((end) => Math.abs(middle(end) - middle(ends.find((before) => before.key === end.key))) > end.bottom - end.top), `The terminals did not move: ${JSON.stringify({ ends, moved })}`);
+                for (const end of moved) {
+                    assert.ok(end.y >= end.top - 1 && end.y <= end.bottom + 1 && Math.abs(end.x - end.right) <= 3, `Laid out again, the read into ${end.key} does not end at its own terminal: ${JSON.stringify(end)}`);
+                }
+            } finally {
+                await evaluate(window, `document.querySelector('#tallerTerminals')?.remove()`);
+            }
+            await waitForCanvasAtRest(window);
             // The FMU's own output to its own input, as Connect to… offers "this.command": accepted, the same entry the card writes.
             await dragBetween(window, await centreOf(window, terminal(id, 'output', 'command')), await centreOf(window, terminal(id, 'input', 'measurement')));
             const commandId = (await savedProject()).nodes.find((node) => node.id === id).states.find((state) => state.symbol === 'command').id;

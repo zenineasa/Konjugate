@@ -1061,6 +1061,22 @@ export async function runInteractionTests(driver) {
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('a model tool found on this computer is offered first and used in one click', async () => {
+        // Where the Copilot CLI is not installed, it is offered for install, and nothing is installed without the person agreeing.
+        await evaluate(window, `document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-tool-row="copilotCli"]'))`, 'The Copilot CLI was not offered.');
+        if (await evaluate(window, `Boolean(document.querySelector('[data-tool-install="copilotCli"]'))`)) {
+            assert.match(await evaluate(window, `document.querySelector('[data-tool-row="copilotCli"]').textContent`), /GitHub Copilot.*Copilot subscription.*Install…/);
+            const asked = driver.waitForDialog({ kind: 'message', includes: 'Install GitHub Copilot?' });
+            await evaluate(window, `document.querySelector('[data-tool-install="copilotCli"]').click()`);
+            const consent = await asked;
+            assert.match(consent.detail, /GitHub's installer[\s\S]*Installer: https:\/\/gh\.io\/copilot-install/);
+            assert.deepEqual(consent.buttons, ['Cancel', 'Install']);
+            await waitFor(window, `Boolean(document.querySelector('[data-tool-install="copilotCli"]')) && !document.querySelector('[data-tool-install="copilotCli"]').disabled`, 'Declining the install left the row busy.');
+        }
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+
         // A fake GitHub Copilot CLI first on the PATH the app looks in (this runs in the app's main process).
         const toolFolder = await mkdtemp(join(tmpdir(), 'konjugate-fake-copilot-'));
         await writeFile(join(toolFolder, 'copilot'), `#!${process.execPath}\nprocess.stdout.write(JSON.stringify({ type: 'result', exitCode: 0 }) + '\\n');`);
@@ -1073,7 +1089,8 @@ export async function runInteractionTests(driver) {
             await waitFor(window, `Boolean(document.querySelector('[data-tool-row="copilotCli"]'))`, 'The Copilot CLI on this computer was not offered.');
             assert.equal(await isRenderedVisible(window, '#assistantToolsSection'), true);
             assert.equal(await evaluate(window, `document.querySelector('.assistantListView').firstElementChild.id`), 'assistantToolsSection', 'What the person already has is not shown first.');
-            assert.match(await evaluate(window, `document.querySelector('[data-tool-row="copilotCli"]').textContent`), /GitHub Copilot.*Installed on this computer.*Use it/);
+            await waitFor(window, `/Installed on this computer/.test(document.querySelector('[data-tool-row="copilotCli"]').textContent)`, 'The installed Copilot CLI was not found.');
+            assert.match(await evaluate(window, `document.querySelector('[data-tool-row="copilotCli"]').textContent`), /GitHub Copilot.*Installed on this computer.*Use it.*Sign in/);
             assert.equal(await evaluate(window, `Boolean(document.querySelector('[data-tool-row="claudeCode"]'))`), false, 'Claude Code was offered without its experimental switch.');
             await evaluate(window, `document.querySelector('[data-tool-use="copilotCli"]').click()`);
             await waitFor(window, `document.querySelector('[data-tool-row="copilotCli"] .settingsBadge')?.textContent === 'In use'`, 'Use it did not put Copilot in use.');

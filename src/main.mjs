@@ -3545,6 +3545,54 @@ ipcMain.handle('aiDetectTools', async (event) => {
     return aiProviderRegistry.detectTools();
 });
 
+// Installing a vendor's tool, or signing in with it, one task at a time: the person agrees to an install in a native dialog
+// that names the installer, what it is printing is sent to the window as it comes (a sign-in may print a link or a code), and
+// the tools are looked for again afterwards.
+let activeAIToolTask = null;
+const runAIToolTask = async (event, provider, task) => {
+    activeAIToolTask?.controller.abort();
+    const controller = new AbortController();
+    const current = { owner: event.sender, controller };
+    activeAIToolTask = current;
+    const abort = () => controller.abort();
+    event.sender.once('destroyed', abort);
+    // Every line, not only the latest: a sign-in's link or code must not be skipped for the line after it.
+    const onOutput = (line) => {
+        if (!event.sender.isDestroyed()) event.sender.send('aiToolProgress', { provider, line: String(line).slice(0, 500) });
+    };
+    try {
+        await task({ signal: controller.signal, onOutput });
+        return { ok: true, tools: await aiProviderRegistry.detectTools() };
+    } catch (error) {
+        const cancelled = error.name === 'AbortError';
+        return { ok: false, error: { message: cancelled ? 'Stopped.' : error.message, code: cancelled ? 'taskCancelled' : error.code ?? 'toolTaskFailed' } };
+    } finally {
+        event.sender.removeListener('destroyed', abort);
+        if (activeAIToolTask === current) activeAIToolTask = null;
+    }
+};
+ipcMain.handle('aiInstallTool', async (event, provider) => {
+    requireProjectWindow(event);
+    const installer = aiProviderRegistry.toolInstaller(provider);
+    if (!installer) return { ok: false, error: { message: 'Konjugate cannot install that tool on this computer.', code: 'installUnavailable' } };
+    const { response } = await dialog.showMessageBox(BrowserWindow.fromWebContents(event.sender), {
+        type: 'question', buttons: ['Cancel', 'Install'], defaultId: 1, cancelId: 0,
+        message: `Install ${installer.name}?`, detail: `${installer.notice}\n\nInstaller: ${installer.source}`
+    });
+    if (response !== 1) return { ok: false, error: { message: '', code: 'installCancelled' } };
+    return runAIToolTask(event, provider, ({ signal, onOutput }) => aiProviderRegistry.installTool({ provider, signal, onOutput }));
+});
+ipcMain.handle('aiSignInWithTool', async (event, provider) => {
+    requireProjectWindow(event);
+    return runAIToolTask(event, provider, ({ signal, onOutput }) => aiProviderRegistry.signInWithTool({ provider, signal, onOutput }));
+});
+ipcMain.handle('aiCancelToolTask', async (event) => {
+    requireProjectWindow(event);
+    if (!activeAIToolTask || activeAIToolTask.owner !== event.sender) return false;
+    activeAIToolTask.controller.abort();
+    return true;
+});
+
 ipcMain.handle('aiCancelSignIn', async (event) => {
     requireProjectWindow(event);
     if (!activeAISignIn || activeAISignIn.owner !== event.sender) return false;

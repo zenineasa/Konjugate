@@ -34,6 +34,7 @@ function candidateFolders({ platform, home, env }) {
 export function createVendorToolRunner({ spawn = spawnProcess, platform = process.platform, home = homedir(), env = process.env } = {}) {
     const names = (tool) => (platform === 'win32' ? [`${tool}.exe`, `${tool}.cmd`] : [tool]);
     return Object.freeze({
+        platform, home,
         // The tool's executable, or null when it is not installed where its installers put it.
         async find(tool) {
             for (const folder of [...new Set(candidateFolders({ platform, home, env }))]) {
@@ -47,13 +48,14 @@ export function createVendorToolRunner({ spawn = spawnProcess, platform = proces
             }
             return null;
         },
-        // Runs it, giving `stdin`, telling `onLine` each line of its output as it comes, and resolving to { code, stdout, stderr }
-        // (stdout only when there is no `onLine`). Ended by `signal` or after `timeoutMilliseconds`.
-        run(path, args, { stdin = '', cwd, onLine, signal, timeoutMilliseconds = 30_000 } = {}) {
+        // Runs it, giving `stdin`, telling `onLine` each line of its output as it comes (and `onErrorLine` each line of its error
+        // output), and resolving to { code, stdout, stderr } (stdout only when there is no `onLine`). Ended by `signal` or after
+        // `timeoutMilliseconds`. `extraEnv` adds to the environment for this run.
+        run(path, args, { stdin = '', cwd, onLine, onErrorLine, signal, timeoutMilliseconds = 30_000, extraEnv = {} } = {}) {
             return new Promise((resolve, reject) => {
                 if (signal?.aborted) { reject(new DOMException('The request was cancelled.', 'AbortError')); return; }
                 // A .cmd needs a shell on Windows; every argument here is Konjugate's own, never the person's text.
-                const child = spawn(path, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: platform === 'win32' && path.endsWith('.cmd') });
+                const child = spawn(path, args, { cwd, env: { ...env, ...extraEnv }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: platform === 'win32' && path.endsWith('.cmd') });
                 let stdout = '';
                 let stderr = '';
                 let pending = '';
@@ -74,7 +76,11 @@ export function createVendorToolRunner({ spawn = spawnProcess, platform = proces
                     }
                 });
                 child.stderr.setEncoding('utf8');
-                child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-maximumStderrCharacters); });
+                child.stderr.on('data', (chunk) => {
+                    stderr = (stderr + chunk).slice(-maximumStderrCharacters);
+                    // An installer or a sign-in says what it is doing on either stream; `onErrorLine` hears the other one.
+                    if (onErrorLine) for (const line of chunk.split('\n')) if (line.trim()) onErrorLine(line.replace(/\r$/, ''));
+                });
                 child.on('error', (error) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); reject(error); });
                 child.on('close', (code) => {
                     clearTimeout(timer);
@@ -94,6 +100,28 @@ export function createVendorToolRunner({ spawn = spawnProcess, platform = proces
     });
 }
 
+// Installing a tool runs its vendor's own published installer, as the vendor publishes it: Konjugate does not download,
+// repackage or pin the tool, so it stays the vendor's own, unmodified and kept up to date by the vendor. Both installers put
+// the tool in the person's own folders without administrator rights. `installer(platform)` gives { command, args, source,
+// extraEnv } for this computer, or null where the vendor publishes none Konjugate can run.
+async function runInstaller({ runner, installer, signal, onOutput }) {
+    const plan = installer(runner.platform);
+    if (!plan) throw new AssistantProviderError('Konjugate cannot install this tool on this computer. See the vendor\'s page for how to install it.', 'installUnavailable');
+    const { code, stderr } = await runner.run(plan.command, plan.args, {
+        signal, onLine: onOutput, onErrorLine: onOutput, extraEnv: plan.extraEnv ?? {}, timeoutMilliseconds: 10 * 60_000
+    });
+    if (code !== 0) throw new AssistantProviderError(`The installer did not finish${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}.`, 'installFailed');
+    return true;
+}
+
+// Signing in with the tool's own sign-in command, which opens the vendor's page in the browser; what it prints (a link or a
+// code to enter) is passed on through `onOutput`, so the page can show it. Five minutes at most.
+async function runToolSignIn({ runner, path, args, signal, onOutput }) {
+    const { code, stderr } = await runner.run(path, args, { signal, onLine: onOutput, onErrorLine: onOutput, timeoutMilliseconds: 5 * 60_000 });
+    if (code !== 0) throw new AssistantProviderError(`Signing in did not finish${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}. You can also sign in from a terminal.`, 'toolSignInFailed');
+    return true;
+}
+
 const lastLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).at(-1)?.slice(0, 300) ?? '';
 const instructions = 'You are the Konjugate modelling assistant. Return only JSON matching the supplied schema -- either a proposal or, if the request is ambiguous or missing information, a clarification.';
 
@@ -103,6 +131,21 @@ async function inEmptyFolder(task) {
     try { return await task(folder); } finally { await rm(folder, { recursive: true, force: true }).catch(() => {}); }
 }
 
+// Anthropic's published installers for Claude Code: into ~/.local, no administrator rights, updating itself.
+function claudeInstaller(platform) {
+    return platform === 'win32'
+        ? { command: 'powershell.exe', args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', 'irm https://claude.ai/install.ps1 | iex'], source: 'https://claude.ai/install.ps1' }
+        : { command: '/bin/bash', args: ['-c', 'curl -fsSL https://claude.ai/install.sh | bash'], source: 'https://claude.ai/install.sh' };
+}
+
+// GitHub's published installers for the Copilot CLI: its script puts it in ~/.local/bin for a person who is not root (PREFIX
+// says so outright), and on Windows GitHub publishes it through WinGet.
+function copilotInstaller(platform, home) {
+    return platform === 'win32'
+        ? { command: 'winget', args: ['install', '--id', 'GitHub.Copilot', '--exact', '--silent', '--accept-source-agreements', '--accept-package-agreements'], source: 'winget: GitHub.Copilot' }
+        : { command: '/bin/bash', args: ['-c', 'curl -fsSL https://gh.io/copilot-install | bash'], source: 'https://gh.io/copilot-install', extraEnv: { PREFIX: join(home, '.local') } };
+}
+
 function claudeCodeProvider({ runner }) {
     const notInstalled = () => new AssistantProviderError('Claude Code is not installed on this computer.', 'toolNotInstalled');
     const notSignedIn = () => new AssistantProviderError('Claude Code is not signed in. Open a terminal, run “claude auth login”, then try again.', 'toolNotSignedIn');
@@ -110,6 +153,11 @@ function claudeCodeProvider({ runner }) {
     return {
         id: 'claudeCode', name: 'Claude (through Claude Code)', defaultEndpoint: '', defaultTimeoutSeconds: 180,
         credentialRequired: false, locality: 'online', vendorTool: 'claude',
+        toolDescription: 'For a Claude subscription (Pro, Max and others). Anthropic\'s own tool.',
+        installer: claudeInstaller,
+        installNotice: 'Konjugate will run Anthropic\'s installer for Claude Code. It installs into your own folders (~/.local), without administrator rights, and keeps itself up to date. Claude Code is Anthropic\'s software, under Anthropic\'s terms.',
+        async install({ signal, onOutput }) { return runInstaller({ runner, installer: claudeInstaller, signal, onOutput }); },
+        async signInWithTool({ signal, onOutput }) { return runToolSignIn({ runner, path: await executable(), args: ['auth', 'login'], signal, onOutput }); },
         // Who is signed in, from Claude Code itself (`claude auth status`, JSON, exit 1 when signed out). Reads no file.
         async detect() {
             const path = await runner.find('claude');
@@ -196,6 +244,11 @@ function copilotProvider({ runner }) {
     return {
         id: 'copilotCli', name: 'GitHub Copilot', defaultEndpoint: '', defaultTimeoutSeconds: 180,
         credentialRequired: false, locality: 'online', vendorTool: 'copilot',
+        toolDescription: 'For a GitHub Copilot subscription (free for students and many open-source maintainers). GitHub\'s own tool.',
+        installer: (platform) => copilotInstaller(platform, runner.home),
+        installNotice: 'Konjugate will run GitHub\'s installer for the Copilot CLI. It installs into your own folders (~/.local/bin, or through WinGet on Windows), without administrator rights. The Copilot CLI is GitHub\'s software, under GitHub\'s terms, and needs a Copilot subscription.',
+        async install({ signal, onOutput }) { return runInstaller({ runner, installer: (platform) => copilotInstaller(platform, runner.home), signal, onOutput }); },
+        async signInWithTool({ signal, onOutput }) { return runToolSignIn({ runner, path: await executable(), args: ['login', '--web-flow'], signal, onOutput }); },
         // The Copilot CLI has no status command and keeps its login in the system's credential store, which Konjugate does not
         // read; whether it is signed in shows when it is first used.
         async detect() {

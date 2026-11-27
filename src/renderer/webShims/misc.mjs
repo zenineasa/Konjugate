@@ -398,6 +398,10 @@ export const aiProviders = {
     cancelSignIn: async () => false,
     openKeyPage: async () => false,
     detectTools: async () => [],
+    installTool: async () => ({ ok: false, error: { message: 'Installing tools needs the desktop app.', code: 'installUnavailable' } }),
+    signInWithTool: async () => ({ ok: false, error: { message: 'Signing in to tools needs the desktop app.', code: 'signInUnavailable' } }),
+    cancelToolTask: async () => false,
+    onToolProgress: () => {},
     generateProposal: async () => {
         throw new Error('AI-assisted authoring is not available in the web edition yet.');
     },

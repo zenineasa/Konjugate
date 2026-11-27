@@ -235,8 +235,27 @@ test('The registry reports what each vendor tool finds, and a tool that cannot b
         { id: 'toolB', name: 'Tool B', vendorTool: 'b', generateProposal: async () => ({}), detect: async () => { throw new Error('broken'); } }
     ]);
     assert.deepEqual(await registry.detectTools(), [
-        { provider: 'toolA', name: 'Tool A', account: 'a@example.com', plan: 'pro', signedIn: true, installed: true },
-        { provider: 'toolB', name: 'Tool B', account: '', plan: '', signedIn: null, installed: false }
+        { provider: 'toolA', name: 'Tool A', account: 'a@example.com', plan: 'pro', signedIn: true, description: '', installable: false, installed: true },
+        { provider: 'toolB', name: 'Tool B', account: '', plan: '', signedIn: null, description: '', installable: false, installed: false }
     ]);
     assert.equal(registry.descriptors().find((descriptor) => descriptor.id === 'toolA').vendorTool, 'a');
+});
+
+test('Installing a tool is described before it runs, and passes through to the tool', async () => {
+    const { createAIProviderRegistry } = await import('../src/aiProviderRegistry.mjs');
+    const installs = [];
+    const registry = createAIProviderRegistry([
+        { id: 'tool', name: 'Tool', vendorTool: 't', generateProposal: async () => ({}), toolDescription: 'For a plan.', installNotice: 'Runs the vendor installer.',
+            installer: (platform) => (platform === 'linux' ? { command: '/bin/bash', args: [], source: 'https://vendor.example/install' } : null),
+            install: async ({ onOutput }) => { onOutput('done'); installs.push(true); return true; }, detect: async () => ({ installed: false }) },
+        { id: 'plain', name: 'Plain', generateProposal: async () => ({}) }
+    ]);
+    assert.deepEqual(registry.toolInstaller('tool', 'linux'), { name: 'Tool', notice: 'Runs the vendor installer.', source: 'https://vendor.example/install' });
+    assert.equal(registry.toolInstaller('tool', 'win32'), null);
+    assert.equal(registry.toolInstaller('plain', 'linux'), null);
+    const heard = [];
+    assert.equal(await registry.installTool({ provider: 'tool', onOutput: (line) => heard.push(line) }), true);
+    assert.deepEqual(heard, ['done']);
+    await assert.rejects(registry.installTool({ provider: 'plain' }), { code: 'installUnavailable' });
+    assert.deepEqual((await registry.detectTools())[0], { provider: 'tool', name: 'Tool', account: '', plan: '', signedIn: null, description: 'For a plan.', installable: true, installed: false });
 });

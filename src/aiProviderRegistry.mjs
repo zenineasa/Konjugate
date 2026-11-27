@@ -47,8 +47,27 @@ export function createAIProviderRegistry(providers = []) {
             const tools = [...registry.values()].filter((provider) => typeof provider.detect === 'function');
             return Promise.all(tools.map(async (provider) => ({
                 provider: provider.id, name: provider.name, account: '', plan: '', signedIn: null,
+                description: provider.toolDescription ?? '', installable: typeof provider.install === 'function',
                 ...(await provider.detect().catch(() => ({ installed: false })))
             })));
+        },
+        // What installing a vendor tool will do, for the person to agree to first: { name, notice, source }, or null.
+        toolInstaller(id, platform = process.platform) {
+            const provider = registry.get(id);
+            if (typeof provider?.install !== 'function') return null;
+            const plan = provider.installer?.(platform);
+            return plan ? { name: provider.name, notice: provider.installNotice ?? '', source: plan.source ?? '' } : null;
+        },
+        // Runs a vendor tool's own installer, or its own sign-in; `onOutput(line)` hears what it prints.
+        async installTool({ provider: id, signal, onOutput }) {
+            const provider = registry.get(id);
+            if (typeof provider?.install !== 'function') throw new AIProviderRegistryError('That tool cannot be installed from Konjugate.', 'installUnavailable');
+            return provider.install({ signal, onOutput });
+        },
+        async signInWithTool({ provider: id, signal, onOutput }) {
+            const provider = registry.get(id);
+            if (typeof provider?.signInWithTool !== 'function') throw new AIProviderRegistryError('That tool cannot be signed in to from Konjugate.', 'signInUnavailable');
+            return provider.signInWithTool({ signal, onOutput });
         },
         // Ends a sign-in at the provider as well, where it can; false where there is nothing to end.
         async signOut({ provider: id, credential, signal }) {

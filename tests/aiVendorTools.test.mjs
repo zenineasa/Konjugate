@@ -152,3 +152,50 @@ test('Cancelling a vendor tool ends its process', unixOnly, () => withFakes(asyn
     setTimeout(() => controller.abort(), 100);
     await assert.rejects(pending, { name: 'AbortError' });
 }));
+
+// A runner that records what it is asked to run and answers as told, for the installers and sign-ins.
+const recordingRunner = ({ platform = 'linux', code = 0, lines = [], found = '/home/person/.local/bin/copilot' } = {}) => {
+    const runs = [];
+    return {
+        runs, platform, home: '/home/person',
+        find: async () => found,
+        run: async (command, args, options = {}) => {
+            runs.push({ command, args, extraEnv: options.extraEnv ?? {} });
+            for (const line of lines) options.onLine?.(line);
+            return { code, stdout: '', stderr: code ? 'Error: could not write to the folder' : '' };
+        }
+    };
+};
+
+test('Installing a tool runs its vendor\'s own published installer into the person\'s own folders', async () => {
+    const runner = recordingRunner({ lines: ['Installing GitHub Copilot CLI...', '✓ GitHub Copilot CLI installed'] });
+    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema, env: { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } });
+    const heard = [];
+    assert.equal(await copilot.install({ onOutput: (line) => heard.push(line) }), true);
+    assert.deepEqual(runner.runs[0], { command: '/bin/bash', args: ['-c', 'curl -fsSL https://gh.io/copilot-install | bash'], extraEnv: { PREFIX: '/home/person/.local' } });
+    assert.deepEqual(heard, ['Installing GitHub Copilot CLI...', '✓ GitHub Copilot CLI installed']);
+    await claude.install({});
+    assert.deepEqual(runner.runs[1].args, ['-c', 'curl -fsSL https://claude.ai/install.sh | bash']);
+    const windows = recordingRunner({ platform: 'win32' });
+    const [copilotOnWindows] = createVendorToolProviders({ runner: windows, operationSchema: schema });
+    await copilotOnWindows.install({});
+    assert.equal(windows.runs[0].command, 'winget');
+    assert.ok(windows.runs[0].args.includes('GitHub.Copilot'));
+    const failing = recordingRunner({ code: 1 });
+    const [copilotFailing] = createVendorToolProviders({ runner: failing, operationSchema: schema });
+    await assert.rejects(copilotFailing.install({}), (error) => error.code === 'installFailed' && /could not write/.test(error.message));
+});
+
+test('Signing in with a tool runs the tool\'s own sign-in and passes on what it prints', async () => {
+    const runner = recordingRunner({ lines: ['Open https://github.com/login/device and enter ABCD-1234'] });
+    const [claude, copilot] = createVendorToolProviders({ runner, operationSchema: schema, env: { KONJUGATE_EXPERIMENTAL_CLAUDE_CODE: '1' } });
+    const heard = [];
+    await copilot.signInWithTool({ onOutput: (line) => heard.push(line) });
+    assert.deepEqual(runner.runs[0].args, ['login', '--web-flow']);
+    assert.deepEqual(heard, ['Open https://github.com/login/device and enter ABCD-1234']);
+    await claude.signInWithTool({});
+    assert.deepEqual(runner.runs[1].args, ['auth', 'login']);
+    const notInstalled = recordingRunner({ found: null });
+    const [missing] = createVendorToolProviders({ runner: notInstalled, operationSchema: schema });
+    await assert.rejects(missing.signInWithTool({}), { code: 'toolNotInstalled' });
+});

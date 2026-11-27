@@ -404,6 +404,12 @@ contextBridge.exposeInMainWorld('aiProviders', {
     openKeyPage: (provider) => invokePlainly('aiOpenKeyPage', provider),
     // The vendors' own tools on this computer (Claude Code, the Copilot CLI) and who each is signed in as.
     detectTools: () => invokePlainly('aiDetectTools'),
+    // Installing a vendor's tool (after the person agrees in a dialog), or signing in with it: { ok, tools } or { ok: false, error }.
+    installTool: (provider) => invokePlainly('aiInstallTool', provider),
+    signInWithTool: (provider) => invokePlainly('aiSignInWithTool', provider),
+    cancelToolTask: () => invokePlainly('aiCancelToolTask'),
+    // What an install or a sign-in is printing: { provider, line }.
+    onToolProgress: (callback) => ipcRenderer.on('aiToolProgress', (_event, progress) => callback(progress)),
     generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
         const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
         if (result.ok) return result.proposal;

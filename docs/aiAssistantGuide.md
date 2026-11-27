@@ -22,9 +22,13 @@ The assistant needs a model. Until one is set up, its panel says so and **Set up
 
 ## Use a model you have
 
-At the very top of **Settings › Model assistant**, **Use a model you have** lists the vendors' own model tools Konjugate finds on this computer; it is hidden when there are none. Today that is the **GitHub Copilot** command-line tool (`copilot`), which uses your Copilot subscription. **Use it** makes a configuration for it with its default model and puts it in use.
+At the very top of **Settings › Model assistant**, **Use a model you have** is for a subscription you already pay for that comes with the vendor's own tool. Today that is **GitHub Copilot**, through GitHub's Copilot command-line tool (`copilot`); a Copilot subscription is free for verified students and for maintainers of many popular open-source projects.
 
-Konjugate runs the tool as it is, signed in as you by the tool's own sign-in, and never sees your password or token. Each request runs the tool once, in an empty temporary folder, with no tools of its own, without your custom instructions and built-in extensions, so all it can do is write the proposal; each request uses one of your Copilot plan's premium requests. If the tool is not signed in, the assistant says so: open a terminal, run `copilot login`, and try again.
+- If the tool is not installed, **Install…** asks first, in a dialog that names GitHub's installer, then runs it as GitHub publishes it (on macOS and Linux its script from `gh.io/copilot-install`, which installs into `~/.local/bin` for you alone; on Windows, WinGet's `GitHub.Copilot`). No administrator rights are needed; what the installer prints is shown as it runs, and **Stop** stops it.
+- **Sign in** runs the tool's own sign-in, which opens GitHub's page in your browser; if it prints a link or a code to enter, the row shows it. You can also sign in from a terminal with `copilot login`.
+- **Use it** makes a configuration for it with its default model and puts it in use.
+
+Konjugate runs the tool as it is, signed in as you by the tool's own sign-in, and never sees your password or token. Each request runs the tool once, in an empty temporary folder, with no tools of its own, without your custom instructions and built-in extensions, so all it can do is write the proposal; each request uses one of your Copilot plan's premium requests. If the tool is not signed in, the assistant says so.
 
 Konjugate looks for the tools on your PATH and where their installers put them (for example `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`), because an app opened from the Finder or the Start menu sees a shorter PATH than a terminal does.
 

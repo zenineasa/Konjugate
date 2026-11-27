@@ -16,6 +16,7 @@ import { objectiveNameLatex, objectiveSummaries } from '../objectiveText.mjs';
 import { ProgramSourceSection, ProgramSummaryView } from './programSourceSection.mjs';
 import { programStatusKey } from './programSummary.mjs';
 import { compareWithOriginal } from '../fmuComparison.mjs';
+import { fmuReplacementPlan, instanceRunByPortName, replaceInstanceWithFmu } from '../fmuReplacement.mjs';
 import { bindPort, entryIndexByKey, referenceToProviderBinding, sourceTermReferenceToBinding } from '../programBinding.mjs';
 import { measuredAt, objectivePorts } from '../objectiveTest.mjs';
 import { ConnectionsPanel } from './connectionsPanel.mjs';
@@ -21827,6 +21828,7 @@ function renderSubsystemComponent(subsystem, locked) {
     $('#subsystemMakeSeparate').disabled = locked || (uses < 2 && !linked);
     $('#subsystemMakeSeparate').hidden = uses < 2 && !linked;
     $('#subsystemMakeSeparate').textContent = linked ? 'Detach' : 'Make this one separate';
+    $('#subsystemReplaceWithFmu').disabled = locked;
     const editable = !locked && !linked;
     $('#subsystemEditorPortList').replaceChildren(...instancePorts(document_, subsystem.id).map((port) => {
         const row = document.createElement('div');
@@ -21912,6 +21914,148 @@ $('#subsystemMakeSeparate').addEventListener('click', () => {
     renderSubsystemEditor(id);
 });
 
+// ---- Replace with its FMU (docs/proposals/rootPorts.md, decision 10) -------------------------------------------------------------
+// A component instance replaced by an FMU node built from an FMU exported from it (or any FMU with its ports' names): the dialog lists
+// what matches and what does not (src/fmuReplacement.mjs), and Replace is one undoable change. The instance's last run, kept with Keep
+// them to compare, is what the FMU's run is compared with, as Try it as a node compares an exported FMU with its model.
+let replaceFmuSubsystemId = null;
+let replaceFmuChoice = null;
+const fmusRunHere = () => typeof window.projectFiles?.tryFmuAsNode === 'function';
+
+async function openReplaceWithFmu(id) {
+    const subsystem = subsystemById(id);
+    if (!subsystem) return;
+    hideCards();
+    if (!fmusRunHere()) {
+        showFmuNotice('FMUs run in the desktop app.', [
+            `Replace with its FMU puts an FMU in ${subsystem.name}'s place. An FMU carries a compiled program for a computer's own system, which a browser cannot run. The free desktop app exports a component as an FMU and replaces an instance by it.`
+        ], { desktopOnly: true });
+        return;
+    }
+    if (activeResult) {
+        showFmuNotice('Close the results to replace it with its FMU.', ['The model is locked while a run\'s results are open. Close them with Keep them to compare, and the FMU\'s run is compared with this one.']);
+        return;
+    }
+    replaceFmuSubsystemId = id;
+    replaceFmuChoice = null;
+    $('#replaceFmuTitle').textContent = `Replace ${subsystem.name} with its FMU`;
+    $('#replaceFmuMatch').hidden = true;
+    $('#replaceFmuError').textContent = '';
+    $('#replaceFmuConfirm').disabled = true;
+    $('#replaceFmuLibrary').hidden = true;
+    $('#replaceFmuLibraryList').replaceChildren();
+    $('#replaceFmuDialog').showModal();
+    // The FMUs of the library whose ports match, each a click from the comparison: an FMU exported from it and tried as a node is there.
+    let entries = [];
+    try {
+        entries = (await window.extensions.list()).filter((entry) => entry.packageType === 'fmu' && entry.enabled !== false).slice(0, 24);
+    } catch { /* none to offer */ }
+    const document_ = serializeProjectDocument();
+    const matching = [];
+    for (const entry of entries) {
+        const ports = await window.extensions.fmuPorts(entry.packageId, entry.version).catch(() => null);
+        if (!ports || ports.error || replaceFmuSubsystemId !== id) continue;
+        if (fmuReplacementPlan(document_, id, ports).ok) matching.push({ entry, ports });
+    }
+    if (replaceFmuSubsystemId !== id || !$('#replaceFmuDialog').open) return;
+    $('#replaceFmuLibraryList').replaceChildren(...matching.slice(0, 6).map(({ entry, ports }) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.fmuId = entry.packageId;
+        button.append(document.createTextNode(entry.name ?? ports.name), Object.assign(document.createElement('small'), { textContent: `FMI ${ports.fmiVersion} · version ${entry.version}` }));
+        button.addEventListener('click', () => chooseReplacementFmu({ guid: entry.packageId, version: entry.version, name: entry.name ?? ports.name }, ports));
+        return button;
+    }));
+    $('#replaceFmuLibrary').hidden = !matching.length;
+}
+
+// What the chosen FMU matches of the instance, row by row, and whether Replace can go ahead.
+function chooseReplacementFmu(fmu, ports) {
+    const id = replaceFmuSubsystemId;
+    if (id === null || !subsystemById(id)) return;
+    rememberFmuPorts(`${fmu.guid}@${fmu.version}`, ports);
+    const plan = fmuReplacementPlan(serializeProjectDocument(), id, ports);
+    replaceFmuChoice = { fmu, ports };
+    const item = (text, ok) => {
+        const element = Object.assign(document.createElement('li'), { textContent: text });
+        if (ok !== undefined) element.dataset.ok = String(ok);
+        return element;
+    };
+    const shown = new Set(plan.rows.map((row) => row.text));
+    $('#replaceFmuChosen').textContent = `${fmu.name ?? ports.name} · FMI ${ports.fmiVersion}`;
+    $('#replaceFmuRows').replaceChildren(...plan.rows.map((row) => item(row.text, row.ok)));
+    $('#replaceFmuProblems').replaceChildren(...plan.problems.filter((text) => !shown.has(text)).map((text) => item(text, false)));
+    $('#replaceFmuNotes').replaceChildren(...plan.notes.filter((text) => !shown.has(text)).map((text) => item(text)));
+    $('#replaceFmuCompare').textContent = !plan.ok
+        ? `Nothing is replaced while something above does not match: ${plan.problems.length === 1 ? 'it is' : 'they are'} marked ✕.`
+        : keptComparisonSamples
+            ? 'Its run is compared with the instance\'s kept run, output by output, once you run it.'
+            : 'To compare its run with the instance\'s, run the model first and close the results with Keep them to compare.';
+    $('#replaceFmuMatch').hidden = false;
+    $('#replaceFmuError').textContent = '';
+    $('#replaceFmuConfirm').disabled = !plan.ok;
+}
+
+$('#replaceFmuChooseFile').addEventListener('click', async () => {
+    $('#replaceFmuError').textContent = '';
+    const added = await window.extensions.addFmu?.(null);
+    if (!added || !$('#replaceFmuDialog').open) return;
+    if (added.error) {
+        $('#replaceFmuError').textContent = added.error;
+        return;
+    }
+    installedFmus = null;
+    const ports = await window.extensions.fmuPorts(added.guid, added.version);
+    if (!ports || ports.error) {
+        $('#replaceFmuError').textContent = ports?.error ?? 'The FMU could not be read.';
+        return;
+    }
+    chooseReplacementFmu({ guid: added.guid, version: added.version, name: added.name }, ports);
+});
+$('#replaceFmuCancel').addEventListener('click', () => $('#replaceFmuDialog').close());
+$('#replaceFmuDialog').addEventListener('close', () => { replaceFmuSubsystemId = null; });
+$('#replaceFmuDialog form').addEventListener('submit', (event) => {
+    event.preventDefault();
+    const id = replaceFmuSubsystemId;
+    const choice = replaceFmuChoice;
+    $('#replaceFmuDialog').close();
+    if (id !== null && choice) replaceSubsystemWithFmu(id, choice.fmu, choice.ports);
+});
+
+// The replacement itself, one undoable change; the FMU node is then selected, and its run compared with the instance's kept run.
+function replaceSubsystemWithFmu(id, fmu, ports) {
+    const before = serializeProjectDocument();
+    const name = subsystemById(id)?.name ?? 'The instance';
+    const original = instanceRunByPortName(before, id, keptComparisonSamples, name);
+    let nodeId = null;
+    let error = null;
+    applyDocumentChange((document_) => {
+        try {
+            const result = replaceInstanceWithFmu(document_, id, { fmuPorts: ports, guid: fmu.guid, version: fmu.version, newId: allocateModelEntityId });
+            nodeId = result.nodeId;
+            return result.document;
+        } catch (caught) {
+            error = caught;
+            return null;
+        }
+    }, () => `${name} replaced by its FMU ${fmu.name ?? ports.name}: every connection moved to the terminal of the same name. Undo brings the instance back${original ? '; run it to compare with the instance\'s run' : ''}`);
+    if (error || nodeId === null) {
+        showFmuNotice(`${name} was not replaced.`, [error?.message ?? 'Nothing changed.']);
+        return;
+    }
+    originalComparison = original ? { ...original, nodeId } : originalComparison;
+    const object = nodeObjects.get(nodeId);
+    if (object) {
+        bringIntoViewWithLabel(object);
+        selectNode(object);
+    }
+}
+
+$('#subsystemReplaceWithFmu').addEventListener('click', () => {
+    const id = currentSubsystemCardId();
+    if (id !== null) openReplaceWithFmu(id);
+});
+
 function openSubsystemEditor(id, clientX, clientY) {
     const card = $('#subsystemEditor');
     hideCards(card);
@@ -21969,6 +22113,8 @@ function openSubsystemContextMenu(id, clientX, clientY) {
     contextSubsystemId = id;
     const locked = Boolean(activeResult);
     ['#subsystemContextRename', '#subsystemContextDissolve', '#subsystemContextDelete'].forEach((selector) => { $(selector).hidden = locked; });
+    const instance = subsystemById(id);
+    $('#subsystemContextReplaceFmu').hidden = locked || instance?.definitionId == null || instance?.definitionKey != null;
     positionCard(menu, clientX, clientY);
 }
 
@@ -21980,6 +22126,7 @@ $('#subsystemContextRename').addEventListener('click', () => {
     $('#subsystemEditorName').focus();
     $('#subsystemEditorName').select();
 });
+$('#subsystemContextReplaceFmu').addEventListener('click', () => { if (contextSubsystemId !== null) openReplaceWithFmu(contextSubsystemId); });
 $('#subsystemContextDissolve').addEventListener('click', () => { if (contextSubsystemId !== null) dissolveSubsystemAction(contextSubsystemId); });
 $('#subsystemContextDelete').addEventListener('click', () => {
     if (contextSubsystemId === null) return;

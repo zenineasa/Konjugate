@@ -204,6 +204,29 @@
         </form>
     </dialog>
 
+    <!-- Replace with its FMU (docs/proposals/rootPorts.md, decision 10): a component instance replaced by an FMU whose ports have its names. -->
+    <dialog id="replaceFmuDialog" class="passwordDialog replaceFmuDialog">
+        <form method="dialog">
+            <span class="contextKicker">Replace with its FMU</span>
+            <strong id="replaceFmuTitle">Replace with its FMU</strong>
+            <p class="builderHint">Choose an FMU exported from this component, or any FMU whose inputs and outputs have its ports' names. Each connection moves to the FMU's terminal of the same name and its exposed parameters' values go to the FMU's parameters of the same name; one undo brings the instance back.</p>
+            <div id="replaceFmuLibrary" hidden>
+                <span class="contextKicker">In your library, matching its ports</span>
+                <div id="replaceFmuLibraryList" class="replaceFmuLibraryList"></div>
+            </div>
+            <p><button id="replaceFmuChooseFile" type="button">Choose an FMU file…</button></p>
+            <div id="replaceFmuMatch" hidden>
+                <strong id="replaceFmuChosen"></strong>
+                <ul id="replaceFmuRows" class="replaceFmuRows"></ul>
+                <ul id="replaceFmuProblems" class="replaceFmuRows replaceFmuProblems"></ul>
+                <ul id="replaceFmuNotes" class="replaceFmuRows replaceFmuNotes"></ul>
+                <p id="replaceFmuCompare" class="builderHint"></p>
+            </div>
+            <p id="replaceFmuError" class="builderHint" role="alert"></p>
+            <footer><button id="replaceFmuCancel" type="button">Cancel</button><button id="replaceFmuConfirm" class="doneButton" type="submit" disabled>Replace</button></footer>
+        </form>
+    </dialog>
+
     <dialog id="componentPlaceDialog" class="passwordDialog componentPlaceDialog">
         <form method="dialog">
             <span class="contextKicker" id="componentPlaceKicker">Place a component</span>
@@ -1254,6 +1277,7 @@
                     <button id="subsystemSaveFile" type="button" title="Save it as a .kjt of its own, which opens and runs alone and can be placed in other models">Save as component file…</button>
                     <button id="subsystemPlaceAnother" type="button" title="A second instance of the same component, kept identical: a change inside one reaches every one">Place another instance</button>
                     <button id="subsystemMakeSeparate" type="button" title="Give this instance a component of its own, so changes to it no longer reach the others">Make this one separate</button>
+                    <button id="subsystemReplaceWithFmu" type="button" title="Put an FMU exported from this component, or any FMU with its ports' names, in its place: every connection moves to the terminal of the same name, and one undo brings the instance back">Replace with its FMU…</button>
                 </div>
                 <h3>Ports</h3>
                 <p class="builderHint">The states it offers outside. A state something outside is connected to is a port already; name it, or keep it, to make it part of the component.</p>
@@ -1580,6 +1604,7 @@
             <button id="subsystemContextOpen" type="button"><i class="primitiveIcon">▤</i><span><strong>Open subsystem</strong><small>Step inside to see and edit what it holds</small></span><b>›</b></button>
             <button id="subsystemContextRename" type="button"><i class="primitiveIcon">✎</i><span><strong>Rename subsystem</strong><small>Give it a name of its own</small></span><b>›</b></button>
             <button id="subsystemContextSaveFile" type="button"><i class="primitiveIcon">⤓</i><span><strong>Save as component file…</strong><small>A .kjt of its own, to place in other models</small></span><b>›</b></button>
+            <button id="subsystemContextReplaceFmu" type="button"><i class="primitiveIcon">⇄</i><span><strong>Replace with its FMU…</strong><small>An FMU exported from it, connected the same way</small></span><b>›</b></button>
             <button id="subsystemContextDissolve" type="button"><i class="primitiveIcon">⇲</i><span><strong>Dissolve subsystem</strong><small>Put its contents in the level above, as they are</small></span><b>›</b></button>
             <hr>
             <button id="subsystemContextDelete" type="button"><i class="primitiveIcon dangerIcon">✕</i><span><strong>Delete subsystem</strong><small>With everything inside it</small></span><b>›</b></button>

@@ -8928,6 +8928,123 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
 
+    // Replace with its FMU (docs/proposals/rootPorts.md, decision 10): the stage 4 controller, exported with its ports as FMI 2.0 and
+    // FMI 3.0, replaces its instance in a model that reads it from a thermostat and a room and drives a valve with it; each FMU runs to
+    // the instance's numbers, bit for bit, the FMU's command and the valve it drives alike, and one undo brings the instance back.
+    await run('an instance is replaced by its FMU: exported as FMI 2.0 and 3.0, each runs to the instance\'s numbers bit for bit, and undo brings the instance and its connections back', async () => {
+        await putAwayLeftovers();
+        const { replacementComponent, replacementHost } = await import('./fixtures/fmuReplacementHost.mjs');
+        const label = (name) => `[...document.querySelectorAll('.subsystemLabel')].find((item) => item.querySelector('strong').textContent === ${JSON.stringify(name)} && getComputedStyle(item.parentElement).display !== 'none')`;
+        const serialize = () => evaluate(window, `window.__debugProject.serialize()`);
+        const isFmu = `(node) => node.implementation?.kind === 'fmi'`;
+        const runTwoSeconds = async (what) => {
+            await openRunDialog(window);
+            await evaluate(window, `(() => { const box = document.querySelector('#runOnlineMode'); if (box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); } const field = document.querySelector('#runTargetTime'); field.value = '2'; field.dispatchEvent(new Event('input', { bubbles: true })); })()`);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `!window.__debugTour.blockers().simulationRunning && window.__debugTour.blockers().hasResult`, `${what} did not run: ${await evaluate(window, `document.querySelector('#statusText').textContent`)}`, 180000);
+            return evaluate(window, `window.__debugSteering.result().samples`);
+        };
+        const closeResults = async (keep) => {
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing did not ask.');
+            await evaluate(window, `document.querySelector(${JSON.stringify(keep ? '#keepCloseResults' : '#confirmCloseResults')}).click()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+        };
+        const series = (samples, stateId) => samples.map((sample) => sample.states.find((state) => state.stateId === stateId)?.value);
+        const ids = (document_) => ({ nodes: document_.nodes.map((node) => node.id).sort(), edges: document_.edges.map((edge) => edge.id).sort(), subsystems: document_.subsystems.map((subsystem) => subsystem.id).sort() });
+        const exported = {};
+        try {
+            // The component opened as a project, exported with its ports.
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(replacementComponent)}, 'Ported controller.kjt')`);
+            for (const [format, version] of [['fmu', '2.0'], ['fmu3', '3.0']]) {
+                await evaluate(window, `document.querySelector('#exportCodeButton').click()`);
+                await waitFor(window, `document.querySelector('#exportCodeDialog').open`, 'The export dialog did not open.');
+                await evaluate(window, `(() => { const format = document.querySelector('#exportCodeFormat'); format.value = ${JSON.stringify(format)}; format.dispatchEvent(new Event('change')); })()`);
+                const { path } = await driver.captureExport(async () => {
+                    await evaluate(window, `document.querySelector('#exportCodeSubmit').click()`);
+                    await waitFor(window, `!document.querySelector('#exportCodeDialog').open`, `The FMI ${version} FMU was not written.`, 120000);
+                }, { fileName: `Ported controller ${version}.fmu`, maxAttempts: 400 });
+                exported[version] = path;
+                await evaluate(window, `document.querySelector('#closeExportFmuNotice').click()`);
+            }
+
+            // The model using it, run once and its results kept to compare with.
+            const { document: host, subsystemId } = replacementHost();
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(host)}, 'Controlled valve.kjt')`);
+            await waitFor(window, `Boolean(${label('Ported controller')})`, 'The instance is not drawn.');
+            const before = await serialize();
+            const commandStateId = before.nodes.find((node) => node.subsystemId === subsystemId && node.name === 'Controller').states[0].id;
+            const instanceRun = await runTwoSeconds('The instance');
+            await closeResults(true);
+
+            for (const version of ['2.0', '3.0']) {
+                // Its card's Replace with its FMU…, the FMU chosen from a file.
+                await evaluate(window, `document.querySelectorAll('.contextCard').forEach((card) => card.classList.add('hidden'))`);
+                await clickElement(window, `${label('Ported controller')}.querySelector('strong')`);
+                await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === 'Ported controller'`, 'The instance\'s card did not open.');
+                await evaluate(window, `document.querySelector('#subsystemReplaceWithFmu').click()`);
+                await waitFor(window, `document.querySelector('#replaceFmuDialog').open`, 'Replace with its FMU did not open.');
+                assert.equal(await evaluate(window, `document.querySelector('#replaceFmuTitle').textContent`), 'Replace Ported controller with its FMU');
+                if (version === '3.0') {
+                    // The FMI 2.0 FMU, in the library since, is offered as matching.
+                    await waitFor(window, `!document.querySelector('#replaceFmuLibrary').hidden && document.querySelectorAll('#replaceFmuLibraryList button').length >= 1`, 'The library\'s matching FMU is not offered.', 20000);
+                }
+                const asked = await driver.answerDialogs({ open: exported[version] }, async () => {
+                    await evaluate(window, `document.querySelector('#replaceFmuChooseFile').click()`);
+                    await waitFor(window, `!document.querySelector('#replaceFmuMatch').hidden`, `The FMI ${version} FMU was not matched: ${await evaluate(window, `document.querySelector('#replaceFmuError').textContent`)}`, 30000);
+                });
+                assert.deepEqual(asked.map((item) => item.kind), ['open']);
+                assert.match(await evaluate(window, `document.querySelector('#replaceFmuChosen').textContent`), new RegExp(`FMI ${version.replace('.', '\\.')}$`));
+                assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('#replaceFmuRows li')].map((item) => item.dataset.ok + ' ' + item.textContent)`), [
+                    'true in · setpoint (degC) → FMU input setpoint, reading Thermostat.target',
+                    'true in · measurement (degC) → FMU input measurement, reading Room.temperature',
+                    'true out · command → FMU output command, read by “Drive”',
+                    'true parameter · g = 0.8 (1/s) → FMU parameter g'
+                ]);
+                assert.equal(await evaluate(window, `document.querySelectorAll('#replaceFmuProblems li').length`), 0);
+                assert.match(await evaluate(window, `document.querySelector('#replaceFmuCompare').textContent`), /compared with the instance's kept run/);
+                await evaluate(window, `document.querySelector('#replaceFmuConfirm').click()`);
+                await waitFor(window, `!document.querySelector('#replaceFmuDialog').open && window.__debugProject.serialize().nodes.some(${isFmu})`, 'The instance was not replaced.');
+
+                // The FMU node stands in its place, read and reading as the instance did.
+                const replaced = await serialize();
+                const fmuNode = replaced.nodes.find((node) => node.implementation?.kind === 'fmi');
+                assert.equal(fmuNode.name, 'Ported controller');
+                assert.deepEqual(replaced.subsystems, []);
+                assert.deepEqual(fmuNode.implementation.bindings.map((binding) => [binding.key, binding.kind, binding.nodeId ?? binding.value]), [['setpoint', 'state', 1001], ['measurement', 'state', 1003], ['g', 'value', 0.8]]);
+                const fmuCommandStateId = fmuNode.implementation.outputs.find((output) => output.key === 'command').stateId;
+                assert.equal(replaced.edges.find((edge) => edge.name === 'Drive').source.nodeId, fmuNode.id, 'The valve reads the FMU\'s output.');
+                assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /^Ported controller replaced by its FMU .*Undo brings the instance back; run it to compare/);
+                await waitFor(window, `Boolean(document.querySelector('.boxPorts.left[data-box="n${fmuNode.id}"]'))`, 'The FMU node has no terminals.', 15000);
+
+                // Run: compared with the instance's kept run, identical; the valve it drives follows bit for bit.
+                const fmuRun = await runTwoSeconds(`The FMI ${version} FMU`);
+                await waitFor(window, `!document.querySelector('#compareOriginalPanel').hidden`, 'The run was not compared with the instance\'s.', 10000);
+                assert.match(await evaluate(window, `document.querySelector('#compareOriginalTitle').textContent`), /^Identical to Ported controller's run: largest difference 0 over 21 values/);
+                assert.deepEqual(fmuRun.map((sample) => sample.time), instanceRun.map((sample) => sample.time));
+                const same = (a, b) => a.length === b.length && a.every((value, index) => Object.is(value, b[index]));
+                assert.ok(same(series(fmuRun, fmuCommandStateId), series(instanceRun, commandStateId)), `FMI ${version}: the command differs.`);
+                assert.ok(same(series(fmuRun, 1006), series(instanceRun, 1006)), `FMI ${version}: the valve differs.`);
+                await closeResults(false);
+
+                // One undo: the instance, its nodes, its connections, as they were.
+                await evaluate(window, `(() => { document.activeElement?.blur(); window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'z', metaKey: true, ctrlKey: true })); })()`);
+                await waitFor(window, `window.__debugProject.serialize().subsystems.length === 1 && !window.__debugProject.serialize().nodes.some(${isFmu})`, 'Undo did not bring the instance back.', 8000);
+                const restored = await serialize();
+                assert.deepEqual(ids(restored), ids(before), 'The same nodes, relationships and instance.');
+                assert.deepEqual(restored.edges.map((edge) => [edge.id, edge.source, edge.target]).sort(), before.edges.map((edge) => [edge.id, edge.source, edge.target]).sort());
+                await waitFor(window, `Boolean(${label('Ported controller')})`, 'The instance is not drawn again.');
+            }
+        } finally {
+            await evaluate(window, `document.querySelector('#replaceFmuDialog').open && document.querySelector('#replaceFmuDialog').close()`).catch(() => {});
+            await evaluate(window, `window.__debugProject.load({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [] }, 'empty.kjt')`).catch(() => {});
+            await evaluate(window, `document.querySelector('#closePortsPanel')?.click()`).catch(() => {});
+            const fmus = await evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu' && /ported/i.test(entry.name ?? '')).map((entry) => ({ guid: entry.packageId, version: entry.version })))`).catch(() => []);
+            for (const fmu of fmus) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+            for (const path of Object.values(exported)) await rm(join(path, '..'), { recursive: true, force: true }).catch(() => {});
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMU export is not available in the web edition' });
+
     // ---- Everything a toolbox can write, a user can write in the canvas ------------------------------------------------
     // A small model of two nodes joined by one edge, loaded into this window, for the scenarios below.
     const loadAuthoringProject = async (overrides = {}) => {
@@ -11661,6 +11778,26 @@ export async function runInteractionTests(driver) {
         })()`);
         await waitFor(window, `!document.querySelector('#fmuNotice').hidden`, 'A dropped FMU said nothing.');
         assert.equal(await evaluate(window, `document.querySelector('#fmuNoticeTitle').textContent`), 'FMUs run in the desktop app.');
+        await evaluate(window, `document.querySelector('#closeFmuNotice').click()`);
+    }, { skip: driver.kind !== 'playwright' && 'the desktop app runs FMUs' });
+
+    // Replace with its FMU in the web edition says, as Add › FMU… does, that FMUs run in the desktop app, and changes nothing.
+    await run('Replace with its FMU in the web edition says FMUs run in the desktop app', async () => {
+        const { replacementHost } = await import('./fixtures/fmuReplacementHost.mjs');
+        const { document: host } = replacementHost();
+        await evaluate(window, `window.__debugProject.load(${JSON.stringify(host)}, 'Controlled valve.kjt')`);
+        const label = `[...document.querySelectorAll('.subsystemLabel')].find((item) => item.querySelector('strong').textContent === 'Ported controller' && getComputedStyle(item.parentElement).display !== 'none')`;
+        await waitFor(window, `Boolean(${label})`, 'The instance is not drawn.');
+        await clickElement(window, `${label}.querySelector('strong')`);
+        await waitFor(window, `!document.querySelector('#subsystemEditor').classList.contains('hidden') && document.querySelector('#subsystemEditorHeading').textContent === 'Ported controller'`, 'The instance\'s card did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#subsystemReplaceWithFmu').textContent`), 'Replace with its FMU…');
+        await evaluate(window, `document.querySelector('#subsystemReplaceWithFmu').click()`);
+        await waitFor(window, `!document.querySelector('#fmuNotice').hidden`, 'Replace with its FMU said nothing.');
+        assert.equal(await evaluate(window, `document.querySelector('#fmuNoticeTitle').textContent`), 'FMUs run in the desktop app.');
+        assert.match(await evaluate(window, `document.querySelector('#fmuNoticeLines').textContent`), /Replace with its FMU puts an FMU in Ported controller's place/);
+        assert.equal(await evaluate(window, `!document.querySelector('#fmuNoticeDownload').hidden`), true);
+        assert.equal(await evaluate(window, `document.querySelector('#replaceFmuDialog').open`), false);
+        assert.equal((await evaluate(window, `window.__debugProject.serialize()`)).subsystems.length, 1, 'Nothing is replaced.');
         await evaluate(window, `document.querySelector('#closeFmuNotice').click()`);
     }, { skip: driver.kind !== 'playwright' && 'the desktop app runs FMUs' });
 

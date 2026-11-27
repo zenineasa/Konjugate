@@ -1102,6 +1102,14 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     .componentBar .componentBarButtons button { flex: 1 1 auto; min-height: 36px; font-size: 10px; }
 }
 .componentPlaceDialog { width: min(520px, 92vw); }
+.replaceFmuDialog { width: min(560px, 92vw); }
+.replaceFmuLibraryList { display: flex; flex-wrap: wrap; gap: 6px; margin: 5px 0 8px; }
+.replaceFmuLibraryList button small { display: block; color: #6f858f; font-size: 7px; }
+.replaceFmuRows { margin: 6px 0; padding: 0; list-style: none; font-size: 9px; }
+.replaceFmuRows li { margin: 3px 0; padding-left: 14px; text-indent: -14px; }
+.replaceFmuRows li[data-ok="true"]::before { content: "✓ "; color: #62e1d5; }
+.replaceFmuRows li[data-ok="false"]::before { content: "✕ "; color: #ff8a7a; }
+.replaceFmuNotes li::before { content: "· "; color: #6f858f; }
 .componentPlaceLists { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0; }
 .componentPlaceLists h3 { margin: 0 0 5px; color: #6e828e; font-size: 7px; letter-spacing: .1em; text-transform: uppercase; }
 .componentLibraryPlaceFile { margin: 0 12px 8px; padding: 6px 9px; color: #86ddd5; background: rgb(98 225 213 / 8%); border: 1px solid #31525a; border-radius: 5px; font-size: 9px; cursor: pointer; }

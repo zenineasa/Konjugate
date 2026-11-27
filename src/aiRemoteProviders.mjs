@@ -2,12 +2,14 @@
 
 import { AssistantProviderError } from './assistantProviders.mjs';
 import { isStreamingResponse, newlineDelimitedJson, serverSentEvents, streamLines } from './aiStreaming.mjs';
+import { loopbackAuthorization } from './aiOAuth.mjs';
 
 const defaults = Object.freeze({
     ollama: 'http://127.0.0.1:11434',
     openAi: 'https://api.openai.com',
     nvidia: 'https://integrate.api.nvidia.com',
     huggingFace: 'https://router.huggingface.co',
+    openRouter: 'https://openrouter.ai/api',
     gemini: 'https://generativelanguage.googleapis.com'
 });
 
@@ -142,15 +144,17 @@ function requireCredential(credential, providerName) {
     if (!credential) throw new AssistantProviderError(`${providerName} requires an API key.`, 'credentialRequired');
 }
 
-function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }) {
+// `headers`: sent with every request besides the key. `modelsPath`: where the models this key can use are listed.
+// `extra`: what else the provider offers (signing in, choosing a model after it).
+function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false, headers = {}, modelsPath = '/v1/models', extra = {} }) {
     return {
-        id, name, defaultEndpoint: endpoint, defaultTimeoutSeconds: 60, credentialRequired: true, locality: 'online',
+        id, name, defaultEndpoint: endpoint, defaultTimeoutSeconds: 60, credentialRequired: true, locality: 'online', ...extra,
         async listModels({ configuration, credential, signal, fetchImpl }) {
             requireCredential(credential, name);
-            const result = await responseJson(fetchImpl, `${baseUrl({ ...configuration, provider: id, endpoint: configuration.endpoint || endpoint })}/v1/models`, {
-                headers: { Authorization: `Bearer ${credential}` }, signal
+            const result = await responseJson(fetchImpl, `${baseUrl({ ...configuration, provider: id, endpoint: configuration.endpoint || endpoint })}${modelsPath}`, {
+                headers: { ...headers, Authorization: `Bearer ${credential}` }, signal
             });
-            return (result.data ?? []).map((model) => ({ id: model.id, name: model.id }));
+            return (result.data ?? []).map((model) => ({ id: model.id, name: typeof model.name === 'string' && model.name ? model.name : model.id }));
         },
         async testConnection(input) {
             const models = await this.listModels(input);
@@ -163,7 +167,7 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false }
             const prompt = proposalPrompt(operationSchema, context, request, repair);
             const attempt = (responseFormat) => generateText(fetchImpl, url, {
                 method: 'POST', signal,
-                headers: { Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
+                headers: { ...headers, Authorization: `Bearer ${credential}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     model: configuration.model,
                     messages: [
@@ -276,19 +280,84 @@ function geminiProvider() {
     };
 }
 
+// The numbers in a model id, for telling a newer version of a family from an older one ("…-4.5" before "…-5").
+const versionOf = (id) => (id.match(/\d+/g) ?? []).map(Number);
+const newerFirst = (a, b) => {
+    const [left, right] = [versionOf(a.id), versionOf(b.id)];
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+        const difference = (right[index] ?? -1) - (left[index] ?? -1);
+        if (difference) return difference;
+    }
+    return 0;
+};
+
+// What a sign-in starts with when the person has not chosen: the newest of the first family the account offers. These are
+// strong at the assistant's job and priced for everyday use; the largest models (Claude Opus, for one) cost several times
+// more per request on an account that pays per use, so they are a choice the person makes, not the default. Variants
+// (":free", ":thinking") are left out: their limits and behaviour differ from the model's own.
+export const openRouterPreferredFamilies = Object.freeze([
+    /^anthropic\/claude-sonnet-[\d.]+$/,
+    /^openai\/gpt-[\d.]+$/,
+    /^google\/gemini-[\d.]+-pro$/
+]);
+
+export function suggestedModel(models, families = openRouterPreferredFamilies) {
+    const plain = models.filter((model) => typeof model?.id === 'string' && !model.id.includes(':'));
+    for (const family of families) {
+        const matches = plain.filter((model) => family.test(model.id)).sort(newerFirst);
+        if (matches.length) return matches[0].id;
+    }
+    return plain[0]?.id ?? models[0]?.id ?? '';
+}
+
+// OpenRouter: one account for models from every major vendor, signed in to with OAuth and PKCE
+// (https://openrouter.ai/docs/guides/overview/auth/oauth). The sign-in hands back an ordinary key that belongs to the
+// person's own account, which they can see, limit and revoke on OpenRouter, so it is kept like any other key. The
+// attribution headers name Konjugate on the person's OpenRouter activity page; they change nothing about a request.
+const openRouterSite = 'https://openrouter.ai';
+function openRouterProvider() {
+    return openAICompatibleProvider({
+        id: 'openRouter', name: 'OpenRouter', endpoint: defaults.openRouter,
+        headers: { 'HTTP-Referer': 'https://github.com/zenineasa/Konjugate', 'X-OpenRouter-Title': 'Konjugate' },
+        // The models this key may use, after the account's own guardrails and privacy settings.
+        modelsPath: '/v1/models/user',
+        extra: {
+            signInDescription: 'One account for Claude, GPT, Gemini and many more. Pay only for what you use.',
+            keyPage: `${openRouterSite}/settings/keys`,
+            suggestModel: (models) => suggestedModel(models),
+            async signIn({ openExternal, signal, fetchImpl }) {
+                const { code, verifier } = await loopbackAuthorization({
+                    host: 'localhost', requireState: false, openExternal, signal,
+                    authorizationUrl: (redirectUri, { challenge, state }) => `${openRouterSite}/auth?${new URLSearchParams({
+                        callback_url: redirectUri, code_challenge: challenge, code_challenge_method: 'S256', state, key_label: 'Konjugate'
+                    })}`
+                });
+                const result = await responseJson(fetchImpl, `${openRouterSite}/api/v1/auth/keys`, {
+                    method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, code_verifier: verifier, code_challenge_method: 'S256' })
+                });
+                if (typeof result?.key !== 'string' || !result.key.trim()) throw new AssistantProviderError('OpenRouter did not return a key.', 'invalidProviderResponse');
+                return { credential: result.key.trim() };
+            }
+        }
+    });
+}
+
 export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operationSchema } = {}) {
     if (typeof fetchImpl !== 'function' || !operationSchema) throw new Error('Remote AI providers require fetch and an operation schema.');
     const bind = (provider) => Object.freeze({
         ...provider,
         listModels: (input) => provider.listModels({ ...input, fetchImpl, operationSchema }),
         testConnection: (input) => provider.testConnection({ ...input, fetchImpl, operationSchema }),
-        generateProposal: (input) => provider.generateProposal({ ...input, fetchImpl, operationSchema })
+        generateProposal: (input) => provider.generateProposal({ ...input, fetchImpl, operationSchema }),
+        ...(provider.signIn ? { signIn: (input) => provider.signIn({ ...input, fetchImpl }) } : {})
     });
     return [
         ollamaProvider(),
         openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true }),
         openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia }),
         openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace }),
+        openRouterProvider(),
         geminiProvider()
     ].map(bind);
 }

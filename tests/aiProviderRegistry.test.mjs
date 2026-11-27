@@ -19,7 +19,7 @@ test('provider registry dispatches generation without exposing provider details 
     assert.equal(result.summary, 'Build it:true');
     assert.deepEqual(registry.descriptors().find((item) => item.id === 'testProvider'), {
         id: 'testProvider', name: 'Test provider', defaultEndpoint: '', defaultTimeoutSeconds: 60,
-        credentialRequired: false, locality: 'local', reasoningSetting: false
+        credentialRequired: false, locality: 'local', reasoningSetting: false, signIn: false, signInDescription: '', keyPage: ''
     });
 });
 
@@ -190,4 +190,24 @@ test('provider registry does not retry transport trouble, but does retry output 
     assert.equal(attempts.transport, 1, 'a gateway error page is not retried');
     await assert.rejects(() => run(failing('empty', 'emptyProviderOutput')), /emptyProviderOutput/);
     assert.equal(attempts.empty, 3, 'an empty reply is retried like malformed JSON');
+});
+
+test('The registry says which providers can be signed in to, and passes a sign-in through', async () => {
+    const { createAIProviderRegistry } = await import('../src/aiProviderRegistry.mjs');
+    const registry = createAIProviderRegistry([
+        { id: 'keyOnly', name: 'Key only', generateProposal: async () => ({}) },
+        { id: 'withSignIn', name: 'With sign-in', signInDescription: 'Sign in here', keyPage: 'https://example.com/keys', generateProposal: async () => ({}),
+            signIn: async ({ openExternal }) => { await openExternal('https://example.com/auth'); return { credential: 'key-1' }; },
+            suggestModel: (models) => models.at(-1).id }
+    ]);
+    const [keyOnly, withSignIn] = registry.descriptors();
+    assert.equal(keyOnly.signIn, false);
+    assert.deepEqual({ signIn: withSignIn.signIn, signInDescription: withSignIn.signInDescription, keyPage: withSignIn.keyPage },
+        { signIn: true, signInDescription: 'Sign in here', keyPage: 'https://example.com/keys' });
+    const opened = [];
+    assert.deepEqual(await registry.signIn({ provider: 'withSignIn', openExternal: async (url) => opened.push(url) }), { credential: 'key-1' });
+    assert.deepEqual(opened, ['https://example.com/auth']);
+    await assert.rejects(registry.signIn({ provider: 'keyOnly', openExternal: async () => {} }), { code: 'signInUnavailable' });
+    assert.equal(registry.suggestModel('withSignIn', [{ id: 'a' }, { id: 'b' }]), 'b');
+    assert.equal(registry.suggestModel('keyOnly', [{ id: 'a' }, { id: 'b' }]), 'a');
 });

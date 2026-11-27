@@ -28,6 +28,7 @@ import { hasUserDetails, isSomeoneElses, makeOwnershipMine, normalizeOwnership, 
 import { editProjectProperties, editSaveOwnership, showOwnershipDefaults } from './ownershipEditor.mjs';
 import { createSettingsSheet } from './settingsSheet.mjs';
 import { createLocalModelsSection } from './localModelsSection.mjs';
+import { createAssistantSignInSection } from './assistantSignInSection.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -14307,7 +14308,7 @@ function renderAssistantConfigurationList() {
         title.textContent = configuration.name;
         const details = document.createElement('small');
         details.className = 'settingsItemHint';
-        details.textContent = `${provider?.name ?? configuration.provider} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        details.textContent = `${provider?.name ?? configuration.provider}${configuration.credentialSource === 'signIn' ? ' · signed in' : ''} · ${configuration.model || 'No model chosen'}${configuration.think === true ? ' · reasons first, slow' : ''}`;
         text.append(title, details);
         const control = document.createElement('span');
         control.className = 'settingsItemControl';
@@ -14327,7 +14328,7 @@ function renderAssistantConfigurationList() {
     }));
     if (!configurations.length) {
         $('#assistantConfigurationList').replaceChildren(Object.assign(document.createElement('div'), {
-            className: 'settingsItem settingsEmpty', textContent: 'None yet. Run a model on this computer above, or add a configuration for an online provider.'
+            className: 'settingsItem settingsEmpty', textContent: 'None yet. Sign in to a provider or run a model on this computer above, or add a configuration with an API key.'
         }));
     }
 }
@@ -14387,7 +14388,8 @@ function populateAssistantConfiguration(configuration = null) {
     $('#assistantConfigurationCredential').value = '';
     $('#assistantConfigurationThink').value = configuration?.think === true ? 'on' : configuration?.think === false ? 'off' : (configuration ? '' : 'off');
     $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? 'New configuration';
-    $('#assistantCredentialHint').textContent = configuration?.credentialConfigured ? 'Leave empty to keep the saved key' : 'Kept, encrypted, when you save';
+    $('#assistantCredentialHint').textContent = configuration?.credentialSource === 'signIn' ? 'From signing in. Leave empty to keep it'
+        : configuration?.credentialConfigured ? 'Leave empty to keep the saved key' : 'Kept, encrypted, when you save';
     $('#deleteAssistantConfiguration').hidden = !configuration;
     setAssistantConfigurationStatus(
         assistantConfigurationCatalog.credentialStorage?.plainText
@@ -14415,6 +14417,7 @@ async function prepareAssistantConfigurationPage() {
     renderAssistantConfigurationList();
     showAssistantView('list');
     localModelsSection.check();
+    assistantSignInSection.render();
 }
 
 // The Ollama the "Run a model on this computer" section asks: that of the Ollama configuration in use, or of any, or Ollama's own.
@@ -14435,6 +14438,7 @@ async function useLocalModel({ model, title, think = null, timeoutSeconds = 180 
     await refreshAssistantConfigurations();
     $('#assistantConfiguration').value = uuid;
     renderAssistantConfigurationList();
+    assistantSignInSection.render();
 }
 
 const localModelsSection = createLocalModelsSection({
@@ -14447,6 +14451,28 @@ const localModelsSection = createLocalModelsSection({
     },
     useModel: useLocalModel,
     platform: /Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent) ? 'linux' : ''
+});
+
+// Puts a configuration in use and redraws everything that shows which one is.
+async function useAssistantConfiguration(uuid) {
+    activeAssistantConfigurationUuid = uuid;
+    await window.aiProviders.setActiveConfiguration(uuid);
+    await refreshAssistantConfigurations();
+    $('#assistantConfiguration').value = uuid;
+    renderAssistantConfigurationList();
+    localModelsSection.render();
+    assistantSignInSection.render();
+}
+
+const assistantSignInSection = createAssistantSignInSection({
+    root: $('#assistantSignInSection'),
+    api: window.aiProviders,
+    providers: () => assistantConfigurationCatalog.providers ?? [],
+    configurations: () => assistantConfigurationCatalog.configurations ?? [],
+    activeUuid: () => activeAssistantConfigurationUuid,
+    // The main process has already saved the configuration and put it in use.
+    signedIn: (configuration) => useAssistantConfiguration(configuration.uuid),
+    use: useAssistantConfiguration
 });
 
 function assistantConfigurationFormValue() {
@@ -14472,6 +14498,7 @@ async function saveAssistantConfiguration() {
     $('#assistantConfigurationCredential').value = '';
     populateAssistantConfiguration(assistantConfigurationCatalog.configurations.find((configuration) => configuration.uuid === saved.uuid));
     setAssistantConfigurationStatus('Configuration saved and selected.');
+    assistantSignInSection.render();
 }
 
 async function discoverAssistantModels() {
@@ -14733,6 +14760,7 @@ $('#deleteAssistantConfiguration').addEventListener('click', async () => {
     renderAssistantConfigurationList();
     showAssistantView('list');
     localModelsSection.render();
+    assistantSignInSection.render();
 });
 $('#assistantPrompt').addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {

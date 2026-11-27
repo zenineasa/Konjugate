@@ -400,6 +400,7 @@ export async function runInteractionTests(driver) {
         'the example guide': ['examples explorer loads a project copy', 'example selection opens its companion guide'],
         'the assistant': [
             'with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it',
+            'signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled',
             'local assistant prepares, validates and applies one undoable transaction',
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
@@ -988,6 +989,39 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click(); document.querySelector('#assistantButton').click()`);
         await waitFor(window, `!document.querySelector('#assistantPanel').classList.contains('needsModel') && document.querySelector('#assistantConfiguration').options.length === 1`, 'The assistant did not take the model set up.');
         assert.equal(await evaluate(window, `document.querySelector('#assistantPrompt').disabled`), false);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled', async () => {
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await evaluate(window, `document.querySelector('#manageAssistantConfigurations').click()`);
+        await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s settings button did not open Settings › Model assistant.');
+        await waitFor(window, `Boolean(document.querySelector('[data-sign-in="openRouter"]'))`, 'OpenRouter was not offered for signing in.');
+        assert.equal(await isRenderedVisible(window, '#assistantSignInSection'), true, 'Signing in is shown first on the page.');
+        assert.match(await evaluate(window, `document.querySelector('[data-sign-in-row="openRouter"]').textContent`), /OpenRouter.*Claude, GPT, Gemini.*Sign in with OpenRouter/);
+        const before = (await evaluate(window, `window.aiProviders.listConfigurations()`)).configurations.length;
+
+        // The person's own browser is asked to open OpenRouter's page (the run records it instead of opening it).
+        const opened = driver.waitForDialog({ kind: 'external', includes: 'https://openrouter.ai/auth?' });
+        await evaluate(window, `document.querySelector('[data-sign-in="openRouter"]').click()`);
+        const authorization = new URL((await opened).url);
+        assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+        assert.match(authorization.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/);
+        const callback = new URL(authorization.searchParams.get('callback_url'));
+        assert.match(callback.href, /^http:\/\/localhost:\d+\/callback$/);
+        await waitFor(window, `Boolean(document.querySelector('[data-sign-in-cancel="openRouter"]'))`, 'The page did not say it is waiting for the browser.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantSignInStatus').textContent`), /Finish signing in to OpenRouter in your browser/);
+        // Konjugate listens for the browser on this computer meanwhile, and answers nothing but the callback.
+        assert.equal((await fetch(`http://127.0.0.1:${callback.port}/elsewhere`)).status, 404);
+        assert.equal((await fetch(`http://127.0.0.1:${callback.port}/callback?code=forged&state=not-the-one`)).status, 400, 'A callback with another state was taken.');
+
+        await evaluate(window, `document.querySelector('[data-sign-in-cancel="openRouter"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-sign-in="openRouter"]')) && document.querySelector('#assistantSignInStatus').hidden`, 'Cancel did not end the sign-in.');
+        await assert.rejects(fetch(`http://127.0.0.1:${callback.port}/callback`), 'Konjugate still listened after Cancel.');
+        assert.equal((await evaluate(window, `window.aiProviders.listConfigurations()`)).configurations.length, before, 'A cancelled sign-in added a configuration.');
+
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 

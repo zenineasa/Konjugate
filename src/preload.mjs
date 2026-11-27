@@ -397,6 +397,9 @@ contextBridge.exposeInMainWorld('aiProviders', {
     removeConfiguration: (configurationUuid) => invokePlainly('aiRemoveConfiguration', configurationUuid),
     setActiveConfiguration: (configurationUuid) => invokePlainly('aiSetActiveConfiguration', configurationUuid),
     testDraftConnection: (configuration, credential) => invokePlainly('aiTestDraftConnection', configuration, credential),
+    // Signing in to a provider in the browser: { ok, configuration } with the configuration it made and put in use, or { ok: false, error }.
+    signIn: (provider) => invokePlainly('aiSignIn', provider),
+    cancelSignIn: () => invokePlainly('aiCancelSignIn'),
     generateProposal: async (requestUuid, configurationUuid, request, context, history) => {
         const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history });
         if (result.ok) return result.proposal;

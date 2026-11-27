@@ -18,11 +18,19 @@ The assistant does not edit the model immediately. Konjugate validates the propo
 
 When a request is ambiguous or missing information the assistant needs, it can ask a clarifying question instead of guessing, sometimes with suggested answers shown as buttons. Selecting a suggestion fills in the prompt rather than sending it immediately, so it can still be edited before the reply is sent.
 
-The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: run one on this computer for free (below), or use an account with an online provider ([Hosted providers](#hosted-providers)).
+The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: sign in to a provider ([below](#sign-in-to-a-provider)), run one on this computer for free ([Run a model on this computer](#run-a-model-on-this-computer)), or add a configuration with an API key ([Hosted providers](#hosted-providers)).
+
+## Sign in to a provider
+
+At the top of **Settings › Model assistant**, **Sign in to a provider** sets the assistant up without making or pasting an API key. Today it offers [OpenRouter](https://openrouter.ai/), one account for models from Anthropic (Claude), OpenAI (GPT), Google (Gemini) and many others, paid for per use from credits on your OpenRouter account.
+
+**Sign in with OpenRouter** opens OpenRouter's own page in your browser, where you sign in (or make an account) and allow Konjugate; the page can also set a spending limit and an expiry for what Konjugate is given. While it waits, the section says "Waiting for your browser…" and **Cancel** stops it; it gives up by itself after five minutes. When you allow it, the browser comes back to Konjugate on this computer, Konjugate is given a key for your account, and it makes an **OpenRouter** configuration with a model chosen for you and puts it in use, so the assistant is ready. The model chosen is the newest Claude Sonnet your account can use, or else the newest GPT, or else the newest Gemini Pro: strong at the assistant's job and priced for everyday use. The largest models cost several times more per request, so they are left for you to choose on the configuration's page.
+
+Your password goes only to OpenRouter's page; Konjugate never sees it. The key is kept encrypted like any other ([Credentials and privacy](#credentials-and-privacy)), and you can see, limit or revoke it on OpenRouter under **Settings › API Keys**, where it is named "Konjugate". Once signed in, the row shows the model and offers **Use it** (when another configuration is in use) and **Sign in again**, which replaces the key and keeps the configuration's name and model. Deleting the configuration removes the key from this computer; revoke it on OpenRouter to end it there too.
 
 ## Run a model on this computer
 
-At the top of **Settings › Model assistant**, **Run a model on this computer** runs a model privately and for free, through [Ollama](https://ollama.com/), a free app made by others. Konjugate does not download or install Ollama: if it is not running, the section says so, **Open the Ollama website** opens its download page in your browser, and **Check again** looks for it once it is installed and open. On Linux, Ollama's website gives a one-line command to install it.
+Below signing in, **Run a model on this computer** runs a model privately and for free, through [Ollama](https://ollama.com/), a free app made by others. Konjugate does not download or install Ollama: if it is not running, the section says so, **Open the Ollama website** opens its download page in your browser, and **Check again** looks for it once it is installed and open. On Linux, Ollama's website gives a one-line command to install it.
 
 Once Ollama is running, the section suggests models we have measured with the [evaluation harness](assistantEvaluation.md) ([findings](assistantModelFindings.md)):
 
@@ -87,6 +95,7 @@ Konjugate currently supports:
 - OpenAI;
 - NVIDIA NIM;
 - Hugging Face Inference Providers;
+- OpenRouter ([or sign in instead](#sign-in-to-a-provider));
 - Google Gemini.
 
 Create an API key through the chosen provider, enter it in the configuration manager, discover or enter a model and test the connection before saving.
@@ -97,6 +106,7 @@ Provider documentation:
 - [NVIDIA NIM APIs](https://docs.nvidia.com/nim/large-language-models/latest/api-reference.html)
 - [Hugging Face Inference Providers](https://huggingface.co/docs/inference-providers/index)
 - [Gemini API](https://ai.google.dev/gemini-api/docs)
+- [OpenRouter API](https://openrouter.ai/docs/api-reference/overview)
 
 Provider availability, model identifiers, account requirements and pricing are controlled by the provider and may change independently of Konjugate.
 

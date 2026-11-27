@@ -272,3 +272,65 @@ test('a Gemini 401 explains that Google is retiring standard API keys, and other
     const openAi = provider('openAi', async () => unauthorized());
     await assert.rejects(() => openAi.generateProposal(input('openAi')), (error) => /HTTP 401/.test(error.message) && !/AI Studio/.test(error.message));
 });
+
+test('OpenRouter lists the models its key may use and names Konjugate on requests', async () => {
+    const calls = [];
+    const adapter = provider('openRouter', async (url, options = {}) => {
+        calls.push({ url, options });
+        if (url.endsWith('/models/user')) return jsonResponse({ data: [{ id: 'anthropic/claude-sonnet-5', name: 'Anthropic: Claude Sonnet 5' }] });
+        return jsonResponse({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    });
+    assert.deepEqual(await adapter.listModels(input('openRouter')), [{ id: 'anthropic/claude-sonnet-5', name: 'Anthropic: Claude Sonnet 5' }]);
+    assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/models/user');
+    assert.equal(calls[0].options.headers.Authorization, 'Bearer secret');
+    assert.deepEqual(await adapter.generateProposal(input('openRouter')), proposal);
+    assert.equal(calls[1].url, 'https://openrouter.ai/api/v1/chat/completions');
+    assert.equal(calls[1].options.headers['X-OpenRouter-Title'], 'Konjugate');
+    assert.equal(JSON.parse(calls[1].options.body).response_format.type, 'json_object');
+});
+
+test('Signing in to OpenRouter exchanges the code with its PKCE verifier for a key', async () => {
+    const calls = [];
+    const adapter = provider('openRouter', async (url, options = {}) => {
+        calls.push({ url, options });
+        return jsonResponse({ key: 'sk-or-v1-from-sign-in', user_id: 'user_1' });
+    });
+    let authorization;
+    const result = await adapter.signIn({
+        openExternal: async (address) => {
+            authorization = new URL(address);
+            const back = authorization.searchParams.get('callback_url');
+            setImmediate(() => fetch(`${back.replace('localhost', '127.0.0.1')}?code=code-1&state=${authorization.searchParams.get('state')}`).catch(() => {}));
+        }
+    });
+    assert.deepEqual(result, { credential: 'sk-or-v1-from-sign-in' });
+    assert.equal(authorization.origin + authorization.pathname, 'https://openrouter.ai/auth');
+    assert.equal(authorization.searchParams.get('code_challenge_method'), 'S256');
+    assert.match(authorization.searchParams.get('callback_url'), /^http:\/\/localhost:\d+\/callback$/);
+    assert.equal(calls[0].url, 'https://openrouter.ai/api/v1/auth/keys');
+    const body = JSON.parse(calls[0].options.body);
+    assert.equal(body.code, 'code-1');
+    assert.equal(body.code_challenge_method, 'S256');
+    const { createHash } = await import('node:crypto');
+    assert.equal(createHash('sha256').update(body.code_verifier).digest('base64url'), authorization.searchParams.get('code_challenge'));
+});
+
+test('A refused OpenRouter code exchange is reported, not turned into a key', async () => {
+    const adapter = provider('openRouter', async () => jsonResponse({ error: { message: 'Invalid code or code_verifier' } }, 403));
+    await assert.rejects(adapter.signIn({
+        openExternal: async (address) => {
+            const authorization = new URL(address);
+            setImmediate(() => fetch(`${authorization.searchParams.get('callback_url').replace('localhost', '127.0.0.1')}?code=bad`).catch(() => {}));
+        }
+    }), /HTTP 403: Invalid code or code_verifier/);
+});
+
+test('A sign-in starts with the newest model of the first family the account offers', async () => {
+    const { suggestedModel } = await import('../src/aiRemoteProviders.mjs');
+    const models = ['openai/gpt-6.1', 'anthropic/claude-opus-5', 'anthropic/claude-sonnet-4.5', 'anthropic/claude-sonnet-5', 'anthropic/claude-sonnet-5:thinking', 'meta/llama-5']
+        .map((id) => ({ id, name: id }));
+    assert.equal(suggestedModel(models), 'anthropic/claude-sonnet-5');
+    assert.equal(suggestedModel(models.filter((model) => !model.id.startsWith('anthropic/claude-sonnet'))), 'openai/gpt-6.1');
+    assert.equal(suggestedModel([{ id: 'meta/llama-5' }]), 'meta/llama-5');
+    assert.equal(suggestedModel([]), '');
+});

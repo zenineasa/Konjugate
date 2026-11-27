@@ -516,6 +516,12 @@
                     </section>
                     <section class="settingsPage" data-settings-page="assistant" data-assistant-view="list" role="tabpanel" aria-labelledby="settingsPageTitle" hidden>
                         <div class="assistantListView">
+                            <section id="assistantSignInSection" class="settingsSection assistantSignInSection" aria-labelledby="assistantSignInTitle" hidden>
+                                <h3 id="assistantSignInTitle" class="settingsSectionTitle">Sign in to a provider</h3>
+                                <div id="assistantSignInList" class="settingsCard" role="list" aria-label="Providers you can sign in to"></div>
+                                <p id="assistantSignInStatus" class="settingsNote assistantConfigurationStatus" role="status" hidden></p>
+                                <p class="settingsNote">Your browser opens on the provider's own page, so Konjugate never sees your password. The key it gives Konjugate is kept encrypted on this computer.</p>
+                            </section>
                             <section id="localModelsSection" class="settingsSection localModelsSection" aria-labelledby="localModelsTitle">
                                 <div class="settingsSectionHeader"><h3 id="localModelsTitle" class="settingsSectionTitle">Run a model on this computer</h3><span id="localModelsState" class="localModelsState" role="status"></span></div>
                                 <p id="localModelsDesktopOnly" class="settingsNote" hidden>Running a model on this computer needs the desktop app. Here, add a configuration for an online provider below.</p>

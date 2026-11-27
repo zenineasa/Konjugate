@@ -3465,6 +3465,58 @@ ipcMain.handle('aiTestDraftConnection', async (event, configuration, credential)
         (signal) => aiProviderRegistry.testConnection({ ...resolved, signal }));
 });
 
+// Signing in to a provider in the person's own browser (docs/proposals/assistantSignIn.md), one sign-in at a time, ended
+// by Cancel or by its window closing. The key it brings back is kept like a typed one, in the configuration an earlier
+// sign-in to that provider made (keeping its name and model) or a new one starting with the model the provider suggests,
+// and that configuration is put in use: one click gives a working assistant.
+let activeAISignIn = null;
+ipcMain.handle('aiSignIn', async (event, provider) => {
+    requireProjectWindow(event);
+    const descriptor = aiProviderRegistry.descriptors().find((item) => item.id === provider);
+    if (!descriptor?.signIn) return { ok: false, error: { message: 'Signing in to that provider is not available.', code: 'signInUnavailable' } };
+    activeAISignIn?.controller.abort();
+    const controller = new AbortController();
+    const signIn = { owner: event.sender, controller };
+    activeAISignIn = signIn;
+    const abort = () => controller.abort();
+    event.sender.once('destroyed', abort);
+    try {
+        const { credential } = await aiProviderRegistry.signIn({
+            provider, signal: controller.signal, openExternal: (url) => shell.openExternal(url)
+        });
+        const { configurations } = await aiConfigurationStore.list();
+        const earlier = configurations.find((item) => item.provider === provider && item.credentialSource === 'signIn');
+        const configuration = {
+            uuid: earlier?.uuid, name: earlier?.name ?? descriptor.name, provider, endpoint: earlier?.endpoint ?? '',
+            model: earlier?.model ?? '', timeoutSeconds: earlier?.timeoutSeconds ?? descriptor.defaultTimeoutSeconds,
+            think: earlier?.think ?? null, credentialSource: 'signIn'
+        };
+        if (!configuration.model) {
+            // A model list that does not come is no reason to lose the sign-in: the configuration is kept, and a model chosen on its page.
+            const models = await aiProviderRegistry.listModels({
+                configuration, credential, signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)])
+            }).catch(() => []);
+            configuration.model = aiProviderRegistry.suggestModel(provider, models);
+        }
+        const saved = await aiConfigurationStore.save(configuration, credential);
+        await aiConfigurationStore.setActive(saved.uuid);
+        return { ok: true, configuration: saved };
+    } catch (error) {
+        const cancelled = error.name === 'AbortError';
+        return { ok: false, error: { message: cancelled ? 'Signing in was cancelled.' : error.message, code: cancelled ? 'signInCancelled' : error.code ?? 'signInFailed' } };
+    } finally {
+        event.sender.removeListener('destroyed', abort);
+        if (activeAISignIn === signIn) activeAISignIn = null;
+    }
+});
+
+ipcMain.handle('aiCancelSignIn', async (event) => {
+    requireProjectWindow(event);
+    if (!activeAISignIn || activeAISignIn.owner !== event.sender) return false;
+    activeAISignIn.controller.abort();
+    return true;
+});
+
 ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history }) => {
     requireProjectWindow(event);
     if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');

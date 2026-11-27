@@ -4,7 +4,7 @@ title: "The best model a person has access to, with the least setup"
 description: How the model assistant can use the models people already pay for or can reach — a Claude subscription through Claude Code, a ChatGPT plan through Sign in with ChatGPT, a Copilot subscription, OpenRouter and Hugging Face sign-in, local models — by detecting what is there, installing a vendor's own tool when needed, and signing in through the vendor's own flow; what each vendor's terms allow, where Anthropic's documentation is unclear, how a desktop app that shows Claude logins does it, and a staged plan.
 tags: [proposals, assistant, providers, oauth, credentials, settings, claude-code]
 status: draft
-implementation: none
+implementation: partial
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
@@ -174,7 +174,7 @@ Nothing now: the assistant is not in the web edition yet. When it is, OpenRouter
 
 ## Stages
 
-1. **Direct sign-in plumbing and OpenRouter.** Credential kinds, `src/aiOAuth.mjs`, OpenRouter sign-in, and the reorganised settings page. Needs nothing from anyone, and from this stage on any person can reach any vendor's best model by signing in.
+1. **Built: direct sign-in plumbing and OpenRouter** (`src/aiOAuth.mjs`, the OpenRouter adapter, **Sign in to a provider** at the top of the settings page; described in the [provider architecture](../aiProviderArchitecture.md#signing-in-to-a-provider) and the [guide](../aiAssistantGuide.md#sign-in-to-a-provider)). An OpenRouter key is an ordinary key, so the sign-in record with a refresh token waits for ChatGPT plan usage, the first provider that needs it.
 2. **Anthropic with an API key**, through the Messages API, and the short Google AI Studio path.
 3. **ChatGPT plan usage**, with the Responses API request path, once OpenAI confirms eligibility.
 4. **Detection and vendor-tool providers**, with the Claude Code bridge built behind a switch that stays off until Anthropic answers, and the Copilot provider once GitHub's terms are confirmed.

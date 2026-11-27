@@ -2458,6 +2458,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .localModelAction button:disabled { opacity: .6; cursor: default; }
 .localModelAction progress { flex: 1; min-width: 80px; height: 6px; accent-color: var(--accent); }
 .localModelProgressText { color: #8aa0aa; font-size: 7px; font-variant-numeric: tabular-nums; }
+.assistantSignInWaiting { color: #8aa0aa; font-size: 7px; }
 .huggingFaceBrowser { padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }
 .huggingFaceBrowser[hidden] { display: none; }
 .huggingFaceBrowser summary { color: #8fb4b6; font-size: 8px; cursor: pointer; user-select: none; }

@@ -1,7 +1,7 @@
 ---
 type: Architecture
 title: Model assistant provider architecture
-description: Design and security model for local (Ollama) and hosted (OpenAI, Gemini, NIM, HuggingFace) model providers.
+description: Design and security model for local (Ollama) and hosted (OpenAI, Gemini, NIM, HuggingFace, OpenRouter) model providers, and signing in to a provider in the browser.
 tags: [assistant, architecture, security, credentials]
 status: stable
 ---
@@ -54,6 +54,7 @@ The registry also:
 | OpenAI | OpenAI models and chat-completions APIs |
 | NVIDIA | OpenAI-compatible NVIDIA NIM endpoints |
 | Hugging Face | OpenAI-compatible Inference Providers router |
+| OpenRouter | OpenAI-compatible chat completions; models from `/v1/models/user`; OAuth sign-in |
 | Gemini | Gemini models and `generateContent` APIs |
 
 Ollama uses portable JSON mode because its structured-output schema converter does not accept every construct in Konjugate's Draft 2020-12 operation schema. The complete schema remains in the prompt and the host remains the validation authority.
@@ -65,6 +66,18 @@ Ollama uses portable JSON mode because its structured-output schema converter do
 - **Hugging Face.** The chat-completion API takes `json_object` or `json_schema` and streams server-sent events with a bearer token; which of those a given model's provider honours varies. The adapter uses plain JSON mode.
 - **Gemini.** The key goes in `x-goog-api-key` (which is what the adapter sends), and `streamGenerateContent?alt=sse` streams. Google has been retiring standard API keys for the Gemini API: unrestricted ones are rejected, with an HTTP 401 whose text talks about OAuth, and new keys made in Google AI Studio are the kind it accepts. A 401 from Gemini therefore carries a hint to create a new key. Reasoning summaries come from `generationConfig.thinkingConfig.includeThoughts`; the adapter does not send it, because models without thinking support can refuse the field, so Gemini shows no reasoning.
 - **Ollama.** `/api/chat` streams newline-delimited JSON by default, takes `format: "json"`, and puts reasoning in `message.thinking` only when the `think` option is enabled. The adapter sends `think` only when a configuration sets it (**Reasoning** in Settings, `think` in the configuration: true, false, or unset for the model's own default), since a model that cannot reason may refuse the field. Its descriptor says `reasoningSetting: true`, which is what shows the setting.
+
+- **OpenRouter.** Its API is OpenAI-compatible, so it is the same adapter as NVIDIA's and Hugging Face's, in plain JSON mode (structured output is supported per serving endpoint, not per model). The models listed are `/v1/models/user`, those the key may use after the account's own guardrails and privacy settings. Every request carries `HTTP-Referer` (the project's repository) and `X-OpenRouter-Title: Konjugate`, which name Konjugate on the person's activity page and change nothing about the request.
+
+### Signing in to a provider
+
+A provider can offer signing in, in the person's own browser, instead of a pasted key ([proposal](proposals/assistantSignIn.md)). Its descriptor then says `signIn: true`, with `signInDescription` for the settings page, and the adapter supplies `signIn({ openExternal, signal })`, resolving to `{ credential }`, and `suggestModel(models)`, the model a new sign-in starts with.
+
+`src/aiOAuth.mjs` holds what every flow shares. `loopbackAuthorization` makes a PKCE verifier and S256 challenge and a random `state`, listens on this computer's loopback address on a port the system chooses (for a redirect to `localhost`, on both `127.0.0.1` and `::1`, since a browser may resolve the name to either), opens the provider's page with `openExternal`, and waits for the browser to come back to `/callback`. Anything else is answered 404; a callback with a different `state` is answered 400 and ignored, since another page on the computer could send one; a callback with no `state` is accepted only where the provider sets `requireState: false`, which is safe only where the code is useless without the verifier, which never leaves the main process. A refusal (`error=access_denied`) ends it as `signInDenied`; Cancel, or the window closing, aborts it; five minutes without an answer ends it as `signInTimedOut`. The listener is closed however it ends. The browser is always the person's own, never a window of the app's, so the provider's page is the only thing that sees their password.
+
+OpenRouter's flow sends the browser to `https://openrouter.ai/auth` with the challenge, `state` and `key_label=Konjugate`, and exchanges the code and verifier at `POST /api/v1/auth/keys` for an ordinary key on the person's account. Its documentation names `localhost` callbacks, so that is the redirect host, and it returns `state` when the person allows access, but is not relied on to (`requireState: false`): the PKCE exchange is what binds the code to this sign-in.
+
+The main process's `aiSignIn` runs one sign-in at a time. The key is saved like a typed one, in the configuration an earlier sign-in to that provider made (keeping its name, model and timeout) or a new one named after the provider, with `credentialSource: 'signIn'` so the settings page can say it is signed in; a key typed on the configuration's page later clears that mark. A new configuration starts with the provider's suggested model from its model list (asked with a 30-second limit; a list that does not come leaves the model to be chosen), and the configuration is put in use. The renderer is told only the saved public configuration. `aiCancelSignIn` aborts the sign-in its own window started.
 
 ### Running a model on this computer
 
@@ -206,6 +219,7 @@ Provider changes must preserve these invariants:
 6. The user explicitly approves the final proposal.
 7. Cancellation and timeouts release request state, and progress text is shown as text.
 8. Draft testing does not persist configuration fields or credentials.
+9. Signing in happens in the person's own browser, never a window of the app's; the loopback listener answers only its callback with the `state` it sent, and closes when the sign-in ends.
 
 ## Testing
 

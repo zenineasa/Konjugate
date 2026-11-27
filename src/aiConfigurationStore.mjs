@@ -49,6 +49,8 @@ function normalizeConfiguration(input, existing, uuidFactory) {
         model,
         timeoutSeconds,
         think,
+        // 'signIn' when the saved key came from signing in to the provider in the browser, null when it was typed in.
+        credentialSource: existing?.credentialSource ?? null,
         credentialUuid: existing?.credentialUuid ?? null
     };
 }
@@ -143,6 +145,7 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
                 if (!status.available || status.plainText) {
                     throw new AIConfigurationError('Secure credential storage is unavailable. The API key was not saved.', 'secureStorageUnavailable');
                 }
+                configuration.credentialSource = input.credentialSource === 'signIn' ? 'signIn' : null;
                 configuration.credentialUuid ??= uuidFactory();
                 const encrypted = await credentialVault.encrypt(credential);
                 await writeAtomically(join(credentialsDirectory, `${configuration.credentialUuid}.bin`), encrypted, { mode: 0o600 });

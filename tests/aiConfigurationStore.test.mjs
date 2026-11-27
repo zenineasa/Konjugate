@@ -188,3 +188,18 @@ test('a key the operating system will not decrypt is said plainly, with how to g
     assert.match(unreadableCredentialMessage('linux'), /Unlock your keyring/);
     assert.match(unreadableCredentialMessage('win32'), /Quit and reopen Konjugate/);
 });
+
+test('a key from signing in is marked as such, and a key typed in later clears the mark', () => withStore(async (store) => {
+    const saved = await store.save({ name: 'OpenRouter', provider: 'openRouter', model: 'anthropic/claude-sonnet-5', credentialSource: 'signIn' }, 'sk-or-v1-a');
+    assert.equal(saved.credentialSource, 'signIn');
+    assert.equal(saved.credentialConfigured, true);
+    assert.equal('credentialUuid' in saved, false);
+    const renamed = await store.save({ ...saved, name: 'My OpenRouter' });
+    assert.equal(renamed.credentialSource, 'signIn');
+    assert.equal((await store.resolve(saved.uuid)).credential, 'sk-or-v1-a');
+    // The configuration's own page sends no credentialSource: a key typed there is a typed key.
+    const typed = await store.save({ uuid: renamed.uuid, name: renamed.name, provider: 'openRouter', model: renamed.model }, 'sk-or-v1-typed');
+    assert.equal(typed.credentialSource, null);
+    const ignored = await store.save({ name: 'Ollama', provider: 'ollama', credentialSource: 'signIn' });
+    assert.equal(ignored.credentialSource, null);
+}));

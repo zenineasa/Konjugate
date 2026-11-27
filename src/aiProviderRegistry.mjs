@@ -22,9 +22,25 @@ export function createAIProviderRegistry(providers = []) {
     return Object.freeze({
         descriptors() {
             // `reasoningSetting`: whether the provider can be told to reason before answering, or not (a configuration's `think`).
-            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false }) => ({
-                id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting
+            // `signIn`: whether a person can sign in to it in their browser instead of pasting a key, described by
+            // `signInDescription`. `keyPage`: where its keys are made, for a person who will paste one.
+            return [...registry.values()].map(({ id, name, defaultEndpoint = '', defaultTimeoutSeconds = 60, credentialRequired = false, locality = 'local', reasoningSetting = false, signIn, signInDescription = '', keyPage = '' }) => ({
+                id, name, defaultEndpoint, defaultTimeoutSeconds, credentialRequired, locality, reasoningSetting,
+                signIn: typeof signIn === 'function', signInDescription, keyPage
             }));
+        },
+        // Signs in to a provider in the person's browser; resolves to { credential }. `openExternal` opens the browser.
+        async signIn({ provider: id, openExternal, signal }) {
+            const provider = registry.get(id);
+            if (typeof provider?.signIn !== 'function') throw new AIProviderRegistryError(`Signing in to “${id}” is not available.`, 'signInUnavailable');
+            const result = await provider.signIn({ openExternal, signal });
+            if (typeof result?.credential !== 'string' || !result.credential) throw new AIProviderRegistryError('The provider did not return a credential.', 'invalidProviderResponse');
+            return result;
+        },
+        // The model a configuration starts with when the person has not chosen one: the provider's pick from `models`, or the first.
+        suggestModel(id, models) {
+            const provider = registry.get(id);
+            return provider?.suggestModel ? provider.suggestModel(models) : models[0]?.id ?? '';
         },
         async testConnection({ configuration, credential, signal }) {
             const provider = registry.get(configuration.provider);

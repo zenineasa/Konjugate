@@ -226,8 +226,9 @@ export function referenceCsv({ names, rows }) {
     return [['time', ...names].map((name) => `"${name}"`).join(','), ...rows.map((row) => row.map(csvNumber).join(','))].join('\n') + '\n';
 }
 
+// Lines may end CRLF as well as LF (a file a Windows checkout or editor rewrote): the line ends are not the CSV's content.
 export function parseReferenceCsv(text) {
-    const lines = text.split('\n').filter((line) => line.length > 0);
+    const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
     const names = lines[0].split(',').map((cell) => {
         const match = /^"([^"]*)"$/.exec(cell);
         if (!match) throw new Error(`The header cell ${cell} is not a quoted name.`);

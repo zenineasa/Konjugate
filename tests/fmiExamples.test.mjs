@@ -38,6 +38,7 @@ for (const fmiVersion of fmiVersions) for (const example of fmiExamples) {
         const csvText = await readFile(csvPath, 'utf8');
         assert.doesNotMatch(csvText, /,\n|,$|\r/, 'A separator only goes between elements, and lines end in \\n.');
         const { names, rows } = parseReferenceCsv(csvText);
+        assert.deepEqual(parseReferenceCsv(csvText.replaceAll('\n', '\r\n')), { names, rows }, 'Read the same with CRLF line ends.');
         assert.equal(names[0], 'time', 'The first column is the time.');
         assert.ok(names.length - 1 <= 10, 'At most ten variables.');
         assert.equal(new Set(names).size, names.length);

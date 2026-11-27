@@ -77,7 +77,7 @@ try {
     assert.deepEqual(steps.map((step) => step.what), ['Compiling fmi3Functions.c', 'Compiling model.c', 'Compiling common.c', 'Compiling cosimulation.c', `Linking BouncingBall${extension}`]);
     const first = steps[0].arguments;
     if (compiler.flavor !== 'msvc') {
-        assert.ok(first.includes('-DFMI3_OVERRIDE_FUNCTION_PREFIX') && first.includes('-DFMI_VERSION=3') && first.includes('-std=c99') && first.includes('-O3'), first.join(' '));
+        assert.ok(first.includes('-DFMI3_OVERRIDE_FUNCTION_PREFIX') && first.includes('-DFMI_VERSION=3') && first.includes('-std=gnu99') && first.includes('-O3'), first.join(' '));
         assert.ok(first.indexOf(`-I${join(headersDirectory, 'fmi3')}`) < first.indexOf(`-I${join(stepsFolder, 'sources')}`), 'The FMI standard\'s headers come before the FMU\'s own.');
     }
     await assert.rejects(stat(plan.output), 'Printing the steps builds nothing.');
@@ -86,7 +86,7 @@ try {
     const broken = join(folder, 'broken');
     await mkdir(join(broken, 'sources'), { recursive: true });
     await writeFile(join(broken, 'sources', 'model.c'), 'int broken( { return 0; }\n');
-    const brokenPlan = { sourceRoot: join(broken, 'sources'), objectDirectory: join(broken, 'objects'), output: join(broken, `broken${extension}`), includeFirst: [], sets: [{ language: 'c', standard: 'c99', files: ['model.c'], definitions: [], includeDirectories: [] }], libraries: [], timeoutSeconds: 120 };
+    const brokenPlan = { sourceRoot: join(broken, 'sources'), objectDirectory: join(broken, 'objects'), output: join(broken, `broken${extension}`), includeFirst: [], sets: [{ language: 'c', standard: 'gnu99', files: ['model.c'], definitions: [], includeDirectories: [] }], libraries: [], timeoutSeconds: 120 };
     const failed = await build(brokenPlan, broken);
     assert.notEqual(failed.code, 0);
     assert.match(failed.diagnostics, /Compiling model\.c failed:[\s\S]*model\.c/);

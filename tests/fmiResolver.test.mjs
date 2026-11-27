@@ -19,6 +19,21 @@ import { describeInstalledFmuPorts, resolveFmiSource, resolveInstalledFmus, FmiR
 import { fmiArchitecture } from '../src/fmiBinary.mjs';
 import { packageKey } from '../src/packageArchive.mjs';
 
+// FMI review #5: a switched-off FMU node does not stop the model, whether its FMU is installed or not, nor count as a second instance.
+test('a switched-off FMU node is not resolved: an FMU missing from the library, or one that runs once at a time, does not stop the model', async () => {
+    const node = (id, name, implementation, extra = {}) => ({ id, name, states: [{ id: id * 10, symbol: 'level' }], implementation: { ...implementation, outputs: [{ key: 'decayLevel', stateId: id * 10 }] }, ...extra });
+    await withInstalledFmu(async (directory, installed) => {
+        const reference = { kind: 'fmi', fmuId: installed.guid, fmuVersion: installed.version, bindings: [] };
+        const missing = { kind: 'fmi', fmuId: 'not-in-this-library', fmuVersion: '1.0.0', bindings: [] };
+        const document = { format: 'konjugate', version: 1, edges: [], nodes: [node(1, 'Tank A', reference), node(2, 'Tank B', reference, { enabled: false }), node(3, 'Elsewhere', missing, { enabled: false })] };
+        const resolved = JSON.parse(await resolveInstalledFmus(document, { fmuDirectory: directory }));
+        assert.equal(resolved.nodes[0].implementation.kind, 'cpp');
+        assert.deepEqual(resolved.nodes.slice(1).map((entry) => [entry.enabled, entry.implementation?.kind ?? null]), [[false, null], [false, null]], 'Switched off, it reaches the engine without its FMU.');
+        // Switched on, the missing FMU is said as before.
+        await assert.rejects(resolveInstalledFmus({ ...document, nodes: [node(3, 'Elsewhere', missing)] }, { fmuDirectory: directory }), /is not installed/);
+    }, { coSimulation: ' canBeInstantiatedOnlyOncePerProcess="true"' });
+});
+
 const thisPlatformBinary = `binaries/${process.platform === 'win32' ? 'win64' : process.platform === 'darwin' ? 'darwin64' : 'linux64'}/decayModel${process.platform === 'win32' ? '.dll' : process.platform === 'darwin' ? '.dylib' : '.so'}`;
 
 function fakeFmuBytes({ guid = 'guid-1', variables = '', binaryPath = thisPlatformBinary, coSimulation = '' } = {}) {

@@ -28,6 +28,6 @@ namespace konjugate {
 // rather than treated as a failure -- declining rollback is a valid, documented FMU shape.
 void runFmu(const std::filesystem::path& sharedLibraryPath, int stateCount,
     double targetTime, double globalTimeStep, double outputInterval,
-    const std::filesystem::path& outputCsvPath, bool verifyRollback);
+    const std::filesystem::path& outputCsvPath, bool verifyRollback, const std::string& guid = "guid");
 
 } // namespace konjugate

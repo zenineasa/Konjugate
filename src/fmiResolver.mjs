@@ -410,6 +410,13 @@ export async function resolveInstalledFmus(content, { fmuDirectory, disabledFmuK
     let changed = false;
     // An FMU that may be loaded only once in a process (canBeInstantiatedOnlyOncePerProcess) cannot be two nodes: refused, naming them.
     const byFmu = new Map();
+    // A switched-off node is not run (FMI review #5): its FMU is not looked for, so one missing from this library does not stop the model,
+    // and it is not a second instance. It reaches the engine without its FMU, as a node whose states nothing sets, switched off.
+    for (const node of document.nodes ?? []) {
+        if (node.enabled !== false || node.implementation?.kind !== 'fmi') continue;
+        delete node.implementation;
+        changed = true;
+    }
     for (const node of document.nodes ?? []) {
         if (node.implementation?.kind !== 'fmi' || typeof node.implementation.fmuId !== 'string') continue;
         const key = `${node.implementation.fmuId}@${node.implementation.fmuVersion}`;

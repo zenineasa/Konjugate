@@ -17,6 +17,11 @@
 #include <string>
 #include <vector>
 
+// The model's GUID, appended to the generated source by src/fmiExport.mjs (fmi2IdentitySource), as fmi3Glue.cpp's token is.
+namespace konjugate::sdk::v1 {
+extern const char* const fmi2Guid;
+}
+
 namespace {
 
 struct FmuInstance {
@@ -45,8 +50,16 @@ fmi2Status fmi2SetDebugLogging(fmi2Component, fmi2Boolean, size_t, const fmi2Str
     return fmi2OK; // Konjugate-exported FMUs don't route through the host's logger callback.
 }
 
-fmi2Component fmi2Instantiate(fmi2String, fmi2Type fmuType, fmi2String, fmi2String, const fmi2CallbackFunctions*, fmi2Boolean, fmi2Boolean) {
+fmi2Component fmi2Instantiate(fmi2String instanceName, fmi2Type fmuType, fmi2String fmuGUID, fmi2String, const fmi2CallbackFunctions* functions, fmi2Boolean, fmi2Boolean) {
     if (fmuType != fmi2CoSimulation) return nullptr; // this FMU is Co-Simulation only.
+    // The GUID ties the binary to its modelDescription.xml (FMI 2.0.4 section 2.1.5): another one means another model's description.
+    if (fmuGUID && std::strcmp(fmuGUID, konjugate::sdk::v1::fmi2Guid) != 0) {
+        if (functions && functions->logger) {
+            const std::string message = std::string("The GUID '") + fmuGUID + "' is not this FMU's ('" + konjugate::sdk::v1::fmi2Guid + "'): its modelDescription.xml belongs to another model.";
+            functions->logger(functions->componentEnvironment, instanceName ? instanceName : "", fmi2Error, "logStatusError", "%s", message.c_str());
+        }
+        return nullptr;
+    }
     try {
         auto* instance = new FmuInstance();
         instance->model = konjugate::sdk::v1::createSimulationModel();

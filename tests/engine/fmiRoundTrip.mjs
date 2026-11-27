@@ -68,7 +68,9 @@ try {
         '--state-count', String(orderedStateNames.length),
         '--configuration', runConfigurationPath,
         '--output', roundTripCsvPath,
-        '--verify-rollback'
+        '--verify-rollback',
+        // The FMU's own GUID, as a host passes it: an export refuses any other (FMI review M1).
+        '--guid', /guid="([^"]+)"/.exec(Buffer.from(entries['modelDescription.xml']).toString('utf8'))[1]
     ]);
     assert.equal(runFmuResult.code, 0, 'runFmu must drive the exported FMU successfully (including its rollback self-check).');
     const rows = parseCsv(await readFile(roundTripCsvPath, 'utf8'));

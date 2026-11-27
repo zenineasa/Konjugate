@@ -385,6 +385,9 @@ export function generateFmiModel(document, { fmuInterface = null } = {}) {
         '    }',
         '',
         '    void restoreState(const std::vector<double>& snapshot) override {',
+        // A restored state is a run under way, not a fresh start: a parameter a host sets before its next step is set on it, rather than
+        // starting the programs afresh from the initial values (FMI review #2).
+        '        started_ = true;',
         '        for (std::size_t index = 0; index < state_.size(); ++index) state_[index] = snapshot[index];',
         parameterVariables.map((variable, index) => `        parameterValue_${variable.valueReference} = snapshot[state_.size() + ${index}];`).join('\n'),
         inputVariables.map((variable) => `        inputValue_${variable.valueReference} = state_[${stateIndex.get(variable.stateId)}];`).join('\n'),

@@ -356,7 +356,8 @@ int main(int argc, char** argv) {
         boost::property_tree::read_json(configurationOption, runConfiguration);
         konjugate::runFmu(libraryPath, std::stoi(stateCountOption),
             runConfiguration.get<double>("targetTime"), runConfiguration.get<double>("globalTimeStep"),
-            runConfiguration.get<double>("outputInterval"), outputOption, verifyRollback);
+            runConfiguration.get<double>("outputInterval"), outputOption, verifyRollback,
+            optionPath(argc, argv, "--guid").string().empty() ? std::string("guid") : optionPath(argc, argv, "--guid").string());
         std::_Exit(0);
     }
     // Check program (docs/programs.md, "Testing a program"): a version 2 program's standard checks, run through the transport a run

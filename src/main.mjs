@@ -61,7 +61,7 @@ import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLo
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
-import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
+import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { buildInformationLine } from './nodeProgram.mjs';
@@ -2171,16 +2171,14 @@ ipcMain.handle('packageAddFmu', async (event, { path = null } = {}) => {
         }
         if (inspected.description.coSimulation?.needsExecutionTool) return { error: `${name} needs the tool it was exported from installed and running beside it, which Konjugate cannot start; export it from that tool as a standalone FMU.` };
         const directory = join(app.getPath('userData'), 'packages');
-        const existing = (await listInstalledFmus(directory)).find((entry) => entry.packageId === inspected.description.guid);
-        const installed = existing
-            ? { guid: existing.packageId, version: existing.version, displayName: existing.name }
-            : await installFmuArchive(archive, { directory, sourceFileName: basename(chosenPath) });
+        // The library's copy only when it is this very archive: a different build that kept its ID goes beside it (FMI review #1).
+        const installed = await installOrReuseFmu(directory, archive, { sourceFileName: basename(chosenPath) });
         if (fromSources) {
             const outcome = await buildFmuHere(event, { guid: installed.guid, version: installed.version });
             if (outcome.status === 'declined' || outcome.status === 'cancelled') return null;
             if (outcome.status !== 'built' && outcome.status !== 'cached') return { error: outcome.message, buildLog: outcome.log ?? null, name };
         }
-        return { guid: installed.guid, version: installed.version, name: installed.displayName, reused: Boolean(existing), builtFromSources: fromSources };
+        return { guid: installed.guid, version: installed.version, name: installed.displayName, reused: installed.reused, besideVersion: installed.besideVersion, builtFromSources: fromSources };
     } catch (error) {
         return { error: `${basename(chosenPath)} could not be added: ${error.message}` };
     }

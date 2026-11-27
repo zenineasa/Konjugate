@@ -177,6 +177,12 @@ function fmi3IdentitySource({ instantiationToken, timeValueReference, outputCoun
     ].join('\n');
 }
 
+// The FMI 2.0 identity, appended to the source as FMI 3.0's is: fmi2Instantiate refuses another GUID (FMI review M1). The GUID is the
+// hash of the source without it, as before, so the modelDescription.xml an export writes is unchanged.
+function fmi2IdentitySource(guid) {
+    return ['', '// FMI 2.0 identity, read by engine/src/fmiGlue.cpp.', 'namespace konjugate::sdk::v1 {', `extern const char* const fmi2Guid = "${guid}";`, '}', ''].join('\n');
+}
+
 // The model's C++ source, its modelIdentifier and its modelDescription.xml, as an export writes them: pure JS, no compiler, so a
 // test can check an FMU made earlier against what the exporter writes now (tests/fmiExamples.test.mjs).
 // fmiVersion is '2.0' (the default) or '3.0'; the model and its value references are the same for both.
@@ -198,13 +204,15 @@ export function describeFmu(document, modelName, { fmiVersion = '2.0', stopTime 
             modelName: modelName || 'model', instantiationToken, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture,
             globalTimeStep, timeValueReference, ownership: document.ownership, defaultExperiment
         });
-        return { source: fmi3Source, modelIdentifier, xml, fmiVersion };
+        return { source: fmi3Source, modelSource: source, modelIdentifier, xml, fmiVersion };
     }
+    const guid = deterministicGuid(modelIdentifier, source);
     const xml = modelDescriptionXml({
-        modelName: modelName || 'model', guid: deterministicGuid(modelIdentifier, source), modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership,
+        modelName: modelName || 'model', guid, modelIdentifier, stateVariables, parameterVariables, supportsStateCapture, ownership: document.ownership,
         defaultExperiment
     });
-    return { source, modelIdentifier, xml, fmiVersion };
+    // `modelSource`: the model before either version's identity, the same for FMI 2.0 and 3.0.
+    return { source: `${source}${fmi2IdentitySource(guid)}`, modelSource: source, modelIdentifier, xml, fmiVersion };
 }
 
 // document must already be flattened (stripEdgeGroups(executionProjectDocument(...))), matching

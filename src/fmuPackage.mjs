@@ -252,6 +252,26 @@ export async function listInstalledFmus(directory) {
     return results;
 }
 
+// Add FMU and Replace FMU (FMI review #1): the library's copy of `archive` when it is the same archive (by SHA-256), else the archive
+// installed, beside any copy with the same ID under the next free version, since a newer build that kept its ID is another FMU and
+// must not run the old binary. `{ guid, version, displayName, reused, besideVersion }`, `besideVersion` the version of a copy with the
+// same ID it was installed beside (to say so), or null.
+export async function installOrReuseFmu(directory, archive, { sourceFileName = null } = {}) {
+    const { description } = inspectFmuArchive(archive);
+    const sha256 = sha256Hex(archive);
+    const sameId = (await listInstalledFmus(directory)).filter((entry) => entry.packageId === description.guid);
+    for (const entry of sameId) {
+        const kept = entry.manifest?.archiveSha256 ?? (await installedFmuArchive(directory, entry.packageId, entry.version).catch(() => null))?.sha256;
+        if (kept === sha256) return { guid: entry.packageId, version: entry.version, displayName: entry.name, reused: true, besideVersion: null };
+    }
+    const taken = new Set(sameId.map((entry) => entry.version));
+    let version = '1.0.0';
+    for (let patch = 1; taken.has(version); patch += 1) version = `1.0.${patch}`;
+    const installed = await installFmuArchive(archive, { directory, version, sourceFileName });
+    const besideVersion = sameId.length ? [...sameId].sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0].version : null;
+    return { guid: installed.guid, version: installed.version, displayName: installed.displayName, reused: false, besideVersion };
+}
+
 export async function uninstallFmu({ directory, guid, version }) {
     const target = safeInstallPath(directory, guid, version);
     let meta;

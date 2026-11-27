@@ -4285,7 +4285,7 @@ $('#nodeProgramFmuReplace').addEventListener('click', async () => {
     }
     installedFmus = null;
     await useFmuForNode(node, added.guid, added.version);
-    $('#statusText').textContent = `Replaced with ${added.name}`;
+    $('#statusText').textContent = `Replaced with ${added.name}${fmuBesideNote(added)}`;
 });
 
 // Which of the FMU's binaries runs here, and what about its ports the person wiring it should know (fmuPortNotes).
@@ -14738,6 +14738,11 @@ async function buildFmusThenValidate() {
     scheduleEngineValidation();
 }
 
+// Said when an added FMU kept the ID of one in the library but is another build (FMI review #1): installed beside it, not swapped for it.
+function fmuBesideNote(added) {
+    return added?.besideVersion ? ` (a different build from the one in your library with the same ID, so kept beside it as version ${added.version}; that one stays version ${added.besideVersion})` : '';
+}
+
 async function addFmuToModel({ path = null, position = null, installed = null } = {}) {
     if (activeResult) {
         showFmuNotice('Close the results to add an FMU.', ['The model is locked while a run\'s results are open: Close and edit first.']);
@@ -14764,7 +14769,7 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     if (!position) bringIntoViewWithLabel(node);
     await useFmuForNode(node, added.guid, added.version);
     if (!position) await settleClearOfDrawnModel(node);
-    $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}${added.builtFromSources ? ', built here from its sources' : ''}`;
+    $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}${fmuBesideNote(added)}${added.builtFromSources ? ', built here from its sources' : ''}`;
     return node;
 }
 

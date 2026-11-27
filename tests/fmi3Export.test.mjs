@@ -69,8 +69,9 @@ test('an FMI 3.0 modelDescription.xml has the elements and attributes FMI 3.0 as
     assert.ok(outputs.every((output) => output.initial === 'exact' && output.start !== undefined));
     assert.equal(root.ModelStructure.InitialUnknown, undefined, 'Outputs with initial="exact" are not initial unknowns (FMI 3.0 section 2.4.8).');
 
-    // The source is the FMI 2.0 export's, with the constants engine/src/fmi3Glue.cpp reads appended.
-    const fmi2Source = describeFmu(fixtureDocument, 'fixture').source;
+    // The source is the FMI 2.0 export's model (before its own identity, FMI review M1), with the constants engine/src/fmi3Glue.cpp reads
+    // appended.
+    const fmi2Source = describeFmu(fixtureDocument, 'fixture').modelSource;
     assert.ok(source.startsWith(fmi2Source));
     const identity = source.slice(fmi2Source.length);
     assert.match(identity, new RegExp(`fmi3InstantiationToken = "${root.instantiationToken.replace(/[{}]/g, '\\$&')}";`));
@@ -99,7 +100,8 @@ test('an FMI 3.0 export refuses what the FMI 2.0 export refuses, by the same wor
         const document = withMethod(fixtureDocument, method);
         const fmi2 = describeFmu(document, 'fixture');
         const fmi3 = describeFmu(document, 'fixture', { fmiVersion: '3.0' });
-        assert.ok(fmi3.source.startsWith(fmi2.source), method);
+        assert.ok(fmi3.source.startsWith(fmi2.modelSource), method);
+        assert.ok(fmi2.source.startsWith(fmi2.modelSource) && /extern const char\* const fmi2Guid = "/.test(fmi2.source.slice(fmi2.modelSource.length)), method);
         assert.equal(parseModelDescription(fmi3.xml).canGetAndSetFMUState, parseModelDescription(fmi2.xml).canGetAndSetFMUState, method);
     }
 });

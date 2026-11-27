@@ -53,6 +53,11 @@ private:
 
 } // namespace
 
+// What an FMI 2.0 export appends to the model's source (src/fmiExport.mjs): its GUID.
+namespace konjugate::sdk::v1 {
+extern const char* const fmi2Guid = "guid";
+} // namespace
+
 std::unique_ptr<konjugate::sdk::v1::SimulationModel> konjugate::sdk::v1::createSimulationModel() {
     return std::make_unique<DecayModel>();
 }
@@ -62,6 +67,12 @@ namespace {
 void instantiateRejectsModelExchange() {
     fmi2Component c = fmi2Instantiate("test", fmi2ModelExchange, "guid", "", nullptr, fmi2False, fmi2False);
     require(c == nullptr, "fmi2Instantiate must reject fmi2ModelExchange -- this FMU is Co-Simulation only.");
+}
+
+// FMI review M1: another model's GUID gets no instance, as FMI 2.0.4 section 2.1.5 asks.
+void instantiateRejectsAnotherModelsGuid() {
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "{another-model}", "", nullptr, fmi2False, fmi2False);
+    require(c == nullptr, "fmi2Instantiate must refuse a GUID other than the one in its modelDescription.xml.");
 }
 
 void fullLifecycleMatchesHandComputedEuler() {
@@ -216,6 +227,7 @@ void serializeAndDeserializeFMUstateRoundTrips() {
 
 int main() {
     instantiateRejectsModelExchange();
+    instantiateRejectsAnotherModelsGuid();
     fullLifecycleMatchesHandComputedEuler();
     doStepRejectsANonIntegerMultipleCommunicationStep();
     resetReturnsTheModelToItsInitialState();

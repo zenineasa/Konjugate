@@ -30,11 +30,12 @@ std::vector<double> readState(const Fmi2Api& api, fmi2Component instance, int st
 
 void runFmu(const std::filesystem::path& sharedLibraryPath, int stateCount,
             double targetTime, double globalTimeStep, double outputInterval,
-            const std::filesystem::path& outputCsvPath, bool verifyRollback) {
+            const std::filesystem::path& outputCsvPath, bool verifyRollback, const std::string& guid) {
     LoadedLibrary library(sharedLibraryPath);
     Fmi2Api api(library);
 
-    fmi2Component instance = api.instantiate("konjugateFmiImport", fmi2CoSimulation, "guid", "", nullptr, fmi2False, fmi2False);
+    // The FMU's own GUID, from its modelDescription.xml: an export refuses any other (FMI 2.0.4 section 2.1.5).
+    fmi2Component instance = api.instantiate("konjugateFmiImport", fmi2CoSimulation, guid.c_str(), "", nullptr, fmi2False, fmi2False);
     if (!instance) throw std::runtime_error("fmi2Instantiate failed for the FMU.");
     if (api.setupExperiment(instance, fmi2False, 0, 0.0, fmi2False, 0) != fmi2OK) throw std::runtime_error("fmi2SetupExperiment failed.");
     if (api.enterInitializationMode(instance) != fmi2OK) throw std::runtime_error("fmi2EnterInitializationMode failed.");

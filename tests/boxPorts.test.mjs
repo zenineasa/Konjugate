@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalLineEnd, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
+import { boxDropProblem, distinctPartName, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputArrowhead, inputTerminalLineEnd, inputTerminalOrder, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../src/boxPorts.mjs';
 import { fmiNodeFromPorts } from '../src/nodeProgram.mjs';
 import { readFile } from 'node:fs/promises';
 
@@ -172,4 +172,34 @@ test('a read\'s line ends at the edge of its input\'s terminal that faces its so
     assert.deepEqual(inputTerminalLineEnd(measurement, 400), { x: 180, y: 125 });
     // Straight above or below its middle counts as the right, the side the box is on, as before.
     assert.deepEqual(inputTerminalLineEnd(setpoint, 140), { x: 180, y: 100 });
+});
+
+// From the screenshots of HeatedRoomPid.kjt (round 5): a read's arrowhead sat mid-line, so which input it fed was read off the line's
+// end, not its arrow; and the two reads crossed, Setpoint (above) feeding the lower input and Room (below) the upper one.
+test('a read into an FMU has its arrowhead at its end, its tip on the terminal, pointing along the line into it', () => {
+    const start = { x: -6, y: 3, z: 0 };
+    const end = { x: 2, y: -3, z: 0 };
+    const { position, direction } = inputArrowhead(start, end, 0.24);
+    assert.ok(Math.abs(Math.hypot(direction.x, direction.y, direction.z) - 1) < 1e-12, 'A unit direction.');
+    assert.deepEqual([direction.x, direction.y, direction.z].map((value) => Number(value.toFixed(12))), [0.8, -0.6, 0]);
+    const tip = { x: position.x + direction.x * 0.12, y: position.y + direction.y * 0.12, z: position.z + direction.z * 0.12 };
+    assert.deepEqual([tip.x, tip.y, tip.z].map((value) => Number(value.toFixed(12))), [2, -3, 0], 'Its tip is the line\'s end, at the terminal.');
+    assert.equal(inputArrowhead(end, end, 0.24), null, 'A line of no length has no direction to point.');
+});
+
+test('an FMU\'s inputs are shown top to bottom as their sources stand on screen, stably, and the FMU\'s own order is kept otherwise', () => {
+    const fmuOrder = ['measurement', 'setpoint', 'Ti', 'k'];
+    // On screen (y down): Setpoint above, Room below; Ti and k read nothing.
+    const crossing = new Map([['measurement', 560], ['setpoint', 330]]);
+    assert.deepEqual(inputTerminalOrder(fmuOrder, crossing), ['setpoint', 'measurement', 'Ti', 'k'], 'Setpoint\'s input above Room\'s: the lines no longer cross.');
+    // Unconnected inputs keep their places: only the connected ones trade places among themselves.
+    assert.deepEqual(inputTerminalOrder(['a', 'free', 'b'], new Map([['a', 300], ['b', 100]])), ['b', 'free', 'a']);
+    // Close heights (a node dragged level with another) keep the order shown before, so the terminals do not swap back and forth.
+    const shown = ['setpoint', 'measurement', 'Ti', 'k'];
+    assert.deepEqual(inputTerminalOrder(fmuOrder, new Map([['measurement', 402], ['setpoint', 404]]), shown), shown, 'Within a few pixels: as shown before.');
+    assert.deepEqual(inputTerminalOrder(fmuOrder, new Map([['measurement', 402], ['setpoint', 404]])), fmuOrder, 'With nothing shown before: the FMU\'s own order.');
+    assert.deepEqual(inputTerminalOrder(fmuOrder, new Map([['measurement', 300], ['setpoint', 404]]), shown), fmuOrder, 'Clearly apart again: re-sorted.');
+    // A source not on screen counts as unconnected.
+    assert.deepEqual(inputTerminalOrder(fmuOrder, new Map([['setpoint', NaN], ['measurement', 10]])), fmuOrder);
+    assert.deepEqual(fmuOrder, ['measurement', 'setpoint', 'Ti', 'k'], 'The FMU\'s own order is never changed.');
 });

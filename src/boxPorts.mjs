@@ -166,3 +166,41 @@ export function settingRelationship({ id, source, target, nodes }) {
 export function inputTerminalLineEnd(rect, sourceX) {
     return { x: sourceX < (rect.left + rect.right) / 2 ? rect.left : rect.right, y: rect.top + rect.height / 2 };
 }
+
+// A read's arrowhead, at the end of its line into an FMU input: its tip on the end (the terminal), pointing along the line, so which
+// input a line feeds is read off its arrow. A cone `length` long, centred half its length back from the end. `start` and `end` are
+// points ({ x, y, z }); returns { position, direction } (a unit vector), or null for a line of no length.
+export function inputArrowhead(start, end, length) {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const dz = end.z - start.z;
+    const distance = Math.hypot(dx, dy, dz);
+    if (!distance) return null;
+    const direction = { x: dx / distance, y: dy / distance, z: dz / distance };
+    return { position: { x: end.x - direction.x * (length / 2), y: end.y - direction.y * (length / 2), z: end.z - direction.z * (length / 2) }, direction };
+}
+
+// The order an FMU's input terminals are shown in, top to bottom: the inputs that read a source on screen sorted by how high their sources
+// stand (`sourceY`, a Map of input key to its source's y on screen, y down; missing or not finite for an input reading nothing or nothing
+// shown), so their lines do not cross; inputs reading nothing keep their places. Starting from the order `shown` before (or the FMU's own,
+// `keys`), two neighbours trade places only when their sources are more than `tolerance` pixels apart, so a node dragged level with
+// another does not make the terminals swap back and forth. Display only: `keys` (the FMU's own order) is never changed.
+export function inputTerminalOrder(keys, sourceY, shown = null, tolerance = 6) {
+    const start = shown && shown.length === keys.length && keys.every((key) => shown.includes(key)) ? [...shown] : [...keys];
+    const placed = (key) => Number.isFinite(sourceY.get(key));
+    // Inputs reading nothing stand where the FMU puts them; those reading something fill the other places.
+    const order = keys.map((key) => (placed(key) ? null : key));
+    const connected = start.filter(placed);
+    for (let pass = 0; pass < connected.length; pass += 1) {
+        let swapped = false;
+        for (let index = 0; index + 1 < connected.length; index += 1) {
+            if (sourceY.get(connected[index]) - sourceY.get(connected[index + 1]) > tolerance) {
+                [connected[index], connected[index + 1]] = [connected[index + 1], connected[index]];
+                swapped = true;
+            }
+        }
+        if (!swapped) break;
+    }
+    let next = 0;
+    return order.map((key) => key ?? connected[next++]);
+}

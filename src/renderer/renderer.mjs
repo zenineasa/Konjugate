@@ -97,6 +97,7 @@ import { groupStabilityFindings, isEarlyStabilityFinding, stabilityFindingsTitle
 import { captureProgramWarnings, programWarningIssues } from '../programWarnings.mjs';
 import { canvasFog, draggedNodePositions, eligibleEndpointIds, farPlaneFor, fogDensityFor, labelElementOf, virtualKeyboardInset } from './viewportLayout.mjs';
 import { groupRelationshipBundles } from '../relationshipBundles.mjs';
+import { clearLabelSpot, labelSpotPreferences } from '../labelPlacement.mjs';
 import { nearestSampleIndex, nodeResultSeries, renderBeforeAfterComparison, renderMeasuredVsSimulatedComparison, resultSeriesForStateIds, ResultPlot } from './resultPlot.mjs';
 import { partKey, relationshipPartSeries, samplePartValues, suggestedPlaybackRate } from '../resultSession.mjs';
 import { seriesToCsv, withInstancePaths } from '../resultExport.mjs';
@@ -115,7 +116,7 @@ import {
     applyRootPortSignals, constantSignalNumber, portNameAsKept, portNameLimit, rootPortRequires, rootPortSignalUsable, setRootPortSignal
 } from '../components.mjs';
 import { exposeBakedParameters, fmuExportInterface, fmuInterfaceSummary } from '../fmuInterface.mjs';
-import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputTerminalLineEnd, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
+import { boxDropProblem, fmuBoxPorts, fmuPortsRetryMs, shouldAskFmuPorts, fmuInputBinding, inputArrowhead, inputTerminalLineEnd, inputTerminalOrder, inputTerminalText, instanceBoxPorts, placementBeside, settingRefusal, settingRelationship } from '../boxPorts.mjs';
 import { componentInterfaceLine, layoutRootPortTerminals, linkedChangeWarning, placedTerminalPositions, portCountText, portDirectionLabel, portNodeDocument, rootPortSignalText, rootPortStatus, rootPortTerminalText, takesFromOutside } from '../rootPortTerminals.mjs';
 import {
     executionProjectDocument, hydrateSubsystems, normalizeSubsystemName, subsystemBoundaryCrossings, subsystemContents, subsystemDeletion,
@@ -2266,8 +2267,17 @@ function positionProgramRead(object) {
     object.line.geometry.dispose();
     object.line.geometry = new THREE.BufferGeometry().setFromPoints([start, end]);
     object.line.computeLineDistances();
-    positionDirectionMarker(object.marker, new THREE.LineCurve3(start, end));
-    object.label.position.copy(start.clone().lerp(end, 0.4));
+    // Into an FMU, its arrowhead at the input it feeds, its tip on the terminal (inputArrowhead); into a node, partway, as a relationship's.
+    const head = object.read.fmu ? inputArrowhead(start, end, 0.24) : null;
+    if (head) {
+        object.marker.position.set(head.position.x, head.position.y, head.position.z);
+        object.marker.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(head.direction.x, head.direction.y, head.direction.z));
+    } else {
+        positionDirectionMarker(object.marker, new THREE.LineCurve3(start, end));
+    }
+    // Its chip where placeLineLabels put it, clear of the node cards; partway along the line until then.
+    object.label.position.copy(start.clone().lerp(end, object.labelT ?? 0.4));
+    object.start = start;
     object.end = end;
 }
 
@@ -2423,6 +2433,14 @@ function syncBoxTerminals() {
     const wanted = new Set(boxes.map((box) => box.key));
     [...boxTerminals.keys()].forEach((key) => { if (!wanted.has(key)) removeBoxTerminals(key); });
     for (const box of boxes) {
+        // An FMU's inputs shown in the order their sources stand on screen, so the reads into them do not cross (inputTerminalOrder);
+        // kept as they are while a terminal is being dragged. Display only: the FMU's own order and the file are untouched.
+        if (box.kind === 'fmu') {
+            const shown = boxTerminals.get(box.key)?.order ?? null;
+            const order = boxPortDrag && shown ? shown : inputTerminalOrder(box.terminals.inputs.map((input) => input.key), fmuInputSourceHeights(box), shown);
+            const byKey = new Map(box.terminals.inputs.map((input) => [input.key, input]));
+            box.terminals = { ...box.terminals, inputs: order.map((key) => byKey.get(key)) };
+        }
         const signature = JSON.stringify([box.object.uuid, box.terminals, box.kind === 'fmu' ? box.terminals.inputs.map((input) => boxTerminalStart(box, input)) : null]);
         if (boxTerminals.get(box.key)?.signature === signature) continue;
         removeBoxTerminals(box.key);
@@ -2444,7 +2462,66 @@ function syncBoxTerminals() {
         labels.forEach((label) => { label.renderOrder = 19; box.object.add(label); });
         // An FMU's outputs are its states: shown on its terminals, its label keeps its name alone.
         labelElementOf(box.object, 'node-label-container')?.classList.toggle('hasBoxPorts', box.kind === 'fmu' && box.terminals.outputs.length > 0);
-        boxTerminals.set(box.key, { signature, labels, box });
+        boxTerminals.set(box.key, { signature, labels, box, order: box.terminals.inputs.map((input) => input.key) });
+        programReadEndsStale = true;
+    }
+}
+
+// How high on screen (pixels, y down) each of an FMU box's inputs' sources stands: the node it reads, as shown in this view (its
+// subsystem's box when it is inside one). Missing for an input reading nothing, or reading a node not shown.
+function fmuInputSourceHeights(box) {
+    const heights = new Map();
+    const height = renderer.domElement.clientHeight;
+    for (const input of box.terminals.inputs) {
+        const object = input.reads?.nodeId != null ? displayObjectForNode(input.reads.nodeId) : null;
+        if (!object?.visible || object === box.object) continue;
+        const point = object.getWorldPosition(new THREE.Vector3()).project(camera);
+        if (point.z <= 1) heights.set(input.key, ((1 - point.y) / 2) * height);
+    }
+    return heights;
+}
+
+// The labels on lines -- a read's chip ("→ measurement") and a relationship's ("PidController → Room") -- each moved along its own line
+// to the first spot clear of the node cards and terminals (src/labelPlacement.mjs), so none covers a card's title or values; one keeps
+// its spot while that stays clear. Run with the labels' refresh, and not in a model too large to measure every card that often.
+function placeLineLabels() {
+    if (nodeObjects.size > 150) return;
+    const canvas = renderer.domElement.getBoundingClientRect();
+    if (!canvas.width || !canvas.height) return;
+    const obstacles = [...document.querySelectorAll('.node-label-container, .boxPorts')]
+        .map((element) => element.getBoundingClientRect())
+        .filter((rect) => rect.width && rect.height);
+    const toScreen = (point) => {
+        const projected = point.clone().project(camera);
+        return { x: canvas.left + ((projected.x + 1) / 2) * canvas.width, y: canvas.top + ((1 - projected.y) / 2) * canvas.height };
+    };
+    const sizeOf = (element) => {
+        const rect = element.getBoundingClientRect();
+        return rect.width && rect.height ? { width: rect.width, height: rect.height } : null;
+    };
+    for (const object of programReadObjects.values()) {
+        const size = object.label.visible && object.start && object.end && !object.label.element.matches(':hover, :focus') ? sizeOf(object.label.element) : null;
+        if (!size) continue;
+        const spots = labelSpotPreferences(0.4, object.labelT).map((t) => ({ t, ...toScreen(object.start.clone().lerp(object.end, t)) }));
+        const chosen = clearLabelSpot(spots, size, obstacles);
+        if (chosen && chosen.t !== object.labelT) {
+            object.labelT = chosen.t;
+            object.label.position.copy(object.start.clone().lerp(object.end, chosen.t));
+        }
+    }
+    for (const bundle of activeRelationshipBundles()) {
+        const overlay = relationshipBundleObjects.get(bundle.key);
+        // Not while it is pointed at, focused or pinned open: it grows into its list then, and must not move from under the pointer.
+        const still = overlay?.element.matches(':hover, :focus-within, .pinned');
+        const size = overlay?.anchor.visible && !still ? sizeOf(overlay.element) : null;
+        const curves = size ? bundle.relationships.map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve).filter(Boolean) : [];
+        if (!curves.length) continue;
+        const pointAt = (t) => curves.reduce((sum, curve) => sum.add(curve.getPoint(t)), new THREE.Vector3()).multiplyScalar(1 / curves.length);
+        const chosen = clearLabelSpot(labelSpotPreferences(0.5, overlay.t).map((t) => ({ t, ...toScreen(pointAt(t)) })), size, obstacles);
+        if (chosen && chosen.t !== overlay.t) {
+            overlay.t = chosen.t;
+            overlay.anchor.position.copy(pointAt(chosen.t));
+        }
     }
 }
 
@@ -10874,8 +10951,9 @@ function syncContextualOverlays() {
         const editingWaypoints = bundle.relationships.some((relationship) => waypointHandleObjects.has(relationship.id));
         overlay.baseVisible = Boolean(sourceObject?.visible && targetObject?.visible) && !editingWaypoints;
         overlay.anchor.visible = overlay.baseVisible && bundleLabelAllowed(overlay);
+        // Halfway along its lines, or where placeLineLabels moved it, clear of the node cards.
         const curveMidpoints = bundle.relationships
-            .map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve?.getPoint(0.5))
+            .map((relationship) => relationshipObjects.get(relationship.id)?.line.userData.curve?.getPoint(overlay.t ?? 0.5))
             .filter(Boolean);
         if (curveMidpoints.length) {
             overlay.anchor.position.set(0, 0, 0);
@@ -23462,6 +23540,10 @@ function render(time) {
     if (time - lastLabelRefresh > 250) {
         lastLabelRefresh = time;
         refreshLabelDeclutter();
+        // The camera moved the sources up or down the screen: an FMU's inputs follow (cheap when the order holds), and the labels on lines
+        // keep clear of the cards.
+        if (boxTerminals.size) syncBoxTerminals();
+        placeLineLabels();
         if (labelModes.nodes === 'hidden' || labelModes.edges === 'hidden') refreshLabelObjectVisibility();
         labelsRefreshed = true;
     }

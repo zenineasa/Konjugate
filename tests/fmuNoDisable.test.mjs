@@ -28,6 +28,5 @@ test('the main process passes no disabled FMUs to a run, lists every FMU as enab
 test('no window offers to disable an FMU or leaves one out for being disabled', async () => {
     const renderer = await read('src/renderer/renderer.mjs');
     assert.doesNotMatch(renderer, /packageType === 'fmu' && entry\.enabled !== false/, 'FMUs are not filtered by an enabled flag.');
-    const detail = renderer.slice(renderer.indexOf("$('#extensionsToggleEnabled').hidden"), renderer.indexOf("$('#extensionsToggleEnabled').hidden") + 200);
-    assert.match(detail, /packageType === 'fmu'/, 'Extensions does not offer Disable for an FMU.');
+    // Extensions does not list FMUs at all (tests/fmuNotInExtensions.test.mjs), so it offers no Disable for one.
 });

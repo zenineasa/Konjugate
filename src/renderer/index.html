@@ -365,7 +365,6 @@
             <div class="extensionsTabs" role="tablist" id="extensionsTabs">
                 <button type="button" class="extensionsTab active" data-extensions-tab="addon" role="tab">Add-ons<span class="extensionsTabCount" hidden></span></button>
                 <button type="button" class="extensionsTab" data-extensions-tab="plugin" role="tab">Plugins<span class="extensionsTabCount" hidden></span></button>
-                <button type="button" class="extensionsTab" data-extensions-tab="fmu" role="tab">FMUs<span class="extensionsTabCount" hidden></span></button>
                 <button type="button" class="extensionsTab" id="extensionsUpdatesTab" data-extensions-tab="updates" role="tab" hidden>Updates<span class="extensionsTabCount" hidden></span></button>
             </div>
             <div class="shapeLibraryDomains" id="extensionsDomains" role="tablist" hidden></div>
@@ -400,7 +399,6 @@
                             <div><dt>Package ID</dt><dd id="extensionsDetailId"></dd></div>
                             <div><dt>Version</dt><dd id="extensionsDetailVersion"></dd></div>
                         </dl>
-                        <p id="extensionsDetailFmu" class="examplesExplorerDetailEmpty" hidden></p>
                         <p class="extensionsDetailLabel" id="extensionsDetailPermissionsLabel">Permissions</p>
                         <ul id="extensionsDetailPermissions" class="extensionsPermissionList"></ul>
                         <!-- Cross-references a registry-declared bundle sibling (see the Multi-package
@@ -419,7 +417,6 @@
                         <footer class="extensionsDetailFooter">
                             <button id="extensionsInstallCompatible" type="button" class="doneButton" hidden>Install compatible version</button>
                             <button id="extensionsUpdate" type="button" class="doneButton" hidden>Update</button>
-                            <button id="extensionsAddFmuToModel" type="button" class="doneButton" hidden>Add to model</button>
                             <button id="extensionsToggleEnabled" type="button" class="extensionsToggleButton">Disable</button>
                             <button id="extensionsUninstall" type="button" class="extensionsDangerButton">Uninstall</button>
                         </footer>

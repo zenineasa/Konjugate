@@ -542,6 +542,16 @@ void inferGraphRecoversANonSeparableInteractionTerm() {
 
 }
 
+void automaticSkeletonThresholdIsTheBonferroniFisherBound() {
+    // Values worked out independently with SciPy: tanh(norm.ppf(1 - 0.05 / (2 p (p - 1))) / sqrt(rows - 2p - 2)).
+    require(approxEqual(konjugate::automaticSkeletonThreshold(1000, 20), 0.12290662423235178, 1e-12), "20 columns, 1000 rows.");
+    require(approxEqual(konjugate::automaticSkeletonThreshold(250, 50), 0.3365536994839578, 1e-12), "50 columns, 250 rows.");
+    require(konjugate::automaticSkeletonThreshold(100, 20) > konjugate::automaticSkeletonThreshold(200, 20), "Fewer rows, a higher bar.");
+    bool threw = false;
+    try { konjugate::automaticSkeletonThreshold(42, 20); } catch (const std::runtime_error&) { threw = true; }
+    require(threw, "Too few rows for the stage-1 inversion has no threshold either.");
+}
+
 int main() {
     try {
         parseInferenceCsvParsesHeaderAndRows();
@@ -566,6 +576,7 @@ int main() {
         inferGraphScalesCorrelationOnlyCoefficientsByTimeStep();
         inferGraphOmitsInteractionTermsByDefault();
         inferGraphRecoversANonSeparableInteractionTerm();
+        automaticSkeletonThresholdIsTheBonferroniFisherBound();
         std::cout << "Graph inference tests passed.\n";
         return 0;
     } catch (const std::exception& error) {

@@ -31,7 +31,9 @@ struct InferenceConfig {
     // overridable config field (not hardcoded) for engine-level testing/analysis use, not because
     // any other value is expected to work.
     std::vector<int> candidateLags = {1};
-    double skeletonThreshold = 0.1;      // |partial correlation| a pair must clear to survive stage 1
+    // |partial correlation| a pair must clear to survive stage 1. Unset (the default): chosen from the data's size by
+    // automaticSkeletonThreshold, so that it stays above the noise a short series' partial correlations carry.
+    std::optional<double> skeletonThreshold;
     double coefficientThreshold = 0.05;  // aggregate (L2-norm across degrees) |standardized coefficient| a source must clear
     double validationFraction = 0.2;     // chronological held-out split, applied per target fit
     std::vector<double> ridgePenalties = {0.01, 0.1, 1.0, 10.0};
@@ -111,6 +113,15 @@ struct InferenceResult {
     std::vector<InferredEdge> edges;
     std::vector<SelfTerm> selfTerms; // one entry per target with at least one accepted lagged edge
 };
+
+// The stage-1 threshold used when InferenceConfig::skeletonThreshold is unset: the smallest |lag-1 partial correlation| that is
+// significant at 5 % after a Bonferroni correction over every directed pair, by Fisher's z-transform. Each lag-1 partial correlation
+// conditions on the 2p - 2 other current and lagged columns, so with n = rows - 1 stacked rows atanh(r) has standard deviation
+// 1 / sqrt(n - (2p - 2) - 3) when there is no relationship; with p(p - 1) directed pairs tested, the threshold is
+// tanh(z / sqrt(n - 2p - 1)) with z the normal quantile at 1 - 0.05 / (2 p (p - 1)). A fixed threshold sits below that noise on
+// a short series, admitting hundreds of unrelated pairs (see docs/causalInference.md, Stage 1). Requires rows > 2p + 2, as the
+// stage-1 inversion itself does.
+double automaticSkeletonThreshold(std::size_t rows, std::size_t variables);
 
 // Parses CSV text whose first column is a numeric, strictly increasing, evenly spaced time
 // column and whose remaining columns are the numeric variable series. The validated spacing is

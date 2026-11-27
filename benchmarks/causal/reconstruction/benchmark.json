@@ -11,7 +11,7 @@
         "foundEquationError": "equation error over the true edges that were found"
     },
     "notes": [
-        "infer fits one-row-lagged, additive models (with optional powers of a source and a source-target product) by ridge regression, after a skeleton of lag-1 partial correlations with a fixed threshold of 0.1 (docs/causalInference.md). Datasets inside that model class are recovered well; the ones outside it are included to show where it fails, and say why in their rows.",
+        "infer fits one-row-lagged, additive models (with optional powers of a source and a source-target product) by ridge regression, after a skeleton of lag-1 partial correlations whose threshold is set from the numbers of rows and columns, the smallest significant at 5 % after a Bonferroni correction over every directed pair (docs/causalInference.md). Datasets inside that model class are recovered well; the ones outside it are included to show where it fails, and say why in their rows.",
         "False edges in the recoverable datasets are reverse edges with small rates (the shrinkage effect docs/causalInference.md describes): each row gives the largest false edge's rate beside the smallest true rate. Less noise does not always help: the diamond with the least downstream noise (σ = 0.5) has two (x2 → x1, x3 → x1), because x2 and x3 then follow x1 closely enough to predict it, and it scores below the same diamond at σ = 2. A hidden common cause is the exception: its false edges are as strong as true ones, and nothing in the data can tell them apart.",
         "A variable with no cause found gets no equation at all, by design (docs/causalInference.md, 'Replaying recorded values for input columns'); the own-rate error is measured only over variables with a true cause.",
         "Rates are compared in the engine's own units, per second of the CSV's time column: an edge's terms, and a variable's own rate (its self-lag coefficient less one, over Δt). For the continuous-time datasets the true rates are the system matrix A; infer reports (Φ - I)/Δt for the sampled transition Φ = exp(A Δt), which equals A only as A Δt → 0, while at fine sampling the skeleton finds nothing: there is no sampling interval at which both the structure and the rates are right."
@@ -32,9 +32,9 @@
         "odeChainDt1.f1": { "min": 0.95 },
         "odeChainDt0p5.equationError": { "min": 0.34, "max": 0.53 },
         "odeChainDt1.equationError": { "min": 0.48, "max": 0.74 },
-        "diamondNoise8.recall": { "min": 0.7, "max": 0.8 },
+        "diamondNoise8.recall": { "min": 0.95, "max": 1 },
         "diamondNoise32.recall": { "min": 0.45, "max": 0.55 },
-        "pureQuadratic.recall": { "min": 0, "max": 0 },
+        "pureQuadratic.recall": { "min": 1, "max": 1 },
         "lag2.foundEquationError": { "min": 0.42, "max": 0.66 },
         "instantaneous.directionAccuracy": { "min": 0, "max": 0 },
         "hiddenConfounder.falseEdges": { "min": 2, "max": 2 },
@@ -43,6 +43,6 @@
         "odeChainDt2.equationError": { "min": 0.65, "max": 1.0 },
         "pooled.directionAccuracy": { "min": 0.9 },
         "pooled.foundEquationError": { "max": 0.058 },
-        "sampleSize.f1Gain": { "min": 0.4, "max": 0.52 }
+        "sampleSize.f1Gain": { "min": 0.1, "max": 0.16 }
     }
 }

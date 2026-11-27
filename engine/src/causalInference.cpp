@@ -196,6 +196,22 @@ double adjustedHeldOutScore(double rawScore, std::size_t validationRows, std::si
     return 1.0 - (1.0 - rawScore) * (n - 1.0) / denominator;
 }
 
+double automaticSkeletonThreshold(std::size_t rows, std::size_t variables) {
+    const double freedom = static_cast<double>(rows) - 2.0 * static_cast<double>(variables) - 2.0;
+    if (!(freedom > 0.0)) throw std::runtime_error("Not enough observations relative to the number of variables for a stage-1 threshold.");
+    const double pairs = std::max(1.0, static_cast<double>(variables) * (static_cast<double>(variables) - 1.0));
+    const double tail = 0.05 / (2.0 * pairs);
+    // The normal quantile with upper tail `tail`, by bisection on erfc: monotone, a fixed number of halvings, so the same on every
+    // machine to the last bit of erfc.
+    double low = 0.0;
+    double high = 40.0;
+    for (int halving = 0; halving < 200; ++halving) {
+        const double middle = 0.5 * (low + high);
+        (0.5 * std::erfc(middle / std::sqrt(2.0)) > tail ? low : high) = middle;
+    }
+    return std::tanh(0.5 * (low + high) / std::sqrt(freedom));
+}
+
 InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig& config) {
     if (config.skeletonMethod != "partialCorrelation") {
         throw std::runtime_error("Unsupported skeleton method \"" + config.skeletonMethod + "\".");
@@ -234,12 +250,13 @@ InferenceResult inferGraph(const InferenceSeries& series, const InferenceConfig&
     const auto skeletonColumnCount = static_cast<Eigen::Index>(variableCount);
 
     // Stage 1: which unordered pairs are related at all.
+    const double skeletonThreshold = config.skeletonThreshold ? *config.skeletonThreshold : automaticSkeletonThreshold(rowCount, variableCount);
     std::vector<std::vector<bool>> survivedSkeleton(variableCount, std::vector<bool>(variableCount, false));
     for (std::size_t i = 0; i < variableCount; ++i) {
         for (std::size_t j = i + 1; j < variableCount; ++j) {
             const double iToJ = lagPartial(static_cast<Eigen::Index>(j), skeletonColumnCount + static_cast<Eigen::Index>(i));
             const double jToI = lagPartial(static_cast<Eigen::Index>(i), skeletonColumnCount + static_cast<Eigen::Index>(j));
-            if (std::abs(iToJ) >= config.skeletonThreshold || std::abs(jToI) >= config.skeletonThreshold) {
+            if (std::abs(iToJ) >= skeletonThreshold || std::abs(jToI) >= skeletonThreshold) {
                 survivedSkeleton[i][j] = survivedSkeleton[j][i] = true;
             }
         }

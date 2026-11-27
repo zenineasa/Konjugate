@@ -6,7 +6,7 @@
     "seed": 111,
     "rows": 1500,
     "expect": "limit",
-    "limit": "The root x1 explains too little of x2 and x3 against their own noise for the skeleton to keep the pairs; the edges into x4, whose causes now vary widely, are still found.",
+    "limit": "The root x1 explains little of x2 and x3 against their own noise. Here the skeleton keeps every pair (its bar for four columns and 1,500 rows is 0.074) and all four edges are found, but not reliably: over 20 other seeds about one edge in seven is missed.",
     "generator": {
         "variables": [
             {

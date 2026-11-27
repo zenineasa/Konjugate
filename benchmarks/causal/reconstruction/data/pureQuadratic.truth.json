@@ -12,7 +12,7 @@
             2
         ]
     },
-    "limit": "x1 is symmetric about zero, so x1² has no linear correlation with x1; the skeleton (stage 1) is linear and prunes the pair before any power is fitted.",
+    "limit": "x1 is symmetric about zero, so x1² has no linear correlation with x1 in expectation, and the skeleton (stage 1) is linear. It keeps the pair only when the sample's chance linear correlation clears its bar, as in this sample, and the power is then fitted exactly; over 20 other seeds that happens in one in five.",
     "generator": {
         "variables": [
             {

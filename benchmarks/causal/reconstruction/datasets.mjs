@@ -75,7 +75,7 @@ export const datasets = [
     // Noise: the diamond's downstream noise raised from 0.5 to 2, 8 and 32 (the root's stays 1).
     ...[2, 8, 32].map((noise, index) => ({
         id: `diamondNoise${noise}`, group: 'noise', title: `Diamond, downstream noise σ = ${noise}`, kind: 'discrete', seed: 110 + index, rows: 1500, expect: noise >= 8 ? 'limit' : 'recover',
-        limit: noise >= 8 ? 'The root x1 explains too little of x2 and x3 against their own noise for the skeleton to keep the pairs; the edges into x4, whose causes now vary widely, are still found.' : undefined,
+        limit: noise >= 8 ? (noise === 8 ? 'The root x1 explains little of x2 and x3 against their own noise. Here the skeleton keeps every pair (its bar for four columns and 1,500 rows is 0.074) and all four edges are found, but not reliably: over 20 other seeds about one edge in seven is missed.' : 'The root x1 explains too little of x2 and x3 against their own noise for the skeleton to keep the pairs; the edges into x4, whose causes now vary widely, are still found.') : undefined,
         variables: [v('x1', 0.5), v('x2', 0.3, noise), v('x3', 0.3, noise), v('x4', 0.2, noise)],
         edges: [{ source: 'x1', target: 'x2', linear: 0.8 }, { source: 'x1', target: 'x3', linear: 0.6 }, { source: 'x2', target: 'x4', linear: 0.5 }, { source: 'x3', target: 'x4', linear: -0.7 }]
     })),
@@ -85,7 +85,7 @@ export const datasets = [
         variables: [v('x1', 0.5), v('x2', 0.3, 0.3), v('x3', 0.3, 0.3)],
         edges: [{ source: 'x1', target: 'x2', linear: 0.6, quadratic: 0.4 }, { source: 'x2', target: 'x3', linear: 0.7 }] },
     { id: 'pureQuadratic', group: 'nonlinear', title: 'Purely quadratic term x2 = 0.8 x1² + …', kind: 'discrete', seed: 121, rows: 1500, expect: 'limit', inference: { degrees: [1, 2] },
-        limit: 'x1 is symmetric about zero, so x1² has no linear correlation with x1; the skeleton (stage 1) is linear and prunes the pair before any power is fitted.',
+        limit: 'x1 is symmetric about zero, so x1² has no linear correlation with x1 in expectation, and the skeleton (stage 1) is linear. It keeps the pair only when the sample\'s chance linear correlation clears its bar, as in this sample, and the power is then fitted exactly; over 20 other seeds that happens in one in five.',
         variables: [v('x1', 0.0), v('x2', 0.3, 0.3)],
         edges: [{ source: 'x1', target: 'x2', quadratic: 0.8 }] },
     { id: 'bilinear', group: 'nonlinear', title: 'Source-target product x2 += 0.3 x1 x2 (with a linear path)', kind: 'discrete', seed: 122, rows: 1500, expect: 'recover', inference: { interaction: true },

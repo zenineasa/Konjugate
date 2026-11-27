@@ -14,6 +14,7 @@ import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promise
 import { dirname, join, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { parseModelDescription } from './fmiModelDescription.mjs';
+import { fmuBuildInformation } from './fmuBuildInformation.mjs';
 
 export class FmuPackageError extends Error {
     constructor(message, code) {
@@ -90,9 +91,13 @@ export function inspectFmuArchive(archive) {
     const platforms = [...new Set(
         names.filter((name) => name.startsWith('binaries/')).map((name) => name.split('/')[1]).filter(Boolean)
     )];
-    if (!platforms.length) throw new FmuPackageError('The FMU has no binaries/<platform>/ directory -- there is nothing to load.', 'NOT_AN_FMU');
+    // What it says about building it from its sources (docs/proposals/sourceFmuImport.md): an FMU with no binaries at all is accepted
+    // when it carries build information, and refused, as before, when it carries neither.
+    const buildDescription = files['sources/buildDescription.xml'];
+    const build = fmuBuildInformation({ description, names, buildDescriptionXml: buildDescription ? strFromU8(buildDescription) : null });
+    if (!platforms.length && !build) throw new FmuPackageError('The FMU has no binaries/<platform>/ directory -- there is nothing to load.', 'NOT_AN_FMU');
 
-    return { description, files, platforms };
+    return { description, files, platforms, build };
 }
 
 // archive is the .fmu's raw bytes. displayName/version are supplied by the user at import time

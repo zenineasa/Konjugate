@@ -286,6 +286,17 @@ export function fmuPortHint(port) {
     return parts.join(' · ');
 }
 
+// The line About this FMU and the install review say of an FMU's sources (docs/proposals/sourceFmuImport.md): whether it can be built
+// here, from how many files and from what. `build` is fmuBuildInformation's (src/fmuBuildInformation.mjs) without its configuration.
+export function buildInformationLine(build, { runsHere }) {
+    if (!build) return null;
+    const files = `${build.sourceFileCount} ${build.language === 'C and C++' ? 'source' : build.language} file${build.sourceFileCount === 1 ? '' : 's'}`;
+    const source = build.from === 'buildDescription' ? 'its buildDescription.xml' : 'its <SourceFiles>';
+    if (runsHere) return `It also carries its sources: ${files}, from ${source}`;
+    if (build.problems.length) return `Sources only, and Konjugate cannot build it: ${build.problems[0]}`;
+    return `Sources only: Konjugate can build it, ${files} from ${source}${build.exporter ? ` (exported by ${build.exporter.name} ${build.exporter.version})` : ''}`;
+}
+
 // The lines of the card's "About this FMU", from what describeInstalledFmuPorts gives as `about` (src/fmiResolver.mjs).
 export function fmuAboutLines(about) {
     if (!about) return [];
@@ -309,6 +320,8 @@ export function fmuAboutLines(about) {
         ].filter(Boolean);
         if (said.length) lines.push(`Suggested run: ${said.join(', ')}`);
     }
+    const sources = buildInformationLine(about.build, { runsHere: about.runsHere !== false });
+    if (sources) lines.push(sources);
     lines.push(about.canGetAndSetFMUState ? 'Can save and restore its state (checkpoints, forks, rewinding a twin)' : 'Cannot save its state: checkpoints, forks and rewinding are not available with it');
     if (about.coSimulation?.canBeInstantiatedOnlyOncePerProcess) lines.push('Only one copy of it can run at a time');
     return lines;

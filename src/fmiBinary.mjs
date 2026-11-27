@@ -26,6 +26,11 @@ function operatingSystems(platform) {
     return { tuple: 'linux', legacy: 'linux', extension: '.so' };
 }
 
+// This machine's FMI 3.0 platform tuple (§2.5.1.4): "aarch64-darwin", "x86_64-linux", "x86_64-windows".
+export function platformTuple({ platform = process.platform, arch = process.arch } = {}) {
+    return `${fmiArchitecture(arch)}-${operatingSystems(platform).tuple}`;
+}
+
 // The binaries/ directories an FMU's binary for this machine may be in, in the order they are tried: the FMU's own
 // standard's name first.
 export function binaryDirectoryCandidates(fmiVersion, { platform = process.platform, arch = process.arch } = {}) {

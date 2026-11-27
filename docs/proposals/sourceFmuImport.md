@@ -1,17 +1,17 @@
 ---
 type: Proposal
 title: Building an FMU from its sources
-description: "Proposed, design only: an FMU that carries its C sources but no binary for this computer is built on import by the desktop app, from FMI 3.0's buildDescription.xml, FMI 2.0's <SourceFiles> or a known exporter's recipe (OpenModelica first), never by running the FMU's own CMake, makefiles or scripts; a clear confirmation saying what will run, no network, no sandbox claimed; the computer's own C compiler, found per platform and named when missing; builds cached by the FMU's SHA-256, compiler and flags, kept on this computer and never in the project, which keeps the FMU as it came; the web edition says FMUs run in the desktop app; verified by building the FMI Reference FMUs and OpenModelica's PID controller from their sources and matching their shipped binaries' results bit for bit; five stages."
+description: "Accepted 27 November 2026 (all eight recommendations), built in five stages, stage 1 built: an FMU that carries its C sources but no binary for this computer is built on import by the desktop app, from FMI 3.0's buildDescription.xml, FMI 2.0's <SourceFiles> or a known exporter's recipe (OpenModelica first), never by running the FMU's own CMake, makefiles or scripts; a clear confirmation saying what will run, no network, no sandbox claimed; the computer's own C compiler, found per platform and named when missing; builds cached by the FMU's SHA-256, compiler and flags, kept on this computer and never in the project, which keeps the FMU as it came; the web edition says FMUs run in the desktop app; verified by building the FMI Reference FMUs and OpenModelica's PID controller from their sources and matching their shipped binaries' results bit for bit; five stages."
 tags: [proposals, fmi, fmu, import, compilers, toolchains, security, caching]
 status: draft
-implementation: none
+implementation: partial
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
 
 # Building an FMU from its sources
 
-**Status: draft, design only.** This is the separate proposal decision 12 of [Ports at the top level](rootPorts.md#decisions) asked for: compile an FMU's `sources/` on import, so any source FMU runs on any platform Konjugate does. Nothing here is built; the [open questions](#open-questions) each end with a recommendation.
+**Status: accepted.** This is the separate proposal decision 12 of [Ports at the top level](rootPorts.md#decisions) asked for: compile an FMU's `sources/` on import, so any source FMU runs on any platform Konjugate does. The user accepted the recommendation on all eight [questions](#decisions) on 27 November 2026; the design below follows them. Stage 1 (reading the build information) is built.
 
 ## In short
 
@@ -115,7 +115,7 @@ The web edition can neither compile C nor load a native library. **Add › FMU�
 
 ## Stages
 
-1. **Read build information.** Parse `buildDescription.xml` and `<SourceFiles>`, choose the configuration, recognise OpenModelica, accept source-only FMUs at inspection; About this FMU says "Sources only: Konjugate can build it". Unit tests on the Reference FMUs' and the PID FMU's descriptions, platform choice and fallback, 2.0.4 precedence.
+1. **Read build information.** *Built* (`src/fmuBuildInformation.mjs`, `tests/fmuBuildInformation.test.mjs`): an FMU with build information and no binaries is accepted by `inspectFmuArchive` and installs; About this FMU and the install review say "Sources only: Konjugate can build it, 113 C files from its <SourceFiles> (exported by OpenModelica 1.27.1)", "It also carries its sources" beside a binary, or why it cannot be built (a `<Library>`, a path leaving `sources/`, a listed file it does not carry, a language that is not C or C++, no configuration for this platform); Add › FMU… still refuses one with no binary for this computer, saying it carries its sources, until stage 3 builds it. Parse `buildDescription.xml` and `<SourceFiles>`, choose the configuration, recognise OpenModelica, accept source-only FMUs at inspection; About this FMU says "Sources only: Konjugate can build it". Unit tests on the Reference FMUs' and the PID FMU's descriptions, platform choice and fallback, 2.0.4 precedence.
 2. **Compiler and plan.** The C driver, `vswhere`, the per-platform messages, the full FMI headers, and `buildFmuSources`. Tests: the Reference FMUs' plans compiled; fake compilers on `PATH` for the messages.
 3. **Build on import.** Confirmation, progress and Cancel, failures in words, the cache and its lock, About this FMU's record and Rebuild, projects asking before building. Tests: the bit-for-bit comparison, cache, refusals, project byte identity.
 4. **The OpenModelica recipe.** With the PID controller's verification on macOS and Linux, Windows when a runner has MSVC.
@@ -128,16 +128,19 @@ The web edition can neither compile C nor load a native library. **Add › FMU�
 - **Trust.** "Built from sources" may be read as "checked"; the confirmation's words, and no wording elsewhere suggesting review.
 - **Bit-for-bit expectations.** A compiler update can change the last bits; the build record and run metadata make that visible.
 
-## Open questions
+## Decisions
 
-1. **Run the FMU's own CMakeLists when there is no recipe?** Configuring runs arbitrary code from the FMU and needs CMake (3.21 or newer for OpenModelica's). *Recommendation: no*; recipes instead, and a refusal naming the exporter that points to building outside Konjugate.
-2. **Where does the built binary live?** This computer's cache, or inside the project's attachment. *Recommendation: the cache*, with **Save FMU with this computer's binary…** as an explicit action; projects stay byte-identical and recipients build from sources they can read.
-3. **How often to confirm?** Every build, once per FMU, or a setting to always allow. *Recommendation: once per FMU archive (by SHA-256) on this computer*; a Rebuild after a compiler change asks nothing more.
-4. **Which compiler setting?** Derive the C compiler from the C++ override, or add a C compiler field. *Recommendation: derive it*; add a field only when a real setup needs one.
-5. **FMI 3.0 `compilerOptions`?** All, none, or an allow-list. *Recommendation: an allow-list*, refusing and naming any other flag.
-6. **Build when a binary exists?** Only when none runs, or also on request. *Recommendation: also on request*, from About this FMU, never automatically.
-7. **`<Library>` elements?** *Recommendation: refuse by name at first*; support static libraries in `binaries/` when a real FMU needs them.
-8. **Verification bar.** Bit for bit against the shipped binaries, or FMPy's tolerance. *Recommendation: bit for bit where the shipped binary used the same compiler family*, and a recorded, explained difference elsewhere.
+The user accepted every recommendation below on 27 November 2026.
+
+
+1. **Run the FMU's own CMakeLists when there is no recipe?** Configuring runs arbitrary code from the FMU and needs CMake (3.21 or newer for OpenModelica's). **Decided: no**; recipes instead, and a refusal naming the exporter that points to building outside Konjugate.
+2. **Where does the built binary live?** This computer's cache, or inside the project's attachment. **Decided: the cache**, with **Save FMU with this computer's binary…** as an explicit action; projects stay byte-identical and recipients build from sources they can read.
+3. **How often to confirm?** Every build, once per FMU, or a setting to always allow. **Decided: once per FMU archive (by SHA-256) on this computer**; a Rebuild after a compiler change asks nothing more.
+4. **Which compiler setting?** Derive the C compiler from the C++ override, or add a C compiler field. **Decided: derive it**; add a field only when a real setup needs one.
+5. **FMI 3.0 `compilerOptions`?** All, none, or an allow-list. **Decided: an allow-list**, refusing and naming any other flag.
+6. **Build when a binary exists?** Only when none runs, or also on request. **Decided: also on request**, from About this FMU, never automatically.
+7. **`<Library>` elements?** **Decided: refuse by name at first**; support static libraries in `binaries/` when a real FMU needs them.
+8. **Verification bar.** Bit for bit against the shipped binaries, or FMPy's tolerance. **Decided: bit for bit where the shipped binary used the same compiler family**, and a recorded, explained difference elsewhere.
 
 ## Not in this proposal
 

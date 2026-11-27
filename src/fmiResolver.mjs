@@ -25,7 +25,7 @@
 
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { resolve, sep } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
@@ -33,6 +33,7 @@ import { packageKey } from './packageArchive.mjs';
 import { fmuAttachmentsRequirement, fmuStartValuesRequirement } from './nodeProgram.mjs';
 import { contentForEngine } from './components.mjs';
 import { installedFmuArchive } from './fmuPackage.mjs';
+import { fmuBuildInformation } from './fmuBuildInformation.mjs';
 
 export class FmiResolutionError extends Error {
     constructor(message, code = 'FMI_RESOLUTION_FAILED') {
@@ -292,8 +293,21 @@ async function archiveFacts(fmuDirectory, guid, version) {
     return archive ? { archiveSha256: archive.sha256, archiveBytes: archive.buffer.length } : {};
 }
 
+// What an installed FMU says about building it from its sources (src/fmuBuildInformation.mjs), from its folder: for About this FMU,
+// without the configuration's file lists. Null when it says nothing.
+async function installedBuildInformation(fmuRoot, description) {
+    const entries = await readdir(resolve(fmuRoot, 'sources'), { recursive: true, withFileTypes: true }).catch(() => []);
+    const names = entries.filter((entry) => entry.isFile())
+        .map((entry) => `sources/${relative(resolve(fmuRoot, 'sources'), resolve(entry.parentPath ?? entry.path, entry.name)).split(sep).join('/')}`);
+    const buildDescriptionXml = await readFile(resolve(fmuRoot, 'sources', 'buildDescription.xml'), 'utf8').catch(() => null);
+    const build = fmuBuildInformation({ description, names, buildDescriptionXml });
+    if (!build) return null;
+    const { configuration, ...summary } = build;
+    return summary;
+}
+
 // The card's "About this FMU" (docs/proposals/fmuImportWorkflow.md, stage 3): what the FMU says of itself and how it runs here.
-function fmuAbout(description, platforms, chosen) {
+function fmuAbout(description, platforms, chosen, build = null) {
     return Object.fromEntries(Object.entries({
         modelName: description.modelName,
         fmiVersion: description.fmiVersion,
@@ -308,7 +322,8 @@ function fmuAbout(description, platforms, chosen) {
         coSimulation: description.coSimulation,
         canGetAndSetFMUState: description.canGetAndSetFMUState,
         platforms,
-        runsHere: !chosen.error
+        runsHere: !chosen.error,
+        build: build ?? undefined
     }).filter(([, value]) => value !== undefined));
 }
 
@@ -346,7 +361,7 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
         outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type, ...variableExtras(variable) })),
         notExposed: description.notExposed,
         binary: describeChosenBinary(chosen, description.fmiVersion),
-        about: { ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen), ...await archiveFacts(fmuDirectory, guid, version) }
+        about: { ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen, await installedBuildInformation(fmuRoot, description)), ...await archiveFacts(fmuDirectory, guid, version) }
     };
 }
 

@@ -171,6 +171,9 @@ function parseFmi2(root) {
         variables,
         notExposed,
         ...modelInformation(root),
+        // The C files its Co-Simulation sources are built from (FMI 2.0 §2.3), relative to sources/: what Konjugate builds it from
+        // when no buildDescription.xml says more (docs/proposals/sourceFmuImport.md).
+        ...(root.CoSimulation.SourceFiles ? { sourceFiles: asArray(root.CoSimulation.SourceFiles.File).map((file) => textAttribute(file?.['@_name'])).filter(Boolean) } : {}),
         coSimulation: {
             canHandleVariableCommunicationStepSize: flag(root.CoSimulation['@_canHandleVariableCommunicationStepSize']),
             canSerializeFMUState: flag(root.CoSimulation['@_canSerializeFMUstate']),

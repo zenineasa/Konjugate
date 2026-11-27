@@ -64,6 +64,7 @@ import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchReg
 import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
+import { buildInformationLine } from './nodeProgram.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
@@ -1992,9 +1993,10 @@ ipcMain.handle('packageInstall', async (event) => {
         const detail = [
             `${inspected.description.modelName} (FMI ${inspected.description.fmiVersion}, run in Co-Simulation)`,
             `guid: ${inspected.description.guid}`,
-            `Platforms in this file: ${inspected.platforms.join(', ')}`,
-            describeChosenBinary(chosen, inspected.description.fmiVersion)
-        ].join('\n');
+            `Platforms in this file: ${inspected.platforms.join(', ') || 'none'}`,
+            describeChosenBinary(chosen, inspected.description.fmiVersion),
+            buildInformationLine(inspected.build, { runsHere: !chosen.error })
+        ].filter(Boolean).join('\n');
         const confirmation = await dialog.showMessageBox(targetWindow, {
             type: 'question',
             buttons: ['Cancel', 'Install'],
@@ -2077,7 +2079,11 @@ ipcMain.handle('packageAddFmu', async (event, { path = null } = {}) => {
         const inspected = inspectFmuArchive(archive);
         const name = inspected.description.modelName;
         const chosen = await chooseFmuBinary(inspected.description, async (entry) => inspected.files[entry] ?? null);
-        if (chosen.error) return { error: `${name} cannot run on this computer: ${chosen.error}.` };
+        if (chosen.error) {
+            // One that carries its sources says so (docs/proposals/sourceFmuImport.md): building it from them comes with its stage 3.
+            const sources = inspected.build ? ` It carries its sources (${inspected.build.sourceFileCount} files), but Konjugate does not build an FMU from its sources yet.` : '';
+            return { error: `${name} cannot run on this computer: ${chosen.error}.${sources}` };
+        }
         if (inspected.description.coSimulation?.needsExecutionTool) return { error: `${name} needs the tool it was exported from installed and running beside it, which Konjugate cannot start; export it from that tool as a standalone FMU.` };
         const directory = join(app.getPath('userData'), 'packages');
         const existing = (await listInstalledFmus(directory)).find((entry) => entry.packageId === inspected.description.guid);

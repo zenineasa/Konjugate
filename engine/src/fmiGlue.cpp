@@ -206,7 +206,10 @@ fmi2Status fmi2GetFMUstate(fmi2Component c, fmi2FMUstate* FMUstate) {
     if (!FMUstate) return fail(instance, "fmi2GetFMUstate: no place for the FMU state given.");
     if (!instance->model->supportsStateCapture()) return fail(instance, "fmi2GetFMUstate is not supported: this FMU declares canGetAndSetFMUstate=\"false\" in its modelDescription.xml.");
     try {
-        *FMUstate = new std::vector<double>(instance->model->captureState());
+        // A handle that already holds a state is updated in place (FMI 2.0, 2.1.8), not left behind for a new one.
+        auto values = instance->model->captureState();
+        if (*FMUstate) *static_cast<std::vector<double>*>(*FMUstate) = std::move(values);
+        else *FMUstate = new std::vector<double>(std::move(values));
         return fmi2OK;
     } catch (const std::exception& error) {
         return fail(instance, "fmi2GetFMUstate: " + describe(error));

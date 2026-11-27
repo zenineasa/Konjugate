@@ -155,3 +155,21 @@ test('opening a project installs the FMUs it keeps that this computer lacks, and
         assert.deepEqual(await installProjectAttachments(directory, JSON.stringify({ nodes: [] }), attachments), { content: JSON.stringify({ nodes: [] }), installed: [] });
     });
 });
+
+// FMI review M3: the limit on an FMU's total unpacked size held only once every file was unpacked, so an archive of a few hundred
+// kilobytes could make Konjugate inflate hundreds of megabytes before refusing it. Each entry says its unpacked size before it is
+// unpacked; the total is checked as the entries come, and the archive refused at the first one over the limit, unpacked or not. Here
+// four 60 MB files (240 MB) and a fifth whose data is damaged: refused for its size, it is never inflated, so its damage never shows.
+test('an FMU whose files add up to more than the unpacked limit is refused before they are unpacked', () => {
+    const sixtyMegabytes = new Uint8Array(60 * 1024 * 1024);
+    const archive = zipSync({
+        'modelDescription.xml': new TextEncoder().encode('<?xml version="1.0"?><fmiModelDescription fmiVersion="2.0" modelName="Big" guid="big"><CoSimulation modelIdentifier="big"/></fmiModelDescription>'),
+        ...Object.fromEntries([1, 2, 3, 4, 5].map((index) => [`resources/part${index}.bin`, sixtyMegabytes]))
+    });
+    // Damage the fifth file's compressed data, past its local header (30 bytes and its name).
+    const name = new TextEncoder().encode('resources/part5.bin');
+    const header = Buffer.from(archive).indexOf(Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04])]), Buffer.from(archive).indexOf(Buffer.from(name)) - 30);
+    archive.fill(0xff, header + 30 + name.length, header + 30 + name.length + 64);
+    assert.ok(archive.length < 2 * 1024 * 1024, 'The archive itself is small.');
+    assert.throws(() => inspectFmuArchive(archive), (error) => error instanceof FmuPackageError && error.code === 'ARCHIVE_LIMIT' && /expanded FMU size/.test(error.message));
+});

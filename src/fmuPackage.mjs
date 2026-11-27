@@ -64,12 +64,19 @@ export function inspectFmuArchive(archive) {
         throw new FmuPackageError('The FMU file size is not allowed.', 'ARCHIVE_LIMIT');
     }
     let files;
+    // Each entry says its unpacked size before it is unpacked, so the limits hold as the entries come, before any over them is inflated.
+    let declaredFiles = 0;
+    let declaredBytes = 0;
     try {
         files = unzipSync(archive, {
             filter(file) {
                 safeArchivePath(file.name);
                 if (file.name.endsWith('/')) return false;
                 if (file.originalSize > maximumFileBytes) throw new FmuPackageError('A file inside the FMU exceeds the per-file size limit.', 'ARCHIVE_LIMIT');
+                declaredFiles += 1;
+                declaredBytes += file.originalSize;
+                if (declaredFiles > maximumFileCount) throw new FmuPackageError('The FMU file count is not allowed.', 'ARCHIVE_LIMIT');
+                if (declaredBytes > maximumExpandedBytes) throw new FmuPackageError('The expanded FMU size is not allowed.', 'ARCHIVE_LIMIT');
                 return true;
             }
         });

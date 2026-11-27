@@ -53,6 +53,33 @@ private:
     double k_ = 0.5;
 };
 
+// FMI 2.0 (2.1.8): given a handle that already holds a state, fmi2GetFMUstate updates that state; it must not leave it behind
+// for a new one (FMI review M2: it allocated a new one each time, leaking the old, so a host that saves into one handle every
+// step leaked a state per step).
+void savingIntoAnExistingHandleUpdatesItInPlace() {
+    gSupportsStateCapture = true;
+    fmi2Component c = fmi2Instantiate("test", fmi2CoSimulation, "guid", "", nullptr, fmi2False, fmi2False);
+    require(c != nullptr, "fmi2Instantiate failed.");
+    require(fmi2SetupExperiment(c, fmi2False, 0, 0.0, fmi2False, 0) == fmi2OK, "fmi2SetupExperiment failed.");
+    fmi2FMUstate state = nullptr;
+    require(fmi2GetFMUstate(c, &state) == fmi2OK, "fmi2GetFMUstate failed.");
+    const fmi2FMUstate first = state;
+    require(fmi2DoStep(c, 0.0, 0.5, fmi2False) == fmi2OK, "fmi2DoStep failed.");
+    const fmi2ValueReference xVr = 0;
+    fmi2Real saved = 0;
+    require(fmi2GetReal(c, &xVr, 1, &saved) == fmi2OK, "fmi2GetReal failed.");
+    require(fmi2GetFMUstate(c, &state) == fmi2OK, "fmi2GetFMUstate into an existing handle failed.");
+    require(state == first, "fmi2GetFMUstate into an existing handle must update that state, not allocate another (the first is leaked).");
+    require(fmi2DoStep(c, 0.5, 0.5, fmi2False) == fmi2OK, "fmi2DoStep failed.");
+    require(fmi2SetFMUstate(c, state) == fmi2OK, "fmi2SetFMUstate failed.");
+    fmi2Real restored = 0;
+    require(fmi2GetReal(c, &xVr, 1, &restored) == fmi2OK, "fmi2GetReal failed.");
+    require(restored == saved, "The updated handle must hold the newer state.");
+    require(fmi2FreeFMUstate(c, &state) == fmi2OK, "fmi2FreeFMUstate failed.");
+    fmi2FreeInstance(c);
+    gSupportsStateCapture = false;
+}
+
 } // namespace
 
 // What an FMI 2.0 export appends to the model's source (src/fmiExport.mjs): its GUID.
@@ -265,4 +292,5 @@ int main() {
     getRealReadsBackAParameterValueJustSet();
     rollbackRoundTripsThroughGetSetFMUstate();
     serializeAndDeserializeFMUstateRoundTrips();
+    savingIntoAnExistingHandleUpdatesItInPlace();
 }

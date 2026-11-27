@@ -12,7 +12,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zipSync, unzipSync } from 'fflate';
-import { binaryDirectoryCandidates } from './fmiBinary.mjs';
+import { binaryArchitectures, binaryDirectoryCandidates, fmiArchitecture } from './fmiBinary.mjs';
 import { generateFmiModel } from './fmiCodeGen.mjs';
 import { fmiAttributes } from './ownership.mjs';
 import { cppProviderSdkPath, resolveEnginePath, runEngine } from './engineAdapter.mjs';
@@ -55,12 +55,16 @@ function checkedFmiVersion(fmiVersion) {
 // bucket like most real-world FMU exporters do, rather than inventing a nonstandard directory name.
 // FMI 3.0 names a platform tuple, architecture then operating system (aarch64-darwin, x86_64-linux,
 // x86_64-windows, ...; FMI 3.0 section 2.5.1.4), as src/fmiBinary.mjs reads it on import.
-export function platformDirectory(fmiVersion = '2.0') {
-    if (fmiVersion === '3.0') return binaryDirectoryCandidates('3.0')[0];
-    const bitness = process.arch === 'x86' || process.arch === 'ia32' ? '32' : '64';
-    if (process.platform === 'win32') return `win${bitness}`;
-    if (process.platform === 'darwin') return `darwin${bitness}`;
-    return `linux${bitness}`;
+// FMI 2.0 names a binary's folder by system and bitness only, and its win64 and linux64 mean x86-64: a binary for an ARM processor on
+// Windows or Linux goes under its FMI 3.0 platform tuple (aarch64-linux), where the FMI Reference FMUs put theirs and Konjugate's importer
+// looks (FMI review #7). A Mac's darwin64 holds a binary for either processor, as hosts expect, and merging two makes it universal.
+export function platformDirectory(fmiVersion = '2.0', { platform = process.platform, arch = process.arch } = {}) {
+    if (fmiVersion === '3.0') return binaryDirectoryCandidates('3.0', { platform, arch })[0];
+    const architecture = fmiArchitecture(arch);
+    const bitness = architecture === 'x86' || architecture === 'arm' ? '32' : '64';
+    if (platform === 'darwin') return `darwin${bitness}`;
+    if (architecture === 'aarch64' || architecture === 'arm') return binaryDirectoryCandidates('3.0', { platform, arch })[0];
+    return platform === 'win32' ? `win${bitness}` : `linux${bitness}`;
 }
 
 export function libraryExtension() {
@@ -293,17 +297,93 @@ export function mergeFmuPackages(files) {
         }
     }
 
+    // Each binary by where it goes and the processor it is built for (FMI review #7): a Mac's (darwin32/64) slices are kept by processor and
+    // made one universal binary; elsewhere a binary built for another processor than its FMI 2.0 folder means (linux64 and win64 mean
+    // x86-64) goes under its platform tuple. The same place and processor with different bytes is not the same export.
     const merged = { 'modelDescription.xml': archives[0].entries['modelDescription.xml'] };
+    const macSlices = new Map();
+    const differing = (path, architecture) => new Error(`Two of the given files both contain '${path}'${architecture ? ` built for ${architecture}` : ''} with different contents -- they can't be the same export.`);
     for (const archive of archives) {
         for (const [path, bytes] of Object.entries(archive.entries)) {
             if (!path.startsWith('binaries/')) continue;
-            if (merged[path] && !areBytesEqual(merged[path], bytes)) {
-                throw new Error(`Two of the given files both contain '${path}' with different contents -- they can't be the same export.`);
+            const [, directory, file] = /^binaries\/([^/]+)\/(.+)$/.exec(path) ?? [];
+            if (/^darwin(32|64)$/.test(directory ?? '') && machOSlices(bytes)) {
+                if (!macSlices.has(path)) macSlices.set(path, { slices: new Map(), first: bytes });
+                const kept = macSlices.get(path);
+                for (const slice of machOSlices(bytes)) {
+                    const earlier = kept.slices.get(slice.architecture);
+                    if (earlier && !areBytesEqual(earlier.bytes, slice.bytes)) throw differing(path, slice.architecture);
+                    kept.slices.set(slice.architecture, slice);
+                }
+                continue;
             }
-            merged[path] = bytes;
+            const architectures = binaryArchitectures(bytes);
+            let target = path;
+            if (architectures?.length === 1 && /^(linux|win)64$/.test(directory ?? '') && architectures[0] !== 'x86_64') {
+                target = `binaries/${architectures[0]}-${directory.startsWith('win') ? 'windows' : 'linux'}/${file}`;
+            }
+            if (merged[target] && !areBytesEqual(merged[target], bytes)) throw differing(target, architectures?.[0]);
+            merged[target] = bytes;
         }
     }
+    for (const [path, { slices, first }] of macSlices) {
+        merged[path] = slices.size === 1 || (machOSlices(first).length === slices.size) ? first : universalMachO([...slices.values()]);
+    }
     return Buffer.from(zipSync(merged, { level: 6 }));
+}
+
+// The slices of a Mach-O binary, thin or universal: [{ architecture, cpuType, cpuSubtype, bytes }], or null when it is not one.
+const machOArchitectures = new Map([[0x01000007, 'x86_64'], [0x0100000c, 'aarch64'], [7, 'x86'], [12, 'arm']]);
+function machOSlices(bytes) {
+    if (bytes.length < 12) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const magic = view.getUint32(0, false);
+    if (magic === 0xcffaedfe || magic === 0xcefaedfe) {
+        const cpuType = view.getUint32(4, true);
+        return [{ architecture: machOArchitectures.get(cpuType) ?? `cpu ${cpuType}`, cpuType, cpuSubtype: view.getUint32(8, true), bytes }];
+    }
+    if (magic !== 0xcafebabe) return null;
+    const count = view.getUint32(4, false);
+    if (count === 0 || count > 32 || 8 + count * 20 > bytes.length) return null;
+    const slices = [];
+    for (let index = 0; index < count; index += 1) {
+        const entry = 8 + index * 20;
+        const cpuType = view.getUint32(entry, false);
+        const offset = view.getUint32(entry + 8, false);
+        const size = view.getUint32(entry + 12, false);
+        if (offset + size > bytes.length) return null;
+        slices.push({ architecture: machOArchitectures.get(cpuType) ?? `cpu ${cpuType}`, cpuType, cpuSubtype: view.getUint32(entry + 4, false), bytes: bytes.subarray(offset, offset + size) });
+    }
+    return slices;
+}
+
+// A universal (fat) Mach-O of `slices`, as Apple's lipo writes one: its header (big-endian), then each slice at an offset aligned to its
+// processor's page (2^14 for ARM, 2^12 for Intel), in ascending CPU type.
+function universalMachO(slices) {
+    const ordered = [...slices].sort((left, right) => left.cpuType - right.cpuType);
+    const alignOf = (slice) => ((slice.cpuType & 0xff) === 12 ? 14 : 12);
+    let offset = 8 + ordered.length * 20;
+    const placed = ordered.map((slice) => {
+        const alignment = 2 ** alignOf(slice);
+        offset = Math.ceil(offset / alignment) * alignment;
+        const at = offset;
+        offset += slice.bytes.length;
+        return { ...slice, offset: at };
+    });
+    const bytes = new Uint8Array(offset);
+    const view = new DataView(bytes.buffer);
+    view.setUint32(0, 0xcafebabe, false);
+    view.setUint32(4, placed.length, false);
+    placed.forEach((slice, index) => {
+        const entry = 8 + index * 20;
+        view.setUint32(entry, slice.cpuType, false);
+        view.setUint32(entry + 4, slice.cpuSubtype, false);
+        view.setUint32(entry + 8, slice.offset, false);
+        view.setUint32(entry + 12, slice.bytes.length, false);
+        view.setUint32(entry + 16, alignOf(slice), false);
+        bytes.set(slice.bytes, slice.offset);
+    });
+    return bytes;
 }
 
 function areBytesEqual(a, b) {

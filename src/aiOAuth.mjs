@@ -29,11 +29,11 @@ const defaultTimeoutMilliseconds = 5 * 60_000;
 // for on both 127.0.0.1 and ::1 because a browser may resolve it to either. A request that is not the callback, or whose
 // `state` differs from the one sent, is answered and ignored (another page on this computer could send one); a callback
 // without `state` is accepted only when `requireState` is false, which is safe where the code is useless without the PKCE
-// verifier that never leaves this process. Resolves to { code, verifier, redirectUri, params }, `params` being everything the
+// verifier that never leaves this process. `preferredPort` is tried first where a provider's examples name one. Resolves to { code, verifier, redirectUri, params }, `params` being everything the
 // callback carried (a provider may send more than the code: OpenAI sends the client it registered and the scopes granted).
 export async function loopbackAuthorization({
     authorizationUrl, openExternal, signal, host = '127.0.0.1', path = '/callback',
-    requireState = true, timeoutMilliseconds = defaultTimeoutMilliseconds
+    requireState = true, timeoutMilliseconds = defaultTimeoutMilliseconds, preferredPort = 0
 }) {
     if (typeof authorizationUrl !== 'function' || typeof openExternal !== 'function') throw new Error('Signing in needs an authorization address and a way to open the browser.');
     if (signal?.aborted) throw new DOMException('Signing in was cancelled.', 'AbortError');
@@ -89,7 +89,8 @@ export async function loopbackAuthorization({
     let timer;
     const onAbort = () => settle.reject(new DOMException('Signing in was cancelled.', 'AbortError'));
     try {
-        const port = await listen('127.0.0.1', 0);
+        // The port a provider's own examples use where it is free (OpenAI's is 1455), any free one otherwise.
+        const port = preferredPort ? await listen('127.0.0.1', preferredPort).catch(() => listen('127.0.0.1', 0)) : await listen('127.0.0.1', 0);
         // The same port on IPv6 loopback when the redirect says "localhost"; a computer without IPv6 has only the first.
         if (host === 'localhost') await listen('::1', port).catch(() => {});
         const redirectUri = `http://${host}:${port}${path}`;

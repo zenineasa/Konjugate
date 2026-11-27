@@ -612,3 +612,24 @@ test('Hugging Face offers no sign-in until Konjugate\'s OAuth app is filled in, 
         if (previous === undefined) delete process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID; else process.env.KONJUGATE_HUGGING_FACE_CLIENT_ID = previous;
     }
 });
+
+test('A client ChatGPT issued is kept before the exchange, reused on the next attempt, and a refused exchange says why', async () => {
+    const issued = [];
+    const failing = fakeChatGpt({ onRequest: (address) => (address.endsWith('/oauth/token')
+        ? jsonResponse({ error: 'invalid_grant', error_description: 'The authorization code has expired.' }, 400) : null) });
+    await assert.rejects(provider('chatGpt', failing.fetchImpl).signIn({ openExternal: failing.openExternal, hostId: 'urn:uuid:host', onClientIssued: (id) => issued.push(id) }),
+        (error) => error.code === 'signInFailed' && /invalid_grant\): The authorization code has expired\. Try signing in again\./.test(error.message));
+    assert.deepEqual(issued, ['oaiapp_123'], 'The issued client was lost with the failed exchange.');
+    assert.equal(failing.seen.requests[0].options.headers.Accept, 'application/json');
+    const redirect = new URL(failing.seen.authorizations[0].searchParams.get('redirect_uri'));
+    assert.equal(redirect.pathname, '/auth/callback');
+
+    const again = fakeChatGpt();
+    const retried = [];
+    await provider('chatGpt', again.fetchImpl).signIn({ openExternal: again.openExternal, hostId: 'urn:uuid:host', registeredClientId: 'oaiapp_123', onClientIssued: (id) => retried.push(id) });
+    const parameters = Object.fromEntries(again.seen.authorizations[0].searchParams);
+    assert.equal(parameters.client_id, 'oaiapp_123', 'A second attempt registered Konjugate again.');
+    assert.equal('agent_name_hint' in parameters, false);
+    assert.equal(again.seen.tokenRequests[0].client_id, 'oaiapp_123');
+    assert.deepEqual(retried, []);
+});

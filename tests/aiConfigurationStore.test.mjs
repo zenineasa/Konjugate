@@ -219,3 +219,13 @@ test('a renewed sign-in replaces only the credential, the account is kept for di
     const again = createAIConfigurationStore({ directory, credentialVault: memoryVault(), uuidFactory: uuidFactory() });
     assert.equal(await again.hostIdentifier(), host, 'The host id changed when the store was opened again.');
 }));
+
+test('a client a provider issued to this installation is kept apart from configurations, and can be forgotten', () => withStore(async (store, directory) => {
+    assert.equal(await store.registeredClient('chatGpt'), null);
+    await store.rememberRegisteredClient('chatGpt', 'oaiapp_1');
+    assert.equal(await store.registeredClient('chatGpt'), 'oaiapp_1');
+    const again = createAIConfigurationStore({ directory, credentialVault: memoryVault(), uuidFactory: uuidFactory() });
+    assert.equal(await again.registeredClient('chatGpt'), 'oaiapp_1');
+    await again.rememberRegisteredClient('chatGpt', null);
+    assert.equal(await again.registeredClient('chatGpt'), null);
+}));

@@ -518,7 +518,7 @@ function chatGptProvider() {
         let response;
         try {
             response = await fetchImpl(`${chatGptAuth}/api/accounts/oauth/token`, {
-                method: 'POST', signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(fields).toString()
+                method: 'POST', signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: new URLSearchParams(fields).toString()
             });
         } catch (error) {
             if (error.name === 'AbortError') throw error;
@@ -529,7 +529,9 @@ function chatGptProvider() {
         try { body = JSON.parse(text); } catch { /* reported below */ }
         if (!response.ok) {
             const code = typeof body?.error === 'string' ? body.error : body?.error?.code ?? null;
-            const failure = new AssistantProviderError(`ChatGPT refused the sign-in (HTTP ${response.status}${code ? `, ${code}` : ''}).`, 'signInFailed');
+            // OpenAI's own reason, which says more than the code (an expired code, a redirect that differs, a verifier that does not match).
+            const reason = String(body?.error_description ?? body?.error?.message ?? (body ? '' : text) ?? '').trim().slice(0, 300);
+            const failure = new AssistantProviderError(`ChatGPT refused the sign-in (HTTP ${response.status}${code ? `, ${code}` : ''})${reason ? `: ${reason}` : '.'} Try signing in again.`, 'signInFailed');
             failure.status = response.status;
             failure.providerCode = code;
             throw failure;
@@ -578,14 +580,17 @@ function chatGptProvider() {
         signInDescription: 'Use your ChatGPT Plus or Pro plan, within its limits. No API key.',
         // The models the plan offers, in OpenAI's own order: its first is the one a sign-in starts with.
         suggestModel: (models) => models[0]?.id ?? '',
-        async signIn({ openExternal, signal, fetchImpl, hostId, previous }) {
+        async signIn({ openExternal, signal, fetchImpl, hostId, previous, registeredClientId = null, onClientIssued }) {
             if (typeof hostId !== 'string' || !hostId) throw new Error('Signing in to ChatGPT needs this installation\'s host id.');
             // Signing in again to an account Konjugate is registered with uses the client OpenAI issued for it, and skips the account choice.
             let earlier = null;
             try { earlier = previous ? readChatGptCredential(previous) : null; } catch { /* a first sign-in */ }
+            // A client OpenAI issued on an earlier attempt from this computer is used again, even if that attempt did not finish:
+            // OpenAI's documentation says to retain it and start a fresh authorization with it, not to register again.
+            if (!earlier && registeredClientId) earlier = { clientId: registeredClientId, idToken: null };
             const nonce = randomBytes(16).toString('base64url');
             const { code, verifier, redirectUri, params } = await loopbackAuthorization({
-                host: '127.0.0.1', path: '/auth/callback', openExternal, signal,
+                host: '127.0.0.1', path: '/auth/callback', preferredPort: 1455, openExternal, signal,
                 authorizationUrl: (redirect, { challenge, state }) => `${chatGptAuth}/api/accounts/authorize?${new URLSearchParams({
                     client_id: earlier?.clientId ?? 'dynamic_agent_client', ext_agent_host_id: hostId,
                     ...(earlier ? (earlier.idToken ? { id_token_hint: earlier.idToken } : {}) : { agent_name_hint: 'Konjugate' }),
@@ -596,6 +601,8 @@ function chatGptProvider() {
             const clientId = earlier?.clientId ?? params.client_id;
             if (!clientId) throw new AssistantProviderError('ChatGPT did not finish registering Konjugate. Try signing in again.', 'signInFailed');
             if (earlier && params.client_id && params.client_id !== earlier.clientId) throw new AssistantProviderError('ChatGPT answered for a different registration of Konjugate. Try signing in again.', 'signInFailed');
+            // Kept before the exchange, so a failed exchange does not lose it.
+            if (!earlier) await onClientIssued?.(clientId);
             const body = await tokenRequest(fetchImpl, {
                 grant_type: 'authorization_code', client_id: clientId, code, code_verifier: verifier, redirect_uri: redirectUri, resource: chatGptResource
             }, signal);

@@ -3504,7 +3504,9 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
         const previous = earlier ? await aiConfigurationStore.resolve(earlier.uuid).then(({ credential }) => credential).catch(() => null) : null;
         const { credential, account = '' } = await aiProviderRegistry.signIn({
             provider, signal: controller.signal, openExternal: (url) => shell.openExternal(url),
-            hostId: await aiConfigurationStore.hostIdentifier(), previous
+            hostId: await aiConfigurationStore.hostIdentifier(), previous,
+            registeredClientId: await aiConfigurationStore.registeredClient(provider),
+            onClientIssued: (clientId) => aiConfigurationStore.rememberRegisteredClient(provider, clientId)
         });
         const configuration = {
             uuid: earlier?.uuid, name: earlier?.name ?? descriptor.name, provider, endpoint: earlier?.endpoint ?? '',
@@ -3523,6 +3525,8 @@ ipcMain.handle('aiSignIn', async (event, provider) => {
         return { ok: true, configuration: saved };
     } catch (error) {
         const cancelled = error.name === 'AbortError';
+        // A client the provider no longer accepts is forgotten, so the next sign-in registers Konjugate again.
+        if (error.providerCode === 'invalid_client') await aiConfigurationStore.rememberRegisteredClient(provider, null).catch(() => {});
         return { ok: false, error: { message: cancelled ? 'Signing in was cancelled.' : error.message, code: cancelled ? 'signInCancelled' : error.code ?? 'signInFailed' } };
     } finally {
         event.sender.removeListener('destroyed', abort);

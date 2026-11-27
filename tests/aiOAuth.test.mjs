@@ -88,3 +88,16 @@ test('A "localhost" redirect is answered on IPv4 loopback', async () => {
     });
     assert.equal(result.code, 'v4');
 });
+
+test('A preferred port is used where it is free, and any free port where it is not', async () => {
+    const { createServer } = await import('node:net');
+    const blocker = createServer();
+    const taken = await new Promise((resolve) => blocker.listen(0, '127.0.0.1', () => resolve(blocker.address().port)));
+    try {
+        const result = await loopbackAuthorization({ authorizationUrl, preferredPort: taken, openExternal: providerPage((url) => ({ code: 'c', state: url.searchParams.get('state') })) });
+        assert.notEqual(new URL(result.redirectUri).port, String(taken));
+    } finally { blocker.close(); }
+    const free = await new Promise((resolve) => { const probe = createServer().listen(0, '127.0.0.1', () => { const { port } = probe.address(); probe.close(() => resolve(port)); }); });
+    const result = await loopbackAuthorization({ authorizationUrl, preferredPort: free, openExternal: providerPage((url) => ({ code: 'c', state: url.searchParams.get('state') })) });
+    assert.equal(new URL(result.redirectUri).port, String(free));
+});

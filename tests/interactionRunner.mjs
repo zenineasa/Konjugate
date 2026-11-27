@@ -1288,7 +1288,8 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#settingsDialog').open && !document.querySelector('[data-settings-page="assistant"]').hidden`, 'The assistant\'s ⚙ did not open Settings › Model assistant.');
         assert.equal(await evaluate(window, `document.querySelector('#settingsPageTitle').textContent`), 'Model assistant');
         assert.deepEqual(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].map((option) => option.value)`), [
-            'ollama', 'openAi', 'nvidia', 'huggingFace', 'gemini'
+            // ChatGPT is reached only by signing in, and Claude Code only with its experimental switch, so neither is offered for a key.
+            'ollama', 'openAi', 'nvidia', 'huggingFace', 'openRouter', 'anthropic', 'gemini', 'copilotCli'
         ]);
         await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
         assert.equal(await evaluate(window, `document.querySelector('#assistantCredentialField').hidden`), true);

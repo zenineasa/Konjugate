@@ -189,6 +189,21 @@ export function createAIConfigurationStore({ directory, credentialVault, uuidFac
             }
             return state.hostId;
         },
+        // The client a provider issued to this installation on registering it (ChatGPT plan usage), kept apart from any
+        // configuration so that a sign-in that failed after registering, or a configuration deleted, does not lose it. Not a secret.
+        async registeredClient(provider) {
+            await initialize();
+            return state.registeredClients?.[provider] ?? null;
+        },
+        // null forgets it (the provider refused it, so the next sign-in registers again).
+        async rememberRegisteredClient(provider, clientId) {
+            await initialize();
+            const clients = { ...(state.registeredClients ?? {}) };
+            if (typeof clientId === 'string' && clientId) clients[provider] = clientId;
+            else delete clients[provider];
+            state.registeredClients = clients;
+            await persist();
+        },
         async setActive(uuid) {
             await initialize();
             if (!find(uuid)) throw new AIConfigurationError('That model configuration does not exist.', 'configurationNotFound');

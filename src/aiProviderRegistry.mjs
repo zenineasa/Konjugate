@@ -33,10 +33,11 @@ export function createAIProviderRegistry(providers = []) {
         },
         // Signs in to a provider in the person's browser; resolves to { credential, account? }. `openExternal` opens the browser,
         // `hostId` names this installation, and `previous` is the credential of an earlier sign-in being renewed, if any.
-        async signIn({ provider: id, openExternal, signal, hostId, previous }) {
+        // `registeredClientId` is a client the provider issued to this computer before, and `onClientIssued(id)` keeps a new one.
+        async signIn({ provider: id, openExternal, signal, hostId, previous, registeredClientId, onClientIssued }) {
             const provider = registry.get(id);
             if (typeof provider?.signIn !== 'function') throw new AIProviderRegistryError(`Signing in to “${id}” is not available.`, 'signInUnavailable');
-            const result = await provider.signIn({ openExternal, signal, hostId, previous });
+            const result = await provider.signIn({ openExternal, signal, hostId, previous, registeredClientId, onClientIssued });
             if (typeof result?.credential !== 'string' || !result.credential) throw new AIProviderRegistryError('The provider did not return a credential.', 'invalidProviderResponse');
             return result;
         },

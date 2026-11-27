@@ -48,6 +48,7 @@ import {
     documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuInputRows, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
+import { fmuRemovalQuestion } from '../fmuLibrary.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
 import { generateFmiModel } from '../fmiCodeGen.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -4192,6 +4193,8 @@ async function renderNodeProgramFmus(node) {
     if (ports) rememberFmuPorts(fmuPortsKey(implementation), ports);
     await showFmuNotes(ports);
     const aboutLines = fmuAboutLines(ports && !ports.error ? ports.about : null);
+    // Which copy of the library it runs: another build that kept its ID is kept beside it under another version (FMI review #1).
+    if (aboutLines.length && implementation?.fmuVersion) aboutLines.push(`In your library as version ${implementation.fmuVersion}`);
     $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
     // Build from its sources, or Rebuild, when it carries buildable sources and runs here only from a build (stage 3).
     const about = ports && !ports.error ? ports.about : null;
@@ -10245,6 +10248,75 @@ $('#clearFmuBuilds').addEventListener('click', async () => {
     scheduleEngineValidation();
 });
 
+// Settings › Providers › FMUs in your library (the single FMU workflow, stage 4): each FMU, which open model uses it, and Remove for one no
+// open model uses. The web edition has no FMUs, so no section.
+$('#fmuLibrarySection').hidden = document.documentElement.hasAttribute('data-web-edition');
+function showFmuLibrary(rows) {
+    const list = $('#fmuLibraryList');
+    if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.className = 'settingsItem';
+        empty.innerHTML = '<div class="settingsItemText"><span class="settingsItemLabel">No FMUs yet</span><small class="settingsItemHint">Add one to a model with Add › FMU….</small></div>';
+        list.replaceChildren(empty);
+        return;
+    }
+    list.replaceChildren(...rows.map((row) => {
+        const item = document.createElement('div');
+        item.className = 'settingsItem';
+        item.dataset.fmuKey = `${row.guid}:${row.version}`;
+        const text = document.createElement('div');
+        text.className = 'settingsItemText';
+        const label = document.createElement('span');
+        label.className = 'settingsItemLabel';
+        label.textContent = `${row.name} · version ${row.version}`;
+        const hint = document.createElement('small');
+        hint.className = 'settingsItemHint';
+        const use = row.usedBy.length ? `Used by ${row.usedBy.join(', ')}` : row.unanswered ? 'An open window did not say whether its model uses it' : 'No open model uses it';
+        hint.textContent = [row.size, use].filter(Boolean).join(' · ');
+        text.append(label, hint);
+        item.append(text);
+        if (row.removable) {
+            const control = document.createElement('div');
+            control.className = 'settingsItemControl';
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'settingsButton';
+            remove.textContent = 'Remove';
+            remove.addEventListener('click', async () => {
+                if (!window.confirm(fmuRemovalQuestion(row))) return;
+                try {
+                    showFmuLibrary(await window.extensions.removeFmu(row.guid, row.version));
+                } catch (error) {
+                    window.alert(error.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+                    await refreshFmuLibrary();
+                }
+                await refreshFmuBuildsKept();
+                await refreshInstalledFmus();
+            });
+            control.append(remove);
+            item.append(control);
+        }
+        return item;
+    }));
+}
+async function refreshFmuLibrary() {
+    if ($('#fmuLibrarySection').hidden) return;
+    showFmuLibrary(await window.extensions?.fmuLibrary?.() ?? []);
+}
+// Asked by the main process for that list: the FMUs this window's project uses, anywhere in it (inside components too, switched off too).
+window.extensions?.onFmuUsageRequest?.((id) => {
+    const fmus = [];
+    const visit = (value) => {
+        if (Array.isArray(value)) value.forEach(visit);
+        else if (value && typeof value === 'object') {
+            if (value.kind === 'fmi' && typeof value.fmuId === 'string') fmus.push({ guid: value.fmuId, version: value.fmuVersion });
+            Object.values(value).forEach(visit);
+        }
+    };
+    try { visit(serializeProjectDocument()); } catch { /* answered with what was found */ }
+    window.extensions.fmuUsageReply(id, { project: $('.documentTitle').textContent || 'Untitled', fmus });
+});
+
 function toolchainFields(kind) {
     const prefix = kind === 'python' ? 'toolchainPython' : 'toolchainCpp';
     return { path: $(`#${prefix}Path`), detected: $(`#${prefix}Detected`), status: $(`#${prefix}Status`) };
@@ -10309,7 +10381,7 @@ const settings = createSettingsSheet({
     opened: {
         general: refreshGeneralSettings,
         assistant: prepareAssistantConfigurationPage,
-        providers: () => Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode(), refreshFmuBuildsKept()]),
+        providers: () => Promise.all([refreshToolchainField('cpp'), refreshToolchainField('python'), refreshProviderExecutionMode(), refreshFmuBuildsKept(), refreshFmuLibrary()]),
         controllers: renderControllerSettings,
         pushService: () => connectionsPanel?.show(),
         newProjects: refreshNewProjectSettings

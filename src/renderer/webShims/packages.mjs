@@ -103,6 +103,9 @@ export const extensions = {
     useOwnFmuBinary: async () => false,
     saveFmuWithBinary: async () => ({ error: 'FMUs run in the desktop app only.' }),
     fmuBuildsKept: async () => ({ count: 0, bytes: 0 }),
+    // No FMU is ever in the web edition's library (its Settings › Providers section is hidden).
+    fmuLibrary: async () => [],
+    removeFmu: async () => { throw new Error('FMUs run in the desktop app only.'); },
     clearFmuBuilds: async () => ({ count: 0, bytes: 0 }),
     onFmuBuildProgress: () => {},
     pathForFile: () => null,

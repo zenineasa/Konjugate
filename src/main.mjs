@@ -62,6 +62,7 @@ import { inspectPackageArchive, installPackageArchive, listInstalledPackages, lo
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
 import { inspectFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
+import { fmuLibraryRows } from './fmuLibrary.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary } from './fmiBinary.mjs';
 import { buildInstalledFmu, buildLog, buildsKept, fmuWithThisComputersBinary, removeBuilds, setBuildPreferred } from './fmuBuilds.mjs';
@@ -2200,6 +2201,40 @@ ipcMain.handle('packageUninstall', async (_event, { packageType, packageId, vers
     await discoverComponentLibrary();
     markPackageRestartPending();
     return { packageType, packageId, version };
+});
+
+// Settings › Providers › FMUs in your library (the single FMU workflow, stage 4). Each project window is asked which FMUs its model uses;
+// one that does not answer in five seconds counts as possibly using any, so nothing can be removed while it is silent.
+const fmuUsageRequests = new Map();
+let fmuUsageRequestCount = 0;
+function openModelsFmuUsage() {
+    return Promise.all([...projectWindows].filter((window) => !window.isDestroyed()).map((window) => new Promise((resolve) => {
+        const id = ++fmuUsageRequestCount;
+        const timer = setTimeout(() => { fmuUsageRequests.delete(id); resolve(null); }, 5000);
+        fmuUsageRequests.set(id, { resolve, timer, owner: window.webContents.id });
+        window.webContents.send('fmuUsageRequest', id);
+    })));
+}
+ipcMain.on('fmuUsageReply', (event, id, usage) => {
+    const request = fmuUsageRequests.get(id);
+    if (!request || request.owner !== event.sender.id) return;
+    fmuUsageRequests.delete(id);
+    clearTimeout(request.timer);
+    request.resolve(usage && typeof usage.project === 'string' && Array.isArray(usage.fmus) ? usage : null);
+});
+const fmuLibrary = async () => fmuLibraryRows(await listInstalledFmus(join(app.getPath('userData'), 'packages')), await openModelsFmuUsage());
+ipcMain.handle('packageFmuLibrary', () => fmuLibrary());
+// Removed only when, asked again now, no open model uses it; its builds from sources go with it (uninstallFmu).
+ipcMain.handle('packageRemoveFmu', async (_event, { guid, version }) => {
+    const row = (await fmuLibrary()).find((candidate) => candidate.guid === guid && candidate.version === version);
+    if (!row) throw new Error('That FMU is not in your library.');
+    if (!row.removable) {
+        throw new Error(row.usedBy.length
+            ? `${row.name} is used by ${row.usedBy.join(', ')}. Remove its nodes there, or close those projects, first.`
+            : 'An open window did not say which FMUs its model uses, so nothing was removed. Try again in a moment.');
+    }
+    await uninstallFmu({ directory: join(app.getPath('userData'), 'packages'), guid, version });
+    return fmuLibrary();
 });
 
 ipcMain.handle('packageSetEnabled', async (_event, { packageType, packageId, version, enabled }) => {

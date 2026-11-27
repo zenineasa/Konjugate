@@ -12,8 +12,10 @@ import { strToU8, unzipSync, zipSync } from 'fflate';
 import { installOrReuseFmu, listInstalledFmus } from '../src/fmuPackage.mjs';
 
 const dahlquist = () => readFile(join(import.meta.dirname, '..', 'examples', 'tutorialFmus', 'Dahlquist.fmu'));
-// The same FMU, its ID kept, with one file changed: a newer build of it.
-const rebuilt = async (note) => Buffer.from(zipSync({ ...unzipSync(new Uint8Array(await dahlquist())), 'documentation/rebuilt.txt': strToU8(note) }));
+// The same FMU, its ID kept, with one file changed: a newer build of it. Zipped with a fixed time, so the same build is the same bytes:
+// zipSync stamps each entry with the time it was called (to 2 s), so two calls either side of such a tick made two archives of one build,
+// which the library rightly took for two builds (this test failed now and then).
+const rebuilt = async (note) => Buffer.from(zipSync({ ...unzipSync(new Uint8Array(await dahlquist())), 'documentation/rebuilt.txt': strToU8(note) }, { mtime: new Date(Date.UTC(1980, 0, 1)) }));
 
 test('the library copy is reused only for the same archive; a different build with the same ID is installed beside it and said', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuReuse-'));

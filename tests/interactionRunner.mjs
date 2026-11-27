@@ -11767,6 +11767,68 @@ export async function runInteractionTests(driver) {
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only; the web edition\'s Add › FMU… is checked on its own' });
 
+    // Settings › Providers › FMUs in your library (the single FMU workflow, stage 4): each FMU in the library, which open model uses it,
+    // and Remove for one no open model uses, asking first in words that say what a project not open now loses. Hidden on the web.
+    await run('Settings › Providers lists the FMUs in the library, which open model uses each, and removes one none uses', async () => {
+        if (driver.kind !== 'electron') {
+            await evaluate(window, `document.querySelector('#settingsButton').click()`);
+            await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await evaluate(window, `document.querySelector('[data-settings-target="providers"]').click()`);
+            await waitFor(window, `!document.querySelector('[data-settings-page="providers"]').hidden`, 'Settings › Providers did not open.');
+            assert.equal(await evaluate(window, `document.querySelector('#fmuLibrarySection').hidden`), true, 'The web edition, which has no FMUs, shows no FMU library.');
+            await evaluate(window, `document.querySelector('#settingsClose').click()`);
+            return;
+        }
+        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-library-'));
+        const fmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => [entry.packageId, entry.version]))`);
+        try {
+            for (const [guid, version] of await fmus()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`);
+            const added = {};
+            for (const name of ['Dahlquist', 'Feedthrough']) {
+                const path = join(folder, `${name}.fmu`);
+                await writeFile(path, await referenceFmuArchive('3.0', name));
+                added[name] = await evaluate(window, `window.extensions.addFmu(${JSON.stringify(path)})`);
+                assert.ok(added[name] && !added[name].error, `${name} was not put in the library: ${JSON.stringify(added[name])}`);
+            }
+            // A project using Dahlquist is open; Feedthrough is in no open model.
+            const project = {
+                format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], edges: [],
+                nodes: [{ id: 1, name: 'Dahlquist', position: [0, 0, 0], appearance: { type: 'primitive', shape: 'box', color: '#888888' },
+                    states: [{ id: 2, name: 'x', symbol: 'x', initialValue: 1, unit: '' }], sourceTerms: [],
+                    implementation: { kind: 'fmi', fmuId: added.Dahlquist.guid, fmuVersion: added.Dahlquist.version, bindings: [], outputs: [{ key: 'x', stateId: 2, setsValue: true }] } }]
+            };
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify(project)}, 'Decay.kjt')`);
+            await evaluate(window, `document.querySelector('#settingsButton').click()`);
+            await waitFor(window, `document.querySelector('#settingsDialog').open`, 'Settings did not open.');
+            await evaluate(window, `document.querySelector('[data-settings-target="providers"]').click()`);
+            const row = (name) => `document.querySelector('#fmuLibraryList [data-fmu-key="${added[name].guid}:${added[name].version}"]')`;
+            await waitFor(window, `Boolean(${row('Dahlquist')}) && Boolean(${row('Feedthrough')})`, 'The library\'s FMUs were not listed.', 10000);
+            const title = await evaluate(window, `document.querySelector('.documentTitle').textContent`);
+            assert.match(await evaluate(window, `${row('Dahlquist')}.textContent`), new RegExp(`Used by ${title}`), 'The FMU in the open model says which model uses it.');
+            assert.equal(await evaluate(window, `Boolean(${row('Dahlquist')}.querySelector('button'))`), false, 'An FMU an open model uses cannot be removed.');
+            assert.match(await evaluate(window, `${row('Feedthrough')}.textContent`), /No open model uses it/);
+            // Remove asks first, saying what a project not open now loses; cancelled, nothing is removed.
+            await evaluate(window, `(() => { window.__realConfirm = window.confirm; window.__asked = []; window.__answer = false; window.confirm = (text) => { window.__asked.push(text); return window.__answer; }; })()`);
+            await evaluate(window, `${row('Feedthrough')}.querySelector('button').click()`);
+            const asked = await evaluate(window, `window.__asked`);
+            assert.equal(asked.length, 1);
+            assert.match(asked[0], /^Remove Feedthrough \(version [\d.]+\) from your library\?/);
+            assert.match(asked[0], /A project not open now that links this FMU, rather than keeping it in its file, will need it added again with Add › FMU…\./);
+            assert.equal((await fmus()).length, 2, 'Cancelled, nothing is removed.');
+            await evaluate(window, `window.__answer = true`);
+            await evaluate(window, `${row('Feedthrough')}.querySelector('button').click()`);
+            await waitFor(window, `!${row('Feedthrough')} && Boolean(${row('Dahlquist')})`, 'Feedthrough was not removed from the list.', 10000);
+            assert.deepEqual((await fmus()).map(([guid]) => guid), [added.Dahlquist.guid], 'Only the FMU no open model uses was removed.');
+        } finally {
+            await evaluate(window, `(() => { if (window.__realConfirm) window.confirm = window.__realConfirm; })()`).catch(() => {});
+            await evaluate(window, `document.querySelector('#settingsDialog').open && document.querySelector('#settingsClose').click()`).catch(() => {});
+            await leaveCleanProject();
+            for (const [guid, version] of await fmus().catch(() => [])) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(guid)}, ${JSON.stringify(version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    });
+
     // The web edition keeps Add › FMU… where a person looks for it, and says FMUs run in the desktop app, with where to get it.
     // A model of two nodes is fitted tightly when it opens; FMUs added from the menu stand one after another to the right of the
     // rightmost node, so the second stood outside the view, where a person could not see it (and the round-trip tutorial's ring on it

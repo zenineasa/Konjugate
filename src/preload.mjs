@@ -140,6 +140,12 @@ contextBridge.exposeInMainWorld('extensions', {
     saveFmuWithBinary: (guid, version) => ipcRenderer.invoke('packageSaveFmuWithBinary', { guid, version }),
     fmuBuildsKept: () => ipcRenderer.invoke('packageFmuBuildsKept'),
     clearFmuBuilds: () => ipcRenderer.invoke('packageClearFmuBuilds'),
+    // Settings › Providers › FMUs in your library: each FMU, which open model uses it, and Remove for one none uses.
+    fmuLibrary: () => ipcRenderer.invoke('packageFmuLibrary'),
+    removeFmu: (guid, version) => ipcRenderer.invoke('packageRemoveFmu', { guid, version }),
+    // Asked by the main process for that list: this window's model's FMUs.
+    onFmuUsageRequest: (callback) => ipcRenderer.on('fmuUsageRequest', (_event, id) => callback(id)),
+    fmuUsageReply: (id, usage) => ipcRenderer.send('fmuUsageReply', id, usage),
     cancelFmuBuild: () => ipcRenderer.invoke('packageCancelFmuBuild'),
     fmuBuildLog: (archiveSha256) => ipcRenderer.invoke('packageFmuBuildLog', { archiveSha256 }),
     onFmuBuildProgress: (callback) => ipcRenderer.on('fmuBuildProgress', (_event, detail) => callback(detail)),

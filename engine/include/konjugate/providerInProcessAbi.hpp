@@ -93,6 +93,12 @@ struct KonjugateInProcessNodeProviderV1 {
 
 using KonjugateInProcessNodeProviderV1Fn = const KonjugateInProcessNodeProviderV1* (*)();
 
+// Optional, beside the node vtable (a library without it is used as before): an instance's outputs at the start of a fresh run,
+// before its first step, given its inputs there (NodeProvider::initialOutputs). *given is 0 when it has none. Returns false and
+// sets lastError() on failure.
+using KonjugateInProcessNodeInitialOutputsV1Fn = bool (*)(void* self, std::uint64_t instanceId, double simulationTime,
+    const double* inputs, std::uint32_t inputCount, double* outValues, std::uint32_t outValueCount, std::int32_t* given);
+
 // Version 2 of the program SDK (konjugate/sdk/v2/program.hpp, docs/proposals/programSdkV2.md): one table for both kinds of program,
 // beginning with its own size and ABI version so later fields are appended and an engine reads only the part it knows; an optional
 // method (a Jacobian) is a capability, answered by status 3 when the program gives none. One object per instance; the engine owns
@@ -135,5 +141,6 @@ using KonjugateInProcessProgramV2Fn = const KonjugateInProcessProgramV2* (*)();
 // shims that export them and the engine that looks them up cannot drift independently.
 inline constexpr const char* kKonjugateInProcessProviderEntryPoint = "konjugate_in_process_provider_v1";
 inline constexpr const char* kKonjugateInProcessNodeProviderEntryPoint = "konjugate_in_process_node_provider_v1";
+inline constexpr const char* kKonjugateInProcessNodeInitialOutputsEntryPoint = "konjugate_in_process_node_initial_outputs_v1";
 inline constexpr const char* kKonjugateInProcessProgramEntryPoint = "konjugate_in_process_program_v2";
 inline constexpr std::uint32_t kKonjugateInProcessProgramAbiVersion = 1;

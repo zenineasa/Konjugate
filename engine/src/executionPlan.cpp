@@ -2141,6 +2141,49 @@ void applyProgramUpdates(const ExecutionPlan& plan, const StateValues& readState
     }
 }
 
+bool applyInitialNodeOutputs(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                             const std::vector<ParameterSchedule>& activeSchedules, double time, ProviderEvaluator* providerEvaluator) {
+    if (!providerEvaluator) return false;
+    // The nodes in dependency order: one reading another's value-setting output starts after it, so it starts with that output's
+    // value at the start whatever the order of the nodes in the file; in a ring, in the plan's order.
+    std::vector<const NodeExecutionPlan*> pending;
+    for (const auto& node : plan.nodes) {
+        if (node.nodeProvider && node.nodeProvider->programVersion != 2 && node.nodeProvider->implementation == ContributionImplementation::cppProvider) pending.push_back(&node);
+    }
+    const auto setBy = [](const NodeExecutionPlan& node, std::size_t stateIndex) {
+        return std::any_of(node.nodeProvider->outputs.begin(), node.nodeProvider->outputs.end(),
+            [&](const auto& output) { return output.setsValue && node.stateIndexes.at(output.stateIndex) == stateIndex; });
+    };
+    const auto waits = [&](const NodeExecutionPlan& node) {
+        return std::any_of(node.nodeProvider->bindings.begin(), node.nodeProvider->bindings.end(), [&](const auto& binding) {
+            return binding.source == BindingSource::synchronizationSnapshot && std::any_of(pending.begin(), pending.end(),
+                [&](const auto* other) { return other != &node && setBy(*other, binding.valueIndex); });
+        });
+    };
+    bool written = false;
+    while (!pending.empty()) {
+        auto next = std::find_if(pending.begin(), pending.end(), [&](const auto* node) { return !waits(*node); });
+        if (next == pending.end()) next = pending.begin();
+        const auto& node = **next;
+        pending.erase(next);
+        const auto& task = *node.nodeProvider;
+        StateValues localStates(node.stateIndexes.size());
+        for (std::size_t index = 0; index < node.stateIndexes.size(); ++index) localStates[index] = states.at(node.stateIndexes[index]);
+        const auto inputs = programInputs(task.bindings, localStates, states,
+            resolveTaskParameterValues(task.parameters, liveParameterValues, activeSchedules, time), time);
+        const auto outputs = providerEvaluator->initialNodeOutputs(task, inputs, time);
+        if (!outputs) continue;
+        for (const auto& [key, value] : *outputs) {
+            const auto output = std::find_if(task.outputs.begin(), task.outputs.end(), [&](const auto& candidate) { return candidate.key == key; });
+            if (output == task.outputs.end() || !output->setsValue) continue;
+            if (!std::isfinite(value)) throw std::runtime_error("A computational-node provider produced a non-finite value.");
+            states.at(node.stateIndexes.at(output->stateIndex)) = value;
+            written = true;
+        }
+    }
+    return written;
+}
+
 std::vector<std::pair<std::size_t, double>> reduceContributions(
     std::vector<EvaluatedContribution> contributions) {
     std::vector<std::pair<std::size_t, double>> derivatives;

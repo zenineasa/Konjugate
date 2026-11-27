@@ -63,6 +63,8 @@ public:
                                                               std::span<const double> inputs,
                                                               double simulationTime,
                                                               double stepSize) override;
+    std::optional<std::vector<std::pair<std::string, double>>> initialNodeOutputs(const NodeProviderTask& task, std::span<const double> inputs,
+                                                                                  double simulationTime) override;
     std::vector<std::byte> requestNodeCheckpoint(const NodeProviderTask& task) override;
     void requestNodeRestore(const NodeProviderTask& task, std::span<const std::byte> payload) override;
 

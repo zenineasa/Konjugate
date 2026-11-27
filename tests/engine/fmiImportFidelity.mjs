@@ -112,11 +112,10 @@ async function main() {
         const referenceLevelOf = (sample) => sample.states.find((state) => state.stateId === 11).value;
         const importedLevelOf = (sample) => sample.states.find((state) => state.stateId === 12).value;
 
-        // Sample 0 is the pre-simulation initial condition, deliberately mismatched (see above) --
-        // comparison starts at sample 1, the first point the pseudo-derivative trick has had a
-        // chance to act.
+        // From sample 0: though the host's own initial value is deliberately mismatched (see above), the FMU's output, once
+        // it is initialized, is the state's value at t = 0 too (FMI review #6).
         let compared = 0;
-        for (let index = 1; index < referenceSamples.length; index += 1) {
+        for (let index = 0; index < referenceSamples.length; index += 1) {
             const referenceValue = referenceLevelOf(referenceSamples[index]);
             const importedValue = importedLevelOf(importSamples[index]);
             assert.ok(
@@ -127,15 +126,14 @@ async function main() {
         }
         assert.ok(compared > 5, 'Test setup produced too few samples to be a meaningful comparison.');
 
-        // The very first sample after t=0 is the strongest proof the pseudo-derivative feedback
-        // binding is wired correctly: the host's own initial value (0) is nowhere close to the
-        // reference's first real step, so a silent feedback-binding bug would show up here first.
+        // The first sample, at t = 0, is the strongest proof the output reaches its state before anything is recorded: the
+        // host's own initial value (0) is nowhere close to the FMU's (10), so recording it before the FMU had run shows here first.
         assert.ok(
-            closeEnough(importedLevelOf(importSamples[1]), referenceLevelOf(referenceSamples[1]), absoluteTolerance, relativeTolerance),
-            'The imported FMU state did not snap to the FMU-reported value on the very first substep.'
+            Object.is(importedLevelOf(importSamples[0]), referenceLevelOf(referenceSamples[0])),
+            `The imported FMU's output at t = 0 is ${importedLevelOf(importSamples[0])}, not the FMU's ${referenceLevelOf(referenceSamples[0])}: the host's initial value was recorded.`
         );
 
-        console.log(`✓ FMI import fidelity: imported-FMU run matched the reference engine run across ${compared} samples, including a mismatched-initial-value first step.`);
+        console.log(`✓ FMI import fidelity: imported-FMU run matched the reference engine run across ${compared} samples, including t = 0, where the host's own initial value is mismatched.`);
 
         console.log(`✓ ${await checkReferenceFmus('2.0', join(directory, 'referencePackages'))}`);
         await checkNodeProgramOutputs(engineOptions);

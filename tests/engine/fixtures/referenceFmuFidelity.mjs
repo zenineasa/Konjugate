@@ -91,8 +91,8 @@ export function engineOptionsFor(packagesDirectory) {
     return { applicationPath: join(import.meta.dirname, '..', '..', '..'), resourcesPath: '', packaged: false, fmuDirectory: packagesDirectory, disabledFmuKeys: [] };
 }
 
-// Runs one case in Konjugate and compares each output with FMPy's, bit for bit, at every communication point after the
-// start (Konjugate's sample 0 is the document's initial values, before the FMU has run). Where FMPy stopped because
+// Runs one case in Konjugate and compares each output with FMPy's, bit for bit, at every communication point from the
+// start: at t = 0 too, where an FMU's outputs are those it has once initialized (FMI review #6). Where FMPy stopped because
 // the FMU asked to end the simulation, Konjugate's run goes on with the FMU's outputs held at their last values.
 export async function checkReferenceCase(fmiVersion, testCase, packagesDirectory) {
     const { installed, ports } = await installReferenceFmu(fmiVersion, testCase.name, packagesDirectory);
@@ -112,7 +112,7 @@ export async function checkReferenceCase(fmiVersion, testCase, packagesDirectory
         const reference = expected.outputs[port.name];
         assert.ok(reference, `${fmiVersion} ${testCase.name}: FMPy has no output '${port.name}'.`);
         const valueAt = (sample) => sample.states.find((state) => state.stateId === 200 + outputIndex).value;
-        for (let index = 1; index < samples.length; index += 1) {
+        for (let index = 0; index < samples.length; index += 1) {
             const fmpyIndex = Math.min(index, reference.length - 1);
             const konjugate = valueAt(samples[index]);
             assert.ok(Object.is(konjugate, reference[fmpyIndex]),

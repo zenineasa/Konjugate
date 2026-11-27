@@ -117,41 +117,50 @@ bool initializeInstance(void* self, std::uint64_t instanceId,
     }
 }
 
+// The instance's binding, its inputs placed in the provider's declared order (in shimState.scratchValues).
+InstanceBinding& bindInputs(ShimState& shimState, std::uint64_t instanceId, const double* inputs, std::uint32_t inputCountArg,
+                            std::uint32_t outValueCount) {
+    const auto found = shimState.instanceBindings.find(instanceId);
+    if (found == shimState.instanceBindings.end()) {
+        throw std::runtime_error("In-process node evaluation references an uninitialized instance.");
+    }
+    if (outValueCount != shimState.description.outputs.size()) {
+        throw std::runtime_error("In-process node evaluation was given a mismatched output buffer size.");
+    }
+    auto& binding = found->second;
+    std::fill(shimState.scratchValues.begin(), shimState.scratchValues.end(), 0.0);
+    for (std::size_t index = 0; index < binding.keyIndexes.size() && index < inputCountArg; ++index) {
+        shimState.scratchValues[binding.keyIndexes[index]] = inputs[index];
+    }
+    return binding;
+}
+
+// The provider is free to name gradients in any order (and to omit an output it did not
+// contribute to this step, defaulting it to 0), so results are placed by matching key
+// against description.outputs rather than assumed positional.
+void placeOutputs(const ShimState& shimState, const konjugate::sdk::v1::NodeOutputCollector& output, double* outValues, std::uint32_t outValueCount) {
+    std::fill(outValues, outValues + outValueCount, 0.0);
+    for (const auto& [key, value] : output.gradients()) {
+        const auto& outputs = shimState.description.outputs;
+        const auto matched = std::find_if(outputs.begin(), outputs.end(),
+            [&](const auto& port) { return port.key == key; });
+        if (matched == outputs.end()) {
+            throw std::runtime_error("Node provider produced an undeclared output key: " + key);
+        }
+        outValues[matched - outputs.begin()] += value;
+    }
+}
+
 bool evaluateInstance(void* self, std::uint64_t instanceId, double simulationTime, double stepSize,
                       const double* inputs, std::uint32_t inputCountArg,
                       double* outValues, std::uint32_t outValueCount) {
     auto& shimState = state(self);
     try {
-        const auto found = shimState.instanceBindings.find(instanceId);
-        if (found == shimState.instanceBindings.end()) {
-            throw std::runtime_error("In-process node evaluation references an uninitialized instance.");
-        }
-        if (outValueCount != shimState.description.outputs.size()) {
-            throw std::runtime_error("In-process node evaluation was given a mismatched output buffer size.");
-        }
-        auto& binding = found->second;
-        std::fill(shimState.scratchValues.begin(), shimState.scratchValues.end(), 0.0);
-        for (std::size_t index = 0; index < binding.keyIndexes.size() && index < inputCountArg; ++index) {
-            shimState.scratchValues[binding.keyIndexes[index]] = inputs[index];
-        }
-
+        auto& binding = bindInputs(shimState, instanceId, inputs, inputCountArg, outValueCount);
         konjugate::sdk::v1::NodeOutputCollector output;
         binding.provider->evaluate(
             {simulationTime, stepSize, {shimState.scratchValues, shimState.inputKeys}}, output);
-
-        // The provider is free to name gradients in any order (and to omit an output it did not
-        // contribute to this step, defaulting it to 0), so results are placed by matching key
-        // against description.outputs rather than assumed positional.
-        std::fill(outValues, outValues + outValueCount, 0.0);
-        for (const auto& [key, value] : output.gradients()) {
-            const auto& outputs = shimState.description.outputs;
-            const auto matched = std::find_if(outputs.begin(), outputs.end(),
-                [&](const auto& port) { return port.key == key; });
-            if (matched == outputs.end()) {
-                throw std::runtime_error("Node provider produced an undeclared output key: " + key);
-            }
-            outValues[matched - outputs.begin()] += value;
-        }
+        placeOutputs(shimState, output, outValues, outValueCount);
         return true;
     } catch (const std::exception& error) {
         shimState.lastError = error.what();
@@ -247,4 +256,24 @@ constexpr KonjugateInProcessNodeProviderV1 kVtable{
 
 extern "C" const KonjugateInProcessNodeProviderV1* konjugate_in_process_node_provider_v1() {
     return &kVtable;
+}
+
+// NodeProvider::initialOutputs, through the optional entry point beside the vtable (providerInProcessAbi.hpp).
+extern "C" bool konjugate_in_process_node_initial_outputs_v1(void* self, std::uint64_t instanceId, double simulationTime,
+    const double* inputs, std::uint32_t inputCountArg, double* outValues, std::uint32_t outValueCount, std::int32_t* given) {
+    auto& shimState = state(self);
+    try {
+        auto& binding = bindInputs(shimState, instanceId, inputs, inputCountArg, outValueCount);
+        konjugate::sdk::v1::NodeOutputCollector output;
+        const bool has = binding.provider->initialOutputs({simulationTime, 0.0, {shimState.scratchValues, shimState.inputKeys}}, output);
+        *given = has ? 1 : 0;
+        if (has) placeOutputs(shimState, output, outValues, outValueCount);
+        return true;
+    } catch (const std::exception& error) {
+        shimState.lastError = error.what();
+        return false;
+    } catch (...) {
+        shimState.lastError = "initialOutputs threw a non-standard exception.";
+        return false;
+    }
 }

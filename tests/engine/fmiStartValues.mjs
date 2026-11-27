@@ -45,15 +45,15 @@ async function run(document, testCase, packagesDirectory, what) {
     return outcome.result.samples;
 }
 
-// Every output after the start (sample 0 is the document's initial values, before the FMU has run), by output index.
+// Every output from the start (at t = 0, what the FMU gives once initialized), by output index.
 function outputSeries(samples, ports) {
-    return ports.outputs.map((port, index) => samples.slice(1).map((sample) => sample.states.find((state) => state.stateId === 200 + index).value));
+    return ports.outputs.map((port, index) => samples.map((sample) => sample.states.find((state) => state.stateId === 200 + index).value));
 }
 
 function assertSameBits(actual, expected, what) {
     assert.equal(actual.length, expected.length, `${what}: ${actual.length} outputs, not ${expected.length}.`);
     actual.forEach((series, output) => series.forEach((value, index) => {
-        assert.ok(Object.is(value, expected[output][index]), `${what}: output ${output} at sample ${index + 1} is ${value}, not ${expected[output][index]}.`);
+        assert.ok(Object.is(value, expected[output][index]), `${what}: output ${output} at sample ${index} is ${value}, not ${expected[output][index]}.`);
     }));
 }
 
@@ -81,7 +81,7 @@ try {
                 const reference = expected.outputs[port.name];
                 assert.ok(reference, `${what}: FMPy has no output '${port.name}'.`);
                 // FMPy stops where the FMU ended the simulation; Konjugate holds the last values from there.
-                return Array.from({ length: count }, (_, index) => reference[Math.min(index + 1, reference.length - 1)]);
+                return Array.from({ length: count }, (_, index) => reference[Math.min(index, reference.length - 1)]);
             });
             const valueFor = (port) => testCase.values[port.name] ?? 0;
             const given = await run(hostDocument({ installed, ports, bindingFor: (port) => ({ key: port.key, kind: 'value', value: valueFor(port) }) }),

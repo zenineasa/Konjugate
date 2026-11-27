@@ -344,6 +344,14 @@ public:
         static_cast<void>(stepSize);
         throw std::runtime_error("This provider evaluator does not support computational-node providers.");
     }
+    // A node's outputs at the start of a fresh run, before its first step (NodeProvider::initialOutputs): nothing by default, and for
+    // a node that has none; its states then keep their initial values at the start.
+    virtual std::optional<std::vector<std::pair<std::string, double>>> initialNodeOutputs(
+        const NodeProviderTask&, std::span<const double> inputs, double simulationTime) {
+        static_cast<void>(inputs);
+        static_cast<void>(simulationTime);
+        return std::nullopt;
+    }
     virtual std::vector<std::byte> requestNodeCheckpoint(const NodeProviderTask&) {
         throw std::runtime_error("This provider evaluator does not support computational-node checkpointing.");
     }
@@ -798,6 +806,11 @@ void applyProgramUpdates(const ExecutionPlan& plan, const StateValues& readState
                          const std::vector<ParameterSchedule>& activeSchedules, double time, ProviderEvaluator* providerEvaluator);
 // Whether any node has a version 2 program with outputs into Update states.
 bool planHasProgramUpdates(const ExecutionPlan& plan);
+// The start of a fresh run: each C++ node program (version 1) that gives outputs before its first step (an imported FMU, once
+// initialized at `time`; NodeProvider::initialOutputs) has its value-setting outputs written into `states`, its inputs read from
+// them. True when any was written.
+bool applyInitialNodeOutputs(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
+                             const std::vector<ParameterSchedule>& activeSchedules, double time, ProviderEvaluator* providerEvaluator);
 
 void settleAlgebraicStates(const ExecutionPlan& plan, StateValues& states, const EntityValues& liveParameterValues,
                            double time, double stepSize, ProviderEvaluator* providerEvaluator = nullptr,

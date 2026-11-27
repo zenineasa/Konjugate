@@ -125,10 +125,10 @@ async function main() {
 
         const importedLevelOf = (sample) => sample.states.find((state) => state.stateId === 12).value;
 
-        // Sample 0 is the pre-simulation initial condition, deliberately mismatched (0 vs. the
-        // fixture's real initial 10) -- comparison starts at sample 1.
+        // From sample 0: the host's own initial value is deliberately mismatched (0 vs. the fixture's real initial 10), but at
+        // t = 0 the state holds the FMU's output once it is initialized (FMI review #6).
         let compared = 0;
-        for (let index = 1; index < expected.length; index += 1) {
+        for (let index = 0; index < expected.length; index += 1) {
             const importedValue = importedLevelOf(importSamples[index]);
             assert.ok(
                 closeEnough(importedValue, expected[index], absoluteTolerance, relativeTolerance),
@@ -138,11 +138,11 @@ async function main() {
         }
         assert.ok(compared > 5, 'Test setup produced too few samples to be a meaningful comparison.');
         assert.ok(
-            closeEnough(importedLevelOf(importSamples[1]), expected[1], absoluteTolerance, relativeTolerance),
-            'The imported FMI3 state did not snap to the FMU-reported value on the very first substep.'
+            Object.is(importedLevelOf(importSamples[0]), expected[0]),
+            `The imported FMI3 FMU's output at t = 0 is ${importedLevelOf(importSamples[0])}, not the FMU's ${expected[0]}: the host's initial value was recorded.`
         );
 
-        console.log(`✓ FMI3 import fidelity: imported-FMU run matched the hand-computed trajectory across ${compared} samples, including a mismatched-initial-value first step.`);
+        console.log(`✓ FMI3 import fidelity: imported-FMU run matched the hand-computed trajectory across ${compared} samples, including t = 0, where the host's own initial value is mismatched.`);
 
         const runOptions = { targetTime, globalTimeStep, outputInterval: globalTimeStep, pacing: { mode: 'fastest' } };
         await assert.rejects(
@@ -164,7 +164,7 @@ async function main() {
 }
 
 // Konjugate's own FMI 3.0 export of a decay model with a live parameter (an FMI 3.0 input), installed and imported back: the imported
-// node gives the engine's own run of the model it was exported from, from the first step, though the host's state starts elsewhere.
+// node gives the engine's own run of the model it was exported from, from t = 0, though the host's state starts elsewhere.
 async function checkKonjugateExport(directory, engineOptions) {
     const exported = {
         format: 'konjugate', version: 1, metadata: { projectName: 'FMI 3.0 export fixture: decay' },
@@ -200,13 +200,13 @@ async function checkKonjugateExport(directory, engineOptions) {
     const referenceSamples = reference.result.samples;
     const importedSamples = imported.result.samples;
     assert.equal(importedSamples.length, referenceSamples.length);
-    // Sample 0 is the host's own, deliberately different, initial value.
-    for (let index = 1; index < referenceSamples.length; index += 1) {
+    // From sample 0: the host's own initial value is deliberately different, but at t = 0 the state holds the FMU's output (FMI review #6).
+    for (let index = 0; index < referenceSamples.length; index += 1) {
         const expected = referenceSamples[index].states.find((state) => state.stateId === 11).value;
         const actual = importedSamples[index].states.find((state) => state.stateId === 12).value;
         assert.ok(Object.is(actual, expected), `Sample ${index}: the imported FMI 3.0 export gives ${actual}, the engine ${expected}.`);
     }
-    console.log(`✓ FMI3 import of Konjugate's own FMI 3.0 export: the imported FMU gave the engine's run of the exported model bit for bit across ${referenceSamples.length - 1} samples, from the first step.`);
+    console.log(`✓ FMI3 import of Konjugate's own FMI 3.0 export: the imported FMU gave the engine's run of the exported model bit for bit across ${referenceSamples.length} samples, from t = 0.`);
 }
 
 // A fixed parameter bound to something that changes during the run, and an integer input given a number outside its
@@ -215,7 +215,8 @@ async function checkImportErrors(packages) {
     const run = (document, stopTime, stepSize) => runWithEngine(JSON.stringify(document),
         { targetTime: stopTime, globalTimeStep: stepSize, outputInterval: stepSize, pacing: { mode: 'fastest' } }, engineOptionsFor(packages));
 
-    // Two Dahlquist nodes: the second's fixed parameter k is bound to the first's x, which decays.
+    // Two Dahlquist nodes: the second's fixed parameter k is bound to the first's x, which decays. The second starts with the first's
+    // x at the start, the FMU's 1 (FMI review #6: it was the host's initial value, 0), whichever of them comes first in the file.
     const { installed, ports } = await installReferenceFmu('3.0', 'Dahlquist', packages);
     const first = referenceHostDocument({ guid: installed.guid, version: installed.version, ports, values: { k: 1 }, stepSize: 0.1 });
     const second = structuredClone(first.nodes[0]);
@@ -224,9 +225,9 @@ async function checkImportErrors(packages) {
     second.states = second.states.filter((state) => state.id >= 200).map((state) => ({ ...state, id: state.id + 100 }));
     second.implementation.bindings = [{ key: 'k', kind: 'state', nodeId: 1, stateId: 200 }];
     second.implementation.outputs = second.implementation.outputs.map((output) => ({ ...output, stateId: output.stateId + 100 }));
-    first.nodes.push(second);
+    first.nodes.unshift(second);
     await assert.rejects(run(first, 1, 0.1),
-        /The parameter 'k' of the FMU 'Dahlquist' is fixed: it was set to 0 when the run started and cannot change during the run, but what it is bound to is now 0\.9 \(at t = 0\.1\)/);
+        /The parameter 'k' of the FMU 'Dahlquist' is fixed: it was set to 1 when the run started and cannot change during the run, but what it is bound to is now 0\.9 \(at t = 0\.1\)/);
     console.log('✓ FMI3 import: a fixed parameter whose binding changes during the run stops it, naming the parameter and both values.');
 
     const feedthrough = await installReferenceFmu('3.0', 'Feedthrough', packages);

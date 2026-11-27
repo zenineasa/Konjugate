@@ -110,6 +110,10 @@ public:
     [[nodiscard]] virtual NodeProviderDescription describe() const = 0;
     virtual void initialize(const InitializationContext&) {}
     virtual void evaluate(const EvaluationContext&, NodeOutputCollector&) = 0;
+    // Optional: the outputs at the start of a fresh run, before its first step, given the inputs at the start time (stepSize 0).
+    // Returns false (the default) when the node has none, and its states then keep their initial values at the start. An imported
+    // FMU answers with the outputs it has once initialized at the start time, as an FMI importer reads them before its first step.
+    virtual bool initialOutputs(const EvaluationContext&, NodeOutputCollector&) { return false; }
     // The engine treats this payload as fully opaque -- it never inspects or transforms it, and
     // restore() always runs after initialize() with no re-seed or reset in between (see
     // simulationRunner.cpp's startCheckpoint handling). A stochastic provider (e.g. a seeded PRNG

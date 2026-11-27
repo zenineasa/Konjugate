@@ -210,6 +210,14 @@ public:
         static_cast<void>(inputs);
         throw std::runtime_error("This provider transport does not support computational-node providers.");
     }
+    // A node's outputs at the start of a fresh run (NodeProvider::initialOutputs); nothing when the transport or the node has none.
+    virtual std::optional<std::vector<std::pair<std::string, double>>> initialNodeOutputs(
+        std::uint64_t instanceId, double simulationTime, std::span<const double> inputs) {
+        static_cast<void>(instanceId);
+        static_cast<void>(simulationTime);
+        static_cast<void>(inputs);
+        return std::nullopt;
+    }
     virtual std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) {
         static_cast<void>(instanceId);
         throw std::runtime_error("This provider transport does not support computational-node checkpointing.");
@@ -905,6 +913,24 @@ public:
         return results;
     }
 
+    std::optional<std::vector<std::pair<std::string, double>>> initialNodeOutputs(
+        std::uint64_t instanceId, double simulationTime, std::span<const double> inputs) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!initialOutputs_) return std::nullopt;
+        if (outputKeys_.empty()) cacheOutputKeys();
+        std::vector<double> outValues(outputKeys_.size(), 0.0);
+        std::int32_t given = 0;
+        if (!initialOutputs_(instance_, instanceId, simulationTime, inputs.data(), static_cast<std::uint32_t>(inputs.size()),
+                             outValues.data(), static_cast<std::uint32_t>(outValues.size()), &given)) {
+            throw std::runtime_error("A node program failed: " + std::string(vtable_->lastError(instance_)));
+        }
+        if (!given) return std::nullopt;
+        std::vector<std::pair<std::string, double>> results;
+        results.reserve(outputKeys_.size());
+        for (std::size_t index = 0; index < outputKeys_.size(); ++index) results.emplace_back(outputKeys_[index], outValues[index]);
+        return results;
+    }
+
     std::vector<std::byte> requestCheckpoint(std::uint64_t instanceId) override {
         std::lock_guard<std::mutex> lock(mutex_);
         std::uint32_t size = 0;
@@ -951,6 +977,8 @@ private:
         if (!handle_) throw std::runtime_error("Failed to load in-process computational-node provider library '" + path + "'.");
         auto entryPoint = reinterpret_cast<KonjugateInProcessNodeProviderV1Fn>(
             ::GetProcAddress(handle_, kKonjugateInProcessNodeProviderEntryPoint));
+        initialOutputs_ = reinterpret_cast<KonjugateInProcessNodeInitialOutputsV1Fn>(
+            ::GetProcAddress(handle_, kKonjugateInProcessNodeInitialOutputsEntryPoint));
 #else
         handle_ = ::dlopen(path.c_str(), RTLD_LOCAL | RTLD_NOW);
         if (!handle_) {
@@ -959,6 +987,9 @@ private:
         }
         auto entryPoint = reinterpret_cast<KonjugateInProcessNodeProviderV1Fn>(
             ::dlsym(handle_, kKonjugateInProcessNodeProviderEntryPoint));
+        // Optional: a library built before it was added has none, and its nodes start as they did.
+        initialOutputs_ = reinterpret_cast<KonjugateInProcessNodeInitialOutputsV1Fn>(
+            ::dlsym(handle_, kKonjugateInProcessNodeInitialOutputsEntryPoint));
 #endif
         if (!entryPoint) {
             unloadLibrary();
@@ -991,6 +1022,7 @@ private:
 
     std::string processKey_;
     const KonjugateInProcessNodeProviderV1* vtable_ = nullptr;
+    KonjugateInProcessNodeInitialOutputsV1Fn initialOutputs_ = nullptr;
     void* instance_ = nullptr;
 #ifdef _WIN32
     HMODULE handle_ = nullptr;
@@ -2840,6 +2872,16 @@ std::vector<std::pair<std::string, double>> ProviderRuntime::evaluateNode(
         throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
     }
     return processIt->second->evaluateNode(instanceIt->second, simulationTime, stepSize, inputs);
+}
+
+std::optional<std::vector<std::pair<std::string, double>>> ProviderRuntime::initialNodeOutputs(
+    const NodeProviderTask& task, std::span<const double> inputs, double simulationTime) {
+    const auto processIt = processes_.find(task.providerProcessKeyCache);
+    const auto instanceIt = taskInstanceIds_.find(task.nodeId);
+    if (processIt == processes_.end() || instanceIt == taskInstanceIds_.end()) {
+        throw std::runtime_error("Computational-node provider task not registered in ProviderRuntime.");
+    }
+    return processIt->second->initialNodeOutputs(instanceIt->second, simulationTime, inputs);
 }
 
 std::vector<std::byte> ProviderRuntime::requestNodeCheckpoint(const NodeProviderTask& task) {

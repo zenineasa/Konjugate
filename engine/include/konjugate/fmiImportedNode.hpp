@@ -141,11 +141,7 @@ public:
         if (!instantiated()) throw std::runtime_error(fmuName() + " was evaluated before it was instantiated.");
         if (!ended_) {
             if (!started_) {
-                enterInitializationMode(context.simulationTime);
-                for (std::size_t port = 0; port < inputIndexes_.size(); ++port) setInput(port, context.inputs.at(port), context.simulationTime);
-                for (const auto& given : spec_.values) set(given.variable, given.value, context.simulationTime);
-                exitInitializationMode(context.simulationTime);
-                started_ = true;
+                start(context);
             } else {
                 for (std::size_t port = 0; port < inputIndexes_.size(); ++port) {
                     const auto& variable = spec_.variables[inputIndexes_[port]];
@@ -171,6 +167,19 @@ public:
             if (ended_) terminate();
         }
         for (const auto index : outputIndexes_) outputs.addGradient(spec_.variables[index].key, heldOutputs_.at(index));
+    }
+
+    // A fresh run's start: the FMU initialized at the start time with its inputs there, and the outputs it then has (FMI review #6:
+    // the first sample showed the node's initial values, not the FMU's). Its first step goes on from here as it did.
+    bool initialOutputs(const konjugate::sdk::v1::EvaluationContext& context, konjugate::sdk::v1::NodeOutputCollector& outputs) override {
+        if (!instantiated()) throw std::runtime_error(fmuName() + " was started before it was instantiated.");
+        if (started_ || ended_) return false;
+        start(context);
+        for (const auto index : outputIndexes_) {
+            heldOutputs_[index] = get(spec_.variables[index], context.simulationTime);
+            outputs.addGradient(spec_.variables[index].key, heldOutputs_[index]);
+        }
+        return true;
     }
 
     std::vector<std::byte> checkpoint() const override {
@@ -263,6 +272,14 @@ protected:
     bool ended_ = false;
 
 private:
+    void start(const konjugate::sdk::v1::EvaluationContext& context) {
+        enterInitializationMode(context.simulationTime);
+        for (std::size_t port = 0; port < inputIndexes_.size(); ++port) setInput(port, context.inputs.at(port), context.simulationTime);
+        for (const auto& given : spec_.values) set(given.variable, given.value, context.simulationTime);
+        exitInitializationMode(context.simulationTime);
+        started_ = true;
+    }
+
     void setInput(std::size_t port, double value, double time) {
         set(spec_.variables[inputIndexes_[port]], value, time);
         lastSet_[port] = value;

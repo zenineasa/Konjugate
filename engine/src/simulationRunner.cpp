@@ -1529,6 +1529,12 @@ Simulation::Simulation(const boost::property_tree::ptree& document, const boost:
     // checkpoint and every node's first step all see consistent values -- after a restart too, where a fork may have
     // changed the parameters they depend on. An Update worked out once per step starts at its initial value.
     updateStates(startTime, false, globalTimeStep);
+    // A fresh run's imported FMUs are initialized at its start, with their inputs there, and their outputs are the first sample's
+    // (FMI review #6: it showed the nodes' initial values). A run from a checkpoint has the FMUs' state in the checkpoint.
+    if (!configuration.get_child_optional("startCheckpoint") && providerRuntime &&
+        applyInitialNodeOutputs(executionPlan, states, runControl.parameterValues, runControl.activeSchedules, startTime, providerRuntime.get())) {
+        stepExecutor->restore(states);
+    }
     partTable = recordedParts(executionPlan);
     samples = {{startTime, states, partsAt(startTime)}};
     checkpoints = {makeCheckpoint(startTime)};

@@ -61,8 +61,8 @@ import { listDiagnostics, onDiagnostic, recordDiagnostic } from './diagnosticsLo
 import { inspectPackageArchive, installPackageArchive, listInstalledPackages, loadNamespaceRegistry, packageCompatibility, packageKey, registryVideoUrlPattern, uninstallPackage } from './packageArchive.mjs';
 import { isNewerPackageVersion } from './versionCompare.mjs';
 import { checkEntryUpdate, createReleaseFactsCache, fetchRegistryImage, fetchRegistryScreenshot, fetchRemoteRegistry, identifyRegistryImage, installFromRegistryEntry, registryImageUrl, registryScreenshotUrl } from './registryClient.mjs';
-import { inspectFmuArchive, installedFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, uninstallFmu } from './fmuPackage.mjs';
-import { fmuLibraryRows } from './fmuLibrary.mjs';
+import { inspectFmuArchive, installOrReuseFmu, installProjectAttachments, listInstalledFmus, projectFmuAttachments, uninstallFmu } from './fmuPackage.mjs';
+import { fmuLibraryRows, fmuRemovalRefusal } from './fmuLibrary.mjs';
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary } from './fmiBinary.mjs';
 import { buildInstalledFmu, buildLog, buildsKept, fmuWithThisComputersBinary, removeBuilds, setBuildPreferred } from './fmuBuilds.mjs';
@@ -1212,39 +1212,6 @@ async function createEmbeddedResultSession(resultBytes, branchMetadata = {}) {
 // existing renderer code path that only knows about one embedded result keeps working unchanged.
 // embeddedBranches carries the rest (or, for a genuinely multi-branch save, all of them again --
 // see loadProjectDocument's own dedup-by-sessionId) for the renderer to rebuild its branch tree.
-// The FMUs a project keeps (docs/proposals/fmuImportWorkflow.md, stage 8): every FMU node's archive from the library, by the SHA-256
-// its node names (implementation.fmuSha256), unless the node is linked to the library instead (fmuLink). Returns { attachments,
-// missing } -- missing the FMUs this computer's library does not have, which the file then cannot keep.
-async function projectFmuAttachments(content) {
-    let document;
-    try { document = JSON.parse(content); } catch { return { attachments: [], missing: [] }; }
-    const directory = join(app.getPath('userData'), 'packages');
-    const wanted = new Map();
-    for (const node of document.nodes ?? []) {
-        const implementation = node.implementation;
-        if (implementation?.kind !== 'fmi' || !implementation.fmuSha256 || implementation.fmuLink) continue;
-        if (!wanted.has(implementation.fmuSha256)) wanted.set(implementation.fmuSha256, { implementation, name: node.name ?? implementation.fmuId });
-    }
-    if (!wanted.size) return { attachments: [], missing: [] };
-    const installed = await listInstalledFmus(directory);
-    const attachments = [];
-    const missing = [];
-    for (const [sha256, { implementation, name }] of wanted) {
-        const candidates = [
-            ...installed.filter((entry) => entry.manifest?.archiveSha256 === sha256),
-            ...installed.filter((entry) => entry.packageId === implementation.fmuId && entry.version === implementation.fmuVersion)
-        ];
-        let found = null;
-        for (const entry of candidates) {
-            const archive = await installedFmuArchive(directory, entry.packageId, entry.version);
-            if (archive?.sha256 === sha256) { found = archive; break; }
-        }
-        if (found) attachments.push({ kind: 'fmu', name: found.name, buffer: found.buffer });
-        else missing.push(name);
-    }
-    return { attachments, missing };
-}
-
 async function decodeProjectForRenderer(bytes, options = {}) {
     const bundle = await decodeProjectBundle(bytes, options);
     JSON.parse(bundle.content);
@@ -2220,7 +2187,10 @@ ipcMain.on('fmuUsageReply', (event, id, usage) => {
     if (!request || request.owner !== event.sender.id) return;
     fmuUsageRequests.delete(id);
     clearTimeout(request.timer);
-    request.resolve(usage && typeof usage.project === 'string' && Array.isArray(usage.fmus) ? usage : null);
+    // `history`: FMUs only its Undo or Redo can bring back (src/fmuLibrary.mjs fmuUsage).
+    request.resolve(usage && typeof usage.project === 'string' && Array.isArray(usage.fmus)
+        ? { ...usage, history: Array.isArray(usage.history) ? usage.history : [] }
+        : null);
 });
 const fmuLibrary = async () => fmuLibraryRows(await listInstalledFmus(join(app.getPath('userData'), 'packages')), await openModelsFmuUsage());
 ipcMain.handle('packageFmuLibrary', () => fmuLibrary());
@@ -2229,9 +2199,7 @@ ipcMain.handle('packageRemoveFmu', async (_event, { guid, version }) => {
     const row = (await fmuLibrary()).find((candidate) => candidate.guid === guid && candidate.version === version);
     if (!row) throw new Error('That FMU is not in your library.');
     if (!row.removable) {
-        throw new Error(row.usedBy.length
-            ? `${row.name} is used by ${row.usedBy.join(', ')}. Remove its nodes there, or close those projects, first.`
-            : 'An open window did not say which FMUs its model uses, so nothing was removed. Try again in a moment.');
+        throw new Error(fmuRemovalRefusal(row));
     }
     await uninstallFmu({ directory: join(app.getPath('userData'), 'packages'), guid, version });
     return fmuLibrary();
@@ -2581,7 +2549,23 @@ ipcMain.handle('projectSave', async (event, { path: existingPath, content, sugge
         if (!stored) continue;
         resolvedBranches.push({ buffer: await readFile(stored.path), ...branchMetadata });
     }
-    const { attachments, missing } = await projectFmuAttachments(content);
+    // The FMUs it keeps, from the library; one the library no longer has (removed while Undo could still bring its node back) from the
+    // copy the file being saved over, or the window's own project file (Save As), already holds.
+    const packages = join(app.getPath('userData'), 'packages');
+    let { attachments, missing } = await projectFmuAttachments(packages, content);
+    if (missing.length) {
+        const earlierFiles = [...new Set([path, projectWindowState.get(targetWindow)?.currentProjectPath].filter(Boolean))];
+        const kept = [];
+        for (const file of earlierFiles) {
+            const bytes = await readFile(file).catch(() => null);
+            if (!bytes) continue;
+            for (const attempt of password ? [password, undefined] : [undefined]) {
+                const bundle = await decodeProjectBundle(bytes, { password: attempt }).catch(() => null);
+                if (bundle) { kept.push(...(bundle.attachments ?? [])); break; }
+            }
+        }
+        if (kept.length) ({ attachments, missing } = await projectFmuAttachments(packages, content, { kept }));
+    }
     const bytes = await encodeProjectFile(content, {
         password, resultBranches: resolvedBranches.length ? resolvedBranches : null, publicNotice: publicNoticeOf(content), attachments: attachments.length ? attachments : null
     });

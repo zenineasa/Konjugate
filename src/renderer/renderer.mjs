@@ -48,7 +48,7 @@ import {
     documentRequires, fmiNodeFromPorts, fmuAboutLines, fmuConnectionNotes, fmuInputRows, fmuKeepLimitBytes, fmuKeptInProject, fmuPortHint, fmuPortNotes, fmuPortRole, freeKey, nodeProgramErrors, nodeProgramInputCandidates, nodeProgramInputValue
 } from '../nodeProgram.mjs';
 import { describeRunFailure } from '../runFailure.mjs';
-import { fmuRemovalQuestion } from '../fmuLibrary.mjs';
+import { fmuInUseText, fmuRemovalQuestion, fmuUsage, modelFmuReferences } from '../fmuLibrary.mjs';
 import { fmuRunSuggestion, fmuStepCheck, fmuStepSentences, wholeNumberOf } from '../fmuSteps.mjs';
 import { generateFmiModel } from '../fmiCodeGen.mjs';
 import { meshFromArrays, partProblems, triangleCount } from '../meshParts.mjs';
@@ -884,7 +884,8 @@ function updateSelectionActionControls() {
 
 function recordHistory(action) {
     if (activeResult) return false;
-    documentController.record(action);
+    // With the FMUs the model refers to after this step, so one only Undo or Redo can bring back stays in use (Settings › Providers).
+    documentController.record(action, { references: modelFmuReferences(model) });
     scheduleComponentSync();
     return true;
 }
@@ -4180,7 +4181,10 @@ async function renderNodeProgramFmus(node) {
     const select = $('#editNodeProgramFmu');
     const implementation = node.userData.definition.implementation;
     const fmus = installedFmus ?? await refreshInstalledFmus();
-    select.replaceChildren(new Option(fmus.length ? 'Choose an installed FMU…' : 'No FMU installed: install one from Extensions', ''));
+    // FMUs come into a model through Add › FMU… or a .fmu dropped on the canvas (the single FMU workflow), never Extensions; the web
+    // edition runs none.
+    const empty = fmusRunHere() ? 'No FMU in your library: add one with Add › FMU…' : 'FMUs run in the desktop app';
+    select.replaceChildren(new Option(fmus.length ? 'Choose an installed FMU…' : empty, ''));
     fmus.forEach((fmu) => select.add(new Option(`${fmu.name} ${fmu.version}`, JSON.stringify([fmu.packageId, fmu.version]))));
     const current = implementation?.fmuId ? JSON.stringify([implementation.fmuId, implementation.fmuVersion]) : '';
     if (current && ![...select.options].some((option) => option.value === current)) {
@@ -10271,7 +10275,7 @@ function showFmuLibrary(rows) {
         label.textContent = `${row.name} · version ${row.version}`;
         const hint = document.createElement('small');
         hint.className = 'settingsItemHint';
-        const use = row.usedBy.length ? `Used by ${row.usedBy.join(', ')}` : row.unanswered ? 'An open window did not say whether its model uses it' : 'No open model uses it';
+        const use = fmuInUseText(row) || 'No open model uses it';
         hint.textContent = [row.size, use].filter(Boolean).join(' · ');
         text.append(label, hint);
         item.append(text);
@@ -10303,18 +10307,16 @@ async function refreshFmuLibrary() {
     if ($('#fmuLibrarySection').hidden) return;
     showFmuLibrary(await window.extensions?.fmuLibrary?.() ?? []);
 }
-// Asked by the main process for that list: the FMUs this window's project uses, anywhere in it (inside components too, switched off too).
+// Asked by the main process for that list: the FMUs this window's project uses, anywhere in it (inside components too, switched off too),
+// and those only a state its Undo or Redo can bring back uses (a deleted FMU node, the FMU a node had before another), held for Undo.
 window.extensions?.onFmuUsageRequest?.((id) => {
-    const fmus = [];
-    const visit = (value) => {
-        if (Array.isArray(value)) value.forEach(visit);
-        else if (value && typeof value === 'object') {
-            if (value.kind === 'fmi' && typeof value.fmuId === 'string') fmus.push({ guid: value.fmuId, version: value.fmuVersion });
-            Object.values(value).forEach(visit);
-        }
-    };
-    try { visit(serializeProjectDocument()); } catch { /* answered with what was found */ }
-    window.extensions.fmuUsageReply(id, { project: $('.documentTitle').textContent || 'Untitled', fmus });
+    let usage;
+    try {
+        usage = fmuUsage($('.documentTitle').textContent || 'Untitled', serializeProjectDocument(), [...documentController.historyReferences, ...modelFmuReferences(model)]);
+    } catch {
+        usage = null;
+    }
+    window.extensions.fmuUsageReply(id, usage);
 });
 
 function toolchainFields(kind) {
@@ -11242,7 +11244,7 @@ async function loadProjectDocument(document, {
     EntityEditor.forgetChosenTabs();
     openStateFields.clear();
     openFoldedLines.clear();
-    documentController.reset({ saved });
+    documentController.reset({ saved, references: modelFmuReferences(model) });
     updateDocumentTitle();
     updateEncryptionControls();
     setCameraView('orbit', false);
@@ -14707,7 +14709,7 @@ function newNodeFromMenu({ position = null } = {}) {
 }
 
 // ---- An FMU as a node, from where a person looks for one (docs/proposals/fmuImportWorkflow.md, stage 4) --------------------
-// Add › FMU… (a file picked), an FMU in the library (under it, and Extensions' Add to model) or a .fmu dropped on the canvas: the
+// Add › FMU… (a file picked, or an FMU in the library listed under it) or a .fmu dropped on the canvas: the
 // FMU made ready (installed when it is new, src/main.mjs packageAddFmu), then a new node built from it (useFmuForNode), selected
 // with its card open, ready to run. What stops it is said in words, and the web edition says FMUs run in the desktop app.
 function showFmuNotice(title, lines = [], { desktopOnly = false } = {}) {

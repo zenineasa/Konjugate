@@ -93,7 +93,7 @@ const steps = Object.freeze([
     {
         id: 'finish',
         title: 'Your model went out as an FMU and came back',
-        text: `${values.reader.name}'s output follows ${values.source.name}'s x a step behind: every node reads the others as they were at the start of each step, so no loop between FMUs ever needs solving. An FMU also arrives from Add › FMU…, a .fmu dropped on the canvas, or Extensions; a saved project keeps its FMUs in its file, so it runs on another computer.`,
+        text: `${values.reader.name}'s output follows ${values.source.name}'s x a step behind: every node reads the others as they were at the start of each step, so no loop between FMUs ever needs solving. An FMU also arrives from Add › FMU… or a .fmu dropped on the canvas; a saved project keeps its FMUs in its file, so it runs on another computer.`,
         advance: 'next', nextLabel: 'Finish', done: () => false
     }
 ]);

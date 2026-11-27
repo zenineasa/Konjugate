@@ -295,3 +295,39 @@ export async function uninstallFmu({ directory, guid, version }) {
         await removeBuilds(directory, meta.archiveSha256);
     }
 }
+
+// The FMUs a project keeps (docs/proposals/fmuImportWorkflow.md, stage 8), for saving it: every FMU node's archive, by the SHA-256 its
+// node names (implementation.fmuSha256), unless the node is linked to the library instead (fmuLink). Taken from the library in
+// `directory`, or else from `kept`, the FMUs the project file being saved over already holds ([{ kind, name, sha256, buffer }],
+// decodeProjectBundle's attachments): an FMU removed from the library while a node that uses it could still come back with Undo is
+// not dropped from the file that keeps it. Returns { attachments, missing } -- missing the names of the nodes whose FMU neither has.
+export async function projectFmuAttachments(directory, content, { kept = [] } = {}) {
+    let document;
+    try { document = JSON.parse(content); } catch { return { attachments: [], missing: [] }; }
+    const wanted = new Map();
+    for (const node of document.nodes ?? []) {
+        const implementation = node.implementation;
+        if (implementation?.kind !== 'fmi' || !implementation.fmuSha256 || implementation.fmuLink) continue;
+        if (!wanted.has(implementation.fmuSha256)) wanted.set(implementation.fmuSha256, { implementation, name: node.name ?? implementation.fmuId });
+    }
+    if (!wanted.size) return { attachments: [], missing: [] };
+    const installed = await listInstalledFmus(directory);
+    const attachments = [];
+    const missing = [];
+    for (const [sha256, { implementation, name }] of wanted) {
+        const candidates = [
+            ...installed.filter((entry) => entry.manifest?.archiveSha256 === sha256),
+            ...installed.filter((entry) => entry.packageId === implementation.fmuId && entry.version === implementation.fmuVersion)
+        ];
+        let found = null;
+        for (const entry of candidates) {
+            const archive = await installedFmuArchive(directory, entry.packageId, entry.version);
+            if (archive?.sha256 === sha256) { found = archive; break; }
+        }
+        // The file's own copy, checked against the SHA-256 the node names.
+        found ??= kept.find((attachment) => attachment?.kind === 'fmu' && attachment.buffer && attachment.sha256 === sha256 && sha256Hex(attachment.buffer) === sha256) ?? null;
+        if (found) attachments.push({ kind: 'fmu', name: found.name, buffer: found.buffer });
+        else missing.push(name);
+    }
+    return { attachments, missing };
+}

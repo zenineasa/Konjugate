@@ -11,6 +11,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { recipeCompiles } from './fmuRecipes.mjs';
 
 // A path's last part, whichever separator it uses (a Windows path read on any computer, as Settings may hold one).
 const fileName = (path) => String(path).split(/[\\/]/).pop();
@@ -50,7 +51,9 @@ export function compilerOptionsOf(text) {
 // `sourceRoot`: `{ plan, notes, problems }`. `headersDirectory` is engine/include/fmiStandard (the folder holding fmi2/ and fmi3/),
 // `objectDirectory` and `output` where the objects and the library go. `recipe` (stage 4) adds definitions, libraries and threads.
 // Problems refuse the build (each a phrase following "Konjugate cannot build it: "); notes are said and lose nothing.
-export function fmuSourceBuildPlan(build, { fmiVersion, sourceRoot, headersDirectory, objectDirectory, output, compilerFamily = null, recipe = null, timeoutSeconds = 300 }) {
+export function fmuSourceBuildPlan(build, { fmiVersion, sourceRoot, headersDirectory, objectDirectory, output, compilerFamily = null, recipe: givenRecipe = null, timeoutSeconds = 300 }) {
+    // The exporter's recipe (src/fmuRecipes.mjs), chosen when the build information was read, unless one is given.
+    const recipe = givenRecipe ?? build?.recipe ?? null;
     const problems = [...(build?.problems ?? [])];
     const notes = [];
     if (!build?.configuration) return { plan: null, notes, problems: problems.length ? problems : ['it says nothing about building it'] };
@@ -66,13 +69,13 @@ export function fmuSourceBuildPlan(build, { fmiVersion, sourceRoot, headersDirec
         }
         sets.push({
             ...language,
-            files: set.sourceFiles,
+            files: set.sourceFiles.filter((file) => recipeCompiles(recipe, file)),
             definitions: [
                 `FMI${major}_OVERRIDE_FUNCTION_PREFIX`,
                 ...set.definitions.map((definition) => (definition.value === null ? definition.name : `${definition.name}=${definition.value}`)),
                 ...(recipe?.definitions ?? [])
             ],
-            includeDirectories: set.includeDirectories,
+            includeDirectories: [...set.includeDirectories, ...(recipe?.includeDirectories ?? [])],
             ...(options.flags?.length ? { compilerOptions: options.flags } : {})
         });
     }

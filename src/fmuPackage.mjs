@@ -95,7 +95,8 @@ export function inspectFmuArchive(archive) {
     // What it says about building it from its sources (docs/proposals/sourceFmuImport.md): an FMU with no binaries at all is accepted
     // when it carries build information, and refused, as before, when it carries neither.
     const buildDescription = files['sources/buildDescription.xml'];
-    const build = fmuBuildInformation({ description, names, buildDescriptionXml: buildDescription ? strFromU8(buildDescription) : null });
+    const cmakeLists = files['sources/CMakeLists.txt'];
+    const build = fmuBuildInformation({ description, names, buildDescriptionXml: buildDescription ? strFromU8(buildDescription) : null, cmakeListsText: cmakeLists ? strFromU8(cmakeLists) : null });
     if (!platforms.length && !build) throw new FmuPackageError('The FMU has no binaries/<platform>/ directory -- there is nothing to load.', 'NOT_AN_FMU');
 
     return { description, files, platforms, build };

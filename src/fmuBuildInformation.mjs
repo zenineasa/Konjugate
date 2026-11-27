@@ -10,6 +10,7 @@
 
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { platformTuple } from './fmiBinary.mjs';
+import { exporterRecipe } from './fmuRecipes.mjs';
 
 const parser = new XMLParser({
     ignoreAttributes: false,
@@ -101,7 +102,8 @@ export function recogniseExporter(description, names) {
 // exporter, problems }`, or null when it says nothing (no buildDescription.xml and no <SourceFiles>). `from` is "buildDescription" or
 // "sourceFiles"; `configuration` the source file sets and libraries to build (a <SourceFiles> list is one C set, sources/ its include
 // directory); `problems` why it cannot be built, each a phrase that follows "Konjugate cannot build it: ".
-export function fmuBuildInformation({ description, names, buildDescriptionXml = null, tuple = platformTuple() }) {
+// `cmakeListsText` is the FMU's sources/CMakeLists.txt as text, read for the one fact an exporter's recipe needs from it (stage 4).
+export function fmuBuildInformation({ description, names, buildDescriptionXml = null, cmakeListsText = null, tuple = platformTuple() }) {
     const inSources = new Set(names.filter((name) => name.startsWith('sources/')).map((name) => name.slice('sources/'.length)));
     const hasBuildDescription = buildDescriptionXml !== null && buildDescriptionXml !== undefined;
     if (!hasBuildDescription && !description?.sourceFiles?.length) return null;
@@ -140,11 +142,16 @@ export function fmuBuildInformation({ description, names, buildDescriptionXml = 
     }
     const sets = configuration?.sourceFileSets ?? [];
     const languages = new Set(sets.map((set) => (/^C\+\+/.test(set.language ?? '') ? 'C++' : 'C')));
+    const exporter = recogniseExporter(description, names);
+    // The exporter's recipe (src/fmuRecipes.mjs): what its sources need beyond the standard, or why they cannot be built here.
+    const chosenRecipe = exporterRecipe(exporter, { cmakeListsText, platform: tuple.endsWith('-windows') ? 'win32' : 'other' });
+    if (chosenRecipe?.problem) problems.push(chosenRecipe.problem);
     return {
         from, modelIdentifier, platform: tuple, configuration,
         sourceFileCount: sets.reduce((total, set) => total + set.sourceFiles.length, 0),
         language: languages.size === 1 ? [...languages][0] : 'C and C++',
-        exporter: recogniseExporter(description, names),
+        exporter,
+        ...(chosenRecipe?.recipe ? { recipe: chosenRecipe.recipe } : {}),
         problems: [...new Set(problems)]
     };
 }

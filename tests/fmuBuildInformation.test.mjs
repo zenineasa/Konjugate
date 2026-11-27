@@ -132,7 +132,9 @@ test('an FMU with sources and no binaries is accepted, installed, and About says
         const installed = await installFmuArchive(sourcesOnly, { directory });
         const ports = await describeInstalledFmuPorts(directory, installed.guid, installed.version);
         assert.equal(ports.about.runsHere, false);
-        assert.deepEqual(ports.about.build, { from: 'sourceFiles', modelIdentifier: 'PidController', platform: platformTuple(), sourceFileCount: 113, language: 'C', exporter: { id: 'openModelica', name: 'OpenModelica', version: '1.27.1' }, problems: [] });
+        const { recipe, ...summary } = ports.about.build;
+        assert.deepEqual(summary, { from: 'sourceFiles', modelIdentifier: 'PidController', platform: platformTuple(), sourceFileCount: 113, language: 'C', exporter: { id: 'openModelica', name: 'OpenModelica', version: '1.27.1' }, problems: [] });
+        assert.equal(recipe.name, 'OpenModelica', 'Built with OpenModelica\'s recipe (stage 4).');
         assert.ok(fmuAboutLines(ports.about).includes('Sources only: Konjugate can build it, 113 C files from its <SourceFiles> (exported by OpenModelica 1.27.1)'));
         // The same FMU with its binaries says it carries its sources as well.
         const both = await installFmuArchive(archive, { directory, version: '2.0.0' });

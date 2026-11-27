@@ -33,7 +33,8 @@ export async function installedBuildInformation(fmuRoot, description) {
     const names = entries.filter((entry) => entry.isFile())
         .map((entry) => `sources/${relative(sources, resolve(entry.parentPath ?? entry.path, entry.name)).split(sep).join('/')}`);
     const buildDescriptionXml = await readFile(resolve(sources, 'buildDescription.xml'), 'utf8').catch(() => null);
-    return fmuBuildInformation({ description, names, buildDescriptionXml });
+    const cmakeListsText = await readFile(resolve(sources, 'CMakeLists.txt'), 'utf8').catch(() => null);
+    return fmuBuildInformation({ description, names, buildDescriptionXml, cmakeListsText });
 }
 
 async function installedFmu(fmuDirectory, guid, version) {
@@ -161,6 +162,8 @@ export async function buildInstalledFmu({
     if (!fmu.build) return { status: 'refused', name, message: `${name} carries no build information (no buildDescription.xml and no <SourceFiles>).` };
     if (fmu.build.problems.length) return { status: 'refused', name, message: `Konjugate cannot build ${name}: ${fmu.build.problems[0]}.` };
     if (!compiler || compiler.message) return { status: 'refused', name, message: compiler?.message ?? 'No C compiler was found.' };
+    // The exporter's recipe, when Konjugate keeps one for it (stage 4), unless the caller gives its own.
+    recipe = recipe ?? fmu.build.recipe ?? null;
     const builds = buildsDirectoryOf(fmuDirectory);
     await mkdir(builds, { recursive: true });
     const folder = await mkdtemp(join(builds, 'building-'));

@@ -1,8 +1,9 @@
 // Copyright © 2026 Zenin Easa Panthakkalakath
 
 // The checks every release runs (.github/workflows/release.yml) and a developer can run with `npm run test:release`: that code export
-// (C++ in each of its parallel modes, and Python), FMU export (FMI 2.0 and FMI 3.0) and the FMU round trip give the engine's own numbers, and that the
-// accuracy benchmarks still meet their thresholds. Each check runs in turn against one engine build; the summary at the end says what
+// (C++ in each of its parallel modes, and Python), FMU export (FMI 2.0 and FMI 3.0) and the FMU round trip give the engine's own numbers,
+// that FMU import (Konjugate's own exports and the FMI Reference FMUs, against FMPy, from t = 0; start values; FMUs built from their
+// sources) does, and that the accuracy benchmarks still meet their thresholds. Each check runs in turn against one engine build; the summary at the end says what
 // passed, what failed, what was skipped and why, and how long each took. Exits with status 1 if any check failed.
 //
 //   node scripts/runReleaseChecks.mjs [--engine <path>] [--require mpi,fmpy]
@@ -12,8 +13,11 @@
 //                     C++ and Python MPI modes), fmpy (the independent FMI simulator the FMU export fidelity check drives). A release
 //                     runner that installs a tool requires it, so a broken install cannot pass as a skip.
 //
-// Without a tool, what needs it is skipped and said so, here and in the summary, never silently. The C++ checks need a C++ compiler
-// with GCC/Clang-style flags (CXX, default c++), and OpenMP (on macOS, Homebrew's libomp); Python ones need python3 (PYTHON).
+// Without a tool, what needs it is skipped and said so, here and in the summary, never silently: a check that runs nothing says
+// "(skipping <why>)" and is counted as skipped, not passed. The C++ checks need a C++ compiler with GCC/Clang-style flags (CXX, default
+// c++), and OpenMP (on macOS, Homebrew's libomp); Python ones need python3 (PYTHON); FMUs built from their sources need a C compiler (on
+// Windows, MSVC). On macOS and Linux a missing C++ compiler fails the run; on Windows, which has MSVC only, the checks that compile with
+// GCC/Clang-style flags are skipped, named, and every other check runs (FMU export compiles with the engine's own toolchain, MSVC there).
 
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync } from 'node:fs';
@@ -86,7 +90,11 @@ if (process.platform === 'darwin') {
 const problems = [];
 const notes = [];
 if (!tools.engine) problems.push(`No engine at ${engine}: build it with npm run build:engine, or name one with --engine.`);
-if (!tools.cxx) problems.push(`No C++ compiler (${process.env.CXX || 'c++'}): the C++ export and FMU checks need one. Set CXX to name it.`);
+// Windows runs the checks that need no GCC/Clang-style compiler; the others are skipped there, each saying why.
+const gccStyleMissing = !tools.cxx && process.platform === 'win32'
+    ? `needs a C++ compiler with GCC/Clang-style flags (${process.env.CXX || 'c++'}), which this Windows computer does not have (MSVC only)`
+    : null;
+if (!tools.cxx && !gccStyleMissing) problems.push(`No C++ compiler (${process.env.CXX || 'c++'}): the C++ export and FMU checks need one. Set CXX to name it.`);
 if (!tools.python) problems.push(`No Python (${python}): the Python export check needs it. Set PYTHON to name it.`);
 if (!tools.libomp) problems.push('No OpenMP for the C++ openmp mode: on macOS, brew install libomp.');
 const cppMpi = tools.mpicxx && tools.mpirun;
@@ -105,10 +113,21 @@ if (!tools.fmpy) {
 
 // ---- the checks ---------------------------------------------------------------------------------------------------------------
 const checks = [
-    { name: 'Code export fidelity (C++ serial, openmp, stdThread, mpi; Python)', script: 'tests/engine/codeExportFidelity.mjs', args: [engine] },
+    // gccStyle: compiles with GCC/Clang-style flags itself (a C++ export, a fixture FMU), so is skipped on a Windows computer without such
+    // a compiler.
+    { name: 'Code export fidelity (C++ serial, openmp, stdThread, mpi; Python)', script: 'tests/engine/codeExportFidelity.mjs', args: [engine], gccStyle: true },
+    { name: 'Export of once-per-step Updates and value-setting relationships (C++, Python, FMI 2.0 and 3.0)', script: 'tests/engine/kindsExportFidelity.mjs', args: [engine], gccStyle: true },
     { name: 'FMU export fidelity (FMPy)', script: 'tests/engine/fmiExportFidelity.mjs', args: [engine] },
     { name: 'FMI 3.0 FMU export fidelity (FMPy)', script: 'tests/engine/fmi3ExportFidelity.mjs', args: [engine] },
     { name: 'FMU round trip', script: 'tests/engine/fmiRoundTrip.mjs', args: [engine] },
+    { name: 'FMU state saved and restored (FMPy)', script: 'tests/engine/fmiStateRestore.mjs', args: [engine] },
+    { name: 'FMU identity: another model\'s guid refused (FMPy)', script: 'tests/engine/fmiIdentity.mjs', args: [engine] },
+    { name: 'FMI 2.0 export says why it refuses a call', script: 'tests/engine/fmi2Reasons.mjs', args: [engine] },
+    { name: 'FMU import fidelity (FMI 2.0; Reference FMUs against FMPy)', script: 'tests/engine/fmiImportFidelity.mjs', args: [engine] },
+    { name: 'FMI 3.0 FMU import fidelity (Reference FMUs against FMPy)', script: 'tests/engine/fmi3ImportFidelity.mjs', args: [engine], gccStyle: true },
+    { name: 'FMU start values (Reference FMUs against FMPy)', script: 'tests/engine/fmiStartValues.mjs', args: [engine] },
+    { name: 'FMUs built from their sources', script: 'tests/engine/fmuSourceBuild.mjs', args: [engine] },
+    { name: 'FMU import building from sources', script: 'tests/engine/fmuSourceImport.mjs', args: [engine] },
     { name: 'FMI example FMUs (examples/fmi)', script: 'tests/engine/fmiExamples.mjs', args: [engine] },
     { name: 'FMU export with declared ports (FMPy)', script: 'tests/engine/fmiPortsExportFidelity.mjs', args: [engine] },
     { name: 'Test signals for in ports', script: 'tests/engine/rootPortSignals.mjs', args: [engine] },
@@ -123,6 +142,11 @@ if (problems.length) {
 } else {
     for (const note of notes) console.log(inActions ? `::warning title=Release checks::${note}` : `! ${note}`);
     for (const check of checks) {
+        if (check.gccStyle && gccStyleMissing) {
+            results.push({ ...check, outcome: 'skipped', seconds: 0, skipped: [`it ${gccStyleMissing}`], failure: null, tail: '' });
+            console.log(inActions ? `::notice title=${check.name}::Skipped: it ${gccStyleMissing}.` : `\n=== ${check.name} === skipped: it ${gccStyleMissing}`);
+            continue;
+        }
         console.log(inActions ? `::group::${check.name}` : `\n=== ${check.name} ===`);
         const begun = Date.now();
         const run = await execute(process.execPath, [join(rootDirectory, check.script), ...check.args], { stream: true, timeout: checkTimeoutMilliseconds });

@@ -92,7 +92,7 @@ try {
     };
     if (ownBinary.error) {
         console.log(`  The committed PidController.fmu cannot run here: ${ownBinary.error}. ${compiler.message
-            ? `With no C compiler here (${compiler.message}), it is not built either, so nothing below is checked.`
+            ? `With no C compiler here (${compiler.message}), it is not built either, so nothing below is checked.\n  (skipping the controller example: its FMU has no binary for this computer and there is no C compiler to build it)`
             : `It is built here from its sources (${compiler.banner}, ${platformTuple()}) and that build is checked.`}`);
     }
 

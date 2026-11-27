@@ -296,14 +296,15 @@ jobs:
     # integration method; the FMU through FMPy and through the engine's own FMI driver), and that the accuracy benchmarks still meet
     # their thresholds (scripts/runReleaseChecks.mjs, `npm run test:release` locally). A job of its own, beside the builds rather than
     # in them: it builds just the engine and runs the checks (about ten minutes of checks), while each build job packages the app and
-    # runs the interaction tests for far longer, so the release waits no longer for it; the release job needs both. On the macOS and
-    # Linux runners the builds use, where the checks' GCC/Clang-style compilers are; Open MPI is installed on Linux only, and required
-    # there, so its modes are checked on every release and said to be skipped on macOS. Windows is said to be left out below.
+    # runs the interaction tests for far longer, so the release waits no longer for it; the release job needs both. On every runner the
+    # builds use. Open MPI is installed on Linux only, and required there, so its modes are checked on every release and said to be
+    # skipped elsewhere. Windows has MSVC only: the checks that compile with GCC/Clang-style flags themselves (C++ code export, a fixture
+    # FMU) are skipped there, each named with why in the summary, and every other check runs, FMU export compiling with MSVC.
     releaseChecks:
         strategy:
             fail-fast: false
             matrix:
-                os: [macos-latest, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm]
+                os: [macos-latest, macos-15-intel, ubuntu-22.04, ubuntu-22.04-arm, windows-latest]
         runs-on: ${{ matrix.os }}
         timeout-minutes: 120
         steps:
@@ -315,6 +316,9 @@ jobs:
             - uses: actions/setup-python@v5
               with:
                   python-version: '3.x'
+            # As in the build job: MSVC for the engine and for the FMUs the checks export and build from their sources.
+            - uses: ilammy/msvc-dev-cmd@v1
+              if: runner.os == 'Windows'
             # See the build job: vcpkg's cache in GitHub's own Actions cache needs these two variables.
             - name: Export GitHub Actions cache environment variables
               uses: actions/github-script@v7
@@ -322,9 +326,14 @@ jobs:
                   script: |
                       core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
                       core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+            - name: Exclude build directories from Windows Defender
+              if: runner.os == 'Windows'
+              run: |
+                  Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\out"
+                  Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\.tools"
             - name: Install release check prerequisites
               # metis on macOS for the engine, as in the build job; libomp for the exported C++'s OpenMP mode; FMPy, the independent
-              # FMI simulator; Open MPI and mpi4py on Linux for the MPI modes.
+              # FMI simulator; Open MPI and mpi4py on Linux for the MPI modes. Windows needs only FMPy (vcpkg brings the engine's own).
               shell: bash
               run: |
                   python -m pip install fmpy
@@ -332,7 +341,7 @@ jobs:
                       sudo apt-get update
                       sudo apt-get install -y --no-install-recommends libopenmpi-dev openmpi-bin
                       python -m pip install mpi4py
-                  else
+                  elif [ "$RUNNER_OS" = macOS ]; then
                       brew install metis libomp
                   fi
             - name: Install the pinned CMake
@@ -362,12 +371,6 @@ jobs:
                   path: out/benchmarks/accuracy/
                   retention-days: 30
                   if-no-files-found: ignore
-
-    releaseChecksWindows:
-        # Said, not silently left out: the code export checks compile with GCC/Clang-style flags, which MSVC does not take.
-        runs-on: ubuntu-latest
-        steps:
-            - run: echo "::notice title=Release checks::Not run on Windows (the code export checks compile with GCC/Clang-style flags); they run on this release's macOS and Linux runners."
 
     release:
         needs: [build, releaseChecks]

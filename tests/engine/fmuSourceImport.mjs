@@ -36,7 +36,7 @@ const builder = process.argv[2] ?? join(root, 'out', 'engine', process.platform 
 const sdkPath = join(root, 'engine');
 const compiler = await findCCompiler();
 if (compiler.message) {
-    console.log(`Skipped: ${compiler.message}`);
+    console.log(`  (skipping building FMUs from their sources on import: no C compiler here -- ${compiler.message})`);
     process.exit(0);
 }
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');

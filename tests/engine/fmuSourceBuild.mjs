@@ -24,7 +24,7 @@ const headersDirectory = fmiStandardHeadersDirectory(join(root, 'engine'));
 
 const compiler = await findCCompiler();
 if (compiler.message) {
-    console.log(`Skipped: ${compiler.message}`);
+    console.log(`  (skipping the source build check: no C compiler here -- ${compiler.message})`);
     process.exit(0);
 }
 

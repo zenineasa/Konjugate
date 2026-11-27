@@ -7040,6 +7040,8 @@ function renderValidationFailure(message) {
     renderValidationStatus();
 }
 
+// What validation last wrote on the status line, to tell it from what an action wrote since.
+let lastValidationStatusText = null;
 function renderValidationStatus() {
     const issues = capturedProgramWarnings.length && $('#validationSummary').dataset.validationSource === 'engine'
         ? [...currentValidation.issues, ...programWarningIssues(capturedProgramWarnings, serializeProjectDocument())] : currentValidation.issues;
@@ -7049,8 +7051,16 @@ function renderValidationStatus() {
     summary.classList.remove('pending');
     summary.classList.toggle('error', errors > 0);
     summary.classList.toggle('warning', !errors && warnings > 0);
-    $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
-        : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
+    // A valid model does not take the status line from what an action said while it was being validated ("Added PidController", "Project
+    // saved"): validation writes "Validating…" when it starts, so anything else there now was said since, and stays, the validation
+    // summary beside it saying the model is valid. Errors and warnings are always said.
+    const shown = $('#statusText').textContent;
+    const saidSinceValidating = Boolean(shown) && shown !== 'Validating…' && shown !== lastValidationStatusText;
+    if (errors || warnings || !saidSinceValidating) {
+        $('#statusText').textContent = errors ? `${errors} model ${errors === 1 ? 'error' : 'errors'}`
+            : warnings ? `${warnings} model ${warnings === 1 ? 'warning' : 'warnings'}` : 'Model valid';
+        lastValidationStatusText = $('#statusText').textContent;
+    }
     $('#runButton').disabled = runButtonDisabled();
     $('#runButton').title = errors ? 'Run settings (resolve model errors before starting)' : 'Run simulation';
 
@@ -22068,9 +22078,13 @@ $('#subsystemPlaceAnother').addEventListener('click', () => {
         if (object) bringIntoViewWithLabel(object);
         selectSubsystem(placed);
         openSubsystemEditor(placed);
-        // A fit frames the boxes, not their labels: one placed at the right may stand in view with its label past the canvas's edge, drawn
-        // on the next frame. The view is then moved along by as much.
-        if (object) requestAnimationFrame(() => requestAnimationFrame(() => panLabelIntoView(object)));
+        // A fit frames the boxes, not their labels: one placed at the right may stand in view with its label past the canvas's edge. The
+        // labels are laid out now, rather than on the next frames (which a window not in front gets late, or not before it is looked at),
+        // and the view is moved along by as much.
+        if (object) {
+            labelRenderer.render(scene, camera);
+            panLabelIntoView(object);
+        }
     }
 });
 $('#subsystemMakeSeparate').addEventListener('click', () => {

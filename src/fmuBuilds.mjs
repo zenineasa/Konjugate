@@ -30,11 +30,39 @@ async function writeJsonWhole(path, value) {
     const partial = `${path}.${process.pid}.${randomUUID()}.partial`;
     try {
         await writeFile(partial, JSON.stringify(value));
-        await rename(partial, path);
+        await renameRetrying(partial, path);
     } catch (error) {
         await rm(partial, { force: true });
         throw error;
     }
+}
+
+// rename(), tried again while Windows refuses it for a moment: it answers EPERM, EACCES or EBUSY while another handle has the file
+// open (a reader, an antivirus scan, another rename onto it), as two builds at once met in 2.1.3's release checks. Ten tries, the
+// waits doubling from `delayMs` to about a second in all; any other failure, or one that lasts, is thrown. `rename` is a test's seam.
+const transientRenameCodes = new Set(['EPERM', 'EACCES', 'EBUSY']);
+export async function renameRetrying(from, to, { rename: renameFile = rename, attempts = 10, delayMs = 2 } = {}) {
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            return await renameFile(from, to);
+        } catch (error) {
+            if (!transientRenameCodes.has(error.code) || attempt >= attempts) throw error;
+            await new Promise((done) => setTimeout(done, delayMs * 2 ** (attempt - 1)));
+        }
+    }
+}
+
+// Each cache file's read-modify-write in turn, within this process (every window's builds run in the one main process): two builds
+// at once each reading confirmed.json, adding their archive and writing it back, lost one of the two. `task` runs once the tasks
+// before it on `path` have finished, whether they succeeded or not.
+const fileTasks = new Map();
+function inTurn(path, task) {
+    const previous = fileTasks.get(path) ?? Promise.resolve();
+    const result = previous.catch(() => {}).then(task);
+    const settled = result.catch(() => {});
+    fileTasks.set(path, settled);
+    settled.then(() => { if (fileTasks.get(path) === settled) fileTasks.delete(path); });
+    return result;
 }
 
 export function buildsDirectoryOf(fmuDirectory) {
@@ -119,10 +147,13 @@ async function readPointer(builds, archiveSha256) {
 // Whether an FMU's kept build runs in place of its own binary (Build from its sources) or not (Use its own binary).
 export async function setBuildPreferred(fmuDirectory, archiveSha256, preferred) {
     const builds = buildsDirectoryOf(fmuDirectory);
-    const pointer = await readPointer(builds, archiveSha256);
-    if (!pointer) return false;
-    await writeJsonWhole(resolve(builds, 'byArchive', `${archiveSha256}.json`), { key: pointer.key, ...(preferred ? { preferred: true } : {}) });
-    return true;
+    const path = resolve(builds, 'byArchive', `${archiveSha256}.json`);
+    return inTurn(path, async () => {
+        const pointer = await readPointer(builds, archiveSha256);
+        if (!pointer) return false;
+        await writeJsonWhole(path, { key: pointer.key, ...(preferred ? { preferred: true } : {}) });
+        return true;
+    });
 }
 
 // The installed FMU as a new .fmu with this computer's build of it among its binaries (Save FMU with this computer's binary…): the
@@ -159,9 +190,12 @@ export async function confirmedArchives(builds) {
 
 // The archives this computer may build without asking, with `archiveSha256` added.
 export async function rememberConfirmedArchive(builds, archiveSha256) {
-    const confirmed = await confirmedArchives(builds);
-    confirmed.add(archiveSha256);
-    await writeJsonWhole(resolve(builds, 'confirmed.json'), [...confirmed]);
+    const path = resolve(builds, 'confirmed.json');
+    await inTurn(path, async () => {
+        const confirmed = await confirmedArchives(builds);
+        confirmed.add(archiveSha256);
+        await writeJsonWhole(path, [...confirmed]);
+    });
 }
 
 // Takes the lock for `key`, or waits for the build that holds it (another window building the same FMU) and returns false then.
@@ -258,9 +292,12 @@ export async function buildInstalledFmu({
         const key = buildKey({ archiveSha256: fmu.archiveSha256, compiler: compiler.compiler, banner: compiler.banner, tuple, steps, recipe, headers: await headersSha256(headersDirectory) });
         // The archive's latest build; run in place of a binary of its own when the person asked for it (`prefer`), or asked before.
         const pointTo = async () => {
-            const preferred = prefer || Boolean((await readPointer(builds, fmu.archiveSha256))?.preferred);
-            await mkdir(resolve(builds, 'byArchive'), { recursive: true });
-            await writeJsonWhole(resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`), { key, ...(preferred ? { preferred: true } : {}) });
+            const path = resolve(builds, 'byArchive', `${fmu.archiveSha256}.json`);
+            await inTurn(path, async () => {
+                const preferred = prefer || Boolean((await readPointer(builds, fmu.archiveSha256))?.preferred);
+                await mkdir(resolve(builds, 'byArchive'), { recursive: true });
+                await writeJsonWhole(path, { key, ...(preferred ? { preferred: true } : {}) });
+            });
         };
         if (!force) {
             const kept = await cachedBuild(builds, key);
@@ -339,6 +376,8 @@ export async function removeBuilds(fmuDirectory, archiveSha256 = null) {
         if (record?.archiveSha256 === archiveSha256) await rm(resolve(builds, entry.name), { recursive: true, force: true });
     }
     await rm(resolve(builds, 'byArchive', `${archiveSha256}.json`), { force: true });
-    const confirmed = await confirmedArchives(builds);
-    if (confirmed.delete(archiveSha256)) await writeJsonWhole(resolve(builds, 'confirmed.json'), [...confirmed]);
+    await inTurn(resolve(builds, 'confirmed.json'), async () => {
+        const confirmed = await confirmedArchives(builds);
+        if (confirmed.delete(archiveSha256)) await writeJsonWhole(resolve(builds, 'confirmed.json'), [...confirmed]);
+    });
 }

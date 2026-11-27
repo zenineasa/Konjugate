@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { unzipSync, zipSync } from 'fflate';
-import { buildInstalledFmu, confirmedArchives, rememberConfirmedArchive, buildKey, buildsDirectoryOf, cachedBuild, currentBuildFor, firstError, portableSteps, removeBuilds } from '../src/fmuBuilds.mjs';
+import { buildInstalledFmu, confirmedArchives, rememberConfirmedArchive, buildKey, buildsDirectoryOf, cachedBuild, currentBuildFor, firstError, portableSteps, removeBuilds, renameRetrying } from '../src/fmuBuilds.mjs';
 import { installFmuArchive, uninstallFmu } from '../src/fmuPackage.mjs';
 import { platformTuple } from '../src/fmiBinary.mjs';
 
@@ -103,6 +103,39 @@ test('OpenModelica\'s sources are built with GCC or clang: MSVC given, one of th
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+});
+
+// 2.1.3's release checks on Windows: two builds at once each read confirmed.json, added their archive and renamed their copy over it.
+// Windows refused the second rename (EPERM), and on every system one of the two archives could be lost.
+test('many archives confirmed at once are all kept', async () => {
+    const builds = await mkdtemp(join(tmpdir(), 'konjugateFmuBuildsConcurrent-'));
+    try {
+        const archives = Array.from({ length: 40 }, (_, index) => index.toString(16).padStart(64, '0'));
+        await Promise.all(archives.map((archive) => rememberConfirmedArchive(builds, archive)));
+        assert.deepEqual([...await confirmedArchives(builds)].sort(), archives);
+    } finally {
+        await rm(builds, { recursive: true, force: true });
+    }
+});
+
+test('a rename Windows refuses for a moment is tried again, a while; any other failure at once', async () => {
+    const failing = (codes) => {
+        const calls = [];
+        return { calls, rename: async (from, to) => {
+            calls.push([from, to]);
+            const code = codes.shift();
+            if (code) throw Object.assign(new Error(`${code}: operation not permitted, rename`), { code });
+        } };
+    };
+    const transient = failing(['EPERM', 'EACCES', 'EBUSY']);
+    await renameRetrying('a.partial', 'a.json', { rename: transient.rename, delayMs: 1 });
+    assert.equal(transient.calls.length, 4, 'EPERM, EACCES and EBUSY are tried again, and the fourth try succeeds.');
+    const missing = failing(['ENOENT']);
+    await assert.rejects(renameRetrying('a.partial', 'a.json', { rename: missing.rename, delayMs: 1 }), { code: 'ENOENT' });
+    assert.equal(missing.calls.length, 1, 'Another failure is not tried again.');
+    const held = failing(Array(50).fill('EPERM'));
+    await assert.rejects(renameRetrying('a.partial', 'a.json', { rename: held.rename, delayMs: 1 }), { code: 'EPERM' });
+    assert.equal(held.calls.length, 10, 'A file held for good is given up on after ten tries.');
 });
 
 // The one fmuSourceImport failure (FMI review group 2): two builds at once, one rewriting confirmed.json while the other read it, read it

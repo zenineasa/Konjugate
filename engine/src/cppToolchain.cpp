@@ -529,8 +529,8 @@ LimitedRunResult runWithLimits(const std::string& compilerPath, const std::vecto
 
 // MSVC's /std: for a C or C++ standard, or nothing where it has none of its own (C89, C99 and C++11 are its defaults' subsets).
 std::string msvcStandardFlag(const std::string& standard) {
-    if (standard == "c11") return "/std:c11";
-    if (standard == "c17" || standard == "c18") return "/std:c17";
+    if (standard == "c11" || standard == "gnu11") return "/std:c11"; // a C standard comes as its GNU dialect (fmuSourceBuild.mjs)
+    if (standard == "c17" || standard == "c18" || standard == "gnu17") return "/std:c17";
     if (standard == "c++14") return "/std:c++14";
     if (standard == "c++17") return "/std:c++17";
     if (standard == "c++20") return "/std:c++20";
@@ -587,7 +587,10 @@ std::vector<BuildStep> sourceLibrarySteps(const SourceLibraryPlan& plan, const s
             } else {
                 arguments = {"-c", "-x", cxx ? "c++" : "c"};
                 if (!set.standard.empty()) arguments.push_back("-std=" + set.standard);
-                arguments.insert(arguments.end(), {"-O3", "-DNDEBUG", "-fPIC"});
+                arguments.insert(arguments.end(), {"-O3", "-DNDEBUG"});
+#ifndef _WIN32
+                arguments.push_back("-fPIC"); // a DLL needs none, and clang targeting MSVC refuses it
+#endif
                 arguments.insert(arguments.end(), set.options.begin(), set.options.end());
                 arguments.insert(arguments.end(), platformFlags.begin(), platformFlags.end());
                 for (const auto& directory : includes) arguments.push_back("-I" + directory);
@@ -618,8 +621,8 @@ std::vector<BuildStep> sourceLibrarySteps(const SourceLibraryPlan& plan, const s
         link.insert(link.end(), objectPaths.begin(), objectPaths.end());
         link.push_back("-o");
         link.push_back(artifact.string());
-#if !defined(__APPLE__)
-        link.push_back("-Wl,-rpath,$ORIGIN");
+#if !defined(__APPLE__) && !defined(_WIN32)
+        link.push_back("-Wl,-rpath,$ORIGIN"); // ELF only: Windows finds a DLL's dependencies beside it anyway
 #endif
         if (plan.threads) link.push_back("-pthread");
         for (const auto& library : plan.libraries) link.push_back("-l" + library);

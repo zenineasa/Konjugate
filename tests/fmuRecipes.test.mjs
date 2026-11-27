@@ -15,12 +15,14 @@ import { inspectFmuArchive } from '../src/fmuPackage.mjs';
 const openModelica = { id: 'openModelica', name: 'OpenModelica', version: '1.27.1' };
 const pidFiles = async () => unzipSync(new Uint8Array(await readFile(join(import.meta.dirname, '..', 'examples', 'pidController', 'PidController.fmu'))));
 
-test('OpenModelica 1.2x has a recipe: its definitions, include folder, pthreads and libm where the platform has them', () => {
+test('OpenModelica 1.2x has a recipe: its definitions, include folder, pthreads and libm where the platform has them, and GCC or clang', () => {
     const { recipe } = exporterRecipe(openModelica, { cmakeListsText: 'set(NEED_CVODE\n    OFF\n    CACHE BOOL "…")', platform: 'darwin' });
     assert.deepEqual([recipe.name, recipe.version, recipe.definitions, recipe.includeDirectories, recipe.libraries, recipe.threads],
         ['OpenModelica', 1, ['OMC_MINIMAL_RUNTIME=1', 'OMC_FMI_RUNTIME=1', 'CMINPACK_NO_DLL', 'OM_HAVE_PTHREADS'], ['sundials'], ['pthread'], true]);
     const windows = exporterRecipe(openModelica, { platform: 'win32' }).recipe;
     assert.deepEqual([windows.definitions, windows.libraries, windows.threads], [['OMC_MINIMAL_RUNTIME=1', 'OMC_FMI_RUNTIME=1', 'CMINPACK_NO_DLL'], [], false]);
+    assert.deepEqual([recipe.compilerFlavors, windows.compilerFlavors], [['gcc', 'clang'], ['gcc', 'clang']], 'GCC or clang, as OpenModelica\'s own toolchains, MSVC refusing its generated C.');
+    assert.match(recipe.compilerReason, /MSVC does not compile/);
     assert.equal(exporterRecipe({ id: 'other', name: 'Dymola', version: '2025x' }), null, 'Another exporter has no recipe.');
     assert.equal(exporterRecipe(null), null);
 });

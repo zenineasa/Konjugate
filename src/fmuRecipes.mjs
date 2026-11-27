@@ -9,6 +9,10 @@
 // sundials_error.c, with OMC_MINIMAL_RUNTIME=1, OMC_FMI_RUNTIME=1 and CMINPACK_NO_DLL defined, OM_HAVE_PTHREADS and pthreads where the
 // platform has them, sources/ and sources/sundials as include folders, and libm. Its <SourceFiles> also lists ModelicaExternalC's
 // files, which that build does not compile.
+//
+// Its generated C is written for GCC-style compilers, as OpenModelica's own toolchains are (GCC or clang; MinGW-w64's GCC on
+// Windows): a model with no equations of a kind gets an empty initializer for an array of unknown size (`const size_t eqMap[] = {};`
+// in <Model>_12jac.c, a GNU C extension), which MSVC refuses (C7757). So the recipe asks for GCC or clang, also on Windows.
 
 export const openModelicaRecipeVersion = 1;
 
@@ -43,6 +47,9 @@ export function exporterRecipe(exporter, { cmakeListsText = null, platform = pro
             // Regular expressions (as text, so the recipe is plain data) over paths relative to sources/: a file is compiled when it
             // matches one of `compiles` and none of `leavesOut`.
             compiles: openModelicaCompiles.map((pattern) => pattern.source),
+            // The compilers its sources compile with, in the order Konjugate looks for one, and why another will not do.
+            compilerFlavors: ['gcc', 'clang'],
+            compilerReason: 'OpenModelica\'s generated C uses GNU C extensions (an empty initializer for an array of unknown size) that MSVC does not compile',
             leavesOut: openModelicaLeavesOut.map((pattern) => pattern.source)
         }
     };

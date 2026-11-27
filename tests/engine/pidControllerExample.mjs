@@ -28,6 +28,7 @@ import { executionProjectDocument } from '../../src/subsystems.mjs';
 import { stripEdgeGroups } from '../../src/edgeGroups.mjs';
 import { installedPidController } from '../../examples/pidController/buildProject.mjs';
 import { unzipSync, zipSync } from 'fflate';
+import { exporterRecipe } from '../../src/fmuRecipes.mjs';
 import { buildInstalledFmu } from '../../src/fmuBuilds.mjs';
 import { findCCompiler } from '../../src/fmuSourceBuild.mjs';
 import { chooseFmuBinary, platformTuple } from '../../src/fmiBinary.mjs';
@@ -76,7 +77,8 @@ try {
     const files = unzipSync(new Uint8Array(archive));
     const description = parseModelDescription(Buffer.from(files['modelDescription.xml']).toString('utf8'));
     const ownBinary = await chooseFmuBinary(description, async (path) => files[path] ?? null);
-    const compiler = await findCCompiler();
+    // A compiler OpenModelica's sources compile with, as its recipe asks (GCC or clang; MSVC refuses its generated C, src/fmuRecipes.mjs).
+    const compiler = await findCCompiler({ flavors: exporterRecipe({ id: 'openModelica', version: '1.27.1' }).recipe.compilerFlavors });
     const builder = process.argv[2] ?? join(engineOptions.applicationPath, 'out', 'engine', process.platform === 'win32' ? 'konjugateEngine.exe' : 'konjugateEngine');
     const buildHere = (fmuDirectory, fmu) => buildInstalledFmu({
         fmuDirectory, guid: fmu.fmuId, version: fmu.fmuVersion, engine: builder, sdkPath: join(engineOptions.applicationPath, 'engine'), compiler
@@ -92,7 +94,7 @@ try {
     };
     if (ownBinary.error) {
         console.log(`  The committed PidController.fmu cannot run here: ${ownBinary.error}. ${compiler.message
-            ? `With no C compiler here (${compiler.message}), it is not built either, so nothing below is checked.\n  (skipping the controller example: its FMU has no binary for this computer and there is no C compiler to build it)`
+            ? `With no C compiler here (${compiler.message}), it is not built either, so nothing below is checked.\n  (skipping the controller example: its FMU has no binary for this computer and there is no compiler here that builds OpenModelica's sources)`
             : `It is built here from its sources (${compiler.banner}, ${platformTuple()}) and that build is checked.`}`);
     }
 

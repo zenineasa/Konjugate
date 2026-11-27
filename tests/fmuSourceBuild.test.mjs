@@ -10,7 +10,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fmuBuildInformation } from '../src/fmuBuildInformation.mjs';
 import { parseModelDescription } from '../src/fmiModelDescription.mjs';
-import { cDriverFor, compilerOptionsOf, findCCompiler, fmuSourceBuildPlan, languageOf, missingCompilerMessage, runProgram } from '../src/fmuSourceBuild.mjs';
+import { cDriverFor, compilerOptionsOf, findCCompiler, fmuSourceBuildPlan, languageOf, missingCompilerMessage, missingFlavorMessage, runProgram } from '../src/fmuSourceBuild.mjs';
 
 const here = join(import.meta.dirname, 'fixtures', 'fmuSources', 'referenceFmus');
 const referenceBuild = async (version, buildDescriptionXml = null) => fmuBuildInformation({
@@ -21,10 +21,10 @@ const referenceBuild = async (version, buildDescriptionXml = null) => fmuBuildIn
 const where = { sourceRoot: '/build/sources', headersDirectory: '/engine/include/fmiStandard', objectDirectory: '/build/objects', output: '/build/BouncingBall.dylib' };
 
 test('a source file set\'s language is the engine\'s language and standard', () => {
-    assert.deepEqual(languageOf('C99'), { language: 'c', standard: 'c99' });
+    assert.deepEqual(languageOf('C99'), { language: 'c', standard: 'gnu99' }, 'C99 as its GNU dialect: strict c99 hides strdup in glibc.');
     assert.deepEqual(languageOf('C'), { language: 'c', standard: '' });
     assert.deepEqual(languageOf(undefined), { language: 'c', standard: '' });
-    assert.deepEqual(languageOf('C18'), { language: 'c', standard: 'c17' });
+    assert.deepEqual(languageOf('C18'), { language: 'c', standard: 'gnu17' });
     assert.deepEqual(languageOf('C++17'), { language: 'c++', standard: 'c++17' });
     assert.deepEqual(languageOf('C++'), { language: 'c++', standard: '' });
     assert.equal(languageOf('Fortran'), null);
@@ -55,7 +55,7 @@ test('the plan compiles each set with its standard and definitions against the F
         sourceRoot: '/build/sources', objectDirectory: '/build/objects', output: '/build/BouncingBall.dylib', timeoutSeconds: 300,
         includeFirst: ['/engine/include/fmiStandard/fmi3'],
         sets: [{
-            language: 'c', standard: 'c99', files: ['fmi3Functions.c', 'model.c', 'common.c', 'cosimulation.c'],
+            language: 'c', standard: 'gnu99', files: ['fmi3Functions.c', 'model.c', 'common.c', 'cosimulation.c'],
             definitions: ['FMI3_OVERRIDE_FUNCTION_PREFIX', 'FMI_VERSION=3'], includeDirectories: []
         }],
         libraries: ['m'], threads: false
@@ -112,6 +112,24 @@ test('the compiler is found per platform, and a computer without one is told wha
     const gccOnly = computer({ programs: { gcc: { code: 0, stdout: 'gcc.exe (Rev2, Built by MSYS2 project) 14.2.0\n', stderr: '' } } });
     assert.equal((await findCCompiler({ platform: 'win32', environment: {}, ...gccOnly })).compiler, 'gcc');
     assert.deepEqual(await findCCompiler({ platform: 'win32', environment: {}, ...computer({}) }), { message: missingCompilerMessage('win32') });
+    // An exporter's recipe asking for GCC or clang (OpenModelica's): MSVC is not looked for, GCC before clang, and none says what to install.
+    const allThree = computer({
+        programs: { gcc: { code: 0, stdout: 'gcc.exe (Rev2, Built by MSYS2 project) 14.2.0\n', stderr: '' },
+            'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe': { code: 0, stdout: `${vs}\r\n`, stderr: '' },
+            [cl]: { code: 0, stdout: '', stderr: 'Microsoft (R) C/C++ Optimizing Compiler Version 19.44.35207 for x64' },
+            clang: { code: 0, stdout: 'clang version 20.1.8\nTarget: x86_64-pc-windows-msvc\n', stderr: '' } },
+        files: { 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe': '', [`${vs}\\VC\\Auxiliary\\Build\\Microsoft.VCToolsVersion.default.txt`]: '14.44.35207\r\n', [cl]: '' }
+    });
+    const environment = { 'ProgramFiles(x86)': 'C:\\Program Files (x86)' };
+    assert.equal((await findCCompiler({ platform: 'win32', arch: 'x64', environment, ...allThree })).flavor, 'msvc', 'With no recipe, MSVC first.');
+    assert.deepEqual(await findCCompiler({ platform: 'win32', arch: 'x64', environment, flavors: ['gcc', 'clang'], ...allThree }),
+        { compiler: 'gcc', flavor: 'gcc', banner: 'gcc.exe (Rev2, Built by MSYS2 project) 14.2.0' });
+    assert.deepEqual(await findCCompiler({ platform: 'win32', arch: 'x64', environment, flavors: ['clang', 'gcc'], ...allThree }),
+        { compiler: 'clang', flavor: 'clang', banner: 'clang version 20.1.8' });
+    assert.deepEqual(await findCCompiler({ platform: 'win32', arch: 'x64', environment, flavors: ['gcc', 'clang'], ...windows }), { message: missingFlavorMessage('win32', ['gcc', 'clang']) });
+    assert.match(missingFlavorMessage('win32', ['gcc', 'clang']), /^Building this FMU needs GCC or clang, which this computer does not have: install MinGW-w64's GCC/);
+    assert.deepEqual(await findCCompiler({ platform: 'linux', flavors: ['gcc', 'clang'], ...computer({ programs: { cc: { code: 0, stdout: 'cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0\n', stderr: '' } } }) }),
+        { compiler: 'cc', flavor: 'gcc', banner: 'cc (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0' }, 'Elsewhere cc, gcc, clang as before, of the flavors asked.');
     assert.match(missingCompilerMessage('win32'), /Visual Studio Build Tools with 'Desktop development with C\+\+'/);
 
     // Linux: cc, gcc, clang in turn.

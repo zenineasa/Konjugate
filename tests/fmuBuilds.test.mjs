@@ -82,6 +82,29 @@ test('what cannot be built is refused before anything runs: no build information
     }
 });
 
+test('OpenModelica\'s sources are built with GCC or clang: MSVC given, one of them is found, or the build is refused saying why', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'konjugateFmuBuilds-'));
+    try {
+        const installed = await installFmuArchive(await pidSourcesOnly(), { directory });
+        const msvc = { compiler: 'C:\\VS\\cl.exe', flavor: 'msvc', banner: 'Microsoft (R) C/C++ Optimizing Compiler Version 19.52.37029 for x64' };
+        const asked = [];
+        const none = async (options) => { asked.push(options.flavors); return { message: 'Building this FMU needs GCC or clang, which this computer does not have.' }; };
+        const refused = await buildInstalledFmu({ fmuDirectory: directory, guid: installed.guid, version: installed.version, engine: '/no/engine', sdkPath: '/no/sdk', compiler: msvc, findCompiler: none, confirm: async () => { throw new Error('nothing may run'); } });
+        assert.deepEqual(asked, [['gcc', 'clang']]);
+        assert.equal(refused.status, 'refused');
+        assert.equal(refused.message, 'Konjugate cannot build PidController with Microsoft (R) C/C++ Optimizing Compiler Version 19.52.37029 for x64: OpenModelica\'s generated C uses GNU C extensions (an empty initializer for an array of unknown size) that MSVC does not compile. Building this FMU needs GCC or clang, which this computer does not have.');
+        // With GCC found, it is the compiler the build runs (the engine here does not exist, so the build stops at it, having chosen GCC).
+        const gcc = { compiler: 'gcc', flavor: 'gcc', banner: 'gcc.exe (x86_64-posix-seh-rev0, Built by MinGW-Builds project) 14.2.0' };
+        const switched = await buildInstalledFmu({ fmuDirectory: directory, guid: installed.guid, version: installed.version, engine: '/no/engine', sdkPath: '/no/sdk', compiler: msvc, findCompiler: async () => gcc, confirm: async () => { throw new Error('nothing may run'); } });
+        assert.equal(switched.status, 'failed', 'The missing engine stops it.');
+        let lookedFor = false;
+        await buildInstalledFmu({ fmuDirectory: directory, guid: installed.guid, version: installed.version, engine: '/no/engine', sdkPath: '/no/sdk', compiler: gcc, findCompiler: async () => { lookedFor = true; return gcc; }, confirm: async () => { throw new Error('nothing may run'); } });
+        assert.equal(lookedFor, false, 'GCC given is used as it is.');
+    } finally {
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
 // The one fmuSourceImport failure (FMI review group 2): two builds at once, one rewriting confirmed.json while the other read it, read it
 // empty. Whatever is read while files are being written is a whole file.
 test('the archives confirmed, read while another build writes them, are always a whole list', async () => {

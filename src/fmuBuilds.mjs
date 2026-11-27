@@ -17,7 +17,7 @@ import { parseModelDescription } from './fmiModelDescription.mjs';
 import { binaryDirectoryCandidates, platformTuple } from './fmiBinary.mjs';
 import { unzipSync, zipSync } from 'fflate';
 import { fmuBuildInformation } from './fmuBuildInformation.mjs';
-import { fmiStandardHeadersDirectory, fmuSourceBuildPlan, runProgram } from './fmuSourceBuild.mjs';
+import { findCCompiler, fmiStandardHeadersDirectory, fmuSourceBuildPlan, runProgram } from './fmuSourceBuild.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const libraryExtension = (platform = process.platform) => (platform === 'win32' ? '.dll' : platform === 'darwin' ? '.dylib' : '.so');
@@ -222,7 +222,7 @@ function runBuild(engine, args, { onProgress, signal }) {
 // (why it cannot be built); "failed" with `message` (the compiler's first error) and `log`.
 export async function buildInstalledFmu({
     fmuDirectory, guid, version, engine, sdkPath, compiler, recipe = null, force = false, confirm = async () => true,
-    onProgress = null, signal = null, timeoutSeconds = 300, tuple = platformTuple(), prefer = false
+    onProgress = null, signal = null, timeoutSeconds = 300, tuple = platformTuple(), prefer = false, findCompiler = findCCompiler
 }) {
     const fmu = await installedFmu(fmuDirectory, guid, version);
     const name = fmu.description.modelName;
@@ -231,6 +231,13 @@ export async function buildInstalledFmu({
     if (!compiler || compiler.message) return { status: 'refused', name, message: compiler?.message ?? 'No C compiler was found.' };
     // The exporter's recipe, when Konjugate keeps one for it (stage 4), unless the caller gives its own.
     recipe = recipe ?? fmu.build.recipe ?? null;
+    // An exporter whose sources compile with some compilers only (OpenModelica's: GCC or clang) is built with one of them, found on
+    // this computer when the compiler given is another (MSVC, on Windows), or refused saying why and what to install.
+    if (recipe?.compilerFlavors && !recipe.compilerFlavors.includes(compiler.flavor)) {
+        const fitting = await findCompiler({ flavors: recipe.compilerFlavors });
+        if (fitting.message) return { status: 'refused', name, message: `Konjugate cannot build ${name} with ${compiler.banner}: ${recipe.compilerReason}. ${fitting.message}` };
+        compiler = fitting;
+    }
     const builds = buildsDirectoryOf(fmuDirectory);
     await mkdir(builds, { recursive: true });
     const folder = await mkdtemp(join(builds, 'building-'));
@@ -284,7 +291,7 @@ export async function buildInstalledFmu({
                 await pointTo();
                 return { status: 'cached', name, record: kept.record, libraryPath: kept.libraryPath, notes };
             }
-            return buildInstalledFmu({ fmuDirectory, guid, version, engine, sdkPath, compiler, recipe, force, confirm, onProgress, signal, timeoutSeconds, tuple, prefer });
+            return buildInstalledFmu({ fmuDirectory, guid, version, engine, sdkPath, compiler, recipe, force, confirm, onProgress, signal, timeoutSeconds, tuple, prefer, findCompiler });
         }
         const outcome = await runBuild(engine, ['buildFmuSources', join(folder, 'plan.json'), '--compiler', compiler.compiler, '--progress'], { onProgress: onProgress && ((progress) => onProgress({ ...progress, name })), signal });
         if (outcome.cancelled) return { status: 'cancelled', name };

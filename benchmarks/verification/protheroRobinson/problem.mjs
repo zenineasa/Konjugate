@@ -79,7 +79,14 @@ export async function evaluate({ engine, config }) {
             const differencedOrder = observedOrder(settings.globalTimeSteps, differenced);
             rows.at(-1).observedOrder = differencedOrder.fitted;
             rows.at(-1).note = `observed order: fitted ${differencedOrder.fitted.toFixed(3)}; per halving ${differencedOrder.pairwise.map((value) => value.toFixed(3)).join(', ')}`;
-            add('finestOrderControlFiniteDifference', differencedOrder.pairwise.at(-1), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps with finite differences: observed order over the finest halving, the Jacobian's error showing`);
+            // Which way the Jacobian's error moves the finest halving's order is the platform's: the finite differences' rounding at
+            // an error of 1e-11 follows the last bits of sin and cos, which each C library rounds its own way. In 2.1.2's release checks,
+            // with the exact Jacobian every platform gave 4.0107 to five figures and the finite differences agreed at every coarser
+            // step, while the finest step's error was 8.9e-12 (Linux), 9.6e-12 and 9.8e-12 (macOS arm64, x64) and 2.7e-11 (Windows):
+            // orders 4.83, 4.74, 4.70 and 3.27. So what is checked is that the order departs from the exact Jacobian's, either way,
+            // and that the error stays that small.
+            add('finestOrderDepartureFiniteDifference', Math.abs(differencedOrder.pairwise.at(-1) - order.pairwise.at(-1)), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps: how far the finest halving's order with finite differences (${differencedOrder.pairwise.at(-1).toFixed(3)}) is from the exact Jacobian's (${order.pairwise.at(-1).toFixed(3)}), the Jacobian's error showing, either way by platform`);
+            add('finestErrorControlFiniteDifference', differenced.at(-1), `Prothero–Robinson, λ = ${lambdas[key]}, Rodas4 at fixed steps with finite differences: the error at the finest step, relative to range`);
             notes.push(`λ = ${lambdas[key]}, Rodas4 at fixed steps: with the exact Jacobian its order per halving is ${order.pairwise.map((value) => value.toFixed(2)).join(', ')}; with finite differences ${differencedOrder.pairwise.map((value) => value.toFixed(2)).join(', ')}, the finest step's error (${differenced.at(-1).toExponential(1)}) the Jacobian's as much as the method's.`);
         }
     }

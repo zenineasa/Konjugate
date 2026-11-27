@@ -19,14 +19,17 @@ const fileName = (path) => String(path).split(/[\\/]/).pop();
 // ---- Languages and compiler options ------------------------------------------------------------------------------------------
 
 // A source file set's language (FMI 3.0.2 §2.4.10.3) as the engine takes it: `{ language: "c" | "c++", standard }`, the standard
-// as gcc and clang name it ("" for the compiler's default).
+// as gcc and clang name it ("" for the compiler's default). A C standard is its GNU dialect (C99 is gnu99), as an exporter's own
+// CMake build compiles it (C_EXTENSIONS on by default) and as the compiler does given no standard: strict -std=c99 hides POSIX
+// functions such as strdup in glibc's headers, and a call to one then returns an int, its pointer cut to 32 bits (every FMI 3.0
+// Reference FMU built on Linux crashed freeing its instance name, 2.1.2's release checks). MSVC takes the same names (cppToolchain.cpp).
 export function languageOf(name) {
     const text = String(name ?? 'C').trim();
     const cxx = /^C\+\+(\d\d)?$/.exec(text);
     if (cxx) return { language: 'c++', standard: cxx[1] ? `c++${cxx[1]}` : '' };
     const c = /^C(\d\d)?$/.exec(text);
     if (!c) return null;
-    const standard = { 89: 'c89', 90: 'c90', 99: 'c99', 11: 'c11', 17: 'c17', 18: 'c17', 23: 'c2x' }[c[1]] ?? '';
+    const standard = { 89: 'gnu89', 90: 'gnu90', 99: 'gnu99', 11: 'gnu11', 17: 'gnu17', 18: 'gnu17', 23: 'gnu2x' }[c[1]] ?? '';
     return { language: 'c', standard };
 }
 
@@ -119,6 +122,13 @@ export function missingCompilerMessage(platform = process.platform) {
     return 'Building this FMU needs a C compiler. Install your distribution\'s build tools (for example sudo apt install build-essential), or set one in Settings › Provider toolchains.';
 }
 
+// What to install when an FMU's sources need a compiler of `flavors` (an exporter recipe's) and this computer has none of them.
+export function missingFlavorMessage(platform = process.platform, flavors = ['gcc', 'clang']) {
+    const names = flavors.map((flavor) => ({ gcc: 'GCC', clang: 'clang', msvc: 'MSVC' })[flavor] ?? flavor).join(' or ');
+    if (platform === 'win32') return `Building this FMU needs ${names}, which this computer does not have: install MinGW-w64's GCC (for example with MSYS2) or LLVM's clang, so that gcc or clang runs from a command prompt.`;
+    return `Building this FMU needs ${names}, which this computer does not have. ${missingCompilerMessage(platform)}`;
+}
+
 // Runs a program with arguments, no shell, a time limit; `{ code, stdout, stderr }`, code null when it could not be started.
 export function runProgram(command, args, { env = process.env, timeoutMs = 15000 } = {}) {
     return new Promise((resolve) => {
@@ -157,15 +167,16 @@ async function msvcByVswhere({ run, exists, readText, environment, arch }) {
 
 // The C compiler a build uses: `{ compiler, flavor, banner }`, or `{ message }` saying what to install (or that the compiler set in
 // Settings does not run, or has no C driver beside it). `cxxOverride` is the C++ compiler set in Settings › Provider toolchains (the C
-// driver is derived from it, decision 4). `run`, `exists`, `readText`, `environment`, `platform` and `arch` are the computer's; tests
-// give their own.
+// driver is derived from it, decision 4). `flavors` (an exporter recipe's compilerFlavors) keeps to compilers of those flavors, looked
+// for in that order. `run`, `exists`, `readText`, `environment`, `platform` and `arch` are the computer's; tests give their own.
 export async function findCCompiler({
-    cxxOverride = null, platform = process.platform, arch = process.arch, run = runProgram, environment = process.env,
+    cxxOverride = null, flavors = null, platform = process.platform, arch = process.arch, run = runProgram, environment = process.env,
     exists = existsSync, readText = (path) => { try { return readFileSync(path, 'utf8'); } catch { return null; } }
 } = {}) {
     const tryCompiler = async (compiler) => {
         const banner = await compilerBanner(compiler, run);
-        return banner ? { compiler, flavor: /(^|[\\/])cl(\.exe)?$/i.test(compiler) ? 'msvc' : /clang/i.test(`${compiler} ${banner}`) ? 'clang' : 'gcc', banner } : null;
+        const found = banner ? { compiler, flavor: /(^|[\\/])cl(\.exe)?$/i.test(compiler) ? 'msvc' : /clang/i.test(`${compiler} ${banner}`) ? 'clang' : 'gcc', banner } : null;
+        return found && (!flavors || flavors.includes(found.flavor)) ? found : null;
     };
     if (cxxOverride) {
         const driver = cDriverFor(cxxOverride);
@@ -177,6 +188,12 @@ export async function findCCompiler({
         const found = await run('xcrun', ['-find', 'clang']);
         const path = found.code === 0 ? found.stdout.trim() : '';
         if (path) candidates.push(path);
+    } else if (platform === 'win32' && flavors) {
+        candidates.push(...flavors.filter((flavor) => flavor !== 'msvc'));
+        if (flavors.includes('msvc')) {
+            const msvc = await msvcByVswhere({ run, exists, readText, environment, arch });
+            if (msvc) candidates.push(msvc);
+        }
     } else if (platform === 'win32') {
         const msvc = await msvcByVswhere({ run, exists, readText, environment, arch });
         if (msvc) candidates.push(msvc);
@@ -188,7 +205,7 @@ export async function findCCompiler({
         const found = await tryCompiler(candidate);
         if (found) return found;
     }
-    return { message: missingCompilerMessage(platform) };
+    return { message: flavors ? missingFlavorMessage(platform, flavors) : missingCompilerMessage(platform) };
 }
 
 // The engine's headers folder for the FMI standard's own headers, from its SDK path (engine/ in development, the packaged engine's

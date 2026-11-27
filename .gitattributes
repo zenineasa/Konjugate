@@ -1,3 +1,6 @@
 benchmarks/results/** linguist-generated
 # The FMI example FMUs and their reference files are checked out exactly as written (the FMI CSV rules, tests/fmiExamples.test.mjs).
 examples/fmi/*/* -text
+# The causal benchmark's data is compared, byte for byte, with what its generator writes (LF line ends): checked out as written, also
+# on Windows, where Git would otherwise give it CRLF.
+benchmarks/causal/reconstruction/data/* eol=lf

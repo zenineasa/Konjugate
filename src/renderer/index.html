@@ -1008,6 +1008,14 @@
             <ul id="fmuNoticeLines" class="runFailureLines"></ul>
             <div class="runFailureActions"><a id="fmuNoticeDownload" href="https://github.com/zenineasa/Konjugate/releases/latest" target="_blank" rel="noopener" hidden>Download the free desktop app ›</a></div>
         </aside>
+        <!-- An FMU built from its sources on this computer (docs/proposals/sourceFmuImport.md, stage 3): its progress, Cancel, and a failure in words. -->
+        <aside id="fmuBuildNotice" class="validationPanel runFailurePanel" role="status" aria-label="Building an FMU" hidden>
+            <header><div><span class="contextKicker">FMU from its sources</span><strong id="fmuBuildNoticeTitle"></strong></div><button id="closeFmuBuildNotice" type="button" aria-label="Close">×</button></header>
+            <p id="fmuBuildNoticeProgress" class="builderHint"></p>
+            <ul id="fmuBuildNoticeLines" class="runFailureLines"></ul>
+            <pre id="fmuBuildNoticeLog" class="fmuBuildLog" hidden></pre>
+            <div class="runFailureActions"><button id="fmuBuildNoticeCancel" type="button">Cancel</button><button id="fmuBuildNoticeShowLog" type="button" hidden>Show the whole log</button></div>
+        </aside>
         <!-- An FMU just exported, and the way on: Try it as a node (stage 7 of docs/proposals/fmuImportWorkflow.md). -->
         <aside id="exportFmuNotice" class="validationPanel exportFmuNotice" role="status" aria-label="FMU exported" hidden>
             <header><div><span class="contextKicker">FMU exported</span><strong id="exportFmuNoticeTitle"></strong></div><button id="closeExportFmuNotice" type="button" aria-label="Close">×</button></header>
@@ -1060,7 +1068,7 @@
                         <label class="editorField"><span>FMU</span><select id="editNodeProgramFmu"></select></label>
                         <p class="builderHint">Each of its outputs is a state of this node, set by the FMU. Its parameters and inputs keep the FMU's own values unless you give one a value of its own, share it, or have it read a state. It runs in Co-Simulation: the FMU steps its own equations and handles its own events within each step.</p>
                         <p id="nodeProgramFmuNotes" class="builderHint" hidden></p>
-                        <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul></details>
+                        <details id="nodeProgramFmuAbout" class="fmuAbout" hidden><summary>About this FMU</summary><ul id="nodeProgramFmuAboutLines"></ul><div id="nodeProgramFmuBuildActions" class="fmuBuildActions" hidden><button id="nodeProgramFmuBuild" type="button" title="Compile its sources with this computer's C compiler, after saying what will run">Build from its sources</button><button id="nodeProgramFmuBuildLog" type="button">Show build log</button></div></details>
                         <!-- Where the FMU is kept: in the project's file, or linked to the library, and Replace FMU… (stage 8 of
                              docs/proposals/fmuImportWorkflow.md). -->
                         <p id="nodeProgramFmuKeep" class="builderHint fmuKeep" hidden><span id="nodeProgramFmuKeepText"></span> <button id="nodeProgramFmuKeepToggle" type="button"></button> <button id="nodeProgramFmuReplace" type="button">Replace FMU…</button></p>

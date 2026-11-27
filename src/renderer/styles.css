@@ -2784,3 +2784,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .portRow .portRowSignal input[data-port-signal-value] { width: 72px; }
 .portRow .portRowSignalNote { flex: 1 1 100%; color: #5f7782; font-size: 7px; }
 .subsystemTerminal.rootPortTerminal.signalled .subsystemTerminalEdge small { color: #9cc1f5; }
+
+/* An FMU built from its sources (docs/proposals/sourceFmuImport.md): the card's actions and the build's log. */
+.fmuBuildActions { display: flex; gap: 6px; margin-top: 6px; }
+.fmuBuildLog { max-height: 220px; overflow: auto; margin: 6px 0; padding: 6px; font-size: 8px; white-space: pre-wrap; color: #c9d6db; background: rgb(0 0 0 / 25%); border-radius: 4px; }

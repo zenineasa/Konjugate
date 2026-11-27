@@ -320,8 +320,14 @@ export function fmuAboutLines(about) {
         ].filter(Boolean);
         if (said.length) lines.push(`Suggested run: ${said.join(', ')}`);
     }
-    const sources = buildInformationLine(about.build, { runsHere: about.runsHere !== false });
-    if (sources) lines.push(sources);
+    if (about.built) {
+        const day = new Date(about.built.builtAt);
+        const date = Number.isNaN(day.getTime()) ? '' : ` on ${day.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+        lines.push(`Built here from its sources with ${about.built.banner}${about.built.recipe ? ` (${about.built.recipe}'s recipe)` : ''}${date}`);
+    } else {
+        const sources = buildInformationLine(about.build, { runsHere: about.runsHere !== false });
+        if (sources) lines.push(sources);
+    }
     lines.push(about.canGetAndSetFMUState ? 'Can save and restore its state (checkpoints, forks, rewinding a twin)' : 'Cannot save its state: checkpoints, forks and rewinding are not available with it');
     if (about.coSimulation?.canBeInstantiatedOnlyOncePerProcess) lines.push('Only one copy of it can run at a time');
     return lines;

@@ -621,10 +621,13 @@ std::vector<BuildStep> sourceLibrarySteps(const SourceLibraryPlan& plan, const s
     return steps;
 }
 
-void buildSourceLibrary(const SourceLibraryPlan& plan, const std::vector<BuildStep>& steps) {
+void buildSourceLibrary(const SourceLibraryPlan& plan, const std::vector<BuildStep>& steps,
+                        const std::function<void(std::size_t, std::size_t, const BuildStep&)>& onStep) {
     std::filesystem::create_directories(plan.objectDirectory);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(std::max(1, plan.timeoutSeconds));
-    for (const auto& step : steps) {
+    for (std::size_t index = 0; index < steps.size(); ++index) {
+        const auto& step = steps[index];
+        if (onStep) onStep(index, steps.size(), step);
         const auto result = runWithLimits(step.compiler, step.arguments, std::filesystem::absolute(plan.objectDirectory), deadline);
         if (result.timedOut) {
             std::filesystem::remove(plan.artifactPath);

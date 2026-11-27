@@ -292,7 +292,7 @@ test('an installed FMU\'s ports are described under the keys a node\'s implement
         assert.deepEqual(about, {
             modelName: 'Decay', fmiVersion: '2.0', generationTool: 'Test',
             coSimulation: { canHandleVariableCommunicationStepSize: false, canSerializeFMUState: false, canBeInstantiatedOnlyOncePerProcess: false, needsExecutionTool: false },
-            canGetAndSetFMUState: false, platforms: [binaryDirectory], runsHere: true
+            canGetAndSetFMUState: false, platforms: [binaryDirectory], runsHere: true, hasOwnBinary: true
         });
         assert.deepEqual(ports, {
             name: 'Decay', fmiVersion: '2.0',

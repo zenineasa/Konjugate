@@ -4183,6 +4183,14 @@ async function renderNodeProgramFmus(node) {
     await showFmuNotes(ports);
     const aboutLines = fmuAboutLines(ports && !ports.error ? ports.about : null);
     $('#nodeProgramFmuAbout').hidden = !aboutLines.length;
+    // Build from its sources, or Rebuild, when it carries buildable sources and runs here only from a build (stage 3).
+    const about = ports && !ports.error ? ports.about : null;
+    const buildable = Boolean(about?.build && !about.build.problems?.length && (!about.hasOwnBinary || about.built));
+    $('#nodeProgramFmuBuildActions').hidden = !buildable;
+    $('#nodeProgramFmuBuild').textContent = about?.built ? 'Rebuild' : 'Build from its sources';
+    $('#nodeProgramFmuBuildLog').hidden = !about?.built;
+    fmuCardBuildTarget = buildable ? { guid: implementation.fmuId, version: implementation.fmuVersion, name: ports.name, archiveSha256: ports.about.archiveSha256, rebuild: Boolean(about.built) } : null;
+    if (buildable && !about.built) $('#nodeProgramFmuAbout').open = true;
     $('#nodeProgramFmuAboutLines').replaceChildren(...aboutLines.map((line) => {
         const item = document.createElement('li');
         item.textContent = line;
@@ -4193,6 +4201,19 @@ async function renderNodeProgramFmus(node) {
     // file leaves to the FMU, src/nodeProgram.mjs implementationForFile, has its row reading nothing). The model is not touched.
     if (!known && ports && !ports.error && selectedNode === node) renderNodeProgram(node);
 }
+
+// The FMU the card's Build from its sources, Rebuild and Show build log act on.
+let fmuCardBuildTarget = null;
+$('#nodeProgramFmuBuild').addEventListener('click', () => {
+    if (fmuCardBuildTarget) buildFmuFromSources(fmuCardBuildTarget, { force: fmuCardBuildTarget.rebuild });
+});
+$('#nodeProgramFmuBuildLog').addEventListener('click', async () => {
+    if (!fmuCardBuildTarget) return;
+    const log = await window.extensions.fmuBuildLog?.(fmuCardBuildTarget.archiveSha256);
+    fmuBuildNoticeStart(fmuCardBuildTarget.name, `How ${fmuCardBuildTarget.name} was built here`);
+    $('#fmuBuildNoticeLog').textContent = log ?? 'No build log is kept for it.';
+    $('#fmuBuildNoticeLog').hidden = false;
+});
 
 // Where the node's FMU is kept (stage 8 of docs/proposals/fmuImportWorkflow.md): in the project's file, so it runs on another computer,
 // or linked to this computer's library; switched here, and Replace FMU… swaps in another FMU (a newer export), keeping matching states,
@@ -6950,6 +6971,11 @@ function scheduleEngineValidation(projectDocument = null) {
             releaseValidationWaiters();
         } catch (error) {
             if (revision !== validationRevision) return;
+            if (/needs to be built from its sources on this computer/.test(error.message)) {
+                await renderValidationNeedsBuild(error.message);
+                releaseValidationWaiters();
+                return;
+            }
             console.error('C++ model validation failed.', error);
             renderValidationFailure(`The C++ validation engine failed: ${error.message}`);
             releaseValidationWaiters();
@@ -6962,7 +6988,7 @@ function scheduleEngineValidation(projectDocument = null) {
 // disabled when there is nothing to set up: a result is on screen, a run is going, or validation is
 // still pending or unavailable.
 function runButtonDisabled() {
-    return Boolean(activeResult) || simulationRunning || $('#validationSummary').dataset.validationSource !== 'engine';
+    return Boolean(activeResult) || simulationRunning || !['engine', 'needsBuild'].includes($('#validationSummary').dataset.validationSource);
 }
 
 function renderValidationPending() {
@@ -9713,7 +9739,8 @@ function openRunDialog() {
     toggle.addEventListener('click', () => setCollapsed(!transport.classList.contains('collapsed')));
 }
 
-$('#runButton').addEventListener('click', openRunDialog);
+// A model whose FMU still needs building from its sources asks to build it first (docs/proposals/sourceFmuImport.md, stage 3).
+$('#runButton').addEventListener('click', () => ($('#validationSummary').dataset.validationSource === 'needsBuild' ? buildFmusThenValidate() : openRunDialog()));
 $('#runLaunchCancel').addEventListener('click', () => $('#runLaunchDialog').close());
 function updateRunModeFields() {
     const online = $('#runOnlineMode').checked;
@@ -14566,6 +14593,105 @@ function showFmuNotice(title, lines = [], { desktopOnly = false } = {}) {
     $('#fmuNotice').hidden = false;
 }
 
+// ---- An FMU built from its sources on this computer (docs/proposals/sourceFmuImport.md, stage 3) -----------------------------
+// The build's progress, with Cancel; a failure with the compiler's first error and the whole log; the card's Build from its sources,
+// Rebuild and Show build log; and a model whose FMU still needs building, which Run asks to build.
+function fmuBuildNoticeStart(name, title = null) {
+    $('#fmuBuildNoticeTitle').textContent = title ?? `Building ${name ?? 'the FMU'} from its sources…`;
+    $('#fmuBuildNoticeProgress').textContent = title ? '' : 'Getting ready…';
+    $('#fmuBuildNoticeLines').replaceChildren();
+    $('#fmuBuildNoticeLog').hidden = true;
+    $('#fmuBuildNoticeLog').textContent = '';
+    $('#fmuBuildNoticeShowLog').hidden = true;
+    $('#fmuBuildNoticeCancel').hidden = Boolean(title);
+    $('#fmuBuildNotice').hidden = false;
+}
+window.extensions?.onFmuBuildProgress?.(({ name, step, count, what }) => {
+    // Shown afresh when nothing is on it yet, or it shows something else (a log, a failure): a build started from Add › FMU….
+    if ($('#fmuBuildNotice').hidden || $('#fmuBuildNoticeCancel').hidden) fmuBuildNoticeStart(name);
+    $('#fmuBuildNoticeTitle').textContent = `Building ${name ?? 'the FMU'} from its sources…`;
+    $('#fmuBuildNoticeProgress').textContent = `${what} (${step} of ${count})`;
+});
+function showFmuBuildFailure({ name, message, log }) {
+    fmuBuildNoticeStart(name, `${name ?? 'The FMU'} was not built.`);
+    $('#fmuBuildNoticeLines').replaceChildren(Object.assign(document.createElement('li'), { textContent: message }));
+    $('#fmuBuildNoticeLog').textContent = log ?? '';
+    $('#fmuBuildNoticeShowLog').hidden = !log;
+}
+$('#fmuBuildNoticeShowLog').addEventListener('click', () => {
+    $('#fmuBuildNoticeLog').hidden = !$('#fmuBuildNoticeLog').hidden;
+    $('#fmuBuildNoticeShowLog').textContent = $('#fmuBuildNoticeLog').hidden ? 'Show the whole log' : 'Hide the log';
+});
+$('#fmuBuildNoticeCancel').addEventListener('click', () => {
+    window.extensions.cancelFmuBuild?.();
+    $('#fmuBuildNoticeProgress').textContent = 'Cancelling: the file being compiled finishes first…';
+});
+$('#closeFmuBuildNotice').addEventListener('click', () => { $('#fmuBuildNotice').hidden = true; });
+
+// Builds an installed FMU here, asking first (in the main process), and says how it went. Its ports are read again, so the card and the
+// box know it runs, and the model is validated again.
+async function buildFmuFromSources({ guid, version, name }, { force = false } = {}) {
+    fmuBuildNoticeStart(name);
+    const outcome = await window.extensions.buildFmu(guid, version, { force });
+    if (outcome.status === 'built' || outcome.status === 'cached') {
+        $('#fmuBuildNotice').hidden = true;
+        rememberFmuPorts(`${guid}@${version}`, await window.extensions.fmuPorts(guid, version));
+        $('#statusText').textContent = outcome.status === 'built' ? `${name ?? outcome.name} built from its sources with ${outcome.record.banner}` : `${name ?? outcome.name} was built here already`;
+        if (selectedNode?.userData.definition.implementation?.kind === 'fmi') renderNodeProgram(selectedNode);
+        scheduleEngineValidation();
+    } else if (outcome.status === 'declined' || outcome.status === 'cancelled') {
+        $('#fmuBuildNotice').hidden = true;
+        $('#statusText').textContent = `${name ?? outcome.name} was not built${outcome.status === 'cancelled' ? ': cancelled' : ''}`;
+    } else {
+        showFmuBuildFailure({ name: name ?? outcome.name, message: outcome.message, log: outcome.log });
+    }
+    return outcome;
+}
+
+// The FMUs of the model's nodes that carry their sources, have no binary for this computer and are not built here yet.
+async function fmusNeedingBuild() {
+    const found = new Map();
+    for (const node of model.nodes) {
+        const implementation = node.deleted ? null : node.userData?.definition?.implementation ?? node.implementation;
+        if (implementation?.kind !== 'fmi' || !implementation.fmuId) continue;
+        const key = fmuPortsKey(implementation);
+        if (found.has(key)) { found.get(key).nodeIds.push(node.id); continue; }
+        let ports = fmuPortsFor(implementation);
+        if (!ports) {
+            ports = await window.extensions.fmuPorts(implementation.fmuId, implementation.fmuVersion).catch(() => null);
+            if (ports) rememberFmuPorts(key, ports);
+        }
+        const about = ports && !ports.error ? ports.about : null;
+        if (about?.runsHere === false && about.build && !about.build.problems?.length) {
+            found.set(key, { guid: implementation.fmuId, version: implementation.fmuVersion, name: ports.name, nodeIds: [node.id] });
+        }
+    }
+    return [...found.values()];
+}
+
+// Validation could not run the model: an FMU needs building first. Said on the FMU's nodes and in the panel; Run asks to build it.
+async function renderValidationNeedsBuild(message) {
+    const text = message.slice(Math.max(0, message.indexOf('FMU '))).replace(/\s*Run the model to be asked.*$/, '');
+    const needing = await fmusNeedingBuild();
+    const issue = (location) => ({ code: 'fmuNeedsBuild', severity: 'error', message: `${text}. Press Run to build it, after saying what will run.`, location });
+    currentValidation = {
+        valid: false,
+        issues: needing.length ? needing.flatMap((fmu) => fmu.nodeIds.map((id) => issue({ kind: 'node', entityId: String(id), field: 'implementation' }))) : [issue({ kind: 'model', entityId: '', field: '' })],
+        executableModel: null
+    };
+    $('#validationSummary').dataset.validationSource = 'needsBuild';
+    renderValidationStatus();
+    $('#runButton').title = 'Build its FMU from its sources first: press Run to be asked';
+}
+
+async function buildFmusThenValidate() {
+    for (const fmu of await fmusNeedingBuild()) {
+        const outcome = await buildFmuFromSources(fmu);
+        if (outcome.status !== 'built' && outcome.status !== 'cached') return;
+    }
+    scheduleEngineValidation();
+}
+
 async function addFmuToModel({ path = null, position = null, installed = null } = {}) {
     if (activeResult) {
         showFmuNotice('Close the results to add an FMU.', ['The model is locked while a run\'s results are open: Close and edit first.']);
@@ -14573,6 +14699,11 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     }
     const added = installed ?? await window.extensions.addFmu?.(path);
     if (!added) return null;
+    $('#fmuBuildNotice').hidden = true;
+    if (added.error && added.buildLog !== undefined) {
+        showFmuBuildFailure({ name: added.name, message: added.error, log: added.buildLog });
+        return null;
+    }
     if (added.error) {
         showFmuNotice(added.desktopOnly ? 'FMUs run in the desktop app.' : 'The FMU was not added.', added.desktopOnly
             ? ['An FMU carries a compiled program for a computer\'s own system, which a browser cannot run. The free desktop app imports and exports FMUs.']
@@ -14587,7 +14718,7 @@ async function addFmuToModel({ path = null, position = null, installed = null } 
     if (!position) bringIntoViewWithLabel(node);
     await useFmuForNode(node, added.guid, added.version);
     if (!position) await settleClearOfDrawnModel(node);
-    $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}`;
+    $('#statusText').textContent = `Added ${added.name ?? 'the FMU'}${added.reused ? ', from your library' : ''}${added.builtFromSources ? ', built here from its sources' : ''}`;
     return node;
 }
 

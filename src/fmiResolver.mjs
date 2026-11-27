@@ -25,7 +25,7 @@
 
 import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { relative, resolve, sep } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 import { chooseInstalledFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
@@ -33,7 +33,7 @@ import { packageKey } from './packageArchive.mjs';
 import { fmuAttachmentsRequirement, fmuStartValuesRequirement } from './nodeProgram.mjs';
 import { contentForEngine } from './components.mjs';
 import { installedFmuArchive } from './fmuPackage.mjs';
-import { fmuBuildInformation } from './fmuBuildInformation.mjs';
+import { currentBuildFor, installedBuildInformation } from './fmuBuilds.mjs';
 
 export class FmiResolutionError extends Error {
     constructor(message, code = 'FMI_RESOLUTION_FAILED') {
@@ -197,14 +197,27 @@ export async function resolveFmiSource(implementation, fmuDirectory, disabledFmu
         );
     }
 
-    const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
+    let chosen = await chooseInstalledFmuBinary(fmuRoot, description);
+    let platformBinaryPath = chosen.error ? null : resolve(fmuRoot, ...chosen.relativePath.split('/'));
     if (chosen.error) {
-        throw new FmiResolutionError(
-            `FMU ${description.modelName} (${guid}) cannot run here: ${chosen.error}. Export or merge a build for this platform before using it here -- see "Merge platform FMUs" in the code export dialog.`,
-            'FMU_PLATFORM_MISSING'
-        );
+        // Built here from its sources (docs/proposals/sourceFmuImport.md, stage 3): the build kept on this computer for its archive,
+        // checked against its SHA-256. The project and the installed FMU stay as they came.
+        const built = await currentBuildFor(fmuDirectory, await installedArchiveSha256(fmuRoot));
+        if (built) {
+            chosen = { relativePath: `fmuBuilds/${built.record.key}/${built.record.library}`, bytes: built.library };
+            platformBinaryPath = built.libraryPath;
+        } else if (await installedBuildInformation(fmuRoot, description)) {
+            throw new FmiResolutionError(
+                `FMU ${description.modelName} needs to be built from its sources on this computer: ${chosen.error}. Run the model to be asked, or press Build from its sources on its card.`,
+                'FMU_NEEDS_BUILD'
+            );
+        } else {
+            throw new FmiResolutionError(
+                `FMU ${description.modelName} (${guid}) cannot run here: ${chosen.error}. Export or merge a build for this platform before using it here -- see "Merge platform FMUs" in the code export dialog.`,
+                'FMU_PLATFORM_MISSING'
+            );
+        }
     }
-    const platformBinaryPath = resolve(fmuRoot, ...chosen.relativePath.split('/'));
     const contentHash = createHash('sha256').update(chosen.bytes).digest('hex');
 
     const inputVariables = description.variables.filter((variable) => variable.causality === 'input' || variable.causality === 'parameter');
@@ -293,21 +306,25 @@ async function archiveFacts(fmuDirectory, guid, version) {
     return archive ? { archiveSha256: archive.sha256, archiveBytes: archive.buffer.length } : {};
 }
 
-// What an installed FMU says about building it from its sources (src/fmuBuildInformation.mjs), from its folder: for About this FMU,
-// without the configuration's file lists. Null when it says nothing.
-async function installedBuildInformation(fmuRoot, description) {
-    const entries = await readdir(resolve(fmuRoot, 'sources'), { recursive: true, withFileTypes: true }).catch(() => []);
-    const names = entries.filter((entry) => entry.isFile())
-        .map((entry) => `sources/${relative(resolve(fmuRoot, 'sources'), resolve(entry.parentPath ?? entry.path, entry.name)).split(sep).join('/')}`);
-    const buildDescriptionXml = await readFile(resolve(fmuRoot, 'sources', 'buildDescription.xml'), 'utf8').catch(() => null);
-    const build = fmuBuildInformation({ description, names, buildDescriptionXml });
+// The SHA-256 of the archive an FMU was installed from (its fmuMeta.json, or its archive.fmu for an older install).
+async function installedArchiveSha256(fmuRoot) {
+    const meta = JSON.parse(await readFile(resolve(fmuRoot, 'fmuMeta.json'), 'utf8').catch(() => '{}'));
+    if (meta.archiveSha256) return meta.archiveSha256;
+    const archive = await readFile(resolve(fmuRoot, 'archive.fmu')).catch(() => null);
+    return archive ? createHash('sha256').update(archive).digest('hex') : null;
+}
+
+// What an installed FMU says about building it from its sources, for About this FMU: without the configuration's file lists. Null when
+// it says nothing.
+async function installedBuildSummary(fmuRoot, description) {
+    const build = await installedBuildInformation(fmuRoot, description);
     if (!build) return null;
     const { configuration, ...summary } = build;
     return summary;
 }
 
 // The card's "About this FMU" (docs/proposals/fmuImportWorkflow.md, stage 3): what the FMU says of itself and how it runs here.
-function fmuAbout(description, platforms, chosen, build = null) {
+function fmuAbout(description, platforms, chosen, build = null, built = null) {
     return Object.fromEntries(Object.entries({
         modelName: description.modelName,
         fmiVersion: description.fmiVersion,
@@ -322,8 +339,11 @@ function fmuAbout(description, platforms, chosen, build = null) {
         coSimulation: description.coSimulation,
         canGetAndSetFMUState: description.canGetAndSetFMUState,
         platforms,
-        runsHere: !chosen.error,
-        build: build ?? undefined
+        runsHere: !chosen.error || Boolean(built),
+        build: build ?? undefined,
+        // Built here from its sources (stage 3): with which compiler and when, for About this FMU.
+        built: built ? { banner: built.record.banner, builtAt: built.record.builtAt, recipe: built.record.recipe?.name ?? null } : undefined,
+        hasOwnBinary: !chosen.error
     }).filter(([, value]) => value !== undefined));
 }
 
@@ -352,6 +372,8 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
     const inputKeys = keyByVariableName(inputVariables, 'input/parameter');
     const outputKeys = keyByVariableName(outputVariables, 'output');
     const chosen = await chooseInstalledFmuBinary(fmuRoot, description);
+    const archiveSha256 = await installedArchiveSha256(fmuRoot);
+    const built = chosen.error ? await currentBuildFor(fmuDirectory, archiveSha256) : null;
     return {
         name: description.modelName, fmiVersion: description.fmiVersion,
         inputs: inputVariables.map((variable) => ({
@@ -360,8 +382,11 @@ export async function describeInstalledFmuPorts(fmuDirectory, guid, version) {
         })),
         outputs: outputVariables.map((variable) => ({ key: outputKeys.get(variable.name), name: variable.name, type: variable.type, ...variableExtras(variable) })),
         notExposed: description.notExposed,
-        binary: describeChosenBinary(chosen, description.fmiVersion),
-        about: { ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen, await installedBuildInformation(fmuRoot, description)), ...await archiveFacts(fmuDirectory, guid, version) }
+        binary: built ? `Runs the build of its sources made on this computer (${built.record.library}).` : describeChosenBinary(chosen, description.fmiVersion),
+        about: {
+            ...fmuAbout(description, await installedPlatforms(fmuRoot), chosen, await installedBuildSummary(fmuRoot, description), built),
+            ...await archiveFacts(fmuDirectory, guid, version)
+        }
     };
 }
 

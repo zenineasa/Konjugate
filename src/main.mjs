@@ -12,7 +12,7 @@ import { decodeProjectBundle, encodeProjectFile, inspectProjectFile } from './pr
 import { createLintScheduler, lintHash } from './lintScheduler.mjs';
 import { pythonProgramLintScript } from './pythonProgramLint.mjs';
 import { decodeObjectiveRunResult, encodeObjectiveRunRequest, frame, objectiveErrorLine } from './objectiveTest.mjs';
-import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, pythonProviderSdkPath, getEngineCapabilities, inferWithEngine, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
+import { checkObjectiveWithEngine, describeProgramWithEngine, testProgramWithEngine, checkSubstepConvergenceWithEngine, cppProviderSdkPath, fitWithEngine, pythonProviderSdkPath, getEngineCapabilities, inferWithEngine, resolveEnginePath, startEngineRun, validateWithEngine } from './engineAdapter.mjs';
 import { generateFmuPackage, mergeFmuPackages } from './fmiExport.mjs';
 import { executionProjectDocument } from './subsystems.mjs';
 import { applyRootPortSignals } from './components.mjs';
@@ -65,6 +65,8 @@ import { inspectFmuArchive, installFmuArchive, installedFmuArchive, installProje
 import { describeInstalledFmuPorts } from './fmiResolver.mjs';
 import { chooseFmuBinary, describeChosenBinary } from './fmiBinary.mjs';
 import { buildInformationLine } from './nodeProgram.mjs';
+import { buildInstalledFmu, buildLog } from './fmuBuilds.mjs';
+import { findCCompiler } from './fmuSourceBuild.mjs';
 import { createExtensionStateStore } from './extensionStateStore.mjs';
 import { exampleCatalogEntry, exampleIdFromFileName, exampleLabel } from './exampleCatalog.mjs';
 import { validateComponentTemplate } from './componentTemplate.mjs';
@@ -2060,6 +2062,66 @@ ipcMain.handle('packageFmuPorts', async (_event, { guid, version }) => {
     }
 });
 
+// ---- Building an FMU from its sources on this computer (docs/proposals/sourceFmuImport.md, stage 3) -----------------------------
+// The confirmation says what will run and asks once per FMU archive (decision 3); Details lists the files, the definitions and what is
+// and is not guaranteed. Progress goes to the window that asked, as fmuBuildProgress; packageCancelFmuBuild stops its build.
+const fmuBuildControllers = new Map();
+
+async function confirmFmuBuild(window, summary) {
+    const files = `${summary.sourceFileCount} ${summary.language === 'C and C++' ? 'source' : summary.language} file${summary.sourceFileCount === 1 ? '' : 's'}`;
+    const detail = [
+        `It has no binary for this computer (${summary.tuple}). Konjugate can compile its ${files} with ${summary.banner} and then run it, as it runs any FMU.`,
+        'Only build FMUs from people you trust: the code will run with your permissions, as a downloaded program would. Konjugate runs the compiler only, not the FMU\'s own build scripts, and uses no network.',
+        ...summary.notes
+    ].join('\n\n');
+    for (;;) {
+        const answer = await dialog.showMessageBox(window, {
+            type: 'warning', buttons: ['Build', 'Cancel', 'Details'], defaultId: 0, cancelId: 1, noLink: true,
+            title: 'Build an FMU from its sources', message: `Build ${summary.name} from its sources?`, detail
+        });
+        if (answer.response !== 2) return answer.response === 0;
+        const shown = summary.files.length > 40 ? [...summary.files.slice(0, 40), `… and ${summary.files.length - 40} more`] : summary.files;
+        await dialog.showMessageBox(window, {
+            type: 'info', buttons: ['Back'], defaultId: 0, cancelId: 0, title: 'What building it does', message: `Building ${summary.name} (${summary.modelIdentifier}, FMI ${summary.fmiVersion})`,
+            detail: [
+                `Compiler: ${summary.banner} (${summary.compiler}).`,
+                `Built from ${summary.from === 'buildDescription' ? 'its buildDescription.xml' : 'its <SourceFiles>'}${summary.exporter ? `, exported by ${summary.exporter.name} ${summary.exporter.version}` : ''}${summary.recipe ? `, with Konjugate's ${summary.recipe} recipe` : ''}.`,
+                `Definitions: ${summary.definitions.join(', ') || 'none'}.`,
+                `Files: ${shown.join(', ')}.`,
+                'Guaranteed: only the compiler and linker run, with arguments Konjugate builds, never through a shell; nothing in its sources runs while it is built; the build opens no network connection; its files are copied to a folder of their own, and their paths are checked as archive paths are.',
+                'Not guaranteed: a source file may #include an absolute path, which the compiler will read; the compiler is not sandboxed; the library built is loaded into the engine as any FMU\'s binary is, with no further isolation.'
+            ].join('\n\n')
+        });
+    }
+}
+
+async function buildFmuHere(event, { guid, version, force = false }) {
+    const window = getWindowFromEvent(event);
+    const engineOptions = { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged };
+    const engine = await resolveEnginePath(engineOptions);
+    if (!engine) return { status: 'refused', message: 'The Konjugate engine binary could not be found, and it builds FMUs from their sources.' };
+    const compiler = await findCCompiler({ cxxOverride: (await providerToolchainStore.get()).cpp.compilerPath || null });
+    const controller = new AbortController();
+    fmuBuildControllers.get(event.sender.id)?.abort();
+    fmuBuildControllers.set(event.sender.id, controller);
+    try {
+        return await buildInstalledFmu({
+            fmuDirectory: join(app.getPath('userData'), 'packages'), guid, version, engine, sdkPath: cppProviderSdkPath(engineOptions), compiler, force,
+            confirm: (summary) => confirmFmuBuild(window, summary),
+            onProgress: (progress) => { if (!event.sender.isDestroyed()) event.sender.send('fmuBuildProgress', { guid, version, ...progress }); },
+            signal: controller.signal
+        });
+    } catch (error) {
+        return { status: 'failed', message: error.message };
+    } finally {
+        if (fmuBuildControllers.get(event.sender.id) === controller) fmuBuildControllers.delete(event.sender.id);
+    }
+}
+
+ipcMain.handle('packageBuildFmu', (event, { guid, version, force = false }) => buildFmuHere(event, { guid, version, force: Boolean(force) }));
+ipcMain.handle('packageCancelFmuBuild', (event) => { fmuBuildControllers.get(event.sender.id)?.abort(); return true; });
+ipcMain.handle('packageFmuBuildLog', (_event, { archiveSha256 }) => buildLog(join(app.getPath('userData'), 'packages'), String(archiveSha256 ?? '')));
+
 // Add › FMU… and an FMU dropped on the canvas (docs/proposals/fmuImportWorkflow.md, stage 4): the .fmu at `path`, or one the person
 // picks, made ready to be a node. One whose binaries cannot run on this computer is refused in words before anything is installed;
 // one already in the library (the same guid, which for Konjugate's own exports is a hash of the model) is used as it is; any other is
@@ -2079,17 +2141,25 @@ ipcMain.handle('packageAddFmu', async (event, { path = null } = {}) => {
         const inspected = inspectFmuArchive(archive);
         const name = inspected.description.modelName;
         const chosen = await chooseFmuBinary(inspected.description, async (entry) => inspected.files[entry] ?? null);
-        if (chosen.error) {
-            // One that carries its sources says so (docs/proposals/sourceFmuImport.md): building it from them comes with its stage 3.
-            const sources = inspected.build ? ` It carries its sources (${inspected.build.sourceFileCount} files), but Konjugate does not build an FMU from its sources yet.` : '';
+        // With no binary for this computer, one that carries its sources is built here, once the person says so
+        // (docs/proposals/sourceFmuImport.md, stage 3); one that cannot be built says why.
+        const fromSources = Boolean(chosen.error && inspected.build && !inspected.build.problems.length);
+        if (chosen.error && !fromSources) {
+            const sources = inspected.build ? ` It carries its sources, but Konjugate cannot build it: ${inspected.build.problems[0]}.` : '';
             return { error: `${name} cannot run on this computer: ${chosen.error}.${sources}` };
         }
         if (inspected.description.coSimulation?.needsExecutionTool) return { error: `${name} needs the tool it was exported from installed and running beside it, which Konjugate cannot start; export it from that tool as a standalone FMU.` };
         const directory = join(app.getPath('userData'), 'packages');
         const existing = (await listInstalledFmus(directory)).find((entry) => entry.packageId === inspected.description.guid);
-        if (existing) return { guid: existing.packageId, version: existing.version, name: existing.name, reused: true };
-        const installed = await installFmuArchive(archive, { directory, sourceFileName: basename(chosenPath) });
-        return { guid: installed.guid, version: installed.version, name: installed.displayName, reused: false };
+        const installed = existing
+            ? { guid: existing.packageId, version: existing.version, displayName: existing.name }
+            : await installFmuArchive(archive, { directory, sourceFileName: basename(chosenPath) });
+        if (fromSources) {
+            const outcome = await buildFmuHere(event, { guid: installed.guid, version: installed.version });
+            if (outcome.status === 'declined' || outcome.status === 'cancelled') return null;
+            if (outcome.status !== 'built' && outcome.status !== 'cached') return { error: outcome.message, buildLog: outcome.log ?? null, name };
+        }
+        return { guid: installed.guid, version: installed.version, name: installed.displayName, reused: Boolean(existing), builtFromSources: fromSources };
     } catch (error) {
         return { error: `${basename(chosenPath)} could not be added: ${error.message}` };
     }

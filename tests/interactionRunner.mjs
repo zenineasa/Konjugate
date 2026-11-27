@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { mulberry32, gaussianFrom, buildThermalSystemCsv } from './fixtures/thermalSystemCsv.mjs';
-import { unzipSync } from 'fflate';
+import { unzipSync, zipSync } from 'fflate';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { decodeProjectFile, encodeProjectFile } from '../src/projectFile.mjs';
@@ -11758,6 +11758,67 @@ export async function runInteractionTests(driver) {
             await rm(folder, { recursive: true, force: true });
         }
     }, { skip: driver.kind === 'playwright' && 'FMUs run in the desktop app only' });
+
+    // Building an FMU from its sources on this computer (docs/proposals/sourceFmuImport.md, stage 3): the FMI standard's Dahlquist and
+    // Feedthrough with their binaries taken out. Cancel builds nothing; Build compiles it, it runs, and About says how it was built.
+    await run('an FMU that carries only its sources is built here once the person says so, runs, says how it was built, and Cancel builds nothing', async () => {
+        const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-sources-'));
+        const sourcesOnly = async (name) => {
+            const files = unzipSync(new Uint8Array(await readFile(join(import.meta.dirname, '..', 'examples', 'tutorialFmus', `${name}.fmu`))));
+            for (const entry of Object.keys(files)) if (entry.startsWith('binaries/')) delete files[entry];
+            const path = join(folder, `${name}.fmu`);
+            await writeFile(path, zipSync(files));
+            return path;
+        };
+        const installedFmus = () => evaluate(window, `window.extensions.list().then((entries) => entries.filter((entry) => entry.packageType === 'fmu').map((entry) => ({ guid: entry.packageId, version: entry.version })))`);
+        try {
+            await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU from sources.kjt')`);
+            for (const fmu of await installedFmus()) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`);
+
+            // Cancel: nothing is built and no node is made.
+            const feedthrough = await sourcesOnly('Feedthrough');
+            const declined = await driver.answerDialogs({ button: 'Cancel' }, async () => {
+                assert.equal(await evaluate(window, `window.__debugFmuDrop(${JSON.stringify(feedthrough)}, 400, 300)`), false);
+            });
+            assert.deepEqual(declined.map((dialog) => [dialog.kind, dialog.message]), [['message', 'Build Feedthrough from its sources?']]);
+            assert.equal((await evaluate(window, `window.__debugProject.serialize()`)).nodes.length, 0, 'Cancel makes no node.');
+
+            // Add › FMU…: asked once, said what will run, built, placed.
+            const dahlquist = await sourcesOnly('Dahlquist');
+            await evaluate(window, `document.querySelector('#addButton').click()`);
+            await waitFor(window, `!document.querySelector('#addPalette').classList.contains('hidden')`, 'The Add menu did not open.');
+            const asked = await driver.answerDialogs({ open: dahlquist, button: 'Build' }, async () => {
+                await evaluate(window, `document.querySelector('#addFmuFromFile').click()`);
+                await waitFor(window, `window.__debugProject.serialize().nodes.length === 1 && window.__debugProject.serialize().nodes[0].implementation?.kind === 'fmi'`, 'The FMU was not built and added.', 120000);
+            });
+            assert.deepEqual(asked.map((dialog) => [dialog.kind, dialog.kind === 'open' ? dialog.title : dialog.message]), [['open', 'Add an FMU'], ['message', 'Build Dahlquist from its sources?']]);
+            assert.match(asked[1].detail, /It has no binary for this computer \([a-z0-9_]+-[a-z]+\)\. Konjugate can compile its \d+ C files? with .+ and then run it/);
+            assert.match(asked[1].detail, /Only build FMUs from people you trust: the code will run with your permissions/);
+            assert.match(asked[1].detail, /runs the compiler only, not the FMU's own build scripts, and uses no network/);
+            assert.equal(await evaluate(window, `document.querySelector('#fmuBuildNotice').hidden`), true, 'The build notice goes once it is built.');
+
+            // About this FMU says how it was built, with Rebuild and its log.
+            await waitFor(window, `[...document.querySelectorAll('#nodeProgramFmuAboutLines li')].some((item) => /^Built here from its sources with /.test(item.textContent))`, 'About this FMU does not say it was built here.', 20000);
+            assert.equal(await evaluate(window, `!document.querySelector('#nodeProgramFmuBuildActions').hidden && document.querySelector('#nodeProgramFmuBuild').textContent`), 'Rebuild');
+            await evaluate(window, `document.querySelector('#nodeProgramFmuBuildLog').click()`);
+            await waitFor(window, `!document.querySelector('#fmuBuildNotice').hidden && /Compiling /.test(document.querySelector('#fmuBuildNoticeLog').textContent)`, 'The build log is not shown.');
+            await evaluate(window, `document.querySelector('#closeFmuBuildNotice').click()`);
+
+            // It runs.
+            await openRunDialog(window);
+            await evaluate(window, `document.querySelector('#startRun').click()`);
+            await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU built from its sources did not run.', 180000);
+            await evaluate(window, `document.querySelector('#closeResults').click()`);
+            await waitFor(window, `document.querySelector('#closeResultsDialog').open`, 'Closing did not ask.');
+            await evaluate(window, `document.querySelector('#confirmCloseResults').click()`);
+            await waitFor(window, `document.querySelector('#resultTransport').hidden`, 'The results did not close.');
+        } finally {
+            await evaluate(window, `document.querySelector('#closeFmuBuildNotice')?.click()`).catch(() => {});
+            await evaluate(window, `window.__debugProject.load({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, nodes: [], edges: [], subsystems: [], edgeGroups: [] }, 'empty.kjt')`).catch(() => {});
+            for (const fmu of await installedFmus().catch(() => [])) await evaluate(window, `window.extensions.uninstall('fmu', ${JSON.stringify(fmu.guid)}, ${JSON.stringify(fmu.version)})`).catch(() => {});
+            await rm(folder, { recursive: true, force: true });
+        }
+    }, { skip: !driver.capabilities.fmuExport && 'FMUs run in the desktop app' });
 
     await run('Add › FMU… in the web edition says FMUs run in the desktop app, and where to get it', async () => {
         await evaluate(window, `window.__debugProject.load(${JSON.stringify({ format: 'konjugate', version: 1, metadata: { units: 'SI' }, sharedParameters: [], nodes: [], edges: [] })}, 'FMU.kjt')`);

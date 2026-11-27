@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -66,6 +68,8 @@ std::vector<BuildStep> sourceLibrarySteps(const SourceLibraryPlan& plan, const s
 // Runs the steps in order, each in the object directory, the whole build ending after plan.timeoutSeconds and each step's
 // output kept to its first 256 KiB. Throws std::runtime_error naming the step and with its output when one fails, or when the
 // time runs out (the running compiler is stopped).
-void buildSourceLibrary(const SourceLibraryPlan& plan, const std::vector<BuildStep>& steps);
+// `onStep(index, count, step)`, when given, is called before each step runs (the app's progress).
+void buildSourceLibrary(const SourceLibraryPlan& plan, const std::vector<BuildStep>& steps,
+    const std::function<void(std::size_t, std::size_t, const BuildStep&)>& onStep = {});
 
 } // namespace konjugate::cppToolchain

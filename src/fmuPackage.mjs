@@ -15,6 +15,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { strFromU8, unzipSync, zipSync } from 'fflate';
 import { parseModelDescription } from './fmiModelDescription.mjs';
 import { fmuBuildInformation } from './fmuBuildInformation.mjs';
+import { removeBuilds } from './fmuBuilds.mjs';
 
 export class FmuPackageError extends Error {
     constructor(message, code) {
@@ -252,11 +253,17 @@ export async function listInstalledFmus(directory) {
 
 export async function uninstallFmu({ directory, guid, version }) {
     const target = safeInstallPath(directory, guid, version);
+    let meta;
     try {
-        await readFile(join(target, 'fmuMeta.json'));
+        meta = JSON.parse(await readFile(join(target, 'fmuMeta.json'), 'utf8'));
     } catch (error) {
         if (error.code === 'ENOENT') throw new FmuPackageError('That FMU version is not installed.', 'NOT_INSTALLED');
         throw error;
     }
     await rm(target, { recursive: true, force: true });
+    // Its builds from sources go with it (docs/proposals/sourceFmuImport.md), unless the same archive is still installed under another
+    // version.
+    if (meta?.archiveSha256 && !(await listInstalledFmus(directory)).some((entry) => entry.manifest?.archiveSha256 === meta.archiveSha256)) {
+        await removeBuilds(directory, meta.archiveSha256);
+    }
 }

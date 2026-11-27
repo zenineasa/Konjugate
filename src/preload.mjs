@@ -134,6 +134,11 @@ contextBridge.exposeInMainWorld('extensions', {
     install: () => ipcRenderer.invoke('packageInstall'),
     // Add › FMU… and a dropped .fmu: the FMU at `path` (or one the person picks) made ready to be a node, { guid, version, name, reused }.
     addFmu: (path = null) => ipcRenderer.invoke('packageAddFmu', { path }),
+    // An installed FMU built from its sources on this computer (docs/proposals/sourceFmuImport.md): { status, message?, log?, record? }.
+    buildFmu: (guid, version, { force = false } = {}) => ipcRenderer.invoke('packageBuildFmu', { guid, version, force }),
+    cancelFmuBuild: () => ipcRenderer.invoke('packageCancelFmuBuild'),
+    fmuBuildLog: (archiveSha256) => ipcRenderer.invoke('packageFmuBuildLog', { archiveSha256 }),
+    onFmuBuildProgress: (callback) => ipcRenderer.on('fmuBuildProgress', (_event, detail) => callback(detail)),
     // Where a dropped file is on disk.
     pathForFile: (file) => { try { return webUtils.getPathForFile(file) || null; } catch { return null; } },
     uninstall: (packageType, packageId, version) => ipcRenderer.invoke('packageUninstall', { packageType, packageId, version }),

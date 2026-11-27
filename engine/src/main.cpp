@@ -273,7 +273,7 @@ int main(int argc, char** argv) {
         std::_Exit(0);
     }
     // A shared library built from an FMU's own C or C++ sources (docs/proposals/sourceFmuImport.md): `buildFmuSources <plan.json>
-    // [--compiler <C compiler>] [--cxx-compiler <C++ compiler>] [--print-steps]`. The plan (written by src/fmuSourceBuild.mjs) says
+    // [--compiler <C compiler>] [--cxx-compiler <C++ compiler>] [--print-steps] [--progress]`. The plan (written by src/fmuSourceBuild.mjs) says
     // the source root, the object directory, the library to write, the folders searched first (the FMI standard's headers), each
     // source file set and the libraries; the engine turns it into the compiler's argument lists (cppToolchain.cpp, the same
     // compiler discovery, macOS SDK and MSVC environment as buildSharedLibrary) and runs them with a time limit, never through a
@@ -326,7 +326,11 @@ int main(int argc, char** argv) {
             std::cout << "]\n" << std::flush;
             std::_Exit(0);
         }
-        konjugate::cppToolchain::buildSourceLibrary(plan, steps);
+        // --progress: a line before each step, "step <n> of <count>: <what>", for the app's progress.
+        const bool progress = hasFlag(argc, argv, "--progress");
+        konjugate::cppToolchain::buildSourceLibrary(plan, steps, [progress](std::size_t index, std::size_t count, const konjugate::cppToolchain::BuildStep& step) {
+            if (progress) std::cout << "step " << (index + 1) << " of " << count << ": " << step.what << '\n' << std::flush;
+        });
         std::_Exit(0);
     }
     // The complementary half of buildSharedLibrary/fmiGlue.cpp: loads a compiled FMI2

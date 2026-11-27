@@ -66,6 +66,7 @@
         "test:fmi3ImportFidelity": "npm run build:engine && node tests/engine/fmi3ImportFidelity.mjs",
         "test:fmiStartValues": "npm run build:engine && node tests/engine/fmiStartValues.mjs",
         "test:fmuSourceBuild": "npm run build:engine && node tests/engine/fmuSourceBuild.mjs",
+        "test:fmuSourceImport": "npm run build:engine && node tests/engine/fmuSourceImport.mjs",
         "test:fmiExamples": "npm run build:engine && node tests/engine/fmiExamples.mjs",
         "test:fmiPortsExport": "npm run build:engine && node tests/engine/fmiPortsExportFidelity.mjs",
         "test:rootPortSignals": "npm run build:engine && node tests/engine/rootPortSignals.mjs",

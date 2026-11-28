@@ -1366,6 +1366,40 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
+    await run('the same request to the same model is answered from its earlier answer, with nothing sent, unless the person asks the model instead', async () => {
+        await evaluate(window, `window.assistantHistory.clear()`);
+        await freshExample();
+        const chats = () => fakeOllama.requests.filter((request) => request.path === '/api/chat').length;
+        const ask = () => evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await evaluate(window, `(() => { window.confirm = () => true; if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#newAssistantConversation').click(); })()`);
+        let before = chats();
+        await ask();
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The first proposal was not ready.', 20000);
+        assert.ok(chats() > before, 'The first request was not sent to the model.');
+        await waitFor(window, `window.assistantHistory.list().then((list) => list.length === 1 && list[0].turnCount === 1 && window.assistantHistory.get(list[0].id)).then((c) => /temperature state/.test(c?.turns[0].reply.summary ?? ''))`, 'The first (fixed) answer was not kept.');
+
+        // A new conversation, the same model unchanged, the same request: the earlier answer, and nothing sent.
+        await evaluate(window, `document.querySelector('#newAssistantConversation').click()`);
+        before = chats();
+        await ask();
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The reused proposal was not ready.', 20000);
+        assert.equal(chats(), before, 'The same request was sent to the model again.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalSummary').textContent`), /with a temperature state/);
+        await waitFor(window, `Boolean(document.querySelector('.assistantTranscriptReused [data-turn-action="askModel"]'))`, 'The reused answer offered no Ask the model instead.');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptReused').textContent`), /nothing sent/);
+
+        // Ask the model instead: the request is sent, and the reused answer is set aside.
+        await evaluate(window, `document.querySelector('.assistantTranscriptReused [data-turn-action="askModel"]').click()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled && document.querySelectorAll('.assistantTranscriptTurn').length === 2`, 'Asking the model instead gave no new proposal.', 20000);
+        assert.ok(chats() > before, 'Ask the model instead did not send the request.');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn .assistantTranscriptOutcome').textContent`), /Discarded: an earlier answer/);
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child .assistantTranscriptUsage').textContent`), /tokens in/);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click(); window.assistantHistory.clear()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
     await run('an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it', async () => {
         await freshExample();
         const nodeNames = () => evaluate(window, `[...document.querySelectorAll('.node-label-container')].map((label) => label.textContent).filter((text) => text.includes('Heat sink')).length`);

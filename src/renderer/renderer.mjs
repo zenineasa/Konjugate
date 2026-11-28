@@ -11739,6 +11739,23 @@ function assistantTurnCheckpoints(turn, index) {
     return box;
 }
 
+// Under a turn answered from an earlier one: when that answer was given, that nothing was sent, and, while it is the answer
+// under review, Ask the model instead.
+function assistantReusedCaption(turn, index) {
+    const caption = document.createElement('p');
+    caption.className = 'assistantTranscriptUsage assistantTranscriptReused';
+    const when = turn.reusedFrom.createdAt ? new Date(turn.reusedFrom.createdAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'earlier';
+    caption.textContent = assistantAskedInstead(turn) ? `The answer from ${when} was set aside, to ask the model instead` : `Your answer from ${when}, for this same request to this model · nothing sent`;
+    const underReview = index === assistantTurnHistory.length - 1 && turn === pendingAssistantTurnRecord && !assistantGenerationController;
+    if (underReview && !assistantAskedInstead(turn)) {
+        const ask = Object.assign(document.createElement('button'), { type: 'button', className: 'assistantTurnAction', textContent: 'Ask the model instead' });
+        ask.dataset.turnAction = 'askModel';
+        ask.title = 'Send this request to the model, as a new answer';
+        caption.append(' ', ask);
+    }
+    return caption;
+}
+
 function renderAssistantTranscript() {
     const transcript = $('#assistantTranscript');
     transcript.hidden = assistantTurnHistory.length === 0;
@@ -11768,7 +11785,8 @@ function renderAssistantTranscript() {
         } else {
             item.append(you, outcome);
         }
-        if (turn.usage) item.append(Object.assign(document.createElement('p'), { className: 'assistantTranscriptUsage', textContent: describeUsage(turn.usage, turn.provider) }));
+        if (turn.reusedFrom) item.append(assistantReusedCaption(turn, index));
+        else if (turn.usage) item.append(Object.assign(document.createElement('p'), { className: 'assistantTranscriptUsage', textContent: describeUsage(turn.usage, turn.provider) }));
         const reply = assistantTurnReply(turn);
         if (reply) item.append(reply);
         const checkpoints = assistantTurnCheckpoints(turn, index);
@@ -11813,16 +11831,36 @@ function assistantConversation(firstRequest) {
 }
 
 // What the model is told of the conversation: its last five turns, as the compact { request, outcome } it always was.
-const assistantModelHistory = (turns = assistantTurnHistory) => turns.slice(-5).map(({ request, outcome }) => ({ request, outcome }));
+// A reused answer the person set aside to ask the model instead is left out: the model is asked as though it never happened.
+const assistantAskedInstead = (turn) => Boolean(turn.reusedFrom) && assistantOutcomeKind(turn.outcome) === 'discarded';
+const assistantModelHistory = (turns = assistantTurnHistory) => turns.filter((turn) => !assistantAskedInstead(turn)).slice(-5).map(({ request, outcome }) => ({ request, outcome }));
 
-function pushAssistantTurn(request, outcome, reply = null, reference = null, used = null) {
+// What exactly is asked, as a SHA-256: the request, the model summary, the turns sent with it, the proposal it is about, and the
+// model configuration that would answer. The same key later means the same question to the same model, which an earlier
+// answer can answer at no cost (docs/aiProviderArchitecture.md, "Reusing an exact earlier answer").
+async function assistantRequestKey(request, summary, history, reference) {
+    const configuration = activeConfigurationRecord();
+    const asked = JSON.stringify({
+        request, summary, history, reference: reference ? { summary: reference.summary, assumptions: reference.assumptions, operations: reference.operations } : null,
+        configuration: $('#assistantConfiguration').value, provider: configuration?.provider ?? '', model: configuration?.model ?? ''
+    });
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(asked));
+    return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+// Set by Ask the model instead, for the one request it sends.
+let assistantAskModelNext = false;
+
+function pushAssistantTurn(request, outcome, reply = null, reference = null, used = null, { key = null, reusedFrom = null } = {}) {
     const context = assistantTurnContext();
-    const record = { request, outcome, reply, turnId: null, project: context.project, provider: context.model.provider, usage: used, reference: reference ? { summary: reference.summary } : null };
+    const record = {
+        request, outcome, reply, turnId: null, project: context.project, provider: context.model.provider, usage: used, reference: reference ? { summary: reference.summary } : null,
+        key, reusedFrom, referenceSource: reference
+    };
     assistantTurnHistory = [...assistantTurnHistory, record];
     renderAssistantTranscript();
     if (historyStore) {
         assistantTurnWrites.set(record, assistantConversation(request)
-            .then((id) => historyStore.appendTurn(id, { request, outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, reply, reference: record.reference, usage: used, ...context }))
+            .then((id) => historyStore.appendTurn(id, { request, outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, reply, reference: record.reference, usage: used, key, reusedFrom, ...context }))
             .then((turn) => { record.turnId = turn.id; })
             .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
     }
@@ -12050,7 +12088,7 @@ async function openAssistantConversation(id) {
     assistantConversationId = conversation.id;
     assistantTurnHistory = conversation.turns.map((turn) => ({
         request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id, before: turn.before, after: turn.after,
-        project: turn.project, reference: turn.reference, usage: turn.usage, provider: turn.model?.provider ?? ''
+        project: turn.project, reference: turn.reference, usage: turn.usage, provider: turn.model?.provider ?? '', key: turn.key ?? null, reusedFrom: turn.reusedFrom ?? null
     }));
     assistantForkChoice = null;
     renderAssistantForkNote(conversation.forkedFrom);
@@ -15254,8 +15292,18 @@ async function requestAssistantProposal() {
         // What the request used, its repair round included, kept with its turn.
         let requestUsage = null;
         const onUsage = (value) => { requestUsage = addUsage(requestUsage, value); };
-        const response = await window.aiProviders.generateProposal(
-            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory(), undefined, reference ?? undefined, { onUsage }
+        const summary = assistantModelSummary();
+        const history = assistantModelHistory();
+        // The same request, about the same model, after the same turns, to the same model: its earlier answer is shown again and
+        // nothing is sent, unless the person asked the model instead.
+        const askModel = assistantAskModelNext;
+        assistantAskModelNext = false;
+        const key = historyStore ? await assistantRequestKey(request, summary, history, reference).catch(() => null) : null;
+        const earlier = key && !askModel ? await historyStore.findAnswer(key).catch(() => null) : null;
+        if (controller.signal.aborted) return { valid: false, cancelled: true };
+        const reusedFrom = earlier ? { conversationId: earlier.conversationId, turnId: earlier.turnId, createdAt: earlier.createdAt } : null;
+        const response = earlier ? structuredClone(earlier.reply) : await window.aiProviders.generateProposal(
+            requestUuid, $('#assistantConfiguration').value, request, summary, history, undefined, reference ?? undefined, { onUsage }
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
         // Clear the prompt only once a response has actually arrived, not before sending --
@@ -15266,11 +15314,12 @@ async function requestAssistantProposal() {
         fitAssistantPrompt();
         setAssistantReference(null);
         if (response.responseKind === 'clarification') {
-            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`, response, reference, requestUsage);
+            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`, response, reference, requestUsage, { key, reusedFrom });
+            renderAssistantTranscript();
             renderAssistantClarification(response);
             return { valid: false, clarification: response };
         }
-        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`, response, reference, requestUsage);
+        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`, response, reference, requestUsage, { key, reusedFrom });
         const preview = await previewAssistantProposal(response, { recordOutcome: false });
         if (preview.valid || preview.superseded || controller.signal.aborted) return preview;
         if (!preview.repairable) {
@@ -15307,12 +15356,28 @@ async function requestAssistantProposal() {
         if (assistantGenerationController === controller) {
             assistantGenerationController = null;
             stopAssistantProgress();
+            if (pendingAssistantTurnRecord?.reusedFrom) renderAssistantTranscript();
             button.disabled = false;
             button.textContent = pendingAssistantProposal ? 'Revise proposal'
                 : !$('#assistantClarification').hidden ? 'Answer'
                     : 'Generate proposal';
         }
     }
+}
+
+// Sets a reused answer aside and sends its request to the model, as though the reused answer had never been shown.
+function askAssistantModelInstead(turn) {
+    if (turn !== pendingAssistantTurnRecord || assistantGenerationController) return;
+    updateAssistantTurnOutcome(turn, `Discarded: an earlier answer, to ask the model instead`);
+    discardAssistantProposal();
+    // The proposal it was about, as it was (Ask about this), since its turn may no longer be in this conversation.
+    assistantReference = turn.referenceSource ?? null;
+    $('#assistantReference').hidden = !assistantReference;
+    $('#assistantReferenceSummary').textContent = assistantReference?.summary ?? '';
+    $('#assistantPrompt').value = turn.request;
+    fitAssistantPrompt();
+    assistantAskModelNext = true;
+    requestAssistantProposal();
 }
 
 $('#cancelAssistantRequest').addEventListener('click', () => assistantGenerationController?.abort());
@@ -15355,6 +15420,7 @@ $('#assistantTranscript').addEventListener('click', (event) => {
     if (!turn) return;
     const action = button.dataset.turnAction;
     if (action === 'askAbout') { setAssistantReference(turn); return; }
+    if (action === 'askModel') { askAssistantModelInstead(turn); return; }
     if (action === 'forkHere' || action === 'editResend') {
         const index = Number(button.closest('[data-turn-index]').dataset.turnIndex);
         assistantForkChoice = { index, including: action === 'forkHere' };

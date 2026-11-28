@@ -22,6 +22,7 @@ const maximumTurnCharacters = 1_000_000;
 const maximumSnapshotCharacters = 50_000_000;
 const promptsFile = 'savedPrompts.json';
 const maximumPrompts = 200;
+const reusableKinds = new Set(['proposed', 'applied', 'asked']);
 const outcomeKinds = new Set(['pending', 'proposed', 'applied', 'discarded', 'rejected', 'asked', 'unanswered', 'error', 'cancelled']);
 
 export class AssistantHistoryError extends Error {
@@ -50,6 +51,12 @@ function cleanTurn(input = {}) {
         usage: input.usage && typeof input.usage === 'object' ? usage(input.usage) : null,
         // An earlier proposal this request drew on (Ask about this), by its summary.
         reference: input.reference && typeof input.reference === 'object' ? { summary: text(input.reference.summary, 500) } : null,
+        // What was asked, exactly (the request, the model summary, the recent turns, the provider and model), as a SHA-256 the
+        // window computed, so the same request later can be answered from this turn (findAnswer) without asking again.
+        key: typeof input.key === 'string' && hashPattern.test(input.key) ? input.key : null,
+        // The earlier turn this turn's answer was reused from, when nothing was sent.
+        reusedFrom: input.reusedFrom && typeof input.reusedFrom === 'object' && idPattern.test(input.reusedFrom.conversationId ?? '')
+            ? { conversationId: input.reusedFrom.conversationId, turnId: text(input.reusedFrom.turnId, 100), createdAt: Number(input.reusedFrom.createdAt) || 0 } : null,
         before: typeof input.before === 'string' && hashPattern.test(input.before) ? input.before : null,
         after: typeof input.after === 'string' && hashPattern.test(input.after) ? input.after : null
     };
@@ -125,6 +132,22 @@ export function createAssistantHistory({ directory, uuidFactory = randomUUID, no
         },
         async get(id) {
             return read(id);
+        },
+        // The answer to exactly this request, from the newest turn asked it (by `key`), when that answer is worth reusing: it was
+        // proposed, applied or a question, not discarded or rejected, since the person or the checks turned that one down.
+        async findAnswer(key) {
+            if (typeof key !== 'string' || !hashPattern.test(key)) return null;
+            let newest = null;
+            for (const id of await ids()) {
+                let conversation;
+                try { conversation = await read(id); } catch { continue; }
+                for (const turn of conversation.turns) {
+                    if (turn.key === key && turn.reply && (!newest || turn.createdAt > newest.turn.createdAt)) newest = { conversation, turn };
+                }
+            }
+            if (!newest || !reusableKinds.has(newest.turn.outcome?.kind)) return null;
+            const { conversation, turn } = newest;
+            return { conversationId: conversation.id, conversationTitle: conversation.title, turnId: turn.id, createdAt: turn.createdAt, reply: turn.reply, outcome: turn.outcome };
         },
         // A new conversation; `forkedFrom` ({ conversationId, turnId, title }) when it is a fork, which create alone does not copy.
         async create({ title = 'New conversation', forkedFrom = null } = {}) {

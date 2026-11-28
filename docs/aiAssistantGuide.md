@@ -208,6 +208,10 @@ Under each turn, the panel says what the request used, as the provider reported 
 
 The instructions Konjugate sends are the same for every request and come first, so providers that cache a repeated start of a prompt (Anthropic, OpenAI, Gemini) charge less for them after the first request; where the provider enforces the response's format, the format's description is not sent a second time.
 
+## The same request again
+
+If you send exactly the same request about the same, unchanged model, after the same turns, to the same model, Konjugate shows the answer it got before and sends nothing, so it costs nothing. The line under the turn says when that answer was given. If you want a new answer, choose **Ask the model instead**. An answer you discarded is never reused.
+
 ## While the assistant works
 
 The panel shows what is happening as the assistant's turn in the conversation, under the request you sent: waiting for the model, whether it is thinking or writing the proposal, checking the proposal, with how long it has been going, and, when a proposal was rejected, that the model was asked to fix it and why. **What the model is doing** opens the model's reasoning, where the provider shares it, and the proposal text as it is written. **Cancel** stops the request at any time.

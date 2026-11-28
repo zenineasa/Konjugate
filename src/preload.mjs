@@ -431,6 +431,7 @@ contextBridge.exposeInMainWorld('aiProviders', {
 contextBridge.exposeInMainWorld('assistantHistory', {
     list: (query) => invokePlainly('assistantHistoryList', query),
     get: (id) => invokePlainly('assistantHistoryGet', id),
+    findAnswer: (key) => invokePlainly('assistantHistoryFindAnswer', key),
     create: (options) => invokePlainly('assistantHistoryCreate', options),
     appendTurn: (id, turn) => invokePlainly('assistantHistoryAppendTurn', id, turn),
     updateTurn: (id, turnId, changes) => invokePlainly('assistantHistoryUpdateTurn', id, turnId, changes),

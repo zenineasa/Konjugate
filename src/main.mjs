@@ -3572,6 +3572,7 @@ ipcMain.handle('aiOpenKeyPage', async (event, provider) => {
 // The store bounds and checks what it is given; these only make sure a project window asks.
 ipcMain.handle('assistantHistoryList', async (event, query) => { requireProjectWindow(event); return assistantHistory.list({ query: typeof query === 'string' ? query.slice(0, 500) : '' }); });
 ipcMain.handle('assistantHistoryGet', async (event, id) => { requireProjectWindow(event); return assistantHistory.get(id); });
+ipcMain.handle('assistantHistoryFindAnswer', async (event, key) => { requireProjectWindow(event); return assistantHistory.findAnswer(key); });
 ipcMain.handle('assistantHistoryCreate', async (event, options) => { requireProjectWindow(event); return assistantHistory.create(options ?? {}); });
 ipcMain.handle('assistantHistoryAppendTurn', async (event, id, turn) => { requireProjectWindow(event); return assistantHistory.appendTurn(id, turn); });
 ipcMain.handle('assistantHistoryUpdateTurn', async (event, id, turnId, changes) => { requireProjectWindow(event); return assistantHistory.updateTurn(id, turnId, changes); });

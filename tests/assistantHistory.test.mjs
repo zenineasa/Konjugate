@@ -157,3 +157,31 @@ test('Saved prompts are kept apart from conversations, once each, newest first, 
     await history.clearPrompts();
     assert.deepEqual(await history.listPrompts(), []);
 }));
+
+test('The same request is answered from the newest turn asked it, in any conversation, unless that answer was turned down', () => withHistory(async (history) => {
+    const key = 'a'.repeat(64);
+    const other = 'b'.repeat(64);
+    assert.equal(await history.findAnswer(key), null);
+    assert.equal(await history.findAnswer('not a key'), null);
+    const first = await history.create({ title: 'Battery' });
+    const proposal = { responseKind: 'proposal', summary: 'Cells', operations: [{ op: 'addNode' }] };
+    const turn = await history.appendTurn(first.id, { request: 'Add cells', outcome: { kind: 'applied', text: 'Applied: Cells' }, reply: proposal, key });
+    await history.appendTurn(first.id, { request: 'Something else', outcome: { kind: 'proposed', text: 'Proposed: x' }, reply: { responseKind: 'proposal', summary: 'x', operations: [] }, key: other });
+    const found = await history.findAnswer(key);
+    assert.deepEqual([found.conversationId, found.turnId, found.reply], [first.id, turn.id, proposal]);
+    assert.equal(found.conversationTitle, 'Battery');
+
+    // A newer turn with the same key, in another conversation, answers instead; once it is discarded, nothing is reused.
+    const second = await history.create({ title: 'Battery again' });
+    const newer = await history.appendTurn(second.id, { request: 'Add cells', outcome: { kind: 'asked', text: 'Asked: how many?' }, reply: { responseKind: 'clarification', question: 'How many?' }, key });
+    assert.equal((await history.findAnswer(key)).turnId, newer.id);
+    await history.updateTurn(second.id, newer.id, { outcome: { kind: 'discarded', text: 'Discarded' } });
+    assert.equal(await history.findAnswer(key), null, 'An answer the person discarded was offered again.');
+
+    // A turn without a reply is never an answer, and a reused turn says where it came from.
+    await history.appendTurn(second.id, { request: 'Add cells', outcome: { kind: 'error', text: 'Error: timed out' }, key: other });
+    assert.equal((await history.findAnswer(other)).reply.summary, 'x');
+    const reused = await history.appendTurn(second.id, { request: 'Add cells', reusedFrom: { conversationId: first.id, turnId: turn.id, createdAt: turn.createdAt }, key: 'not hex' });
+    assert.deepEqual(reused.reusedFrom, { conversationId: first.id, turnId: turn.id, createdAt: turn.createdAt });
+    assert.equal(reused.key, null);
+}));

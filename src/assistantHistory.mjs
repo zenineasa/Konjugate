@@ -187,6 +187,34 @@ export function createAssistantHistory({ directory, uuidFactory = randomUUID, no
                 throw new AssistantHistoryError(error.code === 'ENOENT' ? 'That checkpoint is no longer kept.' : 'That checkpoint could not be read.', 'snapshotNotFound');
             }
         },
+        // A fork: a new conversation holding copies of this one's turns up to `turnId` (or up to the turn before it, with
+        // `including: false`, for editing that turn and sending it again) and of the snapshots those turns name. It remembers where
+        // it came from, and nothing else ties the two: deleting either leaves the other whole.
+        // `startingFrom` is the snapshot of the model at the fork point, copied too when no copied turn names it.
+        async fork(id, turnId, { including = true, title = '', startingFrom = null } = {}) {
+            const source = await read(id);
+            const index = source.turns.findIndex((turn) => turn.id === turnId);
+            if (index < 0) throw new AssistantHistoryError('That turn does not exist.', 'turnNotFound');
+            const copied = structuredClone(source.turns.slice(0, including ? index + 1 : index));
+            const fork = await history.create({
+                title: title || `${source.title} (fork)`,
+                forkedFrom: { conversationId: source.id, turnId, title: source.title }
+            });
+            const wanted = [...copied.flatMap((turn) => [turn.before, turn.after]), ...(typeof startingFrom === 'string' && hashPattern.test(startingFrom) ? [startingFrom] : [])];
+            for (const hash of new Set(wanted.filter(Boolean))) {
+                try {
+                    const content = await readFile(join(folderOf(id), snapshotsFolder, `${hash}.bin`));
+                    await writeAtomically(join(folderOf(fork.id), snapshotsFolder, `${hash}.bin`), content);
+                } catch { /* a checkpoint no longer kept stays missing in the fork too */ }
+            }
+            return serially(fork.id, async () => {
+                const kept = await read(fork.id);
+                kept.turns = copied;
+                kept.updatedAt = now();
+                await write(kept);
+                return kept;
+            });
+        },
         // Deletes the conversation's folder: its turns, replies and snapshots. Its forks keep their own copies.
         async remove(id) {
             const folder = folderOf(id);

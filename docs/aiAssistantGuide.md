@@ -85,6 +85,13 @@ An applied proposal keeps the model as it was just before and just after it, in 
 
 Any earlier proposal, applied or not, offers **Apply again**, which prepares it again against the model open now and shows it to review and apply as a new turn. A proposal names existing nodes and relationships by their ids, so one made for another project could change other things here; the proposal then says so at its top. **Ask about this** is usually the better way to reuse work from another project: it shows "About …" above the prompt, and your next request is sent with that proposal as a reference the model is told to adapt to the model open now ("do what this did, but with three cells"), using this model's own nodes. The turn shows what it was about.
 
+Any turn can be forked from. **Fork from here** continues the conversation from that turn as a conversation of its own; **Edit and resend** does the same from the turn before it and puts that turn's request in the prompt to change and send. Each asks where:
+
+- **In this window**: the model open now goes back to how it was at that point in the conversation (as the last change before it left it), after asking and as one step you can undo, and the panel shows the fork.
+- **In a new window**: a new, unsaved project opens holding the model as it was at that point, with the fork in its panel.
+
+A fork starts with copies of the turns and checkpoints up to that point and says which conversation it was forked from, with **Open it** while that conversation is kept. Nothing else ties them: deleting either leaves the other whole.
+
 The history keeps within 500 MB: past that, the least recently used conversations' checkpoints are deleted first (their turns stay, and say a checkpoint is no longer kept), then whole conversations, never the one in use.
 
 **×** on a conversation in History deletes it with everything it kept: its turns, the replies and the model checkpoints. **Settings › Model assistant › History** says how many conversations are kept and how much space they take, and **Clear history…** deletes them all. What is deleted is removed from Konjugate's history; Konjugate does not claim it cannot be recovered from the disk or from the computer's backups. The history is not encrypted: an encrypted project protects a model you share, and the history is your own working record.

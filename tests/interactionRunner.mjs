@@ -411,6 +411,7 @@ export async function runInteractionTests(driver) {
             'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
             'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
             'an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request',
+            'a conversation forks from a turn, in this window or a new one, each fork its own copy',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1425,6 +1426,45 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(window, `document.querySelector('#assistantReference').hidden`), true, 'The reference stayed after the request was sent.');
         assert.match(await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptReference')].at(-1)?.textContent ?? ''`), /^About: Add a heat sink/);
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('a conversation forks from a turn, in this window or a new one, each fork its own copy', async () => {
+        // The conversation from the scenarios before: its first turn applied a heat sink, and later turns came after it.
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `window.konjugateAssistant.getTurnHistory().length >= 2 && Boolean(document.querySelector('.assistantTranscriptTurn [data-turn-action="forkHere"]'))`, 'The turns offered no fork.');
+        const sourceTitle = (await evaluate(window, `window.assistantHistory.list()`))[0].title;
+        const conversationsBefore = (await evaluate(window, `window.assistantHistory.list()`)).length;
+
+        // Fork from the first turn, in this window: the panel shows the fork, which says where it came from.
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn [data-turn-action="forkHere"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('.assistantForkChoice [data-fork-where="here"]'))`, 'Forking did not ask where.');
+        await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('.assistantForkChoice [data-fork-where="here"]').click(); })()`);
+        await waitFor(window, `!document.querySelector('#assistantForkNote').hidden && window.konjugateAssistant.getTurnHistory().length === 1`, 'The fork was not opened in this window.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantForkNoteText').textContent`), new RegExp(`Forked from “${sourceTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}”`));
+        await waitFor(window, `!document.querySelector('#openForkSource').hidden`, 'The fork offered no way back to where it came from.');
+        assert.equal((await evaluate(window, `window.assistantHistory.list()`)).length, conversationsBefore + 1);
+        assert.ok(await evaluate(window, `[...document.querySelectorAll('.node-label-container')].some((label) => label.textContent.includes('Heat sink'))`), 'The model is not as the forked turn left it.');
+
+        // Edit and resend the same turn, in a new window: the model as it was before that turn, the fork open, the request ready.
+        const before = driver.allHandles();
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn [data-turn-action="editResend"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('.assistantForkChoice [data-fork-where="window"]'))`, 'Editing did not ask where.');
+        await evaluate(window, `document.querySelector('.assistantForkChoice [data-fork-where="window"]').click()`);
+        const forkWindow = await driver.waitForNewHandle(before);
+        await waitFor(forkWindow, `!document.querySelector('#assistantPanel')?.hidden && !document.querySelector('#assistantForkNote').hidden`, 'The new window did not open the fork.', 15000);
+        assert.equal(await evaluate(forkWindow, `document.querySelector('#assistantPrompt').value`), 'Add a heat sink connected to the battery.', 'The request to edit was not in the prompt.');
+        assert.equal(await evaluate(forkWindow, `window.konjugateAssistant.getTurnHistory().length`), 0, 'Editing a turn forks from the turn before it.');
+        assert.ok(await evaluate(forkWindow, `document.querySelectorAll('.node-label-container').length > 0 && [...document.querySelectorAll('.node-label-container')].every((label) => !label.textContent.includes('Heat sink'))`), 'The new window does not hold the model as it was before that turn.');
+        driver.answerNextDialog({ button: 'Discard changes' });
+        await forkWindow.close();
+        driver.clearDialogAnswers();
+
+        // Each fork is its own copy: deleting where it came from leaves the fork whole.
+        const forkId = (await evaluate(window, `window.assistantHistory.list()`)).find((item) => item.title.endsWith('(fork)') && item.turnCount === 1).id;
+        const sourceId = (await evaluate(window, `window.assistantHistory.list()`)).find((item) => item.title === sourceTitle).id;
+        await evaluate(window, `window.assistantHistory.remove(${JSON.stringify(sourceId)})`);
+        assert.equal((await evaluate(window, `window.assistantHistory.get(${JSON.stringify(forkId)})`)).turns.length, 1, 'Deleting where a fork came from changed the fork.');
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {

@@ -699,6 +699,16 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantTurnReply p { margin: 6px 0 0; color: #b8c7ce; }
 .assistantPanel .assistantTurnReply ul { margin-top: 6px; color: #8ea1aa; }
 
+/* A fork's beginning, and the choice of where a fork goes. */
+.assistantForkNote { display: flex; align-items: baseline; gap: 6px; margin: 12px var(--assistant-gutter) 0; padding: 7px 10px; color: #8aa0aa; background: #0c1a22; border: 1px dashed #2e4652; border-radius: 5px; font-size: var(--assistant-caption); }
+.assistantForkNote[hidden] { display: none; }
+.assistantForkNote button { padding: 0; color: #74ddd3; background: none; border: 0; font: inherit; text-decoration: underline; cursor: pointer; }
+.assistantForkNote button[hidden] { display: none; }
+.assistantForkChoice { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 9px; background: #0c1a22; border: 1px solid #2c4048; border-radius: 5px; font-size: var(--assistant-caption); }
+.assistantForkChoice > span { color: #8aa0aa; }
+.assistantForkChoice button { height: 26px; padding: 0 10px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; }
+.assistantForkChoice button.primary { color: #04161a; background: var(--accent); border-color: transparent; }
+
 /* An earlier proposal the next request refers to (Ask about this). */
 .assistantReference { display: flex; align-items: center; gap: 6px; margin: 0; padding: 5px 6px 5px 10px; color: #8fb4b6; background: rgb(66 201 188 / 7%); border: 1px solid rgb(66 201 188 / 25%); border-radius: 5px; font-size: var(--assistant-caption); }
 .assistantReference[hidden] { display: none; }

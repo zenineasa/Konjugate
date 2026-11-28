@@ -3589,6 +3589,19 @@ ipcMain.handle('assistantHistoryPutSnapshot', async (event, id, documentJson) =>
     return hash;
 });
 ipcMain.handle('assistantHistoryGetSnapshot', async (event, id, hash) => { requireProjectWindow(event); return assistantHistory.getSnapshot(id, hash); });
+ipcMain.handle('assistantHistoryFork', async (event, id, turnId, options) => {
+    requireProjectWindow(event);
+    return assistantHistory.fork(id, turnId, { including: options?.including !== false, title: typeof options?.title === 'string' ? options.title : '', startingFrom: options?.startingFrom ?? null });
+});
+// A fork continued in a new window: a new, unsaved project holding the model at the fork point (`snapshot`, when the conversation
+// kept one), with the fork open in its assistant panel and, for a turn to edit and send again, its request in the prompt.
+ipcMain.handle('assistantForkInNewWindow', async (event, { conversationId, snapshot = null, prompt = '' } = {}) => {
+    requireProjectWindow(event);
+    await assistantHistory.get(conversationId);
+    if (snapshot !== null && !/^[0-9a-f]{64}$/.test(snapshot)) throw new Error('That checkpoint does not exist.');
+    createProjectWindow(Promise.resolve({ assistantFork: { conversationId, snapshot, prompt: typeof prompt === 'string' ? prompt.slice(0, 8000) : '' } }));
+    return true;
+});
 
 // The vendors' own tools found on this computer, and who each is signed in as (docs/proposals/assistantSignIn.md).
 ipcMain.handle('aiDetectTools', async (event) => {

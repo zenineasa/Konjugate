@@ -11686,10 +11686,12 @@ function assistantTurnReply(turn) {
 
 // What can be done with an earlier turn: with its proposal, apply it again or ask the model to draw on it; with an applied one's
 // checkpoints, see what it changed and restore the model as it was before or after it.
-function assistantTurnCheckpoints(turn) {
+function assistantTurnCheckpoints(turn, index) {
     const proposal = turn.reply?.responseKind === 'proposal' && turn !== pendingAssistantTurnRecord;
     const applied = Boolean(turn.before && turn.after);
-    if (!proposal && !applied) return null;
+    // Any kept turn can be forked from, or edited and sent again as a fork; not the one under review now.
+    const forkable = Boolean(historyStore) && turn !== pendingAssistantTurnRecord && index !== undefined;
+    if (!proposal && !applied && !forkable) return null;
     const box = document.createElement('div');
     box.className = 'assistantTurnCheckpoints';
     const actions = document.createElement('div');
@@ -11703,6 +11705,10 @@ function assistantTurnCheckpoints(turn) {
             ['changes', turn.diffLines ? 'Hide what changed' : 'Show what changed', 'List what this changed, and select it on the canvas'],
             ['restoreBefore', 'Restore before', 'Put the model back as it was before this change (undoable)'],
             ['restoreAfter', 'Restore after', 'Put the model back as it was right after this change (undoable)']
+        ] : []),
+        ...(forkable ? [
+            ['forkHere', 'Fork from here', 'Continue from this turn as a conversation of its own, here or in a new window'],
+            ['editResend', 'Edit and resend', 'Change this request and send it again, as a fork from the turn before it']
         ] : [])
     ]) {
         const button = Object.assign(document.createElement('button'), { type: 'button', textContent: text, title });
@@ -11710,6 +11716,17 @@ function assistantTurnCheckpoints(turn) {
         actions.append(button);
     }
     box.append(actions);
+    if (assistantForkChoice?.index === index) {
+        const choice = document.createElement('div');
+        choice.className = 'assistantForkChoice';
+        choice.append(Object.assign(document.createElement('span'), { textContent: assistantForkChoice.including ? 'Fork from here:' : 'Edit and resend, as a fork:' }));
+        for (const [where, text, primary] of [['here', 'In this window', true], ['window', 'In a new window', false], ['cancel', 'Cancel', false]]) {
+            const button = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className: primary ? 'primary' : '' });
+            button.dataset.forkWhere = where;
+            choice.append(button);
+        }
+        box.append(choice);
+    }
     if (turn.diffLines) {
         const list = document.createElement('ul');
         list.className = 'assistantTurnDiff';
@@ -11887,11 +11904,79 @@ function setAssistantReference(turn) {
     if (assistantReference) $('#assistantPrompt').focus();
 }
 
+// ---- Forks: a conversation continued from one of its turns as a conversation of its own, with the model as it was there.
+let assistantForkChoice = null; // { index, including }: the turn whose "where to?" is showing
+
+// The model at a fork point (after the first `count` turns): as the last applied turn before it left it, or, if none was applied
+// yet, as it was before the first change after it. Null when the conversation changed the model nowhere.
+function assistantForkSnapshot(turns, count) {
+    const lastApplied = turns.slice(0, count).reverse().find((turn) => turn.before && turn.after);
+    if (lastApplied) return lastApplied.after;
+    return turns.slice(count).find((turn) => turn.before && turn.after)?.before ?? null;
+}
+
+async function forkAssistantConversation(index, including, where) {
+    const turn = assistantTurnHistory[index];
+    await assistantTurnWrites.get(turn);
+    if (!turn?.turnId || !assistantConversationId) throw new Error('This turn is not kept in the history yet.');
+    const snapshot = assistantForkSnapshot(assistantTurnHistory, including ? index + 1 : index);
+    const prompt = including ? '' : turn.request;
+    assistantForkChoice = null;
+    if (where === 'window') {
+        const fork = await historyStore.fork(assistantConversationId, turn.turnId, { including, startingFrom: snapshot });
+        await historyStore.forkInNewWindow({ conversationId: fork.id, snapshot, prompt });
+        renderAssistantTranscript();
+        return fork;
+    }
+    // In this window: the model goes back to the fork point (asked first, as one undoable step) before the fork opens.
+    if (snapshot) {
+        const model = await historyStore.getSnapshot(assistantConversationId, snapshot);
+        const current = serializeProjectDocument();
+        if (JSON.stringify(current) !== JSON.stringify(model)) {
+            if (activeResult) throw new Error('Close simulation results before forking with the model as it was.');
+            if (!window.confirm('Forking here puts the model open now back as it was at that turn. You can undo this. Fork?')) { renderAssistantTranscript(); return null; }
+            replaceModelContents(structuredClone(model));
+            recordHistory({ undo: () => replaceModelContents(current), redo: () => replaceModelContents(structuredClone(model)) });
+        }
+    }
+    const fork = await historyStore.fork(assistantConversationId, turn.turnId, { including, startingFrom: snapshot });
+    await openAssistantConversation(fork.id);
+    if (prompt) {
+        $('#assistantPrompt').value = prompt;
+        fitAssistantPrompt();
+        $('#assistantPrompt').focus();
+    }
+    return fork;
+}
+
+// A window opened to continue a fork: the model at the fork point, then the fork in the assistant's panel.
+async function openAssistantForkWindow({ conversationId, snapshot, prompt }) {
+    if (snapshot) replaceModelContents(structuredClone(await historyStore.getSnapshot(conversationId, snapshot)));
+    showAssistantPanel();
+    await openAssistantConversation(conversationId);
+    if (prompt) {
+        $('#assistantPrompt').value = prompt;
+        fitAssistantPrompt();
+    }
+}
+
+// A fork says where it came from, with a way back while that conversation is kept.
+function renderAssistantForkNote(forkedFrom) {
+    $('#assistantForkNote').hidden = !forkedFrom;
+    if (!forkedFrom) return;
+    $('#assistantForkNoteText').textContent = `Forked from “${forkedFrom.title}”.`;
+    $('#openForkSource').dataset.conversation = forkedFrom.conversationId;
+    $('#openForkSource').hidden = true;
+    historyStore.get(forkedFrom.conversationId).then(() => { $('#openForkSource').hidden = false; }).catch(() => {});
+}
+
 function resetAssistantConversation() {
     assistantTurnHistory = [];
     pendingAssistantTurnRecord = null;
     assistantConversationId = null;
+    assistantForkChoice = null;
     setAssistantReference(null);
+    renderAssistantForkNote(null);
     renderAssistantTranscript();
 }
 
@@ -11905,6 +11990,8 @@ async function openAssistantConversation(id) {
         request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id, before: turn.before, after: turn.after,
         project: turn.project, reference: turn.reference
     }));
+    assistantForkChoice = null;
+    renderAssistantForkNote(conversation.forkedFrom);
     renderAssistantTranscript();
     showAssistantHistory(false);
     updateAssistantCollapsedStatus(conversation.title);
@@ -15159,12 +15246,27 @@ $('#cancelAssistantRequest').addEventListener('click', () => assistantGeneration
 $('#assistantHistoryButton').hidden = !historyStore;
 $('#clearAssistantReference').addEventListener('click', () => setAssistantReference(null));
 $('#assistantTranscript').addEventListener('click', (event) => {
+    const where = event.target.closest('[data-fork-where]')?.dataset.forkWhere;
+    if (!where || !assistantForkChoice) return;
+    if (where === 'cancel') { assistantForkChoice = null; renderAssistantTranscript(); return; }
+    forkAssistantConversation(assistantForkChoice.index, assistantForkChoice.including, where).catch((error) => renderAssistantGenerationError(error.message));
+});
+$('#openForkSource').addEventListener('click', () => {
+    openAssistantConversation($('#openForkSource').dataset.conversation).catch((error) => renderAssistantGenerationError(error.message));
+});
+$('#assistantTranscript').addEventListener('click', (event) => {
     const button = event.target.closest('[data-turn-action]');
     if (!button) return;
     const turn = assistantTurnHistory[Number(button.closest('[data-turn-index]')?.dataset.turnIndex)];
     if (!turn) return;
     const action = button.dataset.turnAction;
     if (action === 'askAbout') { setAssistantReference(turn); return; }
+    if (action === 'forkHere' || action === 'editResend') {
+        const index = Number(button.closest('[data-turn-index]').dataset.turnIndex);
+        assistantForkChoice = { index, including: action === 'forkHere' };
+        renderAssistantTranscript();
+        return;
+    }
     const done = action === 'applyAgain' ? reapplyAssistantProposal(turn)
         : action === 'changes' ? toggleAssistantTurnChanges(turn)
         : action === 'restoreBefore' ? restoreAssistantCheckpoint(turn, 'before')
@@ -18732,6 +18834,10 @@ async function checkPendingProjectOpen() {
     }
     if (pending.placeComponent) {
         await placeComponentFileFromPath(pending.placeComponent.path);
+        return;
+    }
+    if (pending.assistantFork && historyStore) {
+        await openAssistantForkWindow(pending.assistantFork);
         return;
     }
     if (pending.error) {

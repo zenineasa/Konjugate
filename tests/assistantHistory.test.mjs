@@ -108,3 +108,32 @@ test('Over its size limit, the history drops the least recently used checkpoints
     assert.deepEqual((await history.list()).map((item) => item.id), [current.id]);
     assert.ok((await history.usage()).bytes > 0, 'The conversation in use lost what it kept.');
 }));
+
+test('A fork holds its own copies of the turns and checkpoints up to where it was made, and outlives the conversation it came from', () => withHistory(async (history, directory) => {
+    const source = await history.create({ title: 'Heat exchanger' });
+    const beforeHash = await history.putSnapshot(source.id, { nodes: [], edges: [] });
+    const afterHash = await history.putSnapshot(source.id, { nodes: [{ id: 1 }], edges: [] });
+    const first = await history.appendTurn(source.id, { request: 'Make cells', outcome: { kind: 'applied', text: 'Applied: cells' }, before: beforeHash, after: afterHash });
+    const second = await history.appendTurn(source.id, { request: 'Counterflow', outcome: { kind: 'proposed', text: 'Proposed: counterflow' } });
+    await history.appendTurn(source.id, { request: 'Later', outcome: { kind: 'proposed', text: 'Proposed: later' } });
+
+    const fork = await history.fork(source.id, second.id);
+    assert.equal(fork.title, 'Heat exchanger (fork)');
+    assert.deepEqual(fork.forkedFrom, { conversationId: source.id, turnId: second.id, title: 'Heat exchanger' });
+    assert.deepEqual(fork.turns.map((turn) => turn.request), ['Make cells', 'Counterflow']);
+    const edit = await history.fork(source.id, second.id, { including: false });
+    assert.deepEqual(edit.turns.map((turn) => turn.request), ['Make cells'], 'Editing a turn forks from the turn before it.');
+    // A fork from before any turn still holds the model it starts from.
+    const fromTheStart = await history.fork(source.id, first.id, { including: false, startingFrom: beforeHash });
+    assert.deepEqual(fromTheStart.turns, []);
+    assert.deepEqual(await history.getSnapshot(fromTheStart.id, beforeHash), { nodes: [], edges: [] });
+
+    // The fork's checkpoints are its own: deleting where it came from leaves them, and its turns, whole.
+    await history.remove(source.id);
+    assert.deepEqual(await history.getSnapshot(fork.id, afterHash), { nodes: [{ id: 1 }], edges: [] });
+    assert.equal((await history.get(fork.id)).turns[0].id, first.id);
+    const continued = await history.appendTurn(fork.id, { request: 'Parallel instead', outcome: { kind: 'pending', text: '' } });
+    assert.equal(continued.parentId, second.id, 'A turn added to the fork does not follow the turn it was forked from.');
+    assert.deepEqual((await readdir(join(directory, fork.id, 'snapshots'))).sort(), [afterHash, beforeHash].sort().map((hash) => `${hash}.bin`));
+    await assert.rejects(history.fork(fork.id, 'no-such-turn'), { code: 'turnNotFound' });
+}));

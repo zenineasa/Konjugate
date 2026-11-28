@@ -438,7 +438,11 @@ contextBridge.exposeInMainWorld('assistantHistory', {
     usage: () => invokePlainly('assistantHistoryUsage'),
     // A checkpoint of the model (its document as JSON), kept in the conversation; resolves to its hash.
     putSnapshot: (id, documentJson) => invokePlainly('assistantHistoryPutSnapshot', id, documentJson),
-    getSnapshot: (id, hash) => invokePlainly('assistantHistoryGetSnapshot', id, hash)
+    getSnapshot: (id, hash) => invokePlainly('assistantHistoryGetSnapshot', id, hash),
+    // A fork of the conversation up to a turn (`including: false` for up to the turn before it), as a conversation of its own.
+    fork: (id, turnId, options) => invokePlainly('assistantHistoryFork', id, turnId, options),
+    // Continues a fork in a new window holding the model at the fork point.
+    forkInNewWindow: (options) => invokePlainly('assistantForkInNewWindow', options)
 });
 
 // Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).

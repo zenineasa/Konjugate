@@ -691,6 +691,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantHistoryOpen small { overflow: hidden; color: #6f858f; font-size: var(--assistant-caption); text-overflow: ellipsis; white-space: nowrap; }
 .assistantHistoryDelete { flex: none; width: 34px; color: #6f858f; background: transparent; border: 0; border-left: 1px solid #1e313b; font-size: 14px; cursor: pointer; }
 .assistantHistoryDelete:hover { color: #e09aa0; background: rgb(134 52 62 / 12%); }
+.assistantHistoryExport:hover { color: #74ddd3; background: rgb(66 201 188 / 10%); }
 .assistantHistoryEmpty { margin: 0; padding: 24px var(--assistant-gutter); color: #6f858f; font-size: var(--assistant-body); text-align: center; }
 .assistantHistoryEmpty[hidden] { display: none; }
 /* An earlier proposal, kept in the conversation, folded. */

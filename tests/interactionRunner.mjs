@@ -1336,8 +1336,17 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptOutcome').textContent`), /Discarded: /);
         assert.match(await evaluate(window, `document.querySelector('.assistantTurnReply summary').textContent`), /Proposal · \d+ operations/);
 
-        // Deleted with everything it kept: its folder is gone, and the panel no longer shows it.
+        // Exported as Markdown: a record of the request, what came of it, and the proposal's operations.
         await evaluate(window, `document.querySelector('#assistantHistoryButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-history-export="${summary.id}"]'))`, 'History offered no export.');
+        const { bytes } = await driver.captureExport(() => evaluate(window, `document.querySelector('[data-history-export="${summary.id}"]').click()`), { fileName: 'conversation.md' });
+        const markdown = bytes.toString('utf8');
+        assert.match(markdown, /^# Add a heat sink connected to the battery\.\n/);
+        assert.match(markdown, /## 1\. Add a heat sink connected to the battery\./);
+        assert.match(markdown, /\*\*Discarded\*\*: Add a heat sink with a temperature state\./);
+        assert.match(markdown, /The proposal had \d+ operations\./);
+
+        // Deleted with everything it kept: its folder is gone, and the panel no longer shows it.
         await waitFor(window, `Boolean(document.querySelector('[data-history-delete="${summary.id}"]'))`, 'History did not list the conversation to delete.');
         await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('[data-history-delete="${summary.id}"]').click(); })()`);
         await waitFor(window, `window.assistantHistory.list().then((list) => list.length === 0)`, 'Deleting did not remove the conversation.');

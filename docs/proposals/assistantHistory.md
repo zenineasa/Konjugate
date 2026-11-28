@@ -70,7 +70,7 @@ Keeping everything does not change what is sent: the current request, the model 
 2. **Built: checkpoints and diffs** (`src/modelDiff.mjs`). The snapshots before and after each applied proposal; **Restore …**; JSON diffs and **Show what changed**.
 3. **Built: reuse.** **Apply again** and **Ask about this**.
 4. **Built: forks.** **Edit and resend**, **Fork from here** in this window or a new one, each fork a conversation of its own holding copies of what it started from, and the link between a fork and where it came from.
-5. **Export** as Markdown.
+5. **Built: export** as Markdown (`src/assistantConversationMarkdown.mjs`, **⤓** in History).
 6. **Saved prompts.**
 
 Each stage has its own tests (the store's unit tests against a temporary folder, and interaction scenarios driven by the fake Ollama), and the full suites run once at the end.

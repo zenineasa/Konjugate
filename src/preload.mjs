@@ -442,7 +442,9 @@ contextBridge.exposeInMainWorld('assistantHistory', {
     // A fork of the conversation up to a turn (`including: false` for up to the turn before it), as a conversation of its own.
     fork: (id, turnId, options) => invokePlainly('assistantHistoryFork', id, turnId, options),
     // Continues a fork in a new window holding the model at the fork point.
-    forkInNewWindow: (options) => invokePlainly('assistantForkInNewWindow', options)
+    forkInNewWindow: (options) => invokePlainly('assistantForkInNewWindow', options),
+    // Saves the conversation as Markdown where the person chooses; { path, fileName }, or null if they cancelled.
+    exportMarkdown: (id) => invokePlainly('assistantHistoryExport', id)
 });
 
 // Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).

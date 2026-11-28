@@ -32,6 +32,7 @@ import { createAIConfigurationStore, createElectronCredentialVault } from './aiC
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createVendorToolProviders } from './aiVendorTools.mjs';
 import { createAssistantHistory } from './assistantHistory.mjs';
+import { conversationMarkdown } from './assistantConversationMarkdown.mjs';
 import { createLocalModels } from './localModels.mjs';
 import { ollamaDownloadPage } from './suggestedLocalModels.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
@@ -3589,6 +3590,20 @@ ipcMain.handle('assistantHistoryPutSnapshot', async (event, id, documentJson) =>
     return hash;
 });
 ipcMain.handle('assistantHistoryGetSnapshot', async (event, id, hash) => { requireProjectWindow(event); return assistantHistory.getSnapshot(id, hash); });
+// A conversation exported as Markdown, from what the history kept, to a file the person chooses.
+ipcMain.handle('assistantHistoryExport', async (event, id) => {
+    requireProjectWindow(event);
+    const conversation = await assistantHistory.get(id);
+    const safeName = conversation.title.replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 80) || 'Conversation';
+    const result = await dialog.showSaveDialog(getWindowFromEvent(event), {
+        title: 'Export conversation as Markdown', defaultPath: `${safeName}.md`, filters: [{ name: 'Markdown', extensions: ['md'] }]
+    });
+    if (result.canceled) return null;
+    let path = result.filePath;
+    if (!path.toLowerCase().endsWith('.md')) path += '.md';
+    await writeFile(path, conversationMarkdown(conversation, { formatTime: (time) => new Date(time).toLocaleString() }), 'utf8');
+    return { path, fileName: basename(path) };
+});
 ipcMain.handle('assistantHistoryFork', async (event, id, turnId, options) => {
     requireProjectWindow(event);
     return assistantHistory.fork(id, turnId, { including: options?.including !== false, title: typeof options?.title === 'string' ? options.title : '', startingFrom: options?.startingFrom ?? null });

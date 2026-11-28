@@ -11816,12 +11816,15 @@ function updateAssistantTurnOutcome(record, outcome, changes = {}) {
     if (!record || !assistantTurnHistory.includes(record)) return;
     record.outcome = outcome;
     if (changes.reply) record.reply = changes.reply;
+    if (changes.problems) record.problems = changes.problems;
     renderAssistantTranscript();
     const conversationId = assistantConversationId;
     const pending = assistantTurnWrites.get(record);
     if (!historyStore || !pending) return;
     assistantTurnWrites.set(record, pending
-        .then(() => record.turnId && historyStore.updateTurn(conversationId, record.turnId, { outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}) }))
+        .then(() => record.turnId && historyStore.updateTurn(conversationId, record.turnId, {
+            outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}), ...(changes.problems ? { problems: changes.problems } : {})
+        }))
         .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
 }
 
@@ -12034,7 +12037,14 @@ async function renderAssistantHistoryList() {
         remove.ariaLabel = `Delete the conversation “${conversation.title}”`;
         remove.title = 'Delete';
         remove.textContent = '×';
-        item.append(open, remove);
+        const exportButton = document.createElement('button');
+        exportButton.type = 'button';
+        exportButton.className = 'assistantHistoryDelete assistantHistoryExport';
+        exportButton.dataset.historyExport = conversation.id;
+        exportButton.ariaLabel = `Export the conversation “${conversation.title}” as Markdown`;
+        exportButton.title = 'Export as Markdown';
+        exportButton.textContent = '⤓';
+        item.append(open, exportButton, remove);
         return item;
     }));
     $('#assistantHistoryEmpty').hidden = conversations.length > 0;
@@ -12129,6 +12139,7 @@ function inspectAssistantEntity(entityId) {
 async function previewAssistantProposal(proposal, { recordOutcome = true } = {}) {
     if (activeResult) throw new Error('Close simulation results before preparing model changes.');
     let repairable = false;
+    let problems = [];
     const revision = ++assistantPreviewRevision;
     showAssistantPanel();
     try {
@@ -12142,7 +12153,7 @@ async function previewAssistantProposal(proposal, { recordOutcome = true } = {})
         if (!validation.available) throw new Error('The native validation engine is unavailable.');
         if (!validation.report.valid) {
             repairable = true;
-            const problems = showAssistantProblems(validation.report.issues, prepared.document);
+            problems = showAssistantProblems(validation.report.issues, prepared.document);
             const message = problems.length
                 ? `${problems.length === 1 ? 'A problem needs' : `${problems.length} problems need`} fixing before this can be applied: ${problems.join(' ')}`
                 : 'The native validator rejected this proposal.';
@@ -12173,10 +12184,10 @@ async function previewAssistantProposal(proposal, { recordOutcome = true } = {})
         $('#assistantError').hidden = false;
         $('#applyAssistantProposal').disabled = true;
         if (recordOutcome) {
-            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${error.message}`);
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${error.message}`, { problems });
             pendingAssistantTurnRecord = null;
         }
-        return { valid: false, error: error.message, repairable };
+        return { valid: false, error: error.message, repairable, problems };
     }
 }
 
@@ -15201,7 +15212,7 @@ async function requestAssistantProposal() {
         const preview = await previewAssistantProposal(response, { recordOutcome: false });
         if (preview.valid || preview.superseded || controller.signal.aborted) return preview;
         if (!preview.repairable) {
-            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${preview.error}`);
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${preview.error}`, { problems: preview.problems ?? [] });
             pendingAssistantTurnRecord = null;
             return preview;
         }
@@ -15283,6 +15294,13 @@ $('#assistantHistorySearch').addEventListener('input', () => {
 $('#assistantHistoryList').addEventListener('click', (event) => {
     const open = event.target.closest('[data-history-open]');
     if (open) { openAssistantConversation(open.dataset.historyOpen).catch((error) => renderAssistantGenerationError(error.message)); return; }
+    const exportButton = event.target.closest('[data-history-export]');
+    if (exportButton) {
+        historyStore.exportMarkdown(exportButton.dataset.historyExport)
+            .then((saved) => { if (saved) $('#statusText').textContent = `Conversation exported · ${saved.fileName}`; })
+            .catch((error) => console.warn('[assistant] exporting a conversation:', error));
+        return;
+    }
     const remove = event.target.closest('[data-history-delete]');
     if (remove) deleteAssistantConversation(remove.dataset.historyDelete).catch((error) => console.warn('[assistant] deleting a conversation:', error));
 });

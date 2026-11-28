@@ -68,7 +68,7 @@ Keeping everything does not change what is sent: the current request, the model 
 
 1. **Built: the store and History.** `src/assistantHistory.mjs` in the main process (a folder for each conversation, its turns, its compressed snapshots, the size limit, deleting a conversation and clearing all), the IPC for it, every turn kept as it happens, **History** in the panel, reopening and continuing a conversation, **Delete conversation**, and **Settings › Model assistant › History** with **Clear history**.
 2. **Built: checkpoints and diffs** (`src/modelDiff.mjs`). The snapshots before and after each applied proposal; **Restore …**; JSON diffs and **Show what changed**.
-3. **Reuse.** **Apply again** and **Ask about this**.
+3. **Built: reuse.** **Apply again** and **Ask about this**.
 4. **Forks.** **Edit and resend**, **Fork from here** in this window or a new one, each fork a conversation of its own holding copies of what it started from, and the link between a fork and where it came from.
 5. **Export** as Markdown.
 6. **Saved prompts.**

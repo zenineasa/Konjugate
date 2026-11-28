@@ -410,6 +410,7 @@ export async function runInteractionTests(driver) {
             'a proposal the engine rejects goes back to the model to fix before it is shown',
             'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
             'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
+            'an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1389,6 +1390,41 @@ export async function runInteractionTests(driver) {
         await new Promise((resolve) => setTimeout(resolve, 300));
         assert.equal(await nodeNames(), 1, 'Declining the restore changed the model.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request', async () => {
+        // The conversation from the scenario before: its last turn applied a heat sink.
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="applyAgain"]'))`, 'An earlier proposal offered no Apply again.');
+        const turnsBefore = await evaluate(window, `window.konjugateAssistant.getTurnHistory().length`);
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="applyAgain"]').click()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'Applying an earlier proposal again did not prepare it.');
+        assert.equal(await evaluate(window, `window.konjugateAssistant.getTurnHistory().length`), turnsBefore + 1, 'Applying again was not a turn of its own.');
+        assert.match(await evaluate(window, `window.konjugateAssistant.getTurnHistory().at(-1).request`), /^Apply again: Add a heat sink/);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantProposalNote').hidden`), true, 'A proposal made for this project was warned about.');
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click()`);
+
+        // Made for another project: the panel says its ids may be other things here.
+        const title = await evaluate(window, `document.querySelector('.documentTitle').textContent`);
+        await evaluate(window, `document.querySelector('.documentTitle').textContent = 'Another project'`);
+        await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptTurn [data-turn-action="applyAgain"]')].at(-2).click()`);
+        await waitFor(window, `!document.querySelector('#assistantProposalNote').hidden`, 'A proposal made for another project was not warned about.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalNote').textContent`), /made for “.+”.*by their ids.*Ask about this/);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('.documentTitle').textContent = ${JSON.stringify(title)}`);
+
+        // Referred to: shown above the prompt, sent to the model with the request, and kept with the turn.
+        await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptTurn [data-turn-action="askAbout"]')].at(-1).click()`);
+        assert.equal(await isRenderedVisible(window, '#assistantReference'), true, 'The proposal referred to was not shown above the prompt.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantReference').textContent`), /About Add a heat sink/);
+        const chatsBefore = fakeOllama.requests.filter((request) => request.path === '/api/chat').length;
+        await evaluate(window, `(() => { document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.'; document.querySelector('#assistantPromptForm').requestSubmit(); })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The request referring to a proposal was not answered.', 20000);
+        const sent = fakeOllama.requests.filter((request) => request.path === '/api/chat')[chatsBefore].body.messages.at(-1).content;
+        assert.match(sent, /REFERENCE PROPOSAL: .*Adapt it to the current model context/);
+        assert.match(sent, /"summary":"Add a heat sink/);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantReference').hidden`), true, 'The reference stayed after the request was sent.');
+        assert.match(await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptReference')].at(-1)?.textContent ?? ''`), /^About: Add a heat sink/);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {

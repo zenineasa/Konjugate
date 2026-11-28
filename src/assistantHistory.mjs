@@ -43,6 +43,8 @@ function cleanTurn(input = {}) {
         problems: Array.isArray(input.problems) ? input.problems.filter((item) => typeof item === 'string').slice(0, 50).map((item) => item.slice(0, 1000)) : [],
         model: { configuration: text(input.model?.configuration, 200), provider: text(input.model?.provider, 100), model: text(input.model?.model, 200) },
         project: input.project && typeof input.project === 'object' ? { title: text(input.project.title, 300), path: text(input.project.path, 2000) } : null,
+        // An earlier proposal this request drew on (Ask about this), by its summary.
+        reference: input.reference && typeof input.reference === 'object' ? { summary: text(input.reference.summary, 500) } : null,
         before: typeof input.before === 'string' && hashPattern.test(input.before) ? input.before : null,
         after: typeof input.after === 'string' && hashPattern.test(input.after) ? input.after : null
     };

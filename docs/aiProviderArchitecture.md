@@ -172,6 +172,10 @@ A provider that judges a request ambiguous or missing required information may r
 
 The registry's own repair (below) sees only what it can check itself. The renderer prepares the proposal and runs the native validator afterwards; when either rejects it, it asks once more, in the same request, with `generateProposal(…, repair)` (`{ error, proposal }`), which the main process passes to the registry as `initialRepair`: the first attempt then already carries the correction, and the progress says the model is fixing the proposal (`fixingProblems`). The error sent is the problems as the panel lists them, each naming the node or relationship it is about (for a relationship to a node with no states, the validator's own message names the node). Whatever comes back is prepared and validated again and shown as it is; there is no second round. A proposal the native validator could not check at all (no engine) is not sent back.
 
+## A reference to an earlier proposal
+
+`generateProposal(…, repair, reference)` takes an earlier proposal (`{ summary, assumptions, operations }`, at most 60,000 characters as JSON) the person asked the model to draw on (**Ask about this** in the panel). The main process appends it to the request, after the request's own 8,000-character check, as a `REFERENCE PROPOSAL` the model is told to adapt to the current model context: to refer to the entities the context has, by their own ids, to use temporary refs for anything new, and to copy no id the context does not have. A repair round sends the same reference again. The history keeps the turn's reference by its summary.
+
 ## Automatic repair
 
 Provider output is untrusted. When a proposal is malformed or fails structural validation, the registry can send the provider:

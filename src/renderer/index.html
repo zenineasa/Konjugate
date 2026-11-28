@@ -997,6 +997,7 @@
                 </div>
                 <div id="assistantProposal" hidden>
                     <section class="assistantSummary"><strong id="assistantProposalSummary">Proposed model changes</strong><p id="assistantProposalStatus">Checking the proposal…</p></section>
+                    <p id="assistantProposalNote" class="assistantProposalNote" hidden></p>
                     <section id="assistantProblemsSection" class="assistantProblems" hidden><h3>Problems to fix</h3><ul id="assistantProblems"></ul></section>
                     <section id="assistantAssumptionsSection" hidden><h3>Assumptions</h3><ul id="assistantAssumptions"></ul></section>
                     <section><h3>Changes</h3><ol id="assistantChanges"></ol></section>
@@ -1034,6 +1035,7 @@
             </section>
             <form id="assistantPromptForm" class="assistantPromptForm">
                 <label for="assistantPrompt">What should change?</label>
+                <p id="assistantReference" class="assistantReference" hidden><span>About <b id="assistantReferenceSummary"></b></span><button id="clearAssistantReference" type="button" aria-label="Stop referring to that proposal">×</button></p>
                 <textarea id="assistantPrompt" rows="2" placeholder="Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K."></textarea>
                 <div><select id="assistantConfiguration" aria-label="Assistant model configuration"></select><button id="manageAssistantConfigurations" class="assistantManageConfigurations" type="button" aria-label="Manage model configurations">⚙</button><button id="generateAssistantProposal" class="doneButton" type="submit">Generate proposal</button></div>
             </form>

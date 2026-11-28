@@ -3652,7 +3652,17 @@ ipcMain.handle('aiCancelSignIn', async (event) => {
     return true;
 });
 
-ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history, repair }) => {
+// An earlier proposal the person asked the model to draw on (Ask about this), told to the model after the request: possibly made
+// for another model, so to be adapted to this one, never copied.
+const maximumReferenceCharacters = 60_000;
+function requestWithReference(request, reference) {
+    if (reference === undefined || reference === null) return request;
+    const body = JSON.stringify({ summary: String(reference.summary ?? '').slice(0, 500), assumptions: Array.isArray(reference.assumptions) ? reference.assumptions.filter((item) => typeof item === 'string').slice(0, 20) : [], operations: Array.isArray(reference.operations) ? reference.operations : [] });
+    if (body.length > maximumReferenceCharacters) throw new Error('That proposal is too large to refer to. Ask about a smaller one, or describe the change.');
+    return `${request}\n\nREFERENCE PROPOSAL: an earlier proposal the person wants this request to draw on, possibly made for another model. Adapt it to the current model context: refer to the entities the model context has, by their own ids, and use temporary refs for anything new. Do not copy an id from it that the model context does not have.\n${body}`;
+}
+
+ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history, repair, reference }) => {
     requireProjectWindow(event);
     if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');
     if (typeof request !== 'string' || !request.trim() || request.length > 8000) throw new Error('The AI request must contain between 1 and 8,000 characters.');
@@ -3688,7 +3698,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     activeAIRequests.set(key, { owner: event.sender, controller });
     try {
         const proposal = await aiProviderRegistry.generate({
-            ...resolved, context, request: request.trim(), history, initialRepair: repair ?? null, signal: controller.signal,
+            ...resolved, context, request: requestWithReference(request.trim(), reference), history, initialRepair: repair ?? null, signal: controller.signal,
             onProgress: (progress) => {
                 watchdog.touch();
                 progressToPanel.push(progress);

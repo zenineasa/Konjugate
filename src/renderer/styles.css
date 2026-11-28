@@ -654,6 +654,27 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantPanel.collapsed > header strong { font-size: var(--assistant-emphasis); }
 .assistantPanel.collapsed > header small { display: block; }
 
+/* Docked: full height against the right edge, under the toolbars; the inspector opens over it, and closing that shows it again. */
+.assistantPanel.docked { top: calc(var(--title-height) + var(--tools-height)) !important; right: 0 !important; bottom: 0; left: auto !important; z-index: 15; width: var(--assistant-docked-width, min(380px, 45vw)); height: auto; min-height: 0; max-width: 60vw; max-height: none; border-width: 0 0 0 1px; border-radius: 0; box-shadow: -12px 0 30px rgb(0 0 0 / 30%); }
+.assistantPanel.docked.collapsed { bottom: auto; border-bottom-width: 1px; }
+.assistantPanel.docked > header { cursor: default; }
+.assistantPanel.docked > header .contextKicker { display: none; }
+/* The edges and corners that resize it: every one when floating, the left edge when docked, none when collapsed. */
+.assistantResize { position: absolute; z-index: 4; }
+.assistantResize[data-edge="n"] { top: 0; right: 12px; left: 12px; height: 5px; cursor: ns-resize; }
+.assistantResize[data-edge="s"] { right: 12px; bottom: 0; left: 12px; height: 5px; cursor: ns-resize; }
+.assistantResize[data-edge="e"] { top: 12px; right: 0; bottom: 12px; width: 5px; cursor: ew-resize; }
+.assistantResize[data-edge="w"] { top: 12px; bottom: 12px; left: 0; width: 5px; cursor: ew-resize; }
+.assistantResize:is([data-edge="nw"], [data-edge="ne"], [data-edge="sw"], [data-edge="se"]) { width: 14px; height: 14px; }
+.assistantResize[data-edge="nw"] { top: 0; left: 0; cursor: nwse-resize; }
+.assistantResize[data-edge="se"] { right: 0; bottom: 0; cursor: nwse-resize; }
+.assistantResize[data-edge="ne"] { top: 0; right: 0; cursor: nesw-resize; }
+.assistantResize[data-edge="sw"] { bottom: 0; left: 0; cursor: nesw-resize; }
+.assistantPanel.docked .assistantResize[data-edge="w"] { top: 0; bottom: 0; width: 6px; }
+.assistantPanel.collapsed .assistantResize, .assistantPanel.docked .assistantResize:not([data-edge="w"]) { display: none; }
+.assistantPanel.resizing, .assistantPanel.resizing * { user-select: none; }
+.assistantResize:hover, .assistantPanel.resizing .assistantResize:active { background: rgb(66 201 188 / 18%); }
+
 /* The conversation: earlier turns, then the reply to the latest request, then a request under way. */
 .assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
 .assistantBody > * { flex: none; }
@@ -2119,6 +2140,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
     /* A card placed by script (a position from where the person last put it, or from the button that opened it) has no use for that here:
        on a phone it is docked, so the inline left and top are overridden. */
     .assistantPanel { left: 10px !important; top: calc(var(--title-height) + var(--tools-height) + 10px) !important; width: calc(100% - 20px); height: calc(100% - var(--title-height) - var(--tools-height) - 24px); }
+    .assistantResize { display: none; }
     .contextCard.diagnosticsPanel { inset: auto 0 var(--sheet-floor, 0px) 0 !important; width: auto !important; max-height: calc(62% - var(--sheet-floor, 0px)); }
     /* The two cards over the results bar take the width they have, not 285 or 310 pixels pinned to a corner. */
     :is(.executionSummaryCard, .stabilityFindingsCard) { right: 10px; left: 10px; width: auto; max-height: calc(100% - 190px); overflow-y: auto; }

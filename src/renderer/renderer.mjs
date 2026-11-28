@@ -30,6 +30,7 @@ import { createSettingsSheet } from './settingsSheet.mjs';
 import { createLocalModelsSection } from './localModelsSection.mjs';
 import { createAssistantSignInSection } from './assistantSignInSection.mjs';
 import { createAssistantToolsSection } from './assistantToolsSection.mjs';
+import { createAssistantPanelLayout } from './assistantPanelLayout.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -11385,6 +11386,7 @@ function showAssistantPanel() {
     $('#validationSummary').ariaExpanded = 'false';
     $('#assistantPanel').hidden = false;
     $('#assistantButton').ariaExpanded = 'true';
+    assistantPanelLayout.apply();
     if (!assistantHasBeenPositioned) positionAssistantPanel();
     else clampAssistantPanel();
     requestAnimationFrame(avoidAssistantInspectorOverlap);
@@ -11433,7 +11435,7 @@ function positionAssistantPanel() {
 
 function clampAssistantPanel() {
     const panel = $('#assistantPanel');
-    if (panel.hidden) return;
+    if (panel.hidden || panel.classList.contains('docked')) return;
     const rect = panel.getBoundingClientRect();
     setAssistantPosition(rect.left, rect.top);
 }
@@ -11441,7 +11443,8 @@ function clampAssistantPanel() {
 function avoidAssistantInspectorOverlap() {
     const panel = $('#assistantPanel');
     const inspector = visibleModelInspector();
-    if (panel.hidden || !inspector) return;
+    // Docked, the inspector opens over the panel instead, and closing it shows the panel again.
+    if (panel.hidden || !inspector || panel.classList.contains('docked')) return;
     const panelRect = panel.getBoundingClientRect();
     const inspectorRect = inspector.getBoundingClientRect();
     const overlaps = panelRect.right > inspectorRect.left && panelRect.left < inspectorRect.right &&
@@ -11467,7 +11470,7 @@ function installAssistantDragging() {
     const header = $('#assistantPanelHeader');
     let drag = null;
     header.addEventListener('pointerdown', (event) => {
-        if (event.button !== 0 || event.target.closest('button')) return;
+        if (event.button !== 0 || event.target.closest('button') || panel.classList.contains('docked')) return;
         const rect = panel.getBoundingClientRect();
         drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
         header.setPointerCapture(event.pointerId);
@@ -11498,6 +11501,20 @@ function scrollAssistantToEnd() {
         body.scrollTop = body.scrollHeight;
     });
 }
+
+// Floating or docked, and its size (src/renderer/assistantPanelLayout.mjs). Going back to floating, or resetting the size, puts
+// the panel in its own place again.
+const assistantPanelLayout = createAssistantPanelLayout({
+    panel: $('#assistantPanel'),
+    header: $('#assistantPanelHeader'),
+    dockButton: $('#dockAssistantPanel'),
+    canvasTop: () => canvas.getBoundingClientRect().top,
+    setPosition: (left, top) => setAssistantPosition(left, top),
+    isPhone: () => matchMedia('(max-width: 700px), (pointer: coarse) and (max-height: 500px)').matches,
+    onModeChange: (mode) => {
+        if (mode === 'floating' && !$('#assistantPanel').hidden) requestAnimationFrame(positionAssistantPanel);
+    }
+});
 
 function renderAssistantProposal(proposal, prepared) {
     $('#assistantClarification').hidden = true;

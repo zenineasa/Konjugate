@@ -405,6 +405,7 @@ export async function runInteractionTests(driver) {
             'local assistant prepares, validates and applies one undoable transaction',
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
+            'the assistant panel resizes from its edges, docks to the side and floats again',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1248,6 +1249,70 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
+
+    await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {
+        const rectOf = () => evaluate(window, `(() => { const r = document.querySelector('#assistantPanel').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; })()`);
+        // The panel settles (placed, then its configurations listed) a moment after it opens: wait until it stops moving.
+        const settled = async () => {
+            let last = '';
+            for (let attempt = 0; attempt < 40; attempt += 1) {
+                const now = JSON.stringify(await rectOf());
+                if (now === last) return JSON.parse(now);
+                last = now;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            return JSON.parse(last);
+        };
+        const drag = async (from, to) => {
+            await window.mouseMove(from);
+            await window.mouseDown(from);
+            await window.mouseMove({ x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 });
+            await window.mouseMove(to);
+            await window.mouseUp(to);
+            // sendInputEvent does not wait for the page to handle what it sends: give the drag time to land before measuring.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+        };
+        await evaluate(window, `localStorage.removeItem('konjugate.assistantPanelLayout')`);
+        if (await evaluate(window, `document.querySelector('#assistantPanel').hidden`)) await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `!document.querySelector('#assistantPanel').hidden`, 'The assistant did not open.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantPanel').classList.contains('docked')`), false, 'A large window keeps the panel floating.');
+
+        // Floating: the left edge widens it leftwards and keeps its right edge; the size is kept for next time.
+        const before = await settled();
+        await drag({ x: before.left + 2, y: before.top + before.height / 2 }, { x: before.left - 118, y: before.top + before.height / 2 });
+        const wider = await rectOf();
+        assert.ok(Math.abs(wider.width - (before.width + 120)) < 4, `The left edge did not widen the panel (${before.width} → ${wider.width}).`);
+        assert.ok(Math.abs(wider.right - before.right) < 2, 'Widening from the left edge moved its right edge.');
+        assert.ok(Math.abs(JSON.parse(await evaluate(window, `localStorage.getItem('konjugate.assistantPanelLayout')`)).width - wider.width) < 2, 'The new size was not kept.');
+        // The bottom-right corner sets both at once (grabbed inside its rounded corner, which clips what is outside the curve).
+        await drag({ x: wider.right - 6, y: wider.bottom - 6 }, { x: wider.right - 66, y: wider.bottom - 86 });
+        const smaller = await rectOf();
+        assert.ok(Math.abs(smaller.width - (wider.width - 60)) < 4 && Math.abs(smaller.height - (wider.height - 80)) < 4, `The corner did not resize both ways (${JSON.stringify(wider)} → ${JSON.stringify(smaller)}).`);
+        // A double-click on the header gives back its own size.
+        await evaluate(window, `document.querySelector('#assistantPanelHeader').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+        await waitFor(window, `Math.abs(document.querySelector('#assistantPanel').getBoundingClientRect().width - ${before.width}) < 2`, 'A double-click on the header did not reset the size.');
+
+        // Docked: full height against the right edge under the toolbars, its width dragged from its left edge.
+        await evaluate(window, `document.querySelector('#dockAssistantPanel').click()`);
+        await waitFor(window, `document.querySelector('#assistantPanel').classList.contains('docked')`, 'The dock button did not dock the panel.');
+        const docked = await settled();
+        const canvasTop = await evaluate(window, `document.querySelector('#canvas').getBoundingClientRect().top`);
+        const innerWidth = await evaluate(window, `window.innerWidth`);
+        assert.ok(Math.abs(docked.right - innerWidth) < 2, 'A docked panel is not against the right edge.');
+        assert.ok(Math.abs(docked.top - canvasTop) < 2, 'A docked panel does not start under the toolbars.');
+        assert.equal(await isRenderedVisible(window, '#assistantPanelHeader .contextKicker'), false, 'Docked, the header keeps to one line.');
+        await drag({ x: docked.left + 2, y: docked.top + docked.height / 2 }, { x: docked.left - 98, y: docked.top + docked.height / 2 });
+        assert.ok(Math.abs((await rectOf()).width - (docked.width + 100)) < 4, 'The docked panel\'s left edge did not widen it.');
+        assert.equal(JSON.parse(await evaluate(window, `localStorage.getItem('konjugate.assistantPanelLayout')`)).mode, 'docked', 'Docking was not kept as the choice.');
+
+        // Floating again, in its own place.
+        await evaluate(window, `document.querySelector('#dockAssistantPanel').click()`);
+        await waitFor(window, `!document.querySelector('#assistantPanel').classList.contains('docked')`, 'The dock button did not float the panel again.');
+        await waitFor(window, `Math.abs(document.querySelector('#assistantPanel').getBoundingClientRect().right - (window.innerWidth - 10)) < 3`, 'The floating panel did not go back to its place.');
+
+        await evaluate(window, `localStorage.removeItem('konjugate.assistantPanelLayout')`);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
     await run('dismissing a clarification and starting a new conversation both clear it without submitting', async () => {
         await evaluate(window, `document.querySelector('#assistantButton').click()`);
         await evaluate(window, `window.konjugateAssistant.resetConversation()`);
@@ -9495,6 +9560,17 @@ export async function runInteractionTests(driver) {
         const onScreen = (element) => `(() => { const element = ${element}; return Boolean(element) && getComputedStyle(element.parentElement).display !== 'none' && getComputedStyle(element).visibility !== 'hidden'; })()`;
         const detailShown = (element) => evaluate(window, `getComputedStyle(${element}.querySelector('small')).display !== 'none'`);
         const near = (a, b) => a.every((value, index) => Math.abs(value - b[index]) < 1e-6);
+        // The panel settles (placed, then its configurations listed) a moment after it opens: wait until it stops moving.
+        const settled = async () => {
+            let last = '';
+            for (let attempt = 0; attempt < 40; attempt += 1) {
+                const now = JSON.stringify(await rectOf());
+                if (now === last) return JSON.parse(now);
+                last = now;
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+            return JSON.parse(last);
+        };
         const drag = async (from, to) => {
             await window.mouseMove(from);
             await window.mouseDown(from, { button: 'left', clickCount: 1 });

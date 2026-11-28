@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cstdlib>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -203,13 +204,56 @@ struct MsvcEnvironmentFlags {
     std::vector<std::string> libpathFlags;
 };
 
+// A compiler named without a folder ("cl.exe", as a Developer Command Prompt puts it on PATH) found where Windows would run it from:
+// the first PATH folder that has it. Empty when none does.
+std::filesystem::path findOnPath(const std::string& name) {
+    std::filesystem::path given(name);
+    if (given.is_absolute() || given.has_parent_path()) return given;
+    const char* path = std::getenv("PATH");
+    if (!path) return {};
+    std::string folders(path);
+    std::size_t start = 0;
+    while (start <= folders.size()) {
+        const auto end = folders.find(';', start);
+        const auto folder = folders.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!folder.empty()) {
+            for (const auto& candidate : {std::filesystem::path(folder) / given, std::filesystem::path(folder) / (name + ".exe")}) {
+                std::error_code error;
+                if (std::filesystem::is_regular_file(candidate, error)) return candidate;
+            }
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return {};
+}
+
+// MSVC toolset folders (VC\Tools\MSVC\14.52.37025), newest first: numbers compared as numbers.
+bool newerToolset(const std::filesystem::path& one, const std::filesystem::path& other) {
+    const auto parts = [](const std::string& text) {
+        std::vector<long> numbers;
+        std::size_t start = 0;
+        while (start < text.size()) {
+            const auto end = text.find('.', start);
+            try { numbers.push_back(std::stol(text.substr(start, end == std::string::npos ? std::string::npos : end - start))); } catch (...) { numbers.push_back(-1); }
+            if (end == std::string::npos) break;
+            start = end + 1;
+        }
+        return numbers;
+    };
+    return parts(one.filename().string()) > parts(other.filename().string());
+}
+
+// The headers and libraries of the toolset of the cl.exe that runs: found from where that cl.exe is (on PATH when it is named without a
+// folder), else from the newest toolset installed. Taking the first toolset folder listed instead once gave Visual Studio 18's cl.exe
+// the headers of an older toolset installed beside it (14.29's <format>, error C2440), on GitHub's Windows runners (2.1.3).
 MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
     MsvcEnvironmentFlags result;
     std::vector<std::filesystem::path> includeDirs;
     std::vector<std::filesystem::path> libDirs;
 
     try {
-        std::filesystem::path p(compilerPath);
+        std::filesystem::path p = findOnPath(compilerPath);
         if (p.is_absolute() && std::filesystem::exists(p)) {
             auto msvcRoot = p.parent_path();
             for (int i = 0; i < 3 && msvcRoot.has_parent_path(); ++i) {
@@ -240,10 +284,14 @@ MsvcEnvironmentFlags getMsvcEnvironmentFlags(const std::string& compilerPath) {
                         if (!edEntry.is_directory()) continue;
                         auto msvcTools = edEntry.path() / "VC" / "Tools" / "MSVC";
                         if (std::filesystem::exists(msvcTools)) {
+                            std::vector<std::filesystem::path> toolsets;
                             for (const auto& verEntry : std::filesystem::directory_iterator(msvcTools)) {
-                                if (!verEntry.is_directory()) continue;
-                                auto inc = verEntry.path() / "include";
-                                auto lib = verEntry.path() / "lib" / "x64";
+                                if (verEntry.is_directory()) toolsets.push_back(verEntry.path());
+                            }
+                            std::sort(toolsets.begin(), toolsets.end(), newerToolset);
+                            for (const auto& toolset : toolsets) {
+                                auto inc = toolset / "include";
+                                auto lib = toolset / "lib" / "x64";
                                 if (includeDirs.empty() && std::filesystem::exists(inc / "cstddef")) {
                                     includeDirs.push_back(inc);
                                 }

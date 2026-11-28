@@ -41,6 +41,19 @@ async function evaluate(window, expression) {
     return window.evaluate(expression);
 }
 
+// Clicks a button that closes its own window (a code editor's Cancel or close), on the window's next turn, so the script answers
+// before the window goes: clicked within the script, the window could close before its answer came back, and the click then failed
+// with "The window closed before the script answered" (the packaged app on a fast Mac, 2.1.1 and 2.1.3's release runs). The caller
+// waits for the window to close.
+async function clickToClose(window, selector) {
+    const found = await evaluate(window, `(() => {
+        const button = document.querySelector(${JSON.stringify(selector)});
+        if (button) setTimeout(() => button.click(), 0);
+        return Boolean(button);
+    })()`);
+    if (!found) throw new Error(`There is no ${selector} to close the window with.`);
+}
+
 // A renderer-side exception thrown synchronously inside a DOM event listener (e.g. from a
 // synthetic element.click()) never rejects executeJavaScript's promise -- the browser's event
 // dispatch loop swallows it and only reports it to the console as "Uncaught ...". Any assertion
@@ -424,7 +437,24 @@ export async function runInteractionTests(driver) {
     const scenariosSeen = new Set();
     let startedAt = 0;
     const scenarioMinutes = Number(process.env.KONJUGATE_INTERACTION_SCENARIO_MINUTES) || 15;
+    // The scenarios that run an FMI Reference FMU on its shipped binary (tests/engine/fixtures/referenceFmuFidelity.mjs): its release 0.0.42
+    // carries no binary for an Intel Mac, where Konjugate would first ask to build each from its sources, which these scenarios do not
+    // answer ("an FMU that carries only its sources is built here…" is the one that does).
+    const referenceFmuScenarios = new Set([
+        'an FMU that refuses a value says which node, which input and the value it started from',
+        'an FMU parameter that reads nothing keeps the FMU\'s own start value, and the file says it relies on it',
+        'a node built from an FMU runs and is plotted with no wiring at all',
+        'Extensions does not install an FMU: picked or dropped there, it says to use Add › FMU…, and its button does',
+        'an FMU is added from Add › FMU…, from the library and by a drop, runs in five actions, and Extensions lists none',
+        'Settings › Providers lists the FMUs in the library, which open model uses each, and removes one none uses',
+        'FMUs added from the menu to a small model stay in view, with their labels',
+        'two FMUs are connected by the picker, the connection is drawn, and it is read a step late',
+        'the Run dialog says when an FMU\'s step is not a whole number of its own, fixes it, and suggests the FMU\'s own run',
+        'a project keeps its FMU in its file, runs where the library lacks it, links it instead, and replaces it',
+    ]);
+    const referenceFmusHaveNoBinary = process.platform === 'darwin' && process.arch === 'x64';
     const run = async (name, task, { skip } = {}) => {
+        if (!skip && referenceFmusHaveNoBinary && referenceFmuScenarios.has(name)) skip = 'the FMI Reference FMUs 0.0.42 have no binary for an Intel Mac, and this scenario runs one as shipped';
         scenariosSeen.add(name);
         if (only?.length && !only.some((fragment) => name.includes(fragment))) return;
         const took = () => {
@@ -2571,7 +2601,7 @@ export async function runInteractionTests(driver) {
         while (driver.allHandles().includes(editor) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
         assert.ok(!driver.allHandles().includes(editor), 'The code editor window did not close.');
     };
-    const closeProgramEditor = (editor) => evaluate(editor, programEditorWeb ? `document.querySelector('.webProgramEditorClose').click()` : `document.querySelector('#close').click()`);
+    const closeProgramEditor = (editor) => clickToClose(editor, programEditorWeb ? '.webProgramEditorClose' : '#close');
     const setEditorSource = (editor, source) => evaluate(editor, `(() => {
         const view = window.__providerEditorView;
         view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: ${JSON.stringify(source)} } });
@@ -2606,7 +2636,7 @@ export async function runInteractionTests(driver) {
         await setEditorSource(editor, source);
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await waitFor(window, `${edgeCardSource} === ${JSON.stringify(source)}`, 'Apply did not reach the card.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programPreviewLine code').textContent`), source);
 
@@ -2627,7 +2657,7 @@ export async function runInteractionTests(driver) {
         await chooseTemplate(editor, 'blankRelationship');
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await waitFor(window, `${edgeCardSource} !== ${JSON.stringify(source)}`, 'The blank template did not reach the card.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         const regeneratedSource = await evaluate(window, edgeCardSource);
         assert.match(regeneratedSource, /k::Output gradient\{this, "gradient"\};/);
@@ -2693,7 +2723,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `window.__debugProgramCards.edge() === ${JSON.stringify(validCpp)}`,
             'Applying from the provider editor window did not update the relationship editor.');
 
-        await evaluate(editorWindow, `document.querySelector('#close').click()`);
+        await clickToClose(editorWindow, '#close');
         await new Promise((resolve) => setTimeout(resolve, 200));
         assert.ok(!driver.allHandles().includes(editorWindow), 'The provider editor window did not close.');
     }, { skip: !driver.capabilities.addons && 'the provider source editor window has no web-edition equivalent' });
@@ -2742,7 +2772,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorTest').hidden`), false, 'Test is offered once converted.');
 
         // Cancel closes without asking, and the card keeps what it had.
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         assert.equal(await evaluate(window, `window.__debugProgramCards.edge()`), original);
     });
@@ -2759,7 +2789,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(editor, `document.querySelector('[data-side-tab="test"]').classList.contains('active')`), true, 'Test did not show its tab.');
         assert.deepEqual(await evaluate(editor, `[...document.querySelectorAll('#programEditorTestChecks li')].map((check) => check.textContent)`),
             ['✓ ports', '✓ outputs', '✓ purity'], 'A program with no memory has no memory round trip to check.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
     });
@@ -2796,7 +2826,7 @@ export async function runInteractionTests(driver) {
         const before = await evaluate(editor, `window.__providerEditorView.state.doc.toString()`);
         await evaluate(editor, `document.querySelector('#programEditorConvertCancel').click()`);
         assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.toString()`), before);
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
     });
 
@@ -2848,7 +2878,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number`), line);
         await waitFor(editor, `[...document.querySelectorAll('.cm-lintRange-error')].some((mark) => mark.closest('.cm-line') === document.querySelectorAll('.cm-content .cm-line')[${line - 1}])`,
             'Test\'s problem was not underlined on its line.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
     });
 
@@ -2873,7 +2903,7 @@ export async function runInteractionTests(driver) {
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').classList.contains('problem')`, 'The card did not show the problem lint found.', 60000);
         assert.equal(await evaluate(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent`), `1 problem · line ${brokenLine} ›`);
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         editor = await openProgramEditor('#editEdgeProviderSection .programStatus');
         await waitFor(editor, `${cursorLine} === ${brokenLine}`, 'The status did not open the editor at the problem\'s line.');
@@ -2883,7 +2913,7 @@ export async function runInteractionTests(driver) {
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await evaluate(editor, `document.querySelector('#programEditorTest').click()`);
         await waitFor(window, `document.querySelector('#editEdgeProviderSection .programStatus').textContent === '✓ passed Test'`, 'The card did not say Test passed.', 90000);
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
     });
@@ -2933,7 +2963,7 @@ export async function runInteractionTests(driver) {
         await waitFor(editor, `window.__programLintStats.cacheHits > ${beforeReturn.cacheHits}`, 'Going back to a checked source did not use the kept answer.', lintTimeout);
         assert.equal((await stats()).started, beforeReturn.started, 'A check was started for a source already checked.');
 
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
     });
@@ -2995,7 +3025,7 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `window.__debugProject.serialize().edges.find((edge) => edge.name === 'Conduction').implementation.bindings.length === 1`, 'Not bound did not unbind.');
         await waitFor(editor, `Boolean(${row('cold')}?.querySelector('.portBindButton.unbound'))`, 'Ports did not show cold unbound.');
         await bind('cold', 'target.temperature');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
 
         // The run reads what Ports bound: the equation's answer, the cold body at 319.93 K after 60 s.
@@ -3038,7 +3068,7 @@ export async function runInteractionTests(driver) {
         await waitFor(editor, `[...document.querySelectorAll('#programEditorTestHints li')].some((hint) => hint.textContent.includes('‘cold’ moves no output'))`,
             `Test did not say cold moves no output: ${await evaluate(editor, `document.querySelector('#programEditorTestHints').textContent`)}`, 90000);
         assert.equal(await evaluate(editor, `[...document.querySelectorAll('#programEditorTestHints li')].some((hint) => hint.textContent.includes('‘hot’'))`), false, 'hot moves the output.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('equation'));
     });
@@ -3086,7 +3116,7 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(editor, `document.querySelector('.programHoverLink').getAttribute('href')`), /docs\/programs\.md#ports-defaults-and-units$/);
 
         // Python: x. offers the attributes the program declares.
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         await evaluate(window, writeRelationshipAs('python'));
         const pythonEditor = await openProgramEditor();
@@ -3101,7 +3131,7 @@ export async function runInteractionTests(driver) {
             view.focus();
         })()`);
         await waitFor(pythonEditor, `[...document.querySelectorAll('.cm-tooltip-autocomplete li .cm-completionLabel')].some((label) => label.textContent === 'level_now')`, 'x. did not offer the Python program\'s port.');
-        await evaluate(pythonEditor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(pythonEditor, '#programEditorCancel');
         await programEditorClosed(pythonEditor);
         await evaluate(window, writeRelationshipAs('equation'));
     });
@@ -3294,7 +3324,7 @@ export async function runInteractionTests(driver) {
         await evaluate(editor, `[...${temperature}.querySelectorAll('.portChoice')].find((choice) => choice.querySelector('.portChoiceLabel').textContent === 'sourceGain').click()`);
         await waitFor(window, `JSON.stringify(window.__debugProject.serialize().nodes.find((node) => node.name === 'Enclosed air').sourceTerms.find((term) => term.id === 9001).implementation.bindings) === ${JSON.stringify(JSON.stringify([{ key: 'temperature', kind: 'parameter', parameterId: 9002 }]))}`,
             'Binding from Ports did not write the part\'s binding.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         const regenerated = await evaluate(window, `window.__debugProgramCards.term()`);
         assert.match(regenerated, /k::Input temperature\{this, "temperature"\};/);
@@ -6670,7 +6700,7 @@ export async function runInteractionTests(driver) {
         await waitFor(objectiveEditor, `document.querySelector('#programEditorObjectiveSummary').classList.contains('failed')`, 'A broken objective did not fail its Test.', 60000);
         assert.match(await evaluate(objectiveEditor, `document.querySelector('#programEditorObjectiveProblems').textContent`), /ZeroDivisionError/);
         assert.equal(await evaluate(objectiveEditor, `Number(document.querySelector('#programEditorObjectiveProblems .testLineLink')?.dataset.line)`), brokenLine, 'The error does not point at its line.');
-        await evaluate(objectiveEditor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(objectiveEditor, '#programEditorCancel');
         const closedBy = Date.now() + 5000;
         while (driver.allHandles().includes(objectiveEditor) && Date.now() < closedBy) await new Promise((resolve) => setTimeout(resolve, 100));
 
@@ -6697,7 +6727,7 @@ export async function runInteractionTests(driver) {
         await waitFor(cppEditor, `/passed|failed/.test(document.querySelector('#programEditorObjectiveSummary').className)`, 'The C++ objective\'s Test did not answer.', 120000);
         assert.match(await evaluate(cppEditor, `document.querySelector('#programEditorObjectiveSummary').textContent`), /^Objective: \d/,
             `The C++ objective's Test did not give its value: ${await evaluate(cppEditor, `document.querySelector('#programEditorObjectiveTest').textContent`)}`);
-        await evaluate(cppEditor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(cppEditor, '#programEditorCancel');
         const cppClosedBy = Date.now() + 5000;
         while (driver.allHandles().includes(cppEditor) && Date.now() < cppClosedBy) await new Promise((resolve) => setTimeout(resolve, 100));
         await evaluate(opened, `window.confirm = () => true; undefined`);
@@ -6726,7 +6756,7 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#programEditorTest').click()`);
         await waitFor(window, `document.querySelector('#programEditorObjectiveSummary').classList.contains('failed')`, 'Test did not answer.');
         assert.equal(await evaluate(window, `document.querySelector('#programEditorObjectiveSummary').textContent`), 'An objective written as a program is tested in the desktop app.');
-        await evaluate(window, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(window, '#programEditorCancel');
         await programEditorClosed(window);
         await evaluate(window, `document.querySelector('#parameterTuning [data-close-card]')?.click()`);
     }, { skip: driver.capabilities.multiWindow && 'the desktop runs an objective program\'s Test, in the tuning objective test above' });
@@ -11317,7 +11347,7 @@ export async function runInteractionTests(driver) {
             await evaluate(portsEditor, `${port}.querySelector('.portChoice[data-choice="${choice}"]').click()`);
             await waitFor(portsEditor, `!${port}?.querySelector('.portBindButton')?.classList.contains('unbound')`, `${key} was not bound.`);
         }
-        await evaluate(portsEditor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(portsEditor, '#programEditorCancel');
         await programEditorClosed(portsEditor);
         let implementation = await program();
         assert.deepEqual(implementation.bindings, [{ key: 'input', kind: 'state', nodeId: 4, stateId: 6 }, { key: 'setpoint', kind: 'parameter', sharedParameterId: 100 }]);
@@ -11335,7 +11365,7 @@ export async function runInteractionTests(driver) {
         await setEditorSource(editor, implementation.source.replace('output=0.0', 'output=x.setpoint'));
         await evaluate(editor, `document.querySelector('#programEditorApply').click()`);
         await waitFor(editor, `document.querySelector('#programEditorApply').disabled`, 'The edit was not applied.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
         assert.match((await program()).source, /return self\.outputs\(output=x\.setpoint\)/);
         // "set by program ›" on the state it sets opens the same editor, at that output's port.
@@ -11343,7 +11373,7 @@ export async function runInteractionTests(driver) {
         const setByEditor = await openProgramEditor('#nodeEditorStates .setByProgram');
         const portLine = (await program()).source.split('\n').findIndex((line) => /^\s*output\s*=\s*Output\(/.test(line)) + 1;
         await waitFor(setByEditor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number === ${portLine}`, 'The editor did not open at the output\'s port.');
-        await evaluate(setByEditor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(setByEditor, '#programEditorCancel');
         await programEditorClosed(setByEditor);
         assert.equal(await engineVerdict('The node with a program was not validated.'), true);
         await evaluate(window, `document.querySelector('#undoButton').click()`);
@@ -11395,7 +11425,7 @@ export async function runInteractionTests(driver) {
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), true);
         await evaluate(editor, `document.querySelector('#programEditorUnfold').click()`);
         assert.equal(await evaluate(editor, `document.querySelector('#programEditorSide').hidden`), false);
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
 
         // "set by program ›" opens it with that output's port selected, at its declaration (Python's level_rate is the key levelRate).
@@ -11406,7 +11436,7 @@ export async function runInteractionTests(driver) {
         assert.ok(['levelRate', 'effortRateSquared'].includes(selected), `The selected port was ${selected}.`);
         await waitFor(editor, `window.__providerEditorView.state.doc.lineAt(window.__providerEditorView.state.selection.main.head).number === Number(document.querySelector('#programEditorPortsList .portRow.selected').dataset.line)`,
             'The editor did not open at the selected port\'s declaration.');
-        await evaluate(editor, `document.querySelector('#programEditorCancel').click()`);
+        await clickToClose(editor, '#programEditorCancel');
         await programEditorClosed(editor);
     });
 
@@ -11491,7 +11521,7 @@ export async function runInteractionTests(driver) {
     // stage 2): the Reference FMU Dahlquist (dx/dt = -k x, k = 1 by default) runs with no binding for k, its card says so, and
     // the saved file leaves the binding out and says it requires fmuStartValues.
     await run('an FMU parameter that reads nothing keeps the FMU\'s own start value, and the file says it relies on it', async () => {
-        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const { dahlquistReference, referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
         const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
         const fmuPath = join(folder, 'Dahlquist.fmu');
         await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
@@ -11519,9 +11549,8 @@ export async function runInteractionTests(driver) {
             await evaluate(window, `document.querySelector('#startRun').click()`);
             await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU with no bindings did not run.', 180000);
             // With the FMU's own k = 1, every value equals FMPy's run of the FMU at its defaults, bit for bit
-            // (tests/engine/fixtures/referenceFmus/fmpyReference.json, the Dahlquist case, k = 1, steps of 0.1).
-            const fmpy = JSON.parse(await readFile(join(import.meta.dirname, 'engine', 'fixtures', 'referenceFmus', 'fmpyReference.json'), 'utf8'))
-                .runs.find((entry) => entry.fmiVersion === '3.0' && entry.name === 'Dahlquist').outputs.x;
+            // (dahlquistReference: the committed run on Apple Silicon, this computer's binary's own arithmetic elsewhere; k = 1, steps of 0.1).
+            const fmpy = dahlquistReference();
             const samples = await evaluate(window, `window.__debugSteering.result().samples.map((sample) => sample.states.find((state) => state.stateId === 2).value)`);
             assert.equal(samples.length, 11);
             for (let index = 1; index < samples.length; index += 1) assert.ok(Object.is(samples[index], fmpy[index]), `x at step ${index} is ${samples[index]}, not FMPy's ${fmpy[index]}.`);
@@ -11561,7 +11590,7 @@ export async function runInteractionTests(driver) {
     // is the FMU, named after it, a state per output set by the FMU, every parameter at the FMU's own value, ready to run with no
     // wiring at all, and plotted; the numbers are FMPy's, bit for bit.
     await run('a node built from an FMU runs and is plotted with no wiring at all', async () => {
-        const { referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
+        const { dahlquistReference, referenceFmuArchive } = await import('./engine/fixtures/referenceFmuFidelity.mjs');
         const folder = await mkdtemp(join(tmpdir(), 'konjugate-interaction-fmu-'));
         const fmuPath = join(folder, 'Dahlquist.fmu');
         await writeFile(fmuPath, await referenceFmuArchive('3.0', 'Dahlquist'));
@@ -11604,8 +11633,7 @@ export async function runInteractionTests(driver) {
             })()`);
             await evaluate(window, `document.querySelector('#startRun').click()`);
             await waitFor(window, `document.querySelector('#statusText').textContent === 'Simulation complete'`, 'The FMU node did not run.', 180000);
-            const fmpy = JSON.parse(await readFile(join(import.meta.dirname, 'engine', 'fixtures', 'referenceFmus', 'fmpyReference.json'), 'utf8'))
-                .runs.find((entry) => entry.fmiVersion === '3.0' && entry.name === 'Dahlquist').outputs.x;
+            const fmpy = dahlquistReference();
             const samples = await evaluate(window, `window.__debugSteering.result().samples.map((sample) => sample.states[0].value)`);
             assert.equal(samples.length, 11);
             for (let index = 1; index < samples.length; index += 1) assert.ok(Object.is(samples[index], fmpy[index]), `x at step ${index} is ${samples[index]}, not FMPy's ${fmpy[index]}.`);

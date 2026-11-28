@@ -3807,6 +3807,7 @@ ipcMain.handle('engineCheckObjective', async (event, objective) => checkObjectiv
 async function testObjectiveProgram({ language, source, run }) {
     const directory = await mkdtemp(join(tmpdir(), 'konjugateObjectiveTest-'));
     const paths = { applicationPath: app.getAppPath(), resourcesPath: process.resourcesPath, packaged: app.isPackaged };
+    let program = null;
     try {
         let command;
         let args;
@@ -3839,6 +3840,7 @@ async function testObjectiveProgram({ language, source, run }) {
         const answer = await new Promise((resolve) => {
             let child;
             try { child = spawn(command, args, { env: environment, cwd: directory }); } catch (error) { resolve({ failed: error.message }); return; }
+            program = child;
             let received = Buffer.alloc(0);
             let stderr = '';
             let settled = false;
@@ -3872,7 +3874,13 @@ async function testObjectiveProgram({ language, source, run }) {
         const said = String(answer.stderr ?? '').trim().split('\n').filter(Boolean);
         return { available: true, ok: false, message: said.at(-1) || answer.failed, line: objectiveErrorLine(answer.stderr, fileName) };
     } finally {
-        await rm(directory, { recursive: true, force: true });
+        // The program's folder goes once the program has: Windows will not remove the folder a running process works in (EBUSY), which
+        // once turned an objective's answer into "The objective cannot be tested here" (2.1.1 and 2.1.3's packaged runs on Windows). The
+        // answer stands whatever happens to the folder.
+        if (program && program.exitCode === null && program.signalCode === null) {
+            await Promise.race([new Promise((resolve) => program.once('exit', resolve)), new Promise((resolve) => setTimeout(resolve, 3000))]);
+        }
+        await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(() => {});
     }
 }
 ipcMain.handle('engineTestObjective', (event, payload) => {

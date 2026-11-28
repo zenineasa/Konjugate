@@ -23,6 +23,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,8 +35,17 @@ import { buildInstalledFmu } from '../../../src/fmuBuilds.mjs';
 import { findCCompiler } from '../../../src/fmuSourceBuild.mjs';
 import { downloadVerified } from './downloadVerified.mjs';
 
-const root = join(import.meta.dirname, '..', '..', '..');
-const here = join(import.meta.dirname, 'referenceFmus');
+// This folder's referenceFmus/, from the checkout: next to this file, or, where this file is bundled into the packaged app's main.mjs
+// (the --interaction-test runner, make verifyPackagedInteraction) and import.meta.dirname is the bundle's own folder, the checkout the
+// packaged runner starts the app in (scripts/runPackagedInteractionTests.mjs, cwd). The fixtures are not shipped in the app.
+function referenceFmusDirectory() {
+    for (const directory of [join(import.meta.dirname, 'referenceFmus'), join(process.cwd(), 'tests', 'engine', 'fixtures', 'referenceFmus')]) {
+        if (existsSync(join(directory, 'cases.json'))) return directory;
+    }
+    throw new Error(`The Reference FMU fixtures (tests/engine/fixtures/referenceFmus/) are neither beside ${import.meta.dirname} nor in the checkout at ${process.cwd()}: run from the repository.`);
+}
+const here = referenceFmusDirectory();
+const root = join(here, '..', '..', '..', '..');
 export const referenceCases = JSON.parse(await readFile(join(here, 'cases.json'), 'utf8'));
 const fromSources = process.env.KONJUGATE_REFERENCE_FMUS_FROM_SOURCES === '1';
 const committedReference = process.platform === 'darwin' && process.arch === 'arm64' && process.env.KONJUGATE_FMPY_REFERENCE !== 'here' && !fromSources;
@@ -150,6 +160,21 @@ export async function fmpyReferenceRuns(packagesDirectory) {
     } finally {
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+// FMPy's run of the FMI 3.0 Dahlquist FMU at its defaults (k = 1, x(0) = 1, steps of 0.1), x at each of `steps` + 1 points, for the binary
+// this computer runs: on Apple Silicon the committed run (its aarch64-darwin binary fuses the Euler step into one fmadd); elsewhere
+// x + 0.1 * (-k * x) rounded as written, as the release's Linux and Windows binaries (no fused multiply-add) and a build of its sources
+// on an Intel Mac compute it: equal, bit for bit, to FMPy's run of the Linux arm64 binary (checked 2026-11-28), where the committed
+// run differs from step 8 in the last bit. For the interaction tests, which have no FMPy.
+export function dahlquistReference(steps = 10) {
+    if (process.platform === 'darwin' && process.arch === 'arm64') {
+        const committed = JSON.parse(readFileSync(join(here, 'fmpyReference.json'), 'utf8'));
+        return committed.runs.find((run) => run.fmiVersion === '3.0' && run.name === 'Dahlquist').outputs.x.slice(0, steps + 1);
+    }
+    const values = [1];
+    for (let step = 0; step < steps; step += 1) values.push(values[step] + 0.1 * (-1 * values[step]));
+    return values;
 }
 
 // Which binaries FMPy's runs are of, for a summary line.

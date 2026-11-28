@@ -424,6 +424,19 @@ contextBridge.exposeInMainWorld('aiProviders', {
     onProgress: (callback) => ipcRenderer.on('aiProgress', (_event, progress) => callback(progress))
 });
 
+// The assistant's history, kept for the person (docs/proposals/assistantHistory.md).
+contextBridge.exposeInMainWorld('assistantHistory', {
+    list: (query) => invokePlainly('assistantHistoryList', query),
+    get: (id) => invokePlainly('assistantHistoryGet', id),
+    create: (options) => invokePlainly('assistantHistoryCreate', options),
+    appendTurn: (id, turn) => invokePlainly('assistantHistoryAppendTurn', id, turn),
+    updateTurn: (id, turnId, changes) => invokePlainly('assistantHistoryUpdateTurn', id, turnId, changes),
+    rename: (id, title) => invokePlainly('assistantHistoryRename', id, title),
+    remove: (id) => invokePlainly('assistantHistoryRemove', id),
+    clear: () => invokePlainly('assistantHistoryClear'),
+    usage: () => invokePlainly('assistantHistoryUsage')
+});
+
 // Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).
 contextBridge.exposeInMainWorld('localModels', {
     status: (endpoint) => invokePlainly('localModelsStatus', endpoint),

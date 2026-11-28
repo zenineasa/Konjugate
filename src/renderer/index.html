@@ -551,6 +551,11 @@
                                 <div class="settingsSectionActions"><button id="newAssistantConfiguration" class="settingsButton" type="button">Add configuration…</button></div>
                                 <p class="settingsNote">The assistant uses the one marked In use. Another can be chosen in the assistant's panel.</p>
                             </section>
+                            <section id="assistantHistorySettings" class="settingsSection" aria-labelledby="assistantHistorySettingsTitle" hidden>
+                                <h3 id="assistantHistorySettingsTitle" class="settingsSectionTitle">History</h3>
+                                <div class="settingsCard"><div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Conversations kept on this computer</span><small id="assistantHistoryUsage" class="settingsItemHint"></small></div><div class="settingsItemControl"><button id="clearAssistantHistory" class="settingsButton danger" type="button">Clear history…</button></div></div></div>
+                                <p class="settingsNote">Every conversation with the assistant is kept for you, whichever project it was about, with the proposals it made. Open one from History in the assistant's panel. Deleting removes it from Konjugate's history.</p>
+                            </section>
                         </div>
                         <form id="assistantConfigurationForm" class="assistantConfigurationForm assistantDetailView" method="dialog">
                             <button id="assistantConfigurationBack" class="settingsPageBack" type="button">‹ Model assistant</button>
@@ -974,6 +979,7 @@
             <header id="assistantPanelHeader">
                 <div><span class="contextKicker">Model assistant</span><strong id="assistantPanelTitle">Describe a model change</strong><small id="assistantCollapsedStatus">Your model remains unchanged</small></div>
                 <span class="assistantWindowActions">
+                    <button id="assistantHistoryButton" type="button" aria-label="Conversation history" title="History" aria-expanded="false" hidden>☰</button>
                     <button id="newAssistantConversation" type="button" aria-label="Start a new conversation and clear its memory of this exchange" title="New conversation (clears memory)">+</button>
                     <button id="dockAssistantPanel" type="button" aria-label="Dock the model assistant to the side" title="Dock to the side">⇥</button>
                     <button id="collapseAssistantPanel" type="button" aria-label="Collapse model assistant" aria-expanded="true">−</button>
@@ -1020,6 +1026,12 @@
                     <p>The assistant will prepare a structured proposal, explain its assumptions and run native validation before you can apply it.</p>
                 </div>
             </div>
+            <!-- Every kept conversation, newest first, to open (and continue) or delete. In place of the conversation while shown. -->
+            <section id="assistantHistoryView" class="assistantHistoryView" aria-label="Conversation history" hidden>
+                <div class="assistantHistoryBar"><button id="assistantHistoryBack" type="button">‹ Conversation</button><input id="assistantHistorySearch" type="search" placeholder="Search conversations" aria-label="Search conversations"></div>
+                <ol id="assistantHistoryList" class="assistantHistoryList"></ol>
+                <p id="assistantHistoryEmpty" class="assistantHistoryEmpty" hidden></p>
+            </section>
             <form id="assistantPromptForm" class="assistantPromptForm">
                 <label for="assistantPrompt">What should change?</label>
                 <textarea id="assistantPrompt" rows="2" placeholder="Add an ambient boundary at 293.15 K and connect it to the battery with a conductance of 10 W/K."></textarea>

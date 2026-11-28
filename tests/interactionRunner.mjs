@@ -408,6 +408,7 @@ export async function runInteractionTests(driver) {
             'the assistant panel resizes from its edges, docks to the side and floats again',
             'a large proposal is folded into groups, and its problems come first, named',
             'a proposal the engine rejects goes back to the model to fix before it is shown',
+            'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1294,6 +1295,60 @@ export async function runInteractionTests(driver) {
         assert.equal(await isRenderedVisible(window, '#assistantProblemsSection'), false, 'The fixed proposal still shows the first one\'s problems.');
         assert.match(await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptOutcome')].at(-1).textContent`), /Proposed: Add a heat sink with a temperature state/);
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); window.confirm = () => true; document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('a conversation is kept in the history, reopened from it, and deleted with everything it kept', async () => {
+        await evaluate(window, `window.assistantHistory.clear()`);
+        await freshExample();
+        await evaluate(window, `(() => { window.confirm = () => true; if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#newAssistantConversation').click(); })()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The proposal was not ready.', 20000);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click()`);
+        // Kept as it happened: one conversation named after its first request, its turn's reply (the fixed one) and outcome.
+        await waitFor(window, `window.assistantHistory.list().then((list) => list.length === 1 && list[0].turnCount === 1)`, 'The conversation was not kept in the history.');
+        const [summary] = await evaluate(window, `window.assistantHistory.list()`);
+        assert.equal(summary.title, 'Add a heat sink connected to the battery.');
+        await waitFor(window, `window.assistantHistory.get(${JSON.stringify(summary.id)}).then((c) => c.turns[0].outcome.kind === 'discarded')`, 'Discarding was not kept as the turn\'s outcome.');
+        const kept = await evaluate(window, `window.assistantHistory.get(${JSON.stringify(summary.id)})`);
+        assert.equal(kept.turns[0].reply.summary, 'Add a heat sink with a temperature state.', 'The fixed reply was not kept in place of the first one.');
+        assert.equal(kept.turns[0].model.provider, 'ollama');
+        assert.ok(kept.turns[0].project.title, 'The project the turn was about was not kept.');
+
+        // A new conversation, then the first one opened again from History, with its turn and its proposal folded in it.
+        await evaluate(window, `document.querySelector('#newAssistantConversation').click()`);
+        await waitFor(window, `document.querySelector('#assistantTranscript').hidden`, 'A new conversation still showed the last one.');
+        await evaluate(window, `document.querySelector('#assistantHistoryButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-history-open="${summary.id}"]'))`, 'History did not list the conversation.');
+        assert.equal(await isRenderedVisible(window, '#assistantPromptForm'), false, 'History did not take the conversation\'s place.');
+        assert.match(await evaluate(window, `document.querySelector('[data-history-open="${summary.id}"]').textContent`), /Add a heat sink connected to the battery\..*1 turn/);
+        await evaluate(window, `document.querySelector('#assistantHistorySearch').value = 'no such thing'; document.querySelector('#assistantHistorySearch').dispatchEvent(new Event('input'))`);
+        await waitFor(window, `!document.querySelector('#assistantHistoryEmpty').hidden && document.querySelectorAll('[data-history-open]').length === 0`, 'A search for nothing still listed the conversation.');
+        await evaluate(window, `document.querySelector('#assistantHistorySearch').value = 'heat SINK'; document.querySelector('#assistantHistorySearch').dispatchEvent(new Event('input'))`);
+        await waitFor(window, `document.querySelectorAll('[data-history-open]').length === 1`, 'Searching did not find the conversation.');
+        await evaluate(window, `document.querySelector('[data-history-open="${summary.id}"]').click()`);
+        await waitFor(window, `!document.querySelector('#assistantPanel').classList.contains('showingHistory') && !document.querySelector('#assistantTranscript').hidden`, 'Opening the conversation did not show it.');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptOutcome').textContent`), /Discarded: /);
+        assert.match(await evaluate(window, `document.querySelector('.assistantTurnReply summary').textContent`), /Proposal · \d+ operations/);
+
+        // Deleted with everything it kept: its folder is gone, and the panel no longer shows it.
+        await evaluate(window, `document.querySelector('#assistantHistoryButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('[data-history-delete="${summary.id}"]'))`, 'History did not list the conversation to delete.');
+        await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('[data-history-delete="${summary.id}"]').click(); })()`);
+        await waitFor(window, `window.assistantHistory.list().then((list) => list.length === 0)`, 'Deleting did not remove the conversation.');
+        assert.deepEqual(await evaluate(window, `window.assistantHistory.usage()`), { conversations: 0, bytes: 0 }, 'Something the conversation kept was left behind.');
+        await waitFor(window, `!document.querySelector('#assistantHistoryEmpty').hidden`, 'History still listed the deleted conversation.');
+        await evaluate(window, `document.querySelector('#assistantHistoryBack').click()`);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantTranscript').hidden`), true, 'The deleted conversation was still shown.');
+
+        // Settings › Model assistant › History says how much is kept.
+        await evaluate(window, `document.querySelector('#manageAssistantConfigurations').click()`);
+        await waitFor(window, `document.querySelector('#assistantHistoryUsage').textContent === 'None yet'`, 'Settings did not say the history is empty.');
+        assert.equal(await isRenderedVisible(window, '#assistantHistorySettings'), true);
+        await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {

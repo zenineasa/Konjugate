@@ -11401,6 +11401,7 @@ function hideAssistantPanel() {
     assistantGenerationController?.abort();
     $('#assistantPanel').hidden = true;
     $('#assistantButton').ariaExpanded = 'false';
+    showAssistantHistory(false);
 }
 
 function visibleModelInspector() {
@@ -11655,6 +11656,27 @@ function formatAssistantValue(value) {
     return String(value);
 }
 
+// A turn's earlier reply, as the conversation keeps it: a proposal's summary, assumptions and how many changes it made, folded.
+// (The proposal under review now is its own card below the conversation.)
+function assistantTurnReply(turn) {
+    const reply = turn.reply;
+    if (reply?.responseKind !== 'proposal' || turn === pendingAssistantTurnRecord) return null;
+    const details = document.createElement('details');
+    details.className = 'assistantTurnReply';
+    const summary = document.createElement('summary');
+    const count = Array.isArray(reply.operations) ? reply.operations.length : 0;
+    summary.textContent = `Proposal · ${count} ${count === 1 ? 'operation' : 'operations'}`;
+    details.append(summary);
+    if (reply.summary) details.append(Object.assign(document.createElement('p'), { textContent: reply.summary }));
+    const assumptions = (Array.isArray(reply.assumptions) ? reply.assumptions : []).filter((item) => typeof item === 'string' && item.trim());
+    if (assumptions.length) {
+        const list = document.createElement('ul');
+        list.replaceChildren(...assumptions.map((assumption) => Object.assign(document.createElement('li'), { textContent: assumption })));
+        details.append(list);
+    }
+    return details;
+}
+
 function renderAssistantTranscript() {
     const transcript = $('#assistantTranscript');
     transcript.hidden = assistantTurnHistory.length === 0;
@@ -11668,29 +11690,180 @@ function renderAssistantTranscript() {
         outcome.className = 'assistantTranscriptOutcome';
         outcome.textContent = turn.outcome;
         item.append(you, outcome);
+        const reply = assistantTurnReply(turn);
+        if (reply) item.append(reply);
         return item;
     }));
     syncAssistantEmpty();
     scrollAssistantToEnd();
 }
 
-function pushAssistantTurn(request, outcome) {
-    const record = { request, outcome };
-    assistantTurnHistory = [...assistantTurnHistory, record].slice(-5);
+// ---- The assistant's history (docs/proposals/assistantHistory.md): every turn kept as it happens, in the conversation it
+// belongs to, for the person whichever project it is about. The conversation in the panel keeps all its turns; only the last
+// five go to the model. A store that is not there (the web edition) keeps nothing, and the panel works as before.
+const historyStore = window.assistantHistory ?? null;
+let assistantConversationId = null;
+let assistantConversationStarting = null;
+// Each turn's write to the store, in order, kept apart from the turns themselves so they stay plain data.
+const assistantTurnWrites = new WeakMap();
+
+const assistantOutcomeKind = (outcome) => {
+    const prefix = /^(Proposed|Applied|Discarded|Rejected|Asked|Error):/.exec(outcome ?? '')?.[1];
+    return { Proposed: 'proposed', Applied: 'applied', Discarded: 'discarded', Rejected: 'rejected', Asked: 'asked', Error: 'error' }[prefix]
+        ?? (/did not answer/i.test(outcome ?? '') ? 'unanswered' : 'pending');
+};
+
+function assistantTurnContext() {
+    const configuration = activeConfigurationRecord();
+    return {
+        model: { configuration: configuration?.name ?? '', provider: configuration?.provider ?? '', model: configuration?.model ?? '' },
+        project: { title: $('.documentTitle').textContent || 'Untitled', path: currentProjectPath ?? '' }
+    };
+}
+
+// The conversation the next turn goes in: the one open, or a new one named after its first request.
+function assistantConversation(firstRequest) {
+    if (!historyStore) return Promise.resolve(null);
+    if (assistantConversationId) return Promise.resolve(assistantConversationId);
+    assistantConversationStarting ??= historyStore.create({ title: firstRequest.replace(/\s+/g, ' ').slice(0, 80) })
+        .then((conversation) => { assistantConversationId = conversation.id; return conversation.id; })
+        .finally(() => { assistantConversationStarting = null; });
+    return assistantConversationStarting;
+}
+
+// What the model is told of the conversation: its last five turns, as the compact { request, outcome } it always was.
+const assistantModelHistory = (turns = assistantTurnHistory) => turns.slice(-5).map(({ request, outcome }) => ({ request, outcome }));
+
+function pushAssistantTurn(request, outcome, reply = null) {
+    const record = { request, outcome, reply, turnId: null };
+    assistantTurnHistory = [...assistantTurnHistory, record];
     renderAssistantTranscript();
+    if (historyStore) {
+        const context = assistantTurnContext();
+        assistantTurnWrites.set(record, assistantConversation(request)
+            .then((id) => historyStore.appendTurn(id, { request, outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, reply, ...context }))
+            .then((turn) => { record.turnId = turn.id; })
+            .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
+    }
     return record;
 }
 
-function updateAssistantTurnOutcome(record, outcome) {
+// `changes` may give the turn a new reply (a proposal fixed after its problems were sent back).
+function updateAssistantTurnOutcome(record, outcome, changes = {}) {
     if (!record || !assistantTurnHistory.includes(record)) return;
     record.outcome = outcome;
+    if (changes.reply) record.reply = changes.reply;
     renderAssistantTranscript();
+    const conversationId = assistantConversationId;
+    const pending = assistantTurnWrites.get(record);
+    if (!historyStore || !pending) return;
+    assistantTurnWrites.set(record, pending
+        .then(() => record.turnId && historyStore.updateTurn(conversationId, record.turnId, { outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}) }))
+        .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
 }
 
 function resetAssistantConversation() {
     assistantTurnHistory = [];
     pendingAssistantTurnRecord = null;
+    assistantConversationId = null;
     renderAssistantTranscript();
+}
+
+// Opens a kept conversation in the panel, to read or to continue about the model open now.
+async function openAssistantConversation(id) {
+    const conversation = await historyStore.get(id);
+    assistantGenerationController?.abort();
+    discardAssistantProposal();
+    assistantConversationId = conversation.id;
+    assistantTurnHistory = conversation.turns.map((turn) => ({
+        request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id
+    }));
+    renderAssistantTranscript();
+    showAssistantHistory(false);
+    updateAssistantCollapsedStatus(conversation.title);
+    return conversation;
+}
+
+// When a conversation was last used, as a person reads it: the time today, the day this year, the date otherwise.
+function formatHistoryTime(time) {
+    const date = new Date(time);
+    const today = new Date();
+    if (date.toDateString() === today.toDateString()) return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleDateString([], date.getFullYear() === today.getFullYear() ? { day: 'numeric', month: 'short' } : { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+let assistantHistoryRevision = 0;
+async function renderAssistantHistoryList() {
+    const revision = ++assistantHistoryRevision;
+    const query = $('#assistantHistorySearch').value.trim();
+    let conversations = [];
+    try { conversations = await historyStore.list(query); } catch (error) { console.warn('[assistant] reading the history:', error); }
+    if (revision !== assistantHistoryRevision) return;
+    $('#assistantHistoryList').replaceChildren(...conversations.map((conversation) => {
+        const item = document.createElement('li');
+        item.className = `assistantHistoryItem${conversation.id === assistantConversationId ? ' current' : ''}`;
+        item.dataset.conversation = conversation.id;
+        const open = document.createElement('button');
+        open.type = 'button';
+        open.className = 'assistantHistoryOpen';
+        open.dataset.historyOpen = conversation.id;
+        const title = Object.assign(document.createElement('strong'), { textContent: conversation.title });
+        const turns = `${conversation.turnCount} ${conversation.turnCount === 1 ? 'turn' : 'turns'}`;
+        const meta = Object.assign(document.createElement('small'), {
+            textContent: [conversation.project, conversation.model, formatHistoryTime(conversation.updatedAt), turns].filter(Boolean).join(' · ')
+        });
+        open.append(title, meta);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'assistantHistoryDelete';
+        remove.dataset.historyDelete = conversation.id;
+        remove.ariaLabel = `Delete the conversation “${conversation.title}”`;
+        remove.title = 'Delete';
+        remove.textContent = '×';
+        item.append(open, remove);
+        return item;
+    }));
+    $('#assistantHistoryEmpty').hidden = conversations.length > 0;
+    $('#assistantHistoryEmpty').textContent = query ? 'No conversation matches that.' : 'No conversations yet. Each one you have with the assistant is kept here.';
+}
+
+function showAssistantHistory(show) {
+    const panel = $('#assistantPanel');
+    panel.classList.toggle('showingHistory', show);
+    $('#assistantHistoryView').hidden = !show;
+    $('#assistantHistoryButton').ariaExpanded = String(show);
+    if (show) {
+        renderAssistantHistoryList();
+        $('#assistantHistorySearch').focus({ preventScroll: true });
+    }
+}
+
+async function deleteAssistantConversation(id) {
+    const conversation = await historyStore.get(id).catch(() => null);
+    const name = conversation?.title ?? 'this conversation';
+    if (!window.confirm(`Delete “${name}” and everything it kept? Conversations forked from it keep their own copies.`)) return false;
+    await historyStore.remove(id);
+    if (id === assistantConversationId) {
+        assistantGenerationController?.abort();
+        discardAssistantProposal();
+        resetAssistantConversation();
+    }
+    renderAssistantHistoryList();
+    return true;
+}
+
+// Settings › Model assistant › History: how much is kept, and clearing it all.
+async function renderAssistantHistorySettings() {
+    $('#assistantHistorySettings').hidden = !historyStore;
+    if (!historyStore) return;
+    try {
+        const { conversations, bytes } = await historyStore.usage();
+        const size = bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+        $('#assistantHistoryUsage').textContent = conversations ? `${conversations} ${conversations === 1 ? 'conversation' : 'conversations'} · ${size}` : 'None yet';
+        $('#clearAssistantHistory').disabled = conversations === 0;
+    } catch (error) {
+        $('#assistantHistoryUsage').textContent = error.message;
+    }
 }
 
 function renderAssistantClarification(response) {
@@ -14560,6 +14733,7 @@ async function prepareAssistantConfigurationPage() {
     localModelsSection.check();
     assistantSignInSection.render();
     assistantToolsSection.check();
+    renderAssistantHistorySettings();
 }
 
 // The Ollama the "Run a model on this computer" section asks: that of the Ollama configuration in use, or of any, or Ollama's own.
@@ -14789,7 +14963,7 @@ async function requestAssistantProposal() {
     startAssistantProgress(requestUuid, request);
     try {
         const response = await window.aiProviders.generateProposal(
-            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantTurnHistory
+            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory()
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
         // Clear the prompt only once a response has actually arrived, not before sending --
@@ -14799,11 +14973,11 @@ async function requestAssistantProposal() {
         $('#assistantPrompt').value = '';
         fitAssistantPrompt();
         if (response.responseKind === 'clarification') {
-            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`);
+            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`, response);
             renderAssistantClarification(response);
             return { valid: false, clarification: response };
         }
-        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`);
+        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`, response);
         const preview = await previewAssistantProposal(response, { recordOutcome: false });
         if (preview.valid || preview.superseded || controller.signal.aborted) return preview;
         if (!preview.repairable) {
@@ -14817,17 +14991,17 @@ async function requestAssistantProposal() {
         controller.signal.addEventListener('abort', () => { window.aiProviders.cancelRequest(repairUuid).catch(() => {}); }, { once: true });
         startAssistantProgress(repairUuid, request);
         const fixed = await window.aiProviders.generateProposal(
-            repairUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantTurnHistory.slice(0, -1),
+            repairUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory(assistantTurnHistory.slice(0, -1)),
             { error: preview.error.slice(0, 4000), proposal: response }
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
         stopAssistantProgress();
         if (fixed.responseKind === 'clarification') {
-            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Asked: ${fixed.question}`);
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Asked: ${fixed.question}`, { reply: fixed });
             renderAssistantClarification(fixed);
             return { valid: false, clarification: fixed };
         }
-        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Proposed: ${fixed.summary?.trim() || 'model changes'}`);
+        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Proposed: ${fixed.summary?.trim() || 'model changes'}`, { reply: fixed });
         return { ...(await previewAssistantProposal(fixed)), repaired: true };
     } catch (error) {
         if (controller.signal.aborted || error.name === 'AbortError') {
@@ -14849,6 +15023,28 @@ async function requestAssistantProposal() {
 }
 
 $('#cancelAssistantRequest').addEventListener('click', () => assistantGenerationController?.abort());
+$('#assistantHistoryButton').hidden = !historyStore;
+$('#assistantHistoryButton').addEventListener('click', () => showAssistantHistory(!$('#assistantPanel').classList.contains('showingHistory')));
+$('#assistantHistoryBack').addEventListener('click', () => showAssistantHistory(false));
+let assistantHistorySearchTimer = null;
+$('#assistantHistorySearch').addEventListener('input', () => {
+    clearTimeout(assistantHistorySearchTimer);
+    assistantHistorySearchTimer = setTimeout(renderAssistantHistoryList, 150);
+});
+$('#assistantHistoryList').addEventListener('click', (event) => {
+    const open = event.target.closest('[data-history-open]');
+    if (open) { openAssistantConversation(open.dataset.historyOpen).catch((error) => renderAssistantGenerationError(error.message)); return; }
+    const remove = event.target.closest('[data-history-delete]');
+    if (remove) deleteAssistantConversation(remove.dataset.historyDelete).catch((error) => console.warn('[assistant] deleting a conversation:', error));
+});
+$('#clearAssistantHistory').addEventListener('click', async () => {
+    if (!window.confirm('Delete every conversation kept in the assistant\'s history, with the proposals and checkpoints they kept? This cannot be undone.')) return;
+    await historyStore.clear();
+    assistantGenerationController?.abort();
+    discardAssistantProposal();
+    resetAssistantConversation();
+    renderAssistantHistorySettings();
+});
 $('#assistantButton').addEventListener('click', () => {
     if ($('#assistantPanel').hidden) showAssistantPanel();
     else hideAssistantPanel();

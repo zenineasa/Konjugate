@@ -675,6 +675,30 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantPanel.resizing, .assistantPanel.resizing * { user-select: none; }
 .assistantResize:hover, .assistantPanel.resizing .assistantResize:active { background: rgb(66 201 188 / 18%); }
 
+/* History: shown in place of the conversation and the prompt. */
+.assistantPanel.showingHistory > :is(.assistantBody, .assistantPromptForm) { display: none; }
+.assistantHistoryView { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+.assistantHistoryView[hidden] { display: none; }
+.assistantHistoryBar { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px var(--assistant-gutter); border-bottom: 1px solid #263742; }
+.assistantHistoryBar button { flex: none; height: 28px; padding: 0 10px; color: #8aa0aa; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; }
+.assistantHistoryBar input { flex: 1; min-width: 0; height: 28px; padding: 0 9px; color: #d0dde2; background: #09151d; border: 1px solid #30434e; border-radius: 4px; font-size: var(--assistant-body); }
+.assistantHistoryList { flex: 1 1 auto; display: grid; align-content: start; gap: 6px; margin: 0; padding: 10px var(--assistant-gutter) 14px; overflow-y: auto; list-style: none; }
+.assistantHistoryItem { display: flex; align-items: stretch; background: #0c1a22; border: 1px solid #263a44; border-radius: 6px; }
+.assistantHistoryItem.current { border-color: #3e6f6b; }
+.assistantHistoryOpen { flex: 1; min-width: 0; display: grid; gap: 3px; padding: 9px 11px; color: inherit; background: transparent; border: 0; text-align: left; cursor: pointer; }
+.assistantHistoryOpen:hover { background: #12232c; }
+.assistantHistoryOpen strong { overflow: hidden; color: #d0dde2; font-size: var(--assistant-body); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.assistantHistoryOpen small { overflow: hidden; color: #6f858f; font-size: var(--assistant-caption); text-overflow: ellipsis; white-space: nowrap; }
+.assistantHistoryDelete { flex: none; width: 34px; color: #6f858f; background: transparent; border: 0; border-left: 1px solid #1e313b; font-size: 14px; cursor: pointer; }
+.assistantHistoryDelete:hover { color: #e09aa0; background: rgb(134 52 62 / 12%); }
+.assistantHistoryEmpty { margin: 0; padding: 24px var(--assistant-gutter); color: #6f858f; font-size: var(--assistant-body); text-align: center; }
+.assistantHistoryEmpty[hidden] { display: none; }
+/* An earlier proposal, kept in the conversation, folded. */
+.assistantTurnReply { margin: 0; padding: 6px 9px; background: #0c1a22; border: 1px solid #22343e; border-radius: 5px; font-size: var(--assistant-body); }
+.assistantTurnReply summary { color: #70a9c8; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; }
+.assistantTurnReply p { margin: 6px 0 0; color: #b8c7ce; }
+.assistantPanel .assistantTurnReply ul { margin-top: 6px; color: #8ea1aa; }
+
 /* The conversation: earlier turns, then the reply to the latest request, then a request under way. */
 /* No padding at its foot: a reply's buttons stick to the bottom of what is in view, and padding would show what is behind them. */
 .assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

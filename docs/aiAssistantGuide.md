@@ -77,6 +77,14 @@ The section asks the Ollama that the assistant's Ollama configuration uses, or O
 
 Some models can reason before they answer. An Ollama configuration's **Reasoning** setting is the model's own default, **Off** (the suggested models, as measured) or **Reason before answering**. Reasoning is much slower: in a test on an 8 GB M1, Qwen3.5 4B took about 3½ to 10 minutes an answer with reasoning on, against about 20 seconds with it off, and fixed one of two requests it had got wrong. While the model reasons, the panel shows its reasoning as it is written, and a configuration that reasons is marked "Reasons before answering: slow" in the assistant's list.
 
+## History
+
+Every conversation with the assistant is kept for you on this computer, whichever project it was about, so something done in one project can be found and reused in another. **☰** in the panel's header opens **History**: the conversations, most recently used first, each with its title (its first request), the project it was last about, the model and when; the search finds a conversation by any word of its title, requests or outcomes. Opening one shows its turns again, each earlier proposal folded under its turn with its summary and assumptions, and writing continues it, about the model open now. **+** starts a new conversation.
+
+**×** on a conversation in History deletes it with everything it kept: its turns, the replies and the model checkpoints. **Settings › Model assistant › History** says how many conversations are kept and how much space they take, and **Clear history…** deletes them all. What is deleted is removed from Konjugate's history; Konjugate does not claim it cannot be recovered from the disk or from the computer's backups. The history is not encrypted: an encrypted project protects a model you share, and the history is your own working record.
+
+Keeping everything does not change what is sent to the model: the current request, the model summary and the last five turns of the conversation, as below.
+
 ## Conversation memory
 
 The assistant panel keeps a scrollable transcript of the last five exchanges. That history is sent along with every new request, so a reply to a clarifying question, or a follow-up like "make it 10 K warmer instead," is understood in context rather than as an unrelated new request. History is not cleared by applying, discarding or closing the panel — only the **New conversation** button (or switching to a different model configuration, since a different model has no memory of what was said to the previous one) starts a fresh transcript.

@@ -31,6 +31,7 @@ import {
 import { createAIConfigurationStore, createElectronCredentialVault } from './aiConfigurationStore.mjs';
 import { createAIProviderRegistry } from './aiProviderRegistry.mjs';
 import { createVendorToolProviders } from './aiVendorTools.mjs';
+import { createAssistantHistory } from './assistantHistory.mjs';
 import { createLocalModels } from './localModels.mjs';
 import { ollamaDownloadPage } from './suggestedLocalModels.mjs';
 import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
@@ -228,6 +229,7 @@ const activeInferenceOperations = new Set();
 const activeFittingOperations = new Set();
 let aiProviderRegistry = null;
 let aiConfigurationStore = null;
+let assistantHistory = null;
 let providerToolchainStore = null;
 let extensionStateStore = null;
 // Set once an add-on/plugin is installed or uninstalled (not FMUs, and not enable/disable --
@@ -3565,6 +3567,18 @@ ipcMain.handle('aiOpenKeyPage', async (event, provider) => {
     return true;
 });
 
+// The assistant's history (src/assistantHistory.mjs): every conversation, for the person, whichever project it was about.
+// The store bounds and checks what it is given; these only make sure a project window asks.
+ipcMain.handle('assistantHistoryList', async (event, query) => { requireProjectWindow(event); return assistantHistory.list({ query: typeof query === 'string' ? query.slice(0, 500) : '' }); });
+ipcMain.handle('assistantHistoryGet', async (event, id) => { requireProjectWindow(event); return assistantHistory.get(id); });
+ipcMain.handle('assistantHistoryCreate', async (event, options) => { requireProjectWindow(event); return assistantHistory.create(options ?? {}); });
+ipcMain.handle('assistantHistoryAppendTurn', async (event, id, turn) => { requireProjectWindow(event); return assistantHistory.appendTurn(id, turn); });
+ipcMain.handle('assistantHistoryUpdateTurn', async (event, id, turnId, changes) => { requireProjectWindow(event); return assistantHistory.updateTurn(id, turnId, changes); });
+ipcMain.handle('assistantHistoryRename', async (event, id, title) => { requireProjectWindow(event); return assistantHistory.rename(id, title); });
+ipcMain.handle('assistantHistoryRemove', async (event, id) => { requireProjectWindow(event); return assistantHistory.remove(id); });
+ipcMain.handle('assistantHistoryClear', async (event) => { requireProjectWindow(event); return assistantHistory.clear(); });
+ipcMain.handle('assistantHistoryUsage', async (event) => { requireProjectWindow(event); return assistantHistory.usage(); });
+
 // The vendors' own tools found on this computer, and who each is signed in as (docs/proposals/assistantSignIn.md).
 ipcMain.handle('aiDetectTools', async (event) => {
     requireProjectWindow(event);
@@ -4384,6 +4398,8 @@ app.whenReady().then(async () => {
     }
     const operationSchema = JSON.parse(await readFile(join(currentDir, '..', 'schemas', 'assistantOperations.schema.json'), 'utf8'));
     aiProviderRegistry = createAIProviderRegistry([...createRemoteAIProviders({ operationSchema }), ...createVendorToolProviders({ operationSchema })]);
+    // Every assistant conversation, kept for the person (docs/proposals/assistantHistory.md).
+    assistantHistory = createAssistantHistory({ directory: join(app.getPath('userData'), 'assistantHistory') });
     aiConfigurationStore = createAIConfigurationStore({
         directory: join(app.getPath('userData'), 'ai'),
         credentialVault: createElectronCredentialVault(safeStorage)

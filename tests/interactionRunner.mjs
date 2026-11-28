@@ -409,6 +409,7 @@ export async function runInteractionTests(driver) {
             'a large proposal is folded into groups, and its problems come first, named',
             'a proposal the engine rejects goes back to the model to fix before it is shown',
             'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
+            'the same request to the same model is answered from its earlier answer, with nothing sent, unless the person asks the model instead',
             'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
             'an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request',
             'a conversation forks from a turn, in this window or a new one, each fork its own copy',

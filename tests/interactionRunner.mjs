@@ -412,6 +412,7 @@ export async function runInteractionTests(driver) {
             'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
             'an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request',
             'a conversation forks from a turn, in this window or a new one, each fork its own copy',
+            'a request is saved, found under the saved prompts, run from there, and outlives its conversation',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1474,6 +1475,41 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `window.assistantHistory.remove(${JSON.stringify(sourceId)})`);
         assert.equal((await evaluate(window, `window.assistantHistory.get(${JSON.stringify(forkId)})`)).turns.length, 1, 'Deleting where a fork came from changed the fork.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('a request is saved, found under the saved prompts, run from there, and outlives its conversation', async () => {
+        await evaluate(window, `window.assistantHistory.clearPrompts()`);
+        await freshExample();
+        await evaluate(window, `(() => { window.confirm = () => true; if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#newAssistantConversation').click(); })()`);
+        await evaluate(window, `(() => { document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.'; document.querySelector('#assistantPromptForm').requestSubmit(); })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The proposal was not ready.', 20000);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click()`);
+
+        // Saved with the star beside the request.
+        await waitFor(window, `document.querySelector('.assistantTranscriptTurn:last-child [data-save-prompt]')?.textContent === '☆'`, 'The request offered no way to save it.');
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child [data-save-prompt]').click()`);
+        await waitFor(window, `document.querySelector('.assistantTranscriptTurn:last-child [data-save-prompt]')?.textContent === '★'`, 'Saving the request did not mark it saved.');
+        assert.deepEqual((await evaluate(window, `window.assistantHistory.listPrompts()`)).map((prompt) => prompt.text), ['Add a heat sink connected to the battery.']);
+
+        // Found under the saved prompts, and run from there with one click.
+        await evaluate(window, `document.querySelector('#assistantSavedPromptsButton').click()`);
+        await waitFor(window, `document.querySelectorAll('#assistantSavedPromptsList [data-prompt-run]').length === 1`, 'The saved prompt was not listed.');
+        const chatsBefore = fakeOllama.requests.filter((request) => request.path === '/api/chat').length;
+        await evaluate(window, `document.querySelector('#assistantSavedPromptsList [data-prompt-run]').click()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'Running the saved prompt did not send it.', 20000);
+        assert.ok(fakeOllama.requests.filter((request) => request.path === '/api/chat').length > chatsBefore, 'The model was not asked.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantSavedPromptsMenu').hidden`), true, 'The saved prompts stayed open after running one.');
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click()`);
+
+        // Deleting the conversation leaves the saved prompt; removing it from the list removes it.
+        const conversationId = (await evaluate(window, `window.assistantHistory.list()`))[0].id;
+        await evaluate(window, `window.assistantHistory.remove(${JSON.stringify(conversationId)})`);
+        assert.equal((await evaluate(window, `window.assistantHistory.listPrompts()`)).length, 1, 'Deleting a conversation deleted a saved prompt.');
+        await evaluate(window, `document.querySelector('#assistantSavedPromptsButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('#assistantSavedPromptsList [data-prompt-remove]'))`, 'The saved prompt was not listed to remove.');
+        await evaluate(window, `document.querySelector('#assistantSavedPromptsList [data-prompt-remove]').click()`);
+        await waitFor(window, `!document.querySelector('#assistantSavedPromptsEmpty').hidden`, 'Removing the saved prompt did not empty the list.');
+        await evaluate(window, `document.querySelector('#assistantSavedPromptsButton').click(); document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {

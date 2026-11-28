@@ -826,6 +826,7 @@ let assistantGenerationController = null;
 // it) the turn awaiting an outcome -- asked-but-not-answered, proposed-but-not-applied -- so its
 // summary can be corrected in place once the user acts, rather than adding a second entry.
 let assistantTurnHistory = [];
+let assistantSavedPrompts = [];
 let pendingAssistantTurnRecord = null;
 let assistantHasBeenPositioned = false;
 let activeAssistantConfigurationUuid = null;
@@ -11388,6 +11389,7 @@ function showAssistantPanel() {
     $('#assistantPanel').hidden = false;
     $('#assistantButton').ariaExpanded = 'true';
     assistantPanelLayout.apply();
+    refreshAssistantSavedPrompts();
     if (!assistantHasBeenPositioned) positionAssistantPanel();
     else clampAssistantPanel();
     requestAnimationFrame(avoidAssistantInspectorOverlap);
@@ -11750,7 +11752,21 @@ function renderAssistantTranscript() {
         const outcome = document.createElement('p');
         outcome.className = 'assistantTranscriptOutcome';
         outcome.textContent = turn.outcome;
-        item.append(you, outcome);
+        if (historyStore && !/^Apply again: /.test(turn.request)) {
+            // A request can be saved, to run again later; ★ when it is saved.
+            const row = document.createElement('div');
+            row.className = 'assistantTranscriptYouRow';
+            const saved = assistantSavedPrompts.some((prompt) => prompt.text === turn.request.trim());
+            const star = Object.assign(document.createElement('button'), { type: 'button', className: 'assistantSavePrompt', textContent: saved ? '★' : '☆' });
+            star.setAttribute('aria-pressed', String(saved));
+            star.ariaLabel = saved ? 'Remove from saved prompts' : 'Save this request, to run it again later';
+            star.title = saved ? 'Saved prompt (click to remove)' : 'Save this request';
+            star.dataset.savePrompt = String(index);
+            row.append(star, you);
+            item.append(row, outcome);
+        } else {
+            item.append(you, outcome);
+        }
         const reply = assistantTurnReply(turn);
         if (reply) item.append(reply);
         const checkpoints = assistantTurnCheckpoints(turn, index);
@@ -11905,6 +11921,45 @@ function setAssistantReference(turn) {
     $('#assistantReference').hidden = !assistantReference;
     $('#assistantReferenceSummary').textContent = assistantReference?.summary ?? '';
     if (assistantReference) $('#assistantPrompt').focus();
+}
+
+// ---- Saved prompts: requests kept to run again, the person's own, apart from any conversation (assistantSavedPrompts, above).
+async function refreshAssistantSavedPrompts() {
+    if (!historyStore) return;
+    try { assistantSavedPrompts = await historyStore.listPrompts(); } catch { assistantSavedPrompts = []; }
+    renderAssistantSavedPrompts();
+    renderAssistantTranscript();
+}
+
+function renderAssistantSavedPrompts() {
+    $('#assistantSavedPromptsButton').hidden = !historyStore;
+    $('#assistantSavedPromptsList').replaceChildren(...assistantSavedPrompts.map((prompt) => {
+        const item = document.createElement('li');
+        const use = Object.assign(document.createElement('button'), { type: 'button', className: 'assistantSavedPromptText', textContent: prompt.text, title: 'Put this request in the prompt' });
+        use.dataset.promptUse = prompt.id;
+        const run = Object.assign(document.createElement('button'), { type: 'button', className: 'assistantSavedPromptRun', textContent: 'Run', title: 'Send this request now, about the model open now' });
+        run.dataset.promptRun = prompt.id;
+        const remove = Object.assign(document.createElement('button'), { type: 'button', className: 'assistantSavedPromptRemove', textContent: '×', title: 'Remove from saved prompts' });
+        remove.dataset.promptRemove = prompt.id;
+        remove.ariaLabel = `Remove “${prompt.text.slice(0, 60)}” from saved prompts`;
+        item.append(use, run, remove);
+        return item;
+    }));
+    $('#assistantSavedPromptsEmpty').hidden = assistantSavedPrompts.length > 0;
+}
+
+function showAssistantSavedPrompts(show) {
+    $('#assistantSavedPromptsMenu').hidden = !show;
+    $('#assistantSavedPromptsButton').ariaExpanded = String(show);
+    if (show) refreshAssistantSavedPrompts();
+}
+
+async function toggleAssistantSavedPrompt(text) {
+    const value = text.trim();
+    const existing = assistantSavedPrompts.find((prompt) => prompt.text === value);
+    if (existing) await historyStore.removePrompt(existing.id);
+    else await historyStore.savePrompt(value);
+    await refreshAssistantSavedPrompts();
 }
 
 // ---- Forks: a conversation continued from one of its turns as a conversation of its own, with the model as it was there.
@@ -15257,6 +15312,27 @@ $('#cancelAssistantRequest').addEventListener('click', () => assistantGeneration
 $('#assistantHistoryButton').hidden = !historyStore;
 $('#clearAssistantReference').addEventListener('click', () => setAssistantReference(null));
 $('#assistantTranscript').addEventListener('click', (event) => {
+    const star = event.target.closest('[data-save-prompt]');
+    const turn = star && assistantTurnHistory[Number(star.dataset.savePrompt)];
+    if (turn) toggleAssistantSavedPrompt(turn.request).catch((error) => console.warn('[assistant] saving a prompt:', error));
+});
+$('#assistantSavedPromptsButton').addEventListener('click', () => showAssistantSavedPrompts($('#assistantSavedPromptsMenu').hidden));
+$('#assistantSavedPromptsList').addEventListener('click', (event) => {
+    const find = (attribute) => assistantSavedPrompts.find((prompt) => prompt.id === event.target.closest(`[${attribute}]`)?.getAttribute(attribute));
+    const removing = find('data-prompt-remove');
+    if (removing) { historyStore.removePrompt(removing.id).then(refreshAssistantSavedPrompts); return; }
+    const prompt = find('data-prompt-run') ?? find('data-prompt-use');
+    if (!prompt) return;
+    $('#assistantPrompt').value = prompt.text;
+    fitAssistantPrompt();
+    showAssistantSavedPrompts(false);
+    if (event.target.closest('[data-prompt-run]')) {
+        if (!$('#generateAssistantProposal').disabled) $('#assistantPromptForm').requestSubmit();
+    } else {
+        $('#assistantPrompt').focus();
+    }
+});
+$('#assistantTranscript').addEventListener('click', (event) => {
     const where = event.target.closest('[data-fork-where]')?.dataset.forkWhere;
     if (!where || !assistantForkChoice) return;
     if (where === 'cancel') { assistantForkChoice = null; renderAssistantTranscript(); return; }
@@ -15307,6 +15383,10 @@ $('#assistantHistoryList').addEventListener('click', (event) => {
 $('#clearAssistantHistory').addEventListener('click', async () => {
     if (!window.confirm('Delete every conversation kept in the assistant\'s history, with the proposals and checkpoints they kept? This cannot be undone.')) return;
     await historyStore.clear();
+    // Saved prompts are the person's own and stay, unless they say otherwise.
+    const prompts = await historyStore.listPrompts().catch(() => []);
+    if (prompts.length && window.confirm(`Also delete your ${prompts.length} saved ${prompts.length === 1 ? 'prompt' : 'prompts'}?`)) await historyStore.clearPrompts();
+    refreshAssistantSavedPrompts();
     assistantGenerationController?.abort();
     discardAssistantProposal();
     resetAssistantConversation();

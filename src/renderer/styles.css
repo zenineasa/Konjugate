@@ -700,6 +700,24 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantTurnReply p { margin: 6px 0 0; color: #b8c7ce; }
 .assistantPanel .assistantTurnReply ul { margin-top: 6px; color: #8ea1aa; }
 
+/* Saving a request, and the saved prompts offered above the prompt. */
+.assistantTranscriptYouRow { display: flex; align-items: flex-start; justify-content: flex-end; gap: 6px; }
+.assistantTranscriptYouRow .assistantTranscriptYou { max-width: calc(88% - 26px); }
+.assistantSavePrompt { flex: none; width: 22px; height: 22px; margin-top: 4px; padding: 0; color: #4f6672; background: transparent; border: 0; border-radius: 4px; font-size: 13px; line-height: 1; cursor: pointer; }
+.assistantSavePrompt:hover { color: #9ad7d0; background: #12232c; }
+.assistantSavePrompt[aria-pressed="true"] { color: #e2bf86; }
+.assistantSavedPromptsMenu { max-height: 220px; overflow-y: auto; background: #0c1a22; border: 1px solid #2c4048; border-radius: 5px; }
+.assistantSavedPromptsMenu[hidden] { display: none; }
+.assistantSavedPromptsMenu ol { display: grid; margin: 0; padding: 4px; list-style: none; }
+.assistantSavedPromptsMenu li { display: flex; align-items: center; gap: 4px; border-radius: 4px; }
+.assistantSavedPromptsMenu li:hover { background: #12232c; }
+.assistantPromptForm .assistantSavedPromptsMenu button { min-width: 0; height: auto; padding: 6px 8px; color: #c0cfd5; background: transparent; border: 0; border-radius: 4px; font-size: var(--assistant-body); font-weight: 500; }
+.assistantPromptForm .assistantSavedPromptsMenu .assistantSavedPromptText { flex: 1; min-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.assistantPromptForm .assistantSavedPromptsMenu .assistantSavedPromptRun { flex: none; color: #74ddd3; font-size: var(--assistant-caption); font-weight: 700; }
+.assistantPromptForm .assistantSavedPromptsMenu .assistantSavedPromptRemove { flex: none; color: #6f858f; font-size: 13px; }
+.assistantSavedPromptsMenu p { margin: 0; padding: 10px; color: #6f858f; font-size: var(--assistant-caption); }
+.assistantSavedPromptsMenu p[hidden] { display: none; }
+
 /* A fork's beginning, and the choice of where a fork goes. */
 .assistantForkNote { display: flex; align-items: baseline; gap: 6px; margin: 12px var(--assistant-gutter) 0; padding: 7px 10px; color: #8aa0aa; background: #0c1a22; border: 1px dashed #2e4652; border-radius: 5px; font-size: var(--assistant-caption); }
 .assistantForkNote[hidden] { display: none; }

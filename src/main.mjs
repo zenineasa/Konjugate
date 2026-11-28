@@ -3579,6 +3579,10 @@ ipcMain.handle('assistantHistoryRename', async (event, id, title) => { requirePr
 ipcMain.handle('assistantHistoryRemove', async (event, id) => { requireProjectWindow(event); return assistantHistory.remove(id); });
 ipcMain.handle('assistantHistoryClear', async (event) => { requireProjectWindow(event); return assistantHistory.clear(); });
 ipcMain.handle('assistantHistoryUsage', async (event) => { requireProjectWindow(event); return assistantHistory.usage(); });
+ipcMain.handle('assistantPromptsList', async (event) => { requireProjectWindow(event); return assistantHistory.listPrompts(); });
+ipcMain.handle('assistantPromptsSave', async (event, text) => { requireProjectWindow(event); return assistantHistory.savePrompt(text); });
+ipcMain.handle('assistantPromptsRemove', async (event, id) => { requireProjectWindow(event); return assistantHistory.removePrompt(typeof id === 'string' ? id : ''); });
+ipcMain.handle('assistantPromptsClear', async (event) => { requireProjectWindow(event); return assistantHistory.clearPrompts(); });
 // A checkpoint of the model, kept in its conversation; the history is then kept within its size limit (the least recently used
 // conversations' checkpoints first, never this conversation's).
 const assistantHistoryLimitBytes = 500 * 1024 * 1024;

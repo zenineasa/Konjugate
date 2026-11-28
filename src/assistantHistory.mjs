@@ -19,6 +19,8 @@ const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[
 const hashPattern = /^[0-9a-f]{64}$/;
 const maximumTurnCharacters = 1_000_000;
 const maximumSnapshotCharacters = 50_000_000;
+const promptsFile = 'savedPrompts.json';
+const maximumPrompts = 200;
 const outcomeKinds = new Set(['pending', 'proposed', 'applied', 'discarded', 'rejected', 'asked', 'unanswered', 'error', 'cancelled']);
 
 export class AssistantHistoryError extends Error {
@@ -258,6 +260,34 @@ export function createAssistantHistory({ directory, uuidFactory = randomUUID, no
                 removed.conversations.push(entry.id);
             }
             return removed;
+        },
+        // Saved prompts: requests the person keeps to run again, apart from any conversation (deleting one leaves them). A request
+        // saved twice is kept once; at most 200, the oldest going first.
+        async listPrompts() {
+            try { return JSON.parse(await readFile(join(directory, promptsFile), 'utf8')).prompts ?? []; } catch { return []; }
+        },
+        async savePrompt(promptText) {
+            const value = text(promptText, 8000).trim();
+            if (!value) throw new AssistantHistoryError('An empty request cannot be saved.', 'emptyPrompt');
+            return serially(promptsFile, async () => {
+                const prompts = (await history.listPrompts()).filter((prompt) => prompt.text !== value);
+                const saved = { id: uuidFactory(), text: value, createdAt: now() };
+                await mkdir(directory, { recursive: true, mode: 0o700 });
+                await writeAtomically(join(directory, promptsFile), `${JSON.stringify({ version: assistantHistoryVersion, prompts: [saved, ...prompts].slice(0, maximumPrompts) })}\n`);
+                return saved;
+            });
+        },
+        async removePrompt(id) {
+            return serially(promptsFile, async () => {
+                const prompts = await history.listPrompts();
+                const kept = prompts.filter((prompt) => prompt.id !== id);
+                if (kept.length !== prompts.length) await writeAtomically(join(directory, promptsFile), `${JSON.stringify({ version: assistantHistoryVersion, prompts: kept })}\n`);
+                return kept.length !== prompts.length;
+            });
+        },
+        async clearPrompts() {
+            await serially(promptsFile, () => rm(join(directory, promptsFile), { force: true }));
+            return true;
         },
         // How much is kept: the number of conversations and the bytes they take.
         async usage() {

@@ -444,7 +444,12 @@ contextBridge.exposeInMainWorld('assistantHistory', {
     // Continues a fork in a new window holding the model at the fork point.
     forkInNewWindow: (options) => invokePlainly('assistantForkInNewWindow', options),
     // Saves the conversation as Markdown where the person chooses; { path, fileName }, or null if they cancelled.
-    exportMarkdown: (id) => invokePlainly('assistantHistoryExport', id)
+    exportMarkdown: (id) => invokePlainly('assistantHistoryExport', id),
+    // Saved prompts, the person's own, apart from any conversation.
+    listPrompts: () => invokePlainly('assistantPromptsList'),
+    savePrompt: (text) => invokePlainly('assistantPromptsSave', text),
+    removePrompt: (id) => invokePlainly('assistantPromptsRemove', id),
+    clearPrompts: () => invokePlainly('assistantPromptsClear')
 });
 
 // Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).

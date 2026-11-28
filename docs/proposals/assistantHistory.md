@@ -4,7 +4,7 @@ title: "Assistant history: conversations kept for the person, checkpoints, reuse
 description: Keeping every model-assistant conversation for the person (not per project), so work from one project can be reused in another; a checkpoint of the model JSON before and after each applied proposal, to restore or compare, with JSON diffs computed from them; applying a past proposal again; forking a conversation from any turn, in this window or a new one, as an independent copy; deleting a conversation and everything it kept; exporting a conversation as a record; and saved prompts. Stored in a small Git-shaped history of Konjugate's own rather than Git.
 tags: [proposals, assistant, history, checkpoints, undo, privacy]
 status: draft
-implementation: partial
+implementation: complete
 ---
 
 <!-- Copyright © 2026 Zenin Easa Panthakkalakath -->
@@ -71,7 +71,7 @@ Keeping everything does not change what is sent: the current request, the model 
 3. **Built: reuse.** **Apply again** and **Ask about this**.
 4. **Built: forks.** **Edit and resend**, **Fork from here** in this window or a new one, each fork a conversation of its own holding copies of what it started from, and the link between a fork and where it came from.
 5. **Built: export** as Markdown (`src/assistantConversationMarkdown.mjs`, **⤓** in History).
-6. **Saved prompts.**
+6. **Built: saved prompts.**
 
 Each stage has its own tests (the store's unit tests against a temporary folder, and interaction scenarios driven by the fake Ollama), and the full suites run once at the end.
 

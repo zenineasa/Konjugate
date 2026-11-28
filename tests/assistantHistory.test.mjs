@@ -137,3 +137,23 @@ test('A fork holds its own copies of the turns and checkpoints up to where it wa
     assert.deepEqual((await readdir(join(directory, fork.id, 'snapshots'))).sort(), [afterHash, beforeHash].sort().map((hash) => `${hash}.bin`));
     await assert.rejects(history.fork(fork.id, 'no-such-turn'), { code: 'turnNotFound' });
 }));
+
+test('Saved prompts are kept apart from conversations, once each, newest first, and outlive clearing the conversations', () => withHistory(async (history) => {
+    assert.deepEqual(await history.listPrompts(), []);
+    const first = await history.savePrompt('  Add a convective loss to ambient for every node  ');
+    await history.savePrompt('Make every relationship bidirectional');
+    await history.savePrompt('Add a convective loss to ambient for every node');
+    const listed = await history.listPrompts();
+    assert.deepEqual(listed.map((prompt) => prompt.text), ['Add a convective loss to ambient for every node', 'Make every relationship bidirectional'], 'A prompt saved again was kept twice, or not moved to the top.');
+    await assert.rejects(history.savePrompt('   '), { code: 'emptyPrompt' });
+    const conversation = await history.create({ title: 'Something' });
+    await history.clear();
+    assert.equal((await history.listPrompts()).length, 2, 'Clearing the conversations cleared the saved prompts.');
+    assert.deepEqual(await history.usage(), { conversations: 0, bytes: 0 }, 'The saved prompts were counted as a conversation.');
+    void conversation;
+    assert.equal(await history.removePrompt(listed[1].id), true);
+    assert.equal(await history.removePrompt(first.id), false, 'A prompt saved again has a new id; the old one is gone.');
+    assert.deepEqual((await history.listPrompts()).map((prompt) => prompt.text), ['Add a convective loss to ambient for every node']);
+    await history.clearPrompts();
+    assert.deepEqual(await history.listPrompts(), []);
+}));

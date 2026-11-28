@@ -96,6 +96,8 @@ The history keeps within 500 MB: past that, the least recently used conversation
 
 **⤓** on a conversation in History exports it as Markdown, to a file you choose: each request, when and in which project it was made and with which model, what came of it (applied, discarded, rejected, a question), the assumptions each proposal stated and how many operations it had, and the problems found. It is a record for a report or a design review, written from what the history kept.
 
+**☆** beside a request you sent saves it (it turns into **★**; click it again to stop saving it). **★** beside the prompt lists your saved prompts, newest first: click one to put it in the prompt to change, or **Run** to send it straight away, about the model open now; **×** removes one. Saved prompts are yours, kept apart from any conversation: deleting a conversation leaves them, and **Clear history…** asks separately whether to delete them too.
+
 **×** on a conversation in History deletes it with everything it kept: its turns, the replies and the model checkpoints. **Settings › Model assistant › History** says how many conversations are kept and how much space they take, and **Clear history…** deletes them all. What is deleted is removed from Konjugate's history; Konjugate does not claim it cannot be recovered from the disk or from the computer's backups. The history is not encrypted: an encrypted project protects a model you share, and the history is your own working record.
 
 Keeping everything does not change what is sent to the model: the current request, the model summary and the last five turns of the conversation, as below.

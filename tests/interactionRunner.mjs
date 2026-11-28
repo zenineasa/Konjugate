@@ -406,6 +406,7 @@ export async function runInteractionTests(driver) {
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
             'the assistant panel resizes from its edges, docks to the side and floats again',
+            'a large proposal is folded into groups, and its problems come first, named',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1249,6 +1250,31 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
+
+    await run('a large proposal is folded into groups, and its problems come first, named', async () => {
+        // Six pairs of cells, each joined, and a node left without a state that a relationship still points at.
+        const operations = [];
+        for (let i = 1; i <= 6; i += 1) {
+            operations.push({ kind: 'addNode', ref: `shell${i}`, name: `Shell Cell ${i}` }, { kind: 'addState', ref: `shellT${i}`, nodeRef: `shell${i}`, name: 'Temperature', symbol: 'temperature', initialValue: 363 });
+            operations.push({ kind: 'addNode', ref: `tube${i}`, name: `Tube Cell ${i}` }, { kind: 'addState', ref: `tubeT${i}`, nodeRef: `tube${i}`, name: 'Temperature', symbol: 'temperature', initialValue: 293 });
+        }
+        operations.push({ kind: 'addNode', ref: 'ambient', name: 'Ambient' }, { kind: 'addEdge', ref: 'loss', name: 'Heat Loss', sourceNodeRef: 'shell6', targetNodeRef: 'ambient', directionality: 'directed' });
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        const result = await evaluate(window, `window.konjugateAssistant.previewProposal(${JSON.stringify({ responseKind: 'proposal', proposalVersion: 1, summary: 'Cells', operations })})`);
+        assert.equal(result.valid, false);
+        assert.match(result.error, /Heat Loss: /, 'The problem did not name the relationship it is about.');
+        assert.equal(await isRenderedVisible(window, '#assistantProblemsSection'), true, 'The problems were not listed.');
+        assert.equal(await evaluate(window, `Boolean(document.querySelector('#assistantProblemsSection').compareDocumentPosition(document.querySelector('#assistantChanges')) & Node.DOCUMENT_POSITION_FOLLOWING)`), true, 'The problems do not come before the changes.');
+        const problems = await evaluate(window, `[...document.querySelectorAll('#assistantProblems li')].map((item) => item.textContent)`);
+        assert.equal(new Set(problems).size, problems.length, 'A problem was listed twice.');
+        assert.ok(problems.every((text) => text.startsWith('Heat Loss: ')), problems.join(' | '));
+        // 26 changes, folded into a group for each node and relationship, in the order the proposal touches them.
+        const groups = await evaluate(window, `[...document.querySelectorAll('#assistantChanges .assistantChangeGroup')].map((group) => ({ title: group.querySelector('.assistantChangeGroupTitle').textContent, count: group.querySelector('.assistantChangeGroupCount').textContent, open: group.querySelector('details').open, problem: group.querySelector('details').classList.contains('hasProblem') }))`);
+        assert.deepEqual(groups.slice(0, 2).map((group) => [group.title, group.count]), [['Shell Cell 1', '2 changes'], ['Tube Cell 1', '2 changes']]);
+        assert.ok(groups.slice(0, -1).every((group) => !group.open && !group.problem), 'A group without a problem was opened or marked.');
+        assert.deepEqual(groups.at(-1), { title: 'Heat Loss', count: '1 change', open: true, problem: true }, 'The group with the problem was not opened and marked.');
+        await evaluate(window, `window.konjugateAssistant.discardProposal(); document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {
         const rectOf = () => evaluate(window, `(() => { const r = document.querySelector('#assistantPanel').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; })()`);

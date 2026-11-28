@@ -676,7 +676,9 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantResize:hover, .assistantPanel.resizing .assistantResize:active { background: rgb(66 201 188 / 18%); }
 
 /* The conversation: earlier turns, then the reply to the latest request, then a request under way. */
-.assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 4px; }
+/* No padding at its foot: a reply's buttons stick to the bottom of what is in view, and padding would show what is behind them. */
+.assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.assistantBody > :last-child:not(.assistantEmpty) { margin-bottom: 12px; }
 .assistantBody > * { flex: none; }
 .assistantTranscript { display: grid; gap: 14px; margin: 0; padding: 14px var(--assistant-gutter) 4px; list-style: none; }
 .assistantTranscript[hidden] { display: none; }
@@ -719,6 +721,25 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantChange dl div { display: grid; grid-template-columns: 80px 1fr; gap: 8px; }
 .assistantChange dt { overflow: hidden; color: #617681; text-overflow: ellipsis; white-space: nowrap; }
 .assistantChange dd { overflow-wrap: anywhere; margin: 0; color: #899da6; }
+/* What must be fixed, first in the proposal, each naming what it is about. */
+.assistantProblems { background: rgb(134 52 62 / 8%); }
+.assistantProblems[hidden] { display: none; }
+.assistantPanel .assistantProblems h3 { color: #d68a91; }
+.assistantPanel .assistantProblems ul { color: #e3a3a9; user-select: text; }
+/* A long proposal, folded into one group for each thing its changes touch. */
+.assistantPanel #assistantChanges > .assistantChangeGroup { list-style: none; }
+.assistantChangeGroup details { background: #0a161e; border: 1px solid #263943; border-radius: 5px; }
+.assistantChangeGroup details.hasProblem { border-color: #6a3a43; }
+.assistantChangeGroup summary { display: flex; align-items: baseline; gap: 8px; padding: 8px 10px; color: #c0cfd5; cursor: pointer; list-style: none; }
+.assistantChangeGroup summary::-webkit-details-marker { display: none; }
+.assistantChangeGroup summary::before { flex: none; color: #5f7782; font-size: var(--assistant-caption); content: '▸'; transition: transform .12s; }
+.assistantChangeGroup details[open] > summary::before { transform: rotate(90deg); }
+.assistantChangeGroup details.hasProblem > summary::after { margin-left: auto; color: #d68a91; font-size: var(--assistant-caption); font-weight: 650; content: 'Needs fixing'; }
+.assistantChangeGroupTitle { min-width: 0; overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.assistantChangeGroupCount { flex: none; color: #6f858f; font-size: var(--assistant-caption); }
+.assistantPanel .assistantChangeGroup ol { display: grid; gap: 6px; padding: 0 8px 8px; list-style: none; }
+.assistantChangeGroup .assistantChange > :is(button, div) { background: #0d1c25; }
+@media (prefers-reduced-motion: reduce) { .assistantChangeGroup summary::before { transition: none; } }
 .assistantError { margin: 12px; padding: 9px 11px; color: #e09aa0; background: rgb(134 52 62 / 12%); border: 1px solid #633942; border-radius: 4px; font-size: var(--assistant-body); line-height: 1.5; user-select: text; }
 .assistantError[hidden] { display: none; }
 .assistantPanel footer { position: sticky; z-index: 1; bottom: 0; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 12px; background: #0c1a22; border-top: 1px solid #1e313b; border-radius: 0 0 6px 6px; }

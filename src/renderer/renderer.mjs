@@ -11529,7 +11529,9 @@ function renderAssistantProposal(proposal, prepared) {
         item.textContent = assumption;
         return item;
     }));
-    $('#assistantChanges').replaceChildren(...prepared.changes.map((change) => {
+    $('#assistantProblemsSection').hidden = true;
+    $('#assistantProblems').replaceChildren();
+    const changeItem = (change) => {
         const item = document.createElement('li');
         item.className = `assistantChange ${change.action ?? 'update'}`;
         const content = document.createElement(change.focusEntityId ? 'button' : 'div');
@@ -11560,11 +11562,91 @@ function renderAssistantProposal(proposal, prepared) {
         }
         item.append(content);
         return item;
-    }));
+    };
+    // A long proposal is folded into one group for each thing its changes touch (a node, a relationship), in the order the
+    // proposal first touches them, so it can be read at a glance and opened where it matters; a short one is listed as it is.
+    const groups = prepared.changes.length > assistantChangeGroupThreshold ? groupAssistantChanges(prepared.changes, prepared.document) : null;
+    $('#assistantChanges').replaceChildren(...(groups ? groups.map((group) => {
+        const item = document.createElement('li');
+        item.className = 'assistantChangeGroup';
+        const details = document.createElement('details');
+        details.dataset.groupEntities = group.entityIds.join(' ');
+        const summary = document.createElement('summary');
+        const title = document.createElement('span');
+        title.className = 'assistantChangeGroupTitle';
+        title.textContent = group.title;
+        const count = document.createElement('span');
+        count.className = 'assistantChangeGroupCount';
+        count.textContent = `${group.changes.length} ${group.changes.length === 1 ? 'change' : 'changes'}`;
+        summary.append(title, count);
+        const list = document.createElement('ol');
+        list.replaceChildren(...group.changes.map(changeItem));
+        details.append(summary, list);
+        item.append(details);
+        return item;
+    }) : prepared.changes.map(changeItem)));
     $('#assistantError').hidden = true;
     $('#assistantProposalStatus').className = 'pending';
     $('#assistantProposalStatus').textContent = 'Validating the candidate model with the C++ engine…';
     $('#applyAssistantProposal').disabled = true;
+}
+
+const assistantChangeGroupThreshold = 8;
+
+// The name a node, relationship, state or parameter has in `document`, for saying which one a change or a problem is about.
+function assistantEntityName(model, id) {
+    const key = String(id);
+    for (const node of model.nodes ?? []) {
+        if (String(node.id) === key) return node.name;
+        const state = (node.states ?? []).find((item) => String(item.id) === key);
+        if (state) return `${node.name} · ${state.name ?? state.symbol}`;
+    }
+    for (const edge of model.edges ?? []) {
+        if (String(edge.id) === key) return edge.name;
+        const parameter = (edge.parameters ?? []).find((item) => String(item.id) === key);
+        if (parameter) return `${edge.name} · ${parameter.symbol}`;
+    }
+    return null;
+}
+
+// Changes grouped by the node or relationship each is about, in the order the proposal first touches them.
+function groupAssistantChanges(changes, model) {
+    const groups = new Map();
+    for (const change of changes) {
+        const id = change.focusEntityId ?? change.entityId ?? null;
+        const key = id === null ? 'other' : String(id);
+        if (!groups.has(key)) groups.set(key, { title: (id !== null && assistantEntityName(model, id)) || change.label, entityIds: id === null ? [] : [key], changes: [] });
+        groups.get(key).changes.push(change);
+    }
+    return [...groups.values()];
+}
+
+// The native validator's errors as the panel lists them: what each is about by name, the same problem with the same thing
+// said once, and the groups of changes they concern opened and marked.
+function showAssistantProblems(issues, model) {
+    const seen = new Set();
+    const problems = [];
+    for (const issue of issues.filter((item) => item.severity === 'error')) {
+        const id = issue.location?.entityId ?? '';
+        const name = id ? assistantEntityName(model, id) : null;
+        const text = name ? `${name}: ${issue.message}` : issue.message;
+        if (seen.has(text)) continue;
+        seen.add(text);
+        problems.push({ text, id });
+    }
+    $('#assistantProblemsSection').hidden = !problems.length;
+    $('#assistantProblems').replaceChildren(...problems.map((problem) => {
+        const item = document.createElement('li');
+        item.textContent = problem.text;
+        return item;
+    }));
+    for (const details of document.querySelectorAll('#assistantChanges details[data-group-entities]')) {
+        const ids = details.dataset.groupEntities.split(' ');
+        const concerned = problems.some((problem) => problem.id && ids.includes(String(problem.id)));
+        details.classList.toggle('hasProblem', concerned);
+        if (concerned) details.open = true;
+    }
+    return problems.map((problem) => problem.text);
 }
 
 function formatAssistantValue(value) {
@@ -11666,10 +11748,10 @@ async function previewAssistantProposal(proposal) {
         if (validation.cancelled || revision !== assistantPreviewRevision) return { valid: false, superseded: true };
         if (!validation.available) throw new Error('The native validation engine is unavailable.');
         if (!validation.report.valid) {
-            const message = validation.report.issues
-                .filter((issue) => issue.severity === 'error')
-                .map((issue) => issue.message)
-                .join(' ') || 'The native validator rejected this proposal.';
+            const problems = showAssistantProblems(validation.report.issues, prepared.document);
+            const message = problems.length
+                ? `${problems.length === 1 ? 'A problem needs' : `${problems.length} problems need`} fixing before this can be applied: ${problems.join(' ')}`
+                : 'The native validator rejected this proposal.';
             throw new Error(message);
         }
         pendingAssistantProposal = {

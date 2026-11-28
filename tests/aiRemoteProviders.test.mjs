@@ -101,7 +101,7 @@ test('OpenAI-compatible adapters expand conversation history into real prior mes
     assert.match(messages[3].content, /USER REQUEST/);
 });
 
-test('Ollama and Gemini adapters prepend conversation history as text', async () => {
+test('Ollama and Gemini adapters send the fixed instructions first, then the conversation as text, then the request', async () => {
     const history = [{ request: 'Earlier request', outcome: 'Applied something.' }];
     let ollamaBody;
     const ollamaAdapter = provider('ollama', async (url, options) => {
@@ -109,7 +109,9 @@ test('Ollama and Gemini adapters prepend conversation history as text', async ()
         return jsonResponse({ models: [] , message: { content: JSON.stringify(proposal) } });
     });
     await ollamaAdapter.generateProposal(input('ollama', { history }));
-    assert.match(ollamaBody.messages[0].content, /CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\./);
+    assert.equal(ollamaBody.messages[0].role, 'system');
+    assert.match(ollamaBody.messages[0].content, /^You are the Konjugate modelling assistant[\s\S]*OPERATION SCHEMA:/);
+    assert.match(ollamaBody.messages[1].content, /^CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\.[\s\S]*MODEL CONTEXT:[\s\S]*USER REQUEST:\nAdd a node$/);
 
     let geminiBody;
     const geminiAdapter = provider('gemini', async (url, options) => {
@@ -117,7 +119,8 @@ test('Ollama and Gemini adapters prepend conversation history as text', async ()
         return jsonResponse({ candidates: [{ content: { parts: [{ text: JSON.stringify(proposal) }] } }] });
     });
     await geminiAdapter.generateProposal(input('gemini', { history }));
-    assert.match(geminiBody.contents[0].parts[0].text, /CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\./);
+    assert.match(geminiBody.systemInstruction.parts[0].text, /^You are the Konjugate modelling assistant[\s\S]*OPERATION SCHEMA:/);
+    assert.match(geminiBody.contents[0].parts[0].text, /^CONVERSATION SO FAR:\nUser: Earlier request\nAssistant: Applied something\./);
 });
 
 test('remote adapters reject insecure non-local endpoints and missing credentials', async () => {
@@ -375,7 +378,11 @@ test('Anthropic lists models through its own API with the key, and streams a pro
     assert.equal(body.stream, true);
     assert.equal(body.output_config.format.type, 'json_schema');
     assert.equal('thinking' in body, false);
-    assert.match(body.messages.at(-1).content, /OPERATION SCHEMA/);
+    // The instructions are a cached block first; the schema is not in them, since the output format enforces it.
+    assert.deepEqual(body.system[0].cache_control, { type: 'ephemeral' });
+    assert.match(body.system[0].text, /^You are the Konjugate modelling assistant/);
+    assert.equal(body.system[0].text.includes('OPERATION SCHEMA'), false, 'The schema was sent twice.');
+    assert.match(body.messages.at(-1).content, /^MODEL CONTEXT:[\s\S]*USER REQUEST:\nAdd a node$/);
     assert.deepEqual(events.filter((event) => event.type === 'thinking').map((event) => event.text), ['Considering the node.']);
     assert.equal(events.filter((event) => event.type === 'output').map((event) => event.text).join(''), JSON.stringify(proposal));
 });
@@ -636,4 +643,27 @@ test('A client ChatGPT issued is kept before the exchange, reused on the next at
     assert.equal('agent_name_hint' in parameters, false);
     assert.equal(again.seen.tokenRequests[0].client_id, 'oaiapp_123');
     assert.deepEqual(retried, []);
+});
+
+
+test('The instructions stay the same from request to request, so providers can cache them, and leave out the schema only when it is enforced', async () => {
+    const { assistantInstructions, requestPrompt } = await import('../src/aiRemoteProviders.mjs');
+    assert.equal(assistantInstructions(schema), assistantInstructions(schema), 'The fixed part changed between two requests.');
+    assert.match(assistantInstructions(schema), /EQUATION RULES:[\s\S]*OPERATION SCHEMA:\n\{/);
+    assert.equal(assistantInstructions(schema, { includeSchema: false }).includes('OPERATION SCHEMA'), false);
+    assert.match(assistantInstructions(schema, { includeSchema: false }), /must match the JSON schema this request enforces/);
+    assert.match(requestPrompt({ nodes: [] }, 'Add a node', { error: 'bad', proposal: { x: 1 } }), /^MODEL CONTEXT:\n\{"nodes":\[\]\}\n\nUSER REQUEST:\nAdd a node\n\nCORRECTION REQUIRED:/);
+    // OpenAI: the schema in the text only for the plain-JSON fallback, when the format no longer carries it.
+    const bodies = [];
+    const openAi = provider('openAi', async (url, options) => {
+        bodies.push(JSON.parse(options.body));
+        if (bodies.length === 1) return jsonResponse({ error: { message: 'Invalid schema for response_format' } }, 400);
+        return jsonResponse({ choices: [{ message: { content: JSON.stringify(proposal) } }] });
+    });
+    await openAi.generateProposal(input('openAi', { history: [{ request: 'Earlier', outcome: 'Done' }] }));
+    assert.equal(bodies[0].messages[0].role, 'system');
+    assert.equal(bodies[0].messages[0].content.includes('OPERATION SCHEMA'), false, 'Schema mode sent the schema in the text too.');
+    assert.deepEqual(bodies[0].messages.slice(1).map((message) => message.role), ['user', 'assistant', 'user'], 'The turns do not come between the instructions and the request.');
+    assert.equal(bodies[1].response_format.type, 'json_object');
+    assert.ok(bodies[1].messages[0].content.includes('OPERATION SCHEMA'), 'The plain-JSON fallback left the model without the schema.');
 });

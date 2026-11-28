@@ -15,7 +15,7 @@ import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { AssistantProviderError } from './assistantProviders.mjs';
-import { claudeOutputSchema, parseProposalText, proposalPrompt, historyText } from './aiRemoteProviders.mjs';
+import { assistantInstructions, claudeOutputSchema, parseProposalText, requestPrompt, historyText } from './aiRemoteProviders.mjs';
 
 const maximumOutputCharacters = 2_000_000;
 const maximumStderrCharacters = 4000;
@@ -123,7 +123,6 @@ async function runToolSignIn({ runner, path, args, signal, onOutput }) {
 }
 
 const lastLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).at(-1)?.slice(0, 300) ?? '';
-const instructions = 'You are the Konjugate modelling assistant. Return only JSON matching the supplied schema -- either a proposal or, if the request is ambiguous or missing information, a clarification.';
 
 // An empty folder of its own for each run, so the tool reads no project and writes nowhere that matters.
 async function inEmptyFolder(task) {
@@ -206,7 +205,8 @@ function claudeCodeProvider({ runner }) {
                 '-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
                 // No tools: Claude Code then has only its StructuredOutput tool, which the JSON schema needs, and a few turns for it.
                 '--tools', '', '--json-schema', JSON.stringify(claudeCodeSchema(operationSchema)), '--max-turns', '4',
-                '--system-prompt', instructions,
+                // The instructions as the system prompt, without the schema: --json-schema enforces it and shows it to the model.
+                '--system-prompt', assistantInstructions(operationSchema, { includeSchema: false }),
                 // The person's own CLAUDE.md, hooks, skills, plugins and MCP servers stay out; the sign-in stays in (which --bare would drop).
                 '--safe-mode',
                 ...(configuration.model && configuration.model !== 'default' ? ['--model', configuration.model] : [])
@@ -235,7 +235,7 @@ function claudeCodeProvider({ runner }) {
                 } else onEvent?.({ type: 'activity' });
             };
             const { code, stderr } = await inEmptyFolder((cwd) => runner.run(path, args, {
-                cwd, signal, onLine, stdin: historyText(history) + proposalPrompt(operationSchema, context, request, repair), timeoutMilliseconds: 20 * 60_000
+                cwd, signal, onLine, stdin: historyText(history) + requestPrompt(context, request, repair), timeoutMilliseconds: 20 * 60_000
             }));
             if (failure === 'authentication_failed') throw notSignedIn();
             if (!result) throw new AssistantProviderError(`Claude Code stopped without an answer${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}.`, 'providerHttpError');
@@ -310,7 +310,8 @@ function copilotProvider({ runner }) {
                     result = event;
                 } else onEvent?.({ type: 'activity' });
             };
-            const prompt = `${instructions}\n\n${historyText(history)}${proposalPrompt(operationSchema, context, request, repair)}`;
+            // The instructions (with the schema: nothing enforces it here) first, then the turns and the request.
+            const prompt = `${assistantInstructions(operationSchema)}\n\n${historyText(history)}${requestPrompt(context, request, repair)}`;
             const { code, stderr } = await inEmptyFolder((cwd) => runner.run(path, args, { cwd, signal, onLine, stdin: prompt, timeoutMilliseconds: 20 * 60_000 }));
             if (/no authentication information|not (?:logged|signed) in|authenticate/i.test(`${stderr} ${failure}`)) throw notSignedIn();
             const exitCode = result?.exitCode ?? code;

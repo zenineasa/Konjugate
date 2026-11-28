@@ -33,7 +33,7 @@ export function readPrompt(content) {
     const context = JSON.parse(content.slice(contextStart + 'MODEL CONTEXT:\n'.length, requestStart));
     const request = content.slice(requestStart + '\n\nUSER REQUEST:\n'.length).split('\n\nCORRECTION REQUIRED:')[0];
     const history = [];
-    const conversation = /^CONVERSATION SO FAR:\n([\s\S]*?)\n\n/.exec(content);
+    const conversation = /(?:^|\n)CONVERSATION SO FAR:\n([\s\S]*?)\n\n/.exec(content);
     for (const match of (conversation?.[1] ?? '').matchAll(/^User: (.*)\nAssistant: (.*)$/gm)) history.push({ request: match[1], outcome: match[2] });
     // A request asking the model to fix its last proposal carries the problems in a correction section.
     const repairing = content.includes('\n\nCORRECTION REQUIRED:');

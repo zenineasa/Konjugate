@@ -15,6 +15,7 @@ import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { AssistantProviderError } from './assistantProviders.mjs';
+import { usageFrom } from './assistantUsage.mjs';
 import { assistantInstructions, claudeOutputSchema, parseProposalText, requestPrompt, historyText } from './aiRemoteProviders.mjs';
 
 const maximumOutputCharacters = 2_000_000;
@@ -232,6 +233,8 @@ function claudeCodeProvider({ runner }) {
                     failure = event.error;
                 } else if (event.type === 'result') {
                     result = event;
+                    const used = usageFrom.anthropic(event.usage, event.total_cost_usd);
+                    if (used) onEvent?.({ type: 'usage', usage: used });
                 } else onEvent?.({ type: 'activity' });
             };
             const { code, stderr } = await inEmptyFolder((cwd) => runner.run(path, args, {
@@ -308,6 +311,8 @@ function copilotProvider({ runner }) {
                     failure = String(data.message ?? event.message ?? 'error');
                 } else if (event.type === 'result') {
                     result = event;
+                    const used = usageFrom.copilot(event.usage);
+                    if (used) onEvent?.({ type: 'usage', usage: used });
                 } else onEvent?.({ type: 'activity' });
             };
             // The instructions (with the schema: nothing enforces it here) first, then the turns and the request.

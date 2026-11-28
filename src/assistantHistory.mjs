@@ -11,6 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync, strFromU8, strToU8 } from 'fflate';
+import { addUsage, usage } from './assistantUsage.mjs';
 
 export const assistantHistoryVersion = 1;
 const conversationFile = 'conversation.json';
@@ -45,6 +46,8 @@ function cleanTurn(input = {}) {
         problems: Array.isArray(input.problems) ? input.problems.filter((item) => typeof item === 'string').slice(0, 50).map((item) => item.slice(0, 1000)) : [],
         model: { configuration: text(input.model?.configuration, 200), provider: text(input.model?.provider, 100), model: text(input.model?.model, 200) },
         project: input.project && typeof input.project === 'object' ? { title: text(input.project.title, 300), path: text(input.project.path, 2000) } : null,
+        // What the request used (src/assistantUsage.mjs), as its provider reported it.
+        usage: input.usage && typeof input.usage === 'object' ? usage(input.usage) : null,
         // An earlier proposal this request drew on (Ask about this), by its summary.
         reference: input.reference && typeof input.reference === 'object' ? { summary: text(input.reference.summary, 500) } : null,
         before: typeof input.before === 'string' && hashPattern.test(input.before) ? input.before : null,
@@ -91,7 +94,8 @@ export function createAssistantHistory({ directory, uuidFactory = randomUUID, no
         return {
             id: conversation.id, title: conversation.title, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt,
             turnCount: conversation.turns.length, forkedFrom: conversation.forkedFrom ?? null,
-            project: last?.project?.title ?? '', model: last?.model?.configuration ?? ''
+            project: last?.project?.title ?? '', model: last?.model?.configuration ?? '',
+            usage: conversation.turns.reduce((total, turn) => addUsage(total, turn.usage ?? null), null)
         };
     };
     const folderSize = async (folder) => {

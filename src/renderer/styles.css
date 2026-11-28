@@ -757,6 +757,7 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* What the person asked, as their side of a chat; what came of it, as the assistant's. */
 .assistantTranscriptYou { justify-self: end; max-width: 88%; padding: 7px 10px; color: #d0dee3; background: #132630; border: 1px solid #22404a; border-radius: 10px 10px 3px 10px; white-space: pre-wrap; }
 .assistantTranscriptOutcome { color: #9cb0b9; }
+.assistantTranscriptUsage { margin: -4px 0 0; color: #5f7782; font-size: var(--assistant-caption); font-variant-numeric: tabular-nums; }
 .assistantTranscriptOutcome::before { display: block; margin-bottom: 2px; color: #5f7782; font-size: var(--assistant-caption); font-weight: 650; letter-spacing: .06em; text-transform: uppercase; content: 'Assistant'; }
 .assistantEmpty { flex: 1 0 auto; display: grid; min-height: 180px; place-content: center; justify-items: center; gap: 8px; padding: 28px var(--assistant-gutter); color: #607681; text-align: center; }
 .assistantEmpty[hidden] { display: none; }

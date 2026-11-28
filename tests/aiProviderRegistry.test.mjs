@@ -259,3 +259,24 @@ test('Installing a tool is described before it runs, and passes through to the t
     await assert.rejects(registry.installTool({ provider: 'plain' }), { code: 'installUnavailable' });
     assert.deepEqual((await registry.detectTools())[0], { provider: 'tool', name: 'Tool', account: '', plan: '', signedIn: null, description: 'For a plan.', installable: true, installed: false });
 });
+
+test('What every attempt of a request used is added up and told once, whether it ends well or not', async () => {
+    const { createAIProviderRegistry } = await import('../src/aiProviderRegistry.mjs');
+    const answers = ['not json', JSON.stringify({ responseKind: 'proposal', proposalVersion: 1, operations: [{ kind: 'addNode', ref: 'a', name: 'A' }] })];
+    const registry = createAIProviderRegistry([{ id: 'counting', name: 'Counting', async generateProposal({ onEvent }) {
+        onEvent({ type: 'usage', usage: { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 100, costUsd: 0.001, premiumRequests: 0 } });
+        const text = answers.shift();
+        try { return JSON.parse(text); } catch { const error = new Error('bad json'); error.code = 'invalidProposalJson'; throw error; }
+    } }]);
+    const told = [];
+    await registry.generate({ configuration: { provider: 'counting' }, context: { nodes: [], edges: [] }, request: 'x', onUsage: (value) => told.push(value) });
+    assert.equal(told.length, 1);
+    assert.deepEqual(told[0], { inputTokens: 2000, cachedInputTokens: 0, outputTokens: 200, costUsd: 0.002, premiumRequests: 0 }, 'The repaired attempt was not counted.');
+    const failing = createAIProviderRegistry([{ id: 'failing', name: 'Failing', async generateProposal({ onEvent }) {
+        onEvent({ type: 'usage', usage: { inputTokens: 500, cachedInputTokens: 0, outputTokens: 0, costUsd: 0, premiumRequests: 0 } });
+        throw Object.assign(new Error('refused'), { code: 'providerHttpError' });
+    } }]);
+    const toldFailing = [];
+    await assert.rejects(failing.generate({ configuration: { provider: 'failing' }, context: { nodes: [], edges: [] }, request: 'x', onUsage: (value) => toldFailing.push(value) }));
+    assert.equal(toldFailing[0].inputTokens, 500, 'What a failed request used was not told.');
+});

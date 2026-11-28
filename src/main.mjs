@@ -3728,15 +3728,18 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
         if (!event.sender.isDestroyed()) event.sender.send('aiProgress', { requestUuid, ...progress });
     }, 120);
     activeAIRequests.set(key, { owner: event.sender, controller });
+    // What the request used, all its attempts together, returned with the answer or the failure (src/assistantUsage.mjs).
+    let used = null;
     try {
         const proposal = await aiProviderRegistry.generate({
+            onUsage: (value) => { used = value; },
             ...resolved, context, request: requestWithReference(request.trim(), reference), history, initialRepair: repair ?? null, signal: controller.signal,
             onProgress: (progress) => {
                 watchdog.touch();
                 progressToPanel.push(progress);
             }
         });
-        return { ok: true, proposal };
+        return { ok: true, proposal, usage: used };
     } catch (error) {
         const message = expiredBecause === 'idle'
             ? `The model sent nothing for ${resolved.configuration.timeoutSeconds} seconds. This timeout counts silence, not total time: increase it in this model configuration, or choose a faster model.`
@@ -3745,7 +3748,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
                 : error.name === 'AbortError' ? 'Proposal generation was cancelled.' : error.message;
         const code = expiredBecause ? 'requestTimedOut' : error.name === 'AbortError' ? 'requestCancelled' : error.code ?? 'providerError';
         if (code !== 'requestCancelled') logAIIssue(`generating a proposal with ${resolved.configuration.provider} (${resolved.configuration.model || 'no model'})`, { message, code, status: error.status, providerCode: error.providerCode }, resolved.credential);
-        return { ok: false, error: { message, code } };
+        return { ok: false, error: { message, code }, usage: used };
     } finally {
         watchdog.stop();
         progressToPanel.stop();

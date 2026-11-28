@@ -87,7 +87,9 @@ export async function startFakeOllama({ models = ['qwen3.5:4b'], pullSteps = 4, 
             for (const piece of [text.slice(0, half), text.slice(half)]) {
                 response.write(`${JSON.stringify({ message: { role: 'assistant', content: piece }, done: false })}\n`);
             }
-            response.end(`${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true })}\n`);
+            // As Ollama ends a reply: what it read and wrote, which the app shows as the request's usage.
+            const content = body.messages?.map((message) => message.content ?? '').join('') ?? '';
+            response.end(`${JSON.stringify({ message: { role: 'assistant', content: '' }, done: true, prompt_eval_count: Math.ceil(content.length / 4), eval_count: Math.ceil(JSON.stringify(answer).length / 4) })}\n`);
             return undefined;
         }
         return json(response, 404, { error: 'not found' });

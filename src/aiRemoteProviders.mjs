@@ -5,6 +5,7 @@ import { isStreamingResponse, newlineDelimitedJson, serverSentEvents, streamLine
 import { loopbackAuthorization } from './aiOAuth.mjs';
 import Anthropic from '@anthropic-ai/sdk';
 import { randomBytes } from 'node:crypto';
+import { usageFrom } from './assistantUsage.mjs';
 
 const defaults = Object.freeze({
     ollama: 'http://127.0.0.1:11434',
@@ -88,22 +89,36 @@ async function generateText(fetchImpl, url, options, { protocol, fromChunk, from
         const read = fromWhole(whole);
         if (read.thinking) onEvent?.({ type: 'thinking', text: read.thinking });
         if (read.output) onEvent?.({ type: 'output', text: read.output });
+        if (read.usage) onEvent?.({ type: 'usage', usage: read.usage });
         return typeof read.output === 'string' && read.output !== '' ? read.output : undefined;
     }
     const events = protocol === 'sse' ? serverSentEvents : newlineDelimitedJson;
+    // What the request used, as the stream last said it (some providers repeat running totals in every chunk): told once, at the end.
+    let lastUsage = null;
+    try {
+        output = await readStream();
+    } finally {
+        if (lastUsage) onEvent?.({ type: 'usage', usage: lastUsage });
+    }
+    return output === '' ? undefined : output;
+
+    async function readStream() {
+    let text = '';
     for await (const chunk of events(streamLines(response, () => onEvent?.({ type: 'activity' })))) {
         streamError(chunk);
         const read = fromChunk(chunk);
+        if (read.usage) lastUsage = read.usage;
         if (read.thinking) onEvent?.({ type: 'thinking', text: read.thinking });
         if (read.output) {
-            output += read.output;
-            if (output.length > maximumOutputCharacters) {
+            text += read.output;
+            if (text.length > maximumOutputCharacters) {
                 throw new AssistantProviderError('The AI provider response is too large.', 'responseTooLarge');
             }
             onEvent?.({ type: 'output', text: read.output });
         }
     }
-    return output === '' ? undefined : output;
+    return text;
+    }
 }
 
 const equationRules = `EQUATION RULES:\n- The latex field must be real LaTeX math notation, exactly what you would typeset in a document, never a function-call expression. Function-call syntax like Name(args) is not LaTeX and will be misparsed letter by letter.\n- Wrap every state and parameter symbol in \\mathrm{...}, for example \\mathrm{sourceTemperature}, never bare sourceTemperature. Without \\mathrm{}, a multi-letter symbol is misread as a product of single-letter variables (temperature becomes t times e times m times p times e times r times a times t times u times r times e), which is the single most common cause of an equation being rejected.\n- Write multiplication as juxtaposition or \\cdot, e.g. "5 \\cdot \\mathrm{heatingPower}", never "Multiply(5, heatingPower)". Write subtraction as "\\mathrm{a} - \\mathrm{b}", never "Subtract(a, b)". Write powers as "\\mathrm{x}^{2}", never "Power(x, 2)". Write division as "\\frac{\\mathrm{a}}{\\mathrm{b}}", never "Divide(a, b)". Write square roots as "\\sqrt{\\mathrm{x}}", never "Sqrt(x)", and other roots as "\\sqrt[3]{\\mathrm{x}}" for Root.\n- Named functions (Max, Min, Sin, Cos, Tan, Ln, Log, Exp) use their literal lowercase LaTeX command applied like a function, e.g. "\\max(\\mathrm{a}, \\mathrm{b})", "\\min(\\mathrm{a}, \\mathrm{b})", "\\sin(\\mathrm{x})", "\\ln(\\mathrm{x})". Never write these as "\\operatorname{Max}(...)" or a bare capitalized word like "Max(a, b)" -- both are rejected. Write Abs as "\\left|\\mathrm{x}\\right|", never "Abs(x)". Write Negate as a unary minus, "-\\mathrm{x}", never "Negate(x)".\n- For a piecewise value write a LaTeX cases environment with a final otherwise branch, e.g. "\\begin{cases} \\mathrm{rate} & \\mathrm{sourceStock} > 0 \\\\ 0 & \\text{otherwise} \\end{cases}". Conditions may use <, >, \\le, \\ge, =, \\ne, \\land, \\lor and \\lnot; comparisons are only allowed as conditions, never as values.\n- Only these operators are supported: Abs, Add, Cos, Divide, Exp, Ln, Log, Max, Min, Multiply, Negate, Power, Root, Sin, Sqrt, Subtract, Tan, and Which (cases) with Less, LessEqual, Greater, GreaterEqual, Equal, NotEqual, And, Or, Not in its conditions. Never use complex numbers, derivatives, summations, or any other operator or function.\n- Every equation may use t, the simulation time in seconds, for schedules and time-varying inputs (e.g. \"\\begin{cases} \\mathrm{rate} & 3600 \\le t < 7200 \\\\ 0 & \\text{otherwise} \\end{cases}\"). Write it as a bare t, never \\mathrm{t}. Never use t to integrate a state yourself; the engine integrates states over time automatically. Never use the bare letters i or e as symbols outside \\mathrm{}; a real math parser treats them as the imaginary unit and Euler's number.\n- A local source-term equation (addSourceTerm) may only reference that same node's own declared state symbols, used exactly as declared. Nodes cannot have named parameters; write any constant coefficient as a plain number.\n- A relationship equation (setEdgeEquation) may only reference: for each state on the edge's source node, "source" followed by that state's symbol capitalized (a state with symbol "temperature" becomes "sourceTemperature"); for each state on the edge's target node, "target" followed by that state's symbol capitalized ("targetTemperature"); and any parameter already added to that edge with addParameter, using exactly the symbol declared there.\n- Declare every state and every edge parameter an equation will use before the operation that writes the equation, and use no symbol that was not declared this way.`;
@@ -175,7 +190,9 @@ function requireCredential(credential, providerName) {
 
 // `headers`: sent with every request besides the key. `modelsPath`: where the models this key can use are listed.
 // `extra`: what else the provider offers (signing in, choosing a model after it).
-function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false, headers = {}, modelsPath = '/v1/models', extra = {} }) {
+// `streamUsage`: the API takes stream_options.include_usage, so a stream ends with what it used (OpenAI); others report it unasked
+// (OpenRouter) or not at all, and are not sent an option they may refuse.
+function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false, headers = {}, modelsPath = '/v1/models', extra = {}, streamUsage = false }) {
     return {
         id, name, defaultEndpoint: endpoint, defaultTimeoutSeconds: 60, credentialRequired: true, locality: 'online', ...extra,
         async listModels({ configuration, credential, signal, fetchImpl }) {
@@ -205,18 +222,19 @@ function openAICompatibleProvider({ id, name, endpoint, schemaResponse = false, 
                         { role: 'user', content: requestPrompt(context, request, repair) }
                     ],
                     response_format: responseFormat,
-                    stream: true
+                    stream: true,
+                    ...(streamUsage ? { stream_options: { include_usage: true } } : {})
                 })
             }, {
                 protocol: 'sse',
                 // Reasoning models name the reasoning field differently depending on who serves them.
                 fromChunk: (chunk) => {
                     const delta = chunk.choices?.[0]?.delta ?? {};
-                    return { output: delta.content ?? '', thinking: delta.reasoning_content ?? delta.reasoning ?? '' };
+                    return { output: delta.content ?? '', thinking: delta.reasoning_content ?? delta.reasoning ?? '', usage: usageFrom.chatCompletions(chunk.usage) };
                 },
                 fromWhole: (body) => {
                     const message = body.choices?.[0]?.message ?? {};
-                    return { output: message.content, thinking: message.reasoning_content ?? message.reasoning ?? '' };
+                    return { output: message.content, thinking: message.reasoning_content ?? message.reasoning ?? '', usage: usageFrom.chatCompletions(body.usage) };
                 }
             }, onEvent);
             const schemaFormat = { type: 'json_schema', json_schema: { name: 'konjugate_proposal', strict: false, schema: operationSchema } };
@@ -267,8 +285,8 @@ function ollamaProvider() {
                 })
             }, {
                 protocol: 'ndjson',
-                fromChunk: (chunk) => ({ output: chunk.message?.content ?? '', thinking: chunk.message?.thinking ?? '' }),
-                fromWhole: (body) => ({ output: body.message?.content, thinking: body.message?.thinking ?? '' })
+                fromChunk: (chunk) => ({ output: chunk.message?.content ?? '', thinking: chunk.message?.thinking ?? '', usage: chunk.done ? usageFrom.ollama(chunk) : null }),
+                fromWhole: (body) => ({ output: body.message?.content, thinking: body.message?.thinking ?? '', usage: usageFrom.ollama(body) })
             }, onEvent);
             return parseProposal(text);
         }
@@ -301,7 +319,7 @@ function geminiProvider() {
             const fromParts = (body) => {
                 const parts = body.candidates?.[0]?.content?.parts ?? [];
                 const textOf = (selected) => selected.map((part) => part.text ?? '').join('');
-                return { output: textOf(parts.filter((part) => !part.thought)), thinking: textOf(parts.filter((part) => part.thought)) };
+                return { output: textOf(parts.filter((part) => !part.thought)), thinking: textOf(parts.filter((part) => part.thought)), usage: usageFrom.gemini(body.usageMetadata) };
             };
             const text = await generateText(fetchImpl, `${baseUrl({ ...configuration, provider: 'gemini' })}/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
                 method: 'POST', signal, headers: { 'x-goog-api-key': credential, 'Content-Type': 'application/json' },
@@ -470,6 +488,8 @@ function anthropicProvider() {
                     }
                 }
                 const message = await stream.finalMessage();
+                const used = usageFrom.anthropic(message.usage);
+                if (used) onEvent?.({ type: 'usage', usage: used });
                 if (message.stop_reason === 'refusal') {
                     throw new AssistantProviderError('Claude declined this request. Rephrase it, or choose another model or provider.', 'providerRefused');
                 }
@@ -718,6 +738,8 @@ function chatGptProvider() {
                         onEvent?.({ type: 'thinking', text: event.delta });
                     } else if (event.type === 'response.completed') {
                         completed = true;
+                        const used = usageFrom.responses(event.response?.usage);
+                        if (used) onEvent?.({ type: 'usage', usage: used });
                     } else if (event.type === 'response.failed' || event.type === 'error') {
                         const failed = event.response?.error ?? event.error ?? {};
                         const failure = new AssistantProviderError(`ChatGPT stopped: ${String(failed.message ?? failed.code ?? 'unknown error').slice(0, 300)}`, 'providerHttpError');
@@ -798,7 +820,7 @@ export function createRemoteAIProviders({ fetchImpl = globalThis.fetch, operatio
     return [
         ollamaProvider(),
         chatGptProvider(),
-        openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true, extra: { keyPage: 'https://platform.openai.com/api-keys' } }),
+        openAICompatibleProvider({ id: 'openAi', name: 'OpenAI', endpoint: defaults.openAi, schemaResponse: true, streamUsage: true, extra: { keyPage: 'https://platform.openai.com/api-keys' } }),
         openAICompatibleProvider({ id: 'nvidia', name: 'NVIDIA', endpoint: defaults.nvidia, extra: { keyPage: 'https://build.nvidia.com/settings/api-keys' } }),
         openAICompatibleProvider({ id: 'huggingFace', name: 'Hugging Face', endpoint: defaults.huggingFace, extra: { keyPage: 'https://huggingface.co/settings/tokens', ...huggingFaceSignIn() } }),
         openRouterProvider(),

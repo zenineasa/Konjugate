@@ -667,3 +667,32 @@ test('The instructions stay the same from request to request, so providers can c
     assert.equal(bodies[1].response_format.type, 'json_object');
     assert.ok(bodies[1].messages[0].content.includes('OPERATION SCHEMA'), 'The plain-JSON fallback left the model without the schema.');
 });
+
+test('Each adapter reports what a request used, once, as its provider says it', async () => {
+    const sse = (chunks) => new Response(chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n', { headers: { 'Content-Type': 'text/event-stream' } });
+    const collect = () => { const events = []; return { events, onEvent: (event) => events.push(event) }; };
+    // OpenAI: asked for, and read from the stream's last chunk.
+    let body;
+    const openAi = provider('openAi', async (url, options) => {
+        body = JSON.parse(options.body);
+        return sse([{ choices: [{ delta: { content: JSON.stringify(proposal) } }] }, { choices: [], usage: { prompt_tokens: 1200, completion_tokens: 80, prompt_tokens_details: { cached_tokens: 1000 } } }]);
+    });
+    const fromOpenAi = collect();
+    await openAi.generateProposal(input('openAi', { onEvent: fromOpenAi.onEvent }));
+    assert.deepEqual(body.stream_options, { include_usage: true });
+    assert.deepEqual(fromOpenAi.events.filter((event) => event.type === 'usage').map((event) => event.usage), [{ inputTokens: 1200, cachedInputTokens: 1000, outputTokens: 80, costUsd: 0, premiumRequests: 0 }]);
+    // NVIDIA is not sent an option it may refuse.
+    let nvidiaBody;
+    await provider('nvidia', async (url, options) => { nvidiaBody = JSON.parse(options.body); return jsonResponse({ choices: [{ message: { content: JSON.stringify(proposal) } }] }); }).generateProposal(input('nvidia'));
+    assert.equal('stream_options' in nvidiaBody, false);
+    // Ollama: from its last chunk.
+    const ollama = provider('ollama', async () => new Response([{ message: { content: JSON.stringify(proposal) } }, { done: true, prompt_eval_count: 2800, eval_count: 120 }].map((chunk) => JSON.stringify(chunk)).join('\n'), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+    const fromOllama = collect();
+    await ollama.generateProposal(input('ollama', { onEvent: fromOllama.onEvent }));
+    assert.deepEqual(fromOllama.events.filter((event) => event.type === 'usage').map((event) => [event.usage.inputTokens, event.usage.outputTokens]), [[2800, 120]]);
+    // Anthropic: from the final message, with what was read from the cache.
+    const anthropic = provider('anthropic', async () => anthropicStream(JSON.stringify(proposal)));
+    const fromAnthropic = collect();
+    await anthropic.generateProposal(input('anthropic', { onEvent: fromAnthropic.onEvent }));
+    assert.equal(fromAnthropic.events.filter((event) => event.type === 'usage').length, 1, 'Anthropic\'s usage was not reported once.');
+});

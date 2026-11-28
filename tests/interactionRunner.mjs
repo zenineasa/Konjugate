@@ -1319,6 +1319,8 @@ export async function runInteractionTests(driver) {
         const kept = await evaluate(window, `window.assistantHistory.get(${JSON.stringify(summary.id)})`);
         assert.equal(kept.turns[0].reply.summary, 'Add a heat sink with a temperature state.', 'The fixed reply was not kept in place of the first one.');
         assert.equal(kept.turns[0].model.provider, 'ollama');
+        assert.ok(kept.turns[0].usage?.inputTokens > 0, 'What the request used was not kept with its turn.');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child .assistantTranscriptUsage')?.textContent ?? ''`), /tokens in · .* out/, 'What the request used was not shown under its turn.');
         assert.ok(kept.turns[0].project.title, 'The project the turn was about was not kept.');
 
         // A new conversation, then the first one opened again from History, with its turn and its proposal folded in it.

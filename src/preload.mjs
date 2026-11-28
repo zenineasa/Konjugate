@@ -412,8 +412,10 @@ contextBridge.exposeInMainWorld('aiProviders', {
     onToolProgress: (callback) => ipcRenderer.on('aiToolProgress', (_event, progress) => callback(progress)),
     // `repair` ({ error, proposal }), when given, asks the model to fix a proposal the engine rejected.
     // `reference` ({ summary, assumptions, operations }), when given, is an earlier proposal for the model to adapt (Ask about this).
-    generateProposal: async (requestUuid, configurationUuid, request, context, history, repair, reference) => {
+    // `options.onUsage(usage)` is told what the request used (src/assistantUsage.mjs), whether it is answered or fails.
+    generateProposal: async (requestUuid, configurationUuid, request, context, history, repair, reference, options = {}) => {
         const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history, repair, reference });
+        options?.onUsage?.(result.usage ?? null);
         if (result.ok) return result.proposal;
         if (result.error?.code === 'requestCancelled') throw new DOMException(result.error.message, 'AbortError');
         const error = new Error(result.error?.message ?? 'The model provider could not generate a proposal.');

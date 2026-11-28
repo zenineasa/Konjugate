@@ -1,6 +1,7 @@
 /* Copyright © 2026 Zenin Easa Panthakkalakath */
 
 import { generateAssistantProposal } from './assistantProviders.mjs';
+import { addUsage } from './assistantUsage.mjs';
 import { AssistantProposalError, validateAssistantClarification, validateAssistantProposal } from './assistantOperations.mjs';
 
 const maximumRepairAttempts = 2;
@@ -95,7 +96,8 @@ export function createAIProviderRegistry(providers = []) {
             return provider.listModels({ configuration, credential, onCredential, signal });
         },
         // `initialRepair` ({ error, proposal }): this request is the model fixing a proposal the host or the engine rejected.
-        async generate({ configuration, credential, onCredential, context, request, history, initialRepair = null, signal, onProgress }) {
+        // `onUsage(total)` is told, once the request ends however it ends, what all its attempts used together (or null).
+        async generate({ configuration, credential, onCredential, context, request, history, initialRepair = null, signal, onProgress, onUsage }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             // What the panel shows while this runs: which attempt, what stage, and the latest of what the
@@ -104,7 +106,9 @@ export function createAIProviderRegistry(providers = []) {
             const publish = () => onProgress?.({ ...progress });
             const redact = (text) => (credential ? text.replaceAll(credential, '[redacted]') : text);
             if (initialRepair) progress.repairReason = redact(String(initialRepair.error ?? '')).slice(0, repairReasonCharacters);
+            let used = null;
             const onEvent = (event) => {
+                if (event.type === 'usage') { used = addUsage(used, event.usage); return; }
                 if (event.type === 'thinking') {
                     progress.phase = 'receiving';
                     progress.thinking = tail(progress.thinking + event.text, thinkingTailCharacters);
@@ -163,6 +167,8 @@ export function createAIProviderRegistry(providers = []) {
                 const message = credential ? error.message.replaceAll(credential, '[redacted]') : error.message;
                 if (message === error.message) throw error;
                 throw new AIProviderRegistryError(message, error.code);
+            } finally {
+                onUsage?.(used);
             }
         }
     });

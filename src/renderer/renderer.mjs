@@ -32,6 +32,7 @@ import { createAssistantSignInSection } from './assistantSignInSection.mjs';
 import { createAssistantToolsSection } from './assistantToolsSection.mjs';
 import { createAssistantPanelLayout } from './assistantPanelLayout.mjs';
 import { describeModelDiff, diffModels } from '../modelDiff.mjs';
+import { addUsage, describeUsage, shortUsage } from '../assistantUsage.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -11767,6 +11768,7 @@ function renderAssistantTranscript() {
         } else {
             item.append(you, outcome);
         }
+        if (turn.usage) item.append(Object.assign(document.createElement('p'), { className: 'assistantTranscriptUsage', textContent: describeUsage(turn.usage, turn.provider) }));
         const reply = assistantTurnReply(turn);
         if (reply) item.append(reply);
         const checkpoints = assistantTurnCheckpoints(turn, index);
@@ -11813,14 +11815,14 @@ function assistantConversation(firstRequest) {
 // What the model is told of the conversation: its last five turns, as the compact { request, outcome } it always was.
 const assistantModelHistory = (turns = assistantTurnHistory) => turns.slice(-5).map(({ request, outcome }) => ({ request, outcome }));
 
-function pushAssistantTurn(request, outcome, reply = null, reference = null) {
+function pushAssistantTurn(request, outcome, reply = null, reference = null, used = null) {
     const context = assistantTurnContext();
-    const record = { request, outcome, reply, turnId: null, project: context.project, reference: reference ? { summary: reference.summary } : null };
+    const record = { request, outcome, reply, turnId: null, project: context.project, provider: context.model.provider, usage: used, reference: reference ? { summary: reference.summary } : null };
     assistantTurnHistory = [...assistantTurnHistory, record];
     renderAssistantTranscript();
     if (historyStore) {
         assistantTurnWrites.set(record, assistantConversation(request)
-            .then((id) => historyStore.appendTurn(id, { request, outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, reply, reference: record.reference, ...context }))
+            .then((id) => historyStore.appendTurn(id, { request, outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, reply, reference: record.reference, usage: used, ...context }))
             .then((turn) => { record.turnId = turn.id; })
             .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
     }
@@ -11833,13 +11835,15 @@ function updateAssistantTurnOutcome(record, outcome, changes = {}) {
     record.outcome = outcome;
     if (changes.reply) record.reply = changes.reply;
     if (changes.problems) record.problems = changes.problems;
+    if (changes.usage) record.usage = changes.usage;
     renderAssistantTranscript();
     const conversationId = assistantConversationId;
     const pending = assistantTurnWrites.get(record);
     if (!historyStore || !pending) return;
     assistantTurnWrites.set(record, pending
         .then(() => record.turnId && historyStore.updateTurn(conversationId, record.turnId, {
-            outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}), ...(changes.problems ? { problems: changes.problems } : {})
+            outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}), ...(changes.problems ? { problems: changes.problems } : {}),
+            ...(changes.usage ? { usage: changes.usage } : {})
         }))
         .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
 }
@@ -12046,7 +12050,7 @@ async function openAssistantConversation(id) {
     assistantConversationId = conversation.id;
     assistantTurnHistory = conversation.turns.map((turn) => ({
         request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id, before: turn.before, after: turn.after,
-        project: turn.project, reference: turn.reference
+        project: turn.project, reference: turn.reference, usage: turn.usage, provider: turn.model?.provider ?? ''
     }));
     assistantForkChoice = null;
     renderAssistantForkNote(conversation.forkedFrom);
@@ -12082,7 +12086,7 @@ async function renderAssistantHistoryList() {
         const title = Object.assign(document.createElement('strong'), { textContent: conversation.title });
         const turns = `${conversation.turnCount} ${conversation.turnCount === 1 ? 'turn' : 'turns'}`;
         const meta = Object.assign(document.createElement('small'), {
-            textContent: [conversation.project, conversation.model, formatHistoryTime(conversation.updatedAt), turns].filter(Boolean).join(' · ')
+            textContent: [conversation.project, conversation.model, formatHistoryTime(conversation.updatedAt), turns, shortUsage(conversation.usage)].filter(Boolean).join(' · ')
         });
         open.append(title, meta);
         const remove = document.createElement('button');
@@ -15247,8 +15251,11 @@ async function requestAssistantProposal() {
     startAssistantProgress(requestUuid, request);
     try {
         const reference = assistantReference;
+        // What the request used, its repair round included, kept with its turn.
+        let requestUsage = null;
+        const onUsage = (value) => { requestUsage = addUsage(requestUsage, value); };
         const response = await window.aiProviders.generateProposal(
-            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory(), undefined, reference ?? undefined
+            requestUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory(), undefined, reference ?? undefined, { onUsage }
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
         // Clear the prompt only once a response has actually arrived, not before sending --
@@ -15259,11 +15266,11 @@ async function requestAssistantProposal() {
         fitAssistantPrompt();
         setAssistantReference(null);
         if (response.responseKind === 'clarification') {
-            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`, response, reference);
+            pendingAssistantTurnRecord = pushAssistantTurn(request, `Asked: ${response.question}`, response, reference, requestUsage);
             renderAssistantClarification(response);
             return { valid: false, clarification: response };
         }
-        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`, response, reference);
+        pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`, response, reference, requestUsage);
         const preview = await previewAssistantProposal(response, { recordOutcome: false });
         if (preview.valid || preview.superseded || controller.signal.aborted) return preview;
         if (!preview.repairable) {
@@ -15278,16 +15285,16 @@ async function requestAssistantProposal() {
         startAssistantProgress(repairUuid, request);
         const fixed = await window.aiProviders.generateProposal(
             repairUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantModelHistory(assistantTurnHistory.slice(0, -1)),
-            { error: preview.error.slice(0, 4000), proposal: response }, reference ?? undefined
+            { error: preview.error.slice(0, 4000), proposal: response }, reference ?? undefined, { onUsage }
         );
         if (controller.signal.aborted) return { valid: false, cancelled: true };
         stopAssistantProgress();
         if (fixed.responseKind === 'clarification') {
-            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Asked: ${fixed.question}`, { reply: fixed });
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Asked: ${fixed.question}`, { reply: fixed, usage: requestUsage });
             renderAssistantClarification(fixed);
             return { valid: false, clarification: fixed };
         }
-        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Proposed: ${fixed.summary?.trim() || 'model changes'}`, { reply: fixed });
+        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Proposed: ${fixed.summary?.trim() || 'model changes'}`, { reply: fixed, usage: requestUsage });
         return { ...(await previewAssistantProposal(fixed)), repaired: true };
     } catch (error) {
         if (controller.signal.aborted || error.name === 'AbortError') {

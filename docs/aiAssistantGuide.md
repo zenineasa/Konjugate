@@ -202,6 +202,12 @@ The panel reads like a chat. The conversation fills it and scrolls: each request
 
 A proposal of more than eight changes is folded into one group for each node or relationship its changes touch, in the order the proposal touches them; open a group to see its changes. Problems come first, under **Problems to fix**, each naming the node or relationship it is about, and the group a problem concerns is opened and marked **Needs fixing**.
 
+## What a request uses
+
+Under each turn, the panel says what the request used, as the provider reported it: the tokens sent (and how many of them the provider read from its cache, which costs less), the tokens written, and, where the provider reports one, the cost: OpenRouter in dollars of credit, Claude Code as its own estimate at API prices. A subscription (Claude through Claude Code, a ChatGPT plan, GitHub Copilot) is not charged by the token, but its usage counts against the plan's limits, which the line says; Copilot counts premium requests. History shows each conversation's total.
+
+The instructions Konjugate sends are the same for every request and come first, so providers that cache a repeated start of a prompt (Anthropic, OpenAI, Gemini) charge less for them after the first request; where the provider enforces the response's format, the format's description is not sent a second time.
+
 ## While the assistant works
 
 The panel shows what is happening as the assistant's turn in the conversation, under the request you sent: waiting for the model, whether it is thinking or writing the proposal, checking the proposal, with how long it has been going, and, when a proposal was rejected, that the model was asked to fix it and why. **What the model is doing** opens the model's reasoning, where the provider shares it, and the proposal text as it is written. **Cancel** stops the request at any time.

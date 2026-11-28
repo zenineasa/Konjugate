@@ -2537,6 +2537,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .localModelAction button:disabled { opacity: .6; cursor: default; }
 .localModelAction progress { flex: 1; min-width: 80px; height: 6px; accent-color: var(--accent); }
 .localModelProgressText { color: #8aa0aa; font-size: 7px; font-variant-numeric: tabular-nums; }
+/* Settings › Model assistant's rows: their buttons side by side (the description wraps instead), the same height as the
+   rows' badges, and the sign-in buttons one width, so every row's right edge lines up. */
+.passwordDialog.settingsSheet [data-settings-page="assistant"] .settingsItemControl { flex-wrap: nowrap; }
+.passwordDialog.settingsSheet [data-settings-page="assistant"] .settingsItem { min-height: 46px; }
+.passwordDialog.settingsSheet [data-settings-page="assistant"] .settingsBadge { display: inline-grid; height: 26px; place-items: center; padding: 0 10px; background: rgb(102 200 191 / 8%); border: 1px solid rgb(102 200 191 / 30%); border-radius: 5px; }
+.passwordDialog.settingsSheet .assistantSignInRow .settingsButton.primary { min-width: 150px; }
+.passwordDialog.settingsSheet :is(.assistantSignInRow, .assistantToolRow) .settingsButton { min-width: 64px; }
 .assistantSignInWaiting { color: #8aa0aa; font-size: 7px; }
 .assistantToolProgress { display: block; margin-top: 3px; color: #8aa0aa; font: 7px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
 .huggingFaceBrowser { padding: 8px 9px; background: #0a161d; border: 1px solid #263b45; border-radius: 5px; }

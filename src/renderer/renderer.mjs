@@ -14436,7 +14436,11 @@ function renderAssistantConfigurationList() {
         details.className = 'settingsItemHint';
         const signedIn = configuration.credentialSource === 'signIn' ? ` · signed in${configuration.account ? ` as ${configuration.account}` : ''}` : '';
         const model = provider?.vendorTool && configuration.model === 'default' ? 'its default model' : configuration.model || 'No model chosen';
-        details.textContent = `${provider?.name ?? configuration.provider}${signedIn} · ${model}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        // The provider is named only when the configuration's own name does not already say it.
+        const providerName = provider?.name ?? configuration.provider;
+        const named = providerName === configuration.name ? '' : providerName;
+        const line = `${[named + signedIn, model].filter(Boolean).join(' · ').replace(/^ · /, '')}${configuration.think === true ? ' · reasons first, slow' : ''}`;
+        details.textContent = line.charAt(0).toUpperCase() + line.slice(1);
         text.append(title, details);
         const control = document.createElement('span');
         control.className = 'settingsItemControl';

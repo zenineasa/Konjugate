@@ -87,3 +87,24 @@ test('Nothing outside the history folder can be named, and what a turn may hold 
     await writeFile(join(directory, conversation.id, 'conversation.json'), 'not json');
     assert.deepEqual(await history.list(), (await history.list()).filter((item) => item.id !== conversation.id));
 }));
+
+test('Over its size limit, the history drops the least recently used checkpoints first, then whole conversations, never the one in use', () => withHistory(async (history) => {
+    const big = (seed) => ({ nodes: Array.from({ length: 400 }, (_, index) => ({ id: index, name: `${seed}-${index}-${Math.sin(index * seed)}` })), edges: [] });
+    const oldest = await history.create({ title: 'Oldest' });
+    await history.putSnapshot(oldest.id, big(1));
+    const middle = await history.create({ title: 'Middle' });
+    await history.putSnapshot(middle.id, big(2));
+    const current = await history.create({ title: 'Current' });
+    await history.putSnapshot(current.id, big(3));
+    const { bytes } = await history.usage();
+    assert.deepEqual(await history.enforceLimit(bytes + 1, { keep: current.id }), { checkpoints: [], conversations: [] }, 'Within the limit, nothing goes.');
+    // Just under: the oldest conversation's checkpoints go, and it stays.
+    const first = await history.enforceLimit(bytes - 1, { keep: current.id });
+    assert.deepEqual(first, { checkpoints: [oldest.id], conversations: [] });
+    assert.equal((await history.list()).length, 3);
+    // Far under: every other conversation's checkpoints, then those conversations; the one in use stays whole.
+    const second = await history.enforceLimit(1, { keep: current.id });
+    assert.deepEqual(second.conversations.sort(), [oldest.id, middle.id].sort());
+    assert.deepEqual((await history.list()).map((item) => item.id), [current.id]);
+    assert.ok((await history.usage()).bytes > 0, 'The conversation in use lost what it kept.');
+}));

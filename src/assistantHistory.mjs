@@ -197,6 +197,38 @@ export function createAssistantHistory({ directory, uuidFactory = randomUUID, no
             for (const id of await ids()) await history.remove(id);
             return true;
         },
+        // Keeps the history within `limitBytes`: the least recently used conversations' checkpoints go first (their turns stay,
+        // and say a checkpoint is no longer kept when it is asked for), then whole conversations, never `keep`'s. Returns what went.
+        async enforceLimit(limitBytes, { keep = null } = {}) {
+            const entries = [];
+            for (const id of await ids()) {
+                const folder = join(directory, id);
+                const updatedAt = await read(id).then((conversation) => conversation.updatedAt).catch(() => 0);
+                entries.push({ id, updatedAt, bytes: await folderSize(folder), snapshotBytes: await folderSize(join(folder, snapshotsFolder)) });
+            }
+            let total = entries.reduce((sum, entry) => sum + entry.bytes, 0);
+            const removed = { checkpoints: [], conversations: [] };
+            if (total <= limitBytes) return removed;
+            const oldestFirst = entries.filter((entry) => entry.id !== keep).sort((a, b) => a.updatedAt - b.updatedAt);
+            for (const entry of oldestFirst) {
+                if (total <= limitBytes) break;
+                if (!entry.snapshotBytes) continue;
+                await serially(entry.id, async () => {
+                    await rm(join(directory, entry.id, snapshotsFolder), { recursive: true, force: true });
+                    await mkdir(join(directory, entry.id, snapshotsFolder), { recursive: true, mode: 0o700 });
+                });
+                total -= entry.snapshotBytes;
+                entry.bytes -= entry.snapshotBytes;
+                removed.checkpoints.push(entry.id);
+            }
+            for (const entry of oldestFirst) {
+                if (total <= limitBytes) break;
+                await history.remove(entry.id);
+                total -= entry.bytes;
+                removed.conversations.push(entry.id);
+            }
+            return removed;
+        },
         // How much is kept: the number of conversations and the bytes they take.
         async usage() {
             const all = await ids();

@@ -31,6 +31,7 @@ import { createLocalModelsSection } from './localModelsSection.mjs';
 import { createAssistantSignInSection } from './assistantSignInSection.mjs';
 import { createAssistantToolsSection } from './assistantToolsSection.mjs';
 import { createAssistantPanelLayout } from './assistantPanelLayout.mjs';
+import { describeModelDiff, diffModels } from '../modelDiff.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -11677,12 +11678,39 @@ function assistantTurnReply(turn) {
     return details;
 }
 
+// An applied turn's checkpoints: what it changed, and the model as it was before and after it, to restore.
+function assistantTurnCheckpoints(turn) {
+    if (!turn.before || !turn.after) return null;
+    const box = document.createElement('div');
+    box.className = 'assistantTurnCheckpoints';
+    const actions = document.createElement('div');
+    actions.className = 'assistantTurnActions';
+    for (const [action, text, title] of [
+        ['changes', turn.diffLines ? 'Hide what changed' : 'Show what changed', 'List what this changed, and select it on the canvas'],
+        ['restoreBefore', 'Restore before', 'Put the model back as it was before this change (undoable)'],
+        ['restoreAfter', 'Restore after', 'Put the model back as it was right after this change (undoable)']
+    ]) {
+        const button = Object.assign(document.createElement('button'), { type: 'button', textContent: text, title });
+        button.dataset.turnAction = action;
+        actions.append(button);
+    }
+    box.append(actions);
+    if (turn.diffLines) {
+        const list = document.createElement('ul');
+        list.className = 'assistantTurnDiff';
+        list.replaceChildren(...(turn.diffLines.length ? turn.diffLines : ['Nothing changed.']).map((line) => Object.assign(document.createElement('li'), { textContent: line })));
+        box.append(list);
+    }
+    return box;
+}
+
 function renderAssistantTranscript() {
     const transcript = $('#assistantTranscript');
     transcript.hidden = assistantTurnHistory.length === 0;
-    transcript.replaceChildren(...assistantTurnHistory.map((turn) => {
+    transcript.replaceChildren(...assistantTurnHistory.map((turn, index) => {
         const item = document.createElement('li');
         item.className = 'assistantTranscriptTurn';
+        item.dataset.turnIndex = String(index);
         const you = document.createElement('p');
         you.className = 'assistantTranscriptYou';
         you.textContent = turn.request;
@@ -11692,6 +11720,8 @@ function renderAssistantTranscript() {
         item.append(you, outcome);
         const reply = assistantTurnReply(turn);
         if (reply) item.append(reply);
+        const checkpoints = assistantTurnCheckpoints(turn, index);
+        if (checkpoints) item.append(checkpoints);
         return item;
     }));
     syncAssistantEmpty();
@@ -11762,6 +11792,58 @@ function updateAssistantTurnOutcome(record, outcome, changes = {}) {
         .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
 }
 
+// The model before and after an applied proposal, kept with its turn once the turn itself is kept.
+function keepAssistantCheckpoints(record, before, after) {
+    if (!historyStore || !record) return;
+    const conversationId = assistantConversationId;
+    const pending = assistantTurnWrites.get(record) ?? Promise.resolve();
+    assistantTurnWrites.set(record, pending.then(async () => {
+        const id = conversationId ?? assistantConversationId;
+        if (!record.turnId || !id) return;
+        const [beforeHash, afterHash] = await Promise.all([historyStore.putSnapshot(id, JSON.stringify(before)), historyStore.putSnapshot(id, JSON.stringify(after))]);
+        await historyStore.updateTurn(id, record.turnId, { before: beforeHash, after: afterHash });
+        Object.assign(record, { before: beforeHash, after: afterHash });
+        if (assistantTurnHistory.includes(record)) renderAssistantTranscript();
+    }).catch((error) => console.warn('[assistant] keeping this change\'s checkpoints:', error)));
+}
+
+// Shows (or hides) what an applied turn changed, and selects on the canvas the nodes it touched that are in the model now.
+async function toggleAssistantTurnChanges(turn) {
+    if (turn.diffLines) {
+        delete turn.diffLines;
+        renderAssistantTranscript();
+        return;
+    }
+    const [before, after] = await Promise.all([historyStore.getSnapshot(assistantConversationId, turn.before), historyStore.getSnapshot(assistantConversationId, turn.after)]);
+    const diff = diffModels(before, after);
+    turn.diffLines = describeModelDiff(diff);
+    const touched = new Set([...diff.nodes.added, ...diff.nodes.changed].map((item) => item.id));
+    for (const edge of [...diff.edges.added, ...diff.edges.changed]) {
+        const definition = (after.edges ?? []).find((item) => item.id === edge.id);
+        if (definition) { touched.add(definition.source?.nodeId); touched.add(definition.target?.nodeId); }
+    }
+    const nodes = [...touched].map((id) => nodeObjects.get(id)).filter((node) => node?.visible);
+    if (nodes.length && !activeResult) {
+        clearSelection();
+        nodes.forEach((node) => selectNode(node, { additive: true }));
+        $('#statusText').textContent = `${nodes.length} ${nodes.length === 1 ? 'node' : 'nodes'} this change touched`;
+    }
+    renderAssistantTranscript();
+}
+
+// Puts the model open now back as it was before or after an applied turn, as one undoable step, after asking.
+async function restoreAssistantCheckpoint(turn, which) {
+    if (activeResult) { renderAssistantGenerationError('Close simulation results before restoring the model.'); return false; }
+    const when = which === 'before' ? 'before' : 'right after';
+    if (!window.confirm(`Replace the model open now with the model as it was ${when} this change? You can undo this.`)) return false;
+    const snapshot = await historyStore.getSnapshot(assistantConversationId, which === 'before' ? turn.before : turn.after);
+    const current = serializeProjectDocument();
+    replaceModelContents(structuredClone(snapshot));
+    recordHistory({ undo: () => replaceModelContents(current), redo: () => replaceModelContents(structuredClone(snapshot)) });
+    $('#statusText').textContent = `Model restored to ${when} “${turn.request.slice(0, 60)}”`;
+    return true;
+}
+
 function resetAssistantConversation() {
     assistantTurnHistory = [];
     pendingAssistantTurnRecord = null;
@@ -11776,7 +11858,7 @@ async function openAssistantConversation(id) {
     discardAssistantProposal();
     assistantConversationId = conversation.id;
     assistantTurnHistory = conversation.turns.map((turn) => ({
-        request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id
+        request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id, before: turn.before, after: turn.after
     }));
     renderAssistantTranscript();
     showAssistantHistory(false);
@@ -11995,7 +12077,9 @@ function commitAssistantProposal() {
     }
     const before = currentDocument;
     const after = structuredClone(pendingAssistantProposal.document);
+    const appliedRecord = pendingAssistantTurnRecord;
     updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Applied: ${pendingAssistantProposal.proposal.summary?.trim() || 'the proposed changes'}`);
+    keepAssistantCheckpoints(appliedRecord, before, after);
     replaceModelContents(after);
     recordHistory({
         undo: () => replaceModelContents(before),
@@ -15024,6 +15108,17 @@ async function requestAssistantProposal() {
 
 $('#cancelAssistantRequest').addEventListener('click', () => assistantGenerationController?.abort());
 $('#assistantHistoryButton').hidden = !historyStore;
+$('#assistantTranscript').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-turn-action]');
+    if (!button) return;
+    const turn = assistantTurnHistory[Number(button.closest('[data-turn-index]')?.dataset.turnIndex)];
+    if (!turn) return;
+    const action = button.dataset.turnAction;
+    const done = action === 'changes' ? toggleAssistantTurnChanges(turn)
+        : action === 'restoreBefore' ? restoreAssistantCheckpoint(turn, 'before')
+            : action === 'restoreAfter' ? restoreAssistantCheckpoint(turn, 'after') : null;
+    done?.catch((error) => renderAssistantGenerationError(error.message));
+});
 $('#assistantHistoryButton').addEventListener('click', () => showAssistantHistory(!$('#assistantPanel').classList.contains('showingHistory')));
 $('#assistantHistoryBack').addEventListener('click', () => showAssistantHistory(false));
 let assistantHistorySearchTimer = null;

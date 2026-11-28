@@ -699,6 +699,13 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantTurnReply p { margin: 6px 0 0; color: #b8c7ce; }
 .assistantPanel .assistantTurnReply ul { margin-top: 6px; color: #8ea1aa; }
 
+/* An applied turn's checkpoints: what it changed, and restoring the model before or after it. */
+.assistantTurnCheckpoints { display: grid; gap: 6px; }
+.assistantTurnActions { display: flex; flex-wrap: wrap; gap: 6px; }
+.assistantTurnActions button { height: 26px; padding: 0 10px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; }
+.assistantTurnActions button:hover { color: #d2e6e8; border-color: #3d5b63; }
+.assistantPanel .assistantTurnDiff { margin: 0; padding: 7px 9px 7px 22px; background: #0c1a22; border: 1px solid #22343e; border-radius: 5px; font-size: var(--assistant-caption); user-select: text; }
+
 /* The conversation: earlier turns, then the reply to the latest request, then a request under way. */
 /* No padding at its foot: a reply's buttons stick to the bottom of what is in view, and padding would show what is behind them. */
 .assistantBody { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

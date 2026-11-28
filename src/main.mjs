@@ -3578,6 +3578,17 @@ ipcMain.handle('assistantHistoryRename', async (event, id, title) => { requirePr
 ipcMain.handle('assistantHistoryRemove', async (event, id) => { requireProjectWindow(event); return assistantHistory.remove(id); });
 ipcMain.handle('assistantHistoryClear', async (event) => { requireProjectWindow(event); return assistantHistory.clear(); });
 ipcMain.handle('assistantHistoryUsage', async (event) => { requireProjectWindow(event); return assistantHistory.usage(); });
+// A checkpoint of the model, kept in its conversation; the history is then kept within its size limit (the least recently used
+// conversations' checkpoints first, never this conversation's).
+const assistantHistoryLimitBytes = 500 * 1024 * 1024;
+ipcMain.handle('assistantHistoryPutSnapshot', async (event, id, documentJson) => {
+    requireProjectWindow(event);
+    if (typeof documentJson !== 'string') throw new Error('A checkpoint is a model document as JSON.');
+    const hash = await assistantHistory.putSnapshot(id, documentJson);
+    await assistantHistory.enforceLimit(assistantHistoryLimitBytes, { keep: id }).catch((error) => console.warn(`[assistant] keeping the history within its size: ${error.message}`));
+    return hash;
+});
+ipcMain.handle('assistantHistoryGetSnapshot', async (event, id, hash) => { requireProjectWindow(event); return assistantHistory.getSnapshot(id, hash); });
 
 // The vendors' own tools found on this computer, and who each is signed in as (docs/proposals/assistantSignIn.md).
 ipcMain.handle('aiDetectTools', async (event) => {

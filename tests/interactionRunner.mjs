@@ -409,6 +409,7 @@ export async function runInteractionTests(driver) {
             'a large proposal is folded into groups, and its problems come first, named',
             'a proposal the engine rejects goes back to the model to fix before it is shown',
             'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
+            'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1348,6 +1349,45 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `document.querySelector('#assistantHistoryUsage').textContent === 'None yet'`, 'Settings did not say the history is empty.');
         assert.equal(await isRenderedVisible(window, '#assistantHistorySettings'), true);
         await evaluate(window, `document.querySelector('#settingsClose').click()`);
+        await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it', async () => {
+        await freshExample();
+        const nodeNames = () => evaluate(window, `[...document.querySelectorAll('.node-label-container')].map((label) => label.textContent).filter((text) => text.includes('Heat sink')).length`);
+        await evaluate(window, `(() => { window.confirm = () => true; if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#newAssistantConversation').click(); })()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The proposal was not ready.', 20000);
+        await evaluate(window, `document.querySelector('#applyAssistantProposal').click()`);
+        await waitFor(window, `window.konjugateAssistant.getTurnHistory().at(-1)?.after`, 'The applied turn did not keep its checkpoints.');
+        assert.equal(await nodeNames(), 1, 'The heat sink was not added.');
+        await evaluate(window, `document.querySelector('#assistantButton').click()`);
+        await waitFor(window, `Boolean(document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="restoreBefore"]'))`, 'The applied turn offered no checkpoints.');
+
+        // What it changed, listed in the turn and selected on the canvas.
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="changes"]').click()`);
+        await waitFor(window, `Boolean(document.querySelector('.assistantTranscriptTurn:last-child .assistantTurnDiff'))`, 'What changed was not shown.');
+        const lines = await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptTurn:last-child .assistantTurnDiff li')].map((item) => item.textContent)`);
+        assert.ok(lines.includes('Added node “Heat sink”'), lines.join(' | '));
+        assert.ok(lines.some((line) => /^Added relationship “Heat to sink”/.test(line)), lines.join(' | '));
+        assert.match(await evaluate(window, `document.querySelector('#statusText').textContent`), /nodes? this change touched/);
+
+        // Restored to before it, as one undoable step; then to after it.
+        await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="restoreBefore"]').click(); })()`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].every((label) => !label.textContent.includes('Heat sink'))`, 'Restoring the model before the change did not take the heat sink out.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].some((label) => label.textContent.includes('Heat sink'))`, 'Undo did not take the restore back.');
+        await evaluate(window, `document.querySelector('#undoButton').click()`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].every((label) => !label.textContent.includes('Heat sink'))`, 'Undoing the applied proposal did not take the heat sink out.');
+        await evaluate(window, `(() => { window.confirm = () => true; document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="restoreAfter"]').click(); })()`);
+        await waitFor(window, `[...document.querySelectorAll('.node-label-container')].some((label) => label.textContent.includes('Heat sink'))`, 'Restoring the model after the change did not bring the heat sink back.');
+        // Declining the question changes nothing.
+        await evaluate(window, `(() => { window.confirm = () => false; document.querySelector('.assistantTranscriptTurn:last-child [data-turn-action="restoreBefore"]').click(); })()`);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(await nodeNames(), 1, 'Declining the restore changed the model.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 

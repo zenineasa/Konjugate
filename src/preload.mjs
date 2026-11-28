@@ -434,7 +434,10 @@ contextBridge.exposeInMainWorld('assistantHistory', {
     rename: (id, title) => invokePlainly('assistantHistoryRename', id, title),
     remove: (id) => invokePlainly('assistantHistoryRemove', id),
     clear: () => invokePlainly('assistantHistoryClear'),
-    usage: () => invokePlainly('assistantHistoryUsage')
+    usage: () => invokePlainly('assistantHistoryUsage'),
+    // A checkpoint of the model (its document as JSON), kept in the conversation; resolves to its hash.
+    putSnapshot: (id, documentJson) => invokePlainly('assistantHistoryPutSnapshot', id, documentJson),
+    getSnapshot: (id, hash) => invokePlainly('assistantHistoryGetSnapshot', id, hash)
 });
 
 // Running a model on this computer through Ollama (docs/proposals/suggestedLocalModels.md).

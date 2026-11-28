@@ -35,7 +35,7 @@ The web edition keeps the same things in the browser's own storage, for that bro
 
 A change is kept as it is made, with no Save button, as an operating system's settings are. A compiler or interpreter path is checked before it is kept, and says beside it when it could not be; blank goes back to the one found on the machine. The defaults for new projects are kept a moment after the last key, and at once when Settings closes. The one exception is a model configuration: its API key is stored only when **Save** is pressed, so a configuration's page keeps its Save and Test buttons, and leaving it with changes not saved asks first. Filling in the list of models a provider offers is not a change.
 
-On **Model assistant**, the configurations are a list, the one in use marked **In use**; a row, or **Add configuration…**, opens a configuration on a page of its own, with **‹ Model assistant** to go back to the list.
+On **Model assistant**, four sections set up a model (**Use a model you have**, **Sign in to a provider**, **Use an API key**, **Run a model on this computer**), and **Your models** lists those set up, the one in use marked **In use**; a row, **Add API key…** or **Add another…** opens a configuration on a page of its own, with **‹ Model assistant** to go back to the list.
 
 ## How a page is laid out
 

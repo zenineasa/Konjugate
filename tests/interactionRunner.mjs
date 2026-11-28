@@ -1046,12 +1046,20 @@ export async function runInteractionTests(driver) {
         await evaluate(window, `document.querySelector('[data-sign-in-cancel="chatGpt"]').click()`);
         await waitFor(window, `Boolean(document.querySelector('[data-sign-in="chatGpt"]'))`, 'Cancel did not end the ChatGPT sign-in.');
 
+        // A key has a way in of its own, beside signing in and running a model here, naming the providers that take one.
+        assert.equal(await evaluate(window, `document.querySelector('#assistantKeySection').checkVisibility()`), true, 'Use an API key was not shown.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantKeyProviders').textContent`), 'Paste a key from Anthropic (Claude), OpenAI, Google Gemini, OpenRouter, NVIDIA or Hugging Face.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantYourModelsTitle').textContent`), 'Your models');
+        // Add API key… starts on the first provider that takes one, named after it, and the name follows the provider until typed.
+        await evaluate(window, `document.querySelector('#addAssistantApiKey').click()`);
+        await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden`, 'Add API key… did not open a form.');
+        assert.deepEqual(await evaluate(window, `[document.querySelector('#assistantConfigurationDialogTitle').textContent, document.querySelector('#assistantConfigurationProvider').value, document.querySelector('#assistantConfigurationName').value, document.querySelector('#assistantCredentialField').hidden]`),
+            ['Add an API key', 'anthropic', 'Anthropic (Claude)', false]);
         // A configuration with a key says where its provider's keys are made, and opens only that page.
-        await evaluate(window, `document.querySelector('#newAssistantConfiguration').click()`);
-        await waitFor(window, `!document.querySelector('#assistantConfigurationForm').hidden`, 'Add configuration… did not open a form.');
         assert.equal(await evaluate(window, `[...document.querySelector('#assistantConfigurationProvider').options].some((option) => option.value === 'chatGpt')`), false, 'ChatGPT, reached only by signing in, was offered for a key.');
         const chooseProvider = (id) => evaluate(window, `(() => { const select = document.querySelector('#assistantConfigurationProvider'); select.value = ${JSON.stringify(id)}; select.dispatchEvent(new Event('change')); })()`);
         await chooseProvider('gemini');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantConfigurationName').value`), 'Google Gemini', 'The name Konjugate gave did not follow the provider.');
         assert.equal(await evaluate(window, `document.querySelector('#assistantKeyPage').textContent`), 'Get a free key from Google AI Studio ›');
         assert.equal(await isRenderedVisible(window, '#assistantKeyPage'), true);
         const keyPage = driver.waitForDialog({ kind: 'external', includes: 'aistudio.google.com' });

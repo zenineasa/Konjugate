@@ -18,7 +18,7 @@ The assistant does not edit the model immediately. Konjugate validates the propo
 
 When a request is ambiguous or missing information the assistant needs, it can ask a clarifying question instead of guessing, sometimes with suggested answers shown as buttons. Selecting a suggestion fills in the prompt rather than sending it immediately, so it can still be edited before the reply is sent.
 
-The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: sign in to a provider ([below](#sign-in-to-a-provider)), run one on this computer for free ([Run a model on this computer](#run-a-model-on-this-computer)), or add a configuration with an API key ([Hosted providers](#hosted-providers)).
+The assistant needs a model. Until one is set up, its panel says so and **Set up a model…** opens **Settings › Model assistant**: use a subscription you already have through its vendor's tool ([below](#use-a-model-you-have)), sign in to a provider ([below](#sign-in-to-a-provider)), paste an API key (**Use an API key**, [Hosted providers](#hosted-providers)), or run one on this computer for free ([Run a model on this computer](#run-a-model-on-this-computer)). The page has a section for each of these four ways, and below them **Your models**, the models set up so far.
 
 ## Use a model you have
 
@@ -106,9 +106,9 @@ Keeping everything does not change what is sent to the model: the current reques
 
 The assistant panel keeps a scrollable transcript of the last five exchanges. That history is sent along with every new request, so a reply to a clarifying question, or a follow-up like "make it 10 K warmer instead," is understood in context rather than as an unrelated new request. History is not cleared by applying, discarding or closing the panel — only the **New conversation** button (or switching to a different model configuration, since a different model has no memory of what was said to the previous one) starts a fresh transcript.
 
-## Model configurations
+## Your models
 
-The selector below the assistant prompt chooses the active model configuration. The adjacent ⚙ button opens the configurations in **Settings › Model assistant** ([Settings](settings.md); Settings also opens from ⚙ in the titlebar, or ⌘,).
+The selector below the assistant prompt chooses the model in use, one of **Your models** (each is a configuration: a provider, its model, and its key or sign-in). The adjacent ⚙ button opens the configurations in **Settings › Model assistant** ([Settings](settings.md); Settings also opens from ⚙ in the titlebar, or ⌘,).
 
 The page provides:
 
@@ -122,7 +122,7 @@ The page provides:
 - whether an Ollama model reasons before answering;
 - seamless editing and deletion.
 
-The page lists the configurations, the one in use marked **In use**. A row opens that configuration on a page of its own, and **Add configuration…** opens a new one; **‹ Model assistant** goes back to the list. Selecting a saved configuration in the assistant panel makes it active, and saving one in Settings also does. Unlike the rest of Settings, a configuration is kept only when **Save** is pressed, since its API key is stored only then; leaving it or closing Settings with changes not saved asks first.
+**Your models** lists the configurations, the one in use marked **In use**. A row opens that configuration on a page of its own; **‹ Model assistant** goes back to the list. A first model is set up through one of the four ways above it. **Use an API key** names the providers that take a key, and **Add API key…** opens a new configuration on the first of them (Anthropic), named after its provider until you type a name of your own, with a link to where that provider's keys are made. **Add another…** under the list opens a new configuration of any provider, for a second model, another endpoint (an Ollama on another computer) or another timeout. Selecting a saved configuration in the assistant panel makes it active, and saving one in Settings also does. Unlike the rest of Settings, a configuration is kept only when **Save** is pressed, since its API key is stored only then; leaving it or closing Settings with changes not saved asks first.
 
 ## Ollama
 

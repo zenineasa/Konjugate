@@ -15005,9 +15005,11 @@ function renderAssistantConfigurationList() {
     }));
     if (!configurations.length) {
         $('#assistantConfigurationList').replaceChildren(Object.assign(document.createElement('div'), {
-            className: 'settingsItem settingsEmpty', textContent: 'None yet. Sign in to a provider or run a model on this computer above, or add a configuration with an API key.'
+            className: 'settingsItem settingsEmpty', textContent: 'None yet. Choose one of the ways above.'
         }));
     }
+    // The four ways above set up a first model; Add another… is for a second of the same kind, set up by hand.
+    $('#newAssistantConfiguration').hidden = !configurations.length;
 }
 
 // The page shows the list (the suggested models and the configurations), or one configuration's form with a way back to the list.
@@ -15057,15 +15059,19 @@ function syncAssistantThinkNote() {
     note.textContent = reasoningCostNote;
 }
 
-function populateAssistantConfiguration(configuration = null) {
+// `forKey`: a new configuration for an API key (Use an API key), starting on the first provider that takes one, named after it.
+function populateAssistantConfiguration(configuration = null, { forKey = false } = {}) {
     assistantDiscoveryRevision += 1;
     const providers = assistantConfigurationCatalog.providers;
     // A provider reached only by signing in is offered here only for the configuration a sign-in made.
     $('#assistantConfigurationProvider').replaceChildren(...providers.filter((provider) => !provider.signInOnly || provider.id === configuration?.provider)
         .map((provider) => new Option(provider.name, provider.id)));
-    const initialProvider = configuration?.provider ?? providers.find((provider) => provider.id === 'ollama')?.id ?? providers[0]?.id ?? '';
+    const initialProvider = configuration?.provider ?? (forKey ? assistantKeyProviders()[0]?.id : null)
+        ?? providers.find((provider) => provider.id === 'ollama')?.id ?? providers[0]?.id ?? '';
+    const initialName = configuration?.name ?? (forKey ? providers.find((provider) => provider.id === initialProvider)?.name : null) ?? 'My local model';
+    assistantConfigurationAutoName = configuration ? null : initialName;
     $('#assistantConfigurationUuid').value = configuration?.uuid ?? '';
-    $('#assistantConfigurationName').value = configuration?.name ?? 'My local model';
+    $('#assistantConfigurationName').value = initialName;
     $('#assistantConfigurationProvider').value = initialProvider;
     $('#assistantConfigurationEndpoint').value = configuration?.endpoint ?? '';
     setAssistantModelChoices([], configuration?.model ?? '');
@@ -15073,7 +15079,7 @@ function populateAssistantConfiguration(configuration = null) {
     $('#assistantConfigurationTimeout').value = configuration?.timeoutSeconds ?? initialDescriptor?.defaultTimeoutSeconds ?? 60;
     $('#assistantConfigurationCredential').value = '';
     $('#assistantConfigurationThink').value = configuration?.think === true ? 'on' : configuration?.think === false ? 'off' : (configuration ? '' : 'off');
-    $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? 'New configuration';
+    $('#assistantConfigurationDialogTitle').textContent = configuration?.name ?? (forKey ? 'Add an API key' : 'New configuration');
     $('#assistantCredentialHint').textContent = configuration?.credentialSource === 'signIn' ? 'From signing in. Leave empty to keep it'
         : configuration?.credentialConfigured ? 'Leave empty to keep the saved key' : 'Kept, encrypted, when you save';
     $('#deleteAssistantConfiguration').hidden = !configuration;
@@ -15091,6 +15097,25 @@ function populateAssistantConfiguration(configuration = null) {
     }
 }
 
+// The providers a person can bring a key of their own to, most asked for first: those that need a key and are not reached
+// only by signing in (ChatGPT) or through a vendor's tool.
+const assistantKeyProviderOrder = ['anthropic', 'openAi', 'gemini', 'openRouter', 'nvidia', 'huggingFace'];
+function assistantKeyProviders() {
+    const rank = (id) => { const at = assistantKeyProviderOrder.indexOf(id); return at < 0 ? assistantKeyProviderOrder.length : at; };
+    return assistantConfigurationCatalog.providers.filter((provider) => provider.credentialRequired && !provider.signInOnly && !provider.vendorTool)
+        .sort((a, b) => rank(a.id) - rank(b.id));
+}
+// A new configuration's name, while it is the one Konjugate gave it: it follows the provider until the person types their own.
+let assistantConfigurationAutoName = null;
+
+function renderAssistantKeySection() {
+    const providers = assistantKeyProviders();
+    $('#assistantKeySection').hidden = !providers.length;
+    const names = providers.map((provider) => provider.name);
+    $('#assistantKeyProviders').textContent = names.length
+        ? `Paste a key from ${names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0]}.` : '';
+}
+
 // Settings › Model assistant, filled when it is opened, from the providers and configurations as they are now (Settings can be
 // opened on it before the assistant has ever been, and a configuration may have changed since).
 async function prepareAssistantConfigurationPage() {
@@ -15104,6 +15129,7 @@ async function prepareAssistantConfigurationPage() {
     showAssistantView('list');
     localModelsSection.check();
     assistantSignInSection.render();
+    renderAssistantKeySection();
     assistantToolsSection.check();
     renderAssistantHistorySettings();
 }
@@ -15706,6 +15732,12 @@ $('#assistantConfiguration').addEventListener('change', async () => {
 $('#manageAssistantConfigurations').addEventListener('click', () => openSettings('assistant'));
 $('#assistantKeyPage').addEventListener('click', () => { window.aiProviders.openKeyPage($('#assistantConfigurationProvider').value).catch(() => {}); });
 $('#assistantConfigurationProvider').addEventListener('change', () => {
+    // A name Konjugate gave follows the provider; one the person typed stays.
+    const name = $('#assistantConfigurationName');
+    if (assistantConfigurationAutoName !== null && name.value === assistantConfigurationAutoName) {
+        const chosen = assistantConfigurationCatalog.providers.find((provider) => provider.id === $('#assistantConfigurationProvider').value);
+        if (chosen && chosen.id !== 'ollama') { name.value = chosen.name; assistantConfigurationAutoName = chosen.name; }
+    }
     syncAssistantProviderFields({ replaceEndpoint: true });
     setAssistantModelChoices([]);
     clearTimeout(assistantDiscoveryTimer);
@@ -15719,6 +15751,11 @@ $('#assistantSetUpModel').addEventListener('click', () => openSettings('assistan
 $('#newAssistantConfiguration').addEventListener('click', () => {
     populateAssistantConfiguration();
     showAssistantView('detail');
+});
+$('#addAssistantApiKey').addEventListener('click', () => {
+    populateAssistantConfiguration(null, { forKey: true });
+    showAssistantView('detail');
+    $('#assistantConfigurationProvider').focus();
 });
 $('#assistantConfigurationBack').addEventListener('click', leaveAssistantDetail);
 $('#assistantConfigurationList').addEventListener('click', (event) => {

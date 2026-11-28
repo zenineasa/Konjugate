@@ -528,9 +528,14 @@
                                 <p id="assistantSignInStatus" class="settingsNote assistantConfigurationStatus" role="status" hidden></p>
                                 <p class="settingsNote">Your browser opens on the provider's own page, so Konjugate never sees your password. The key it gives Konjugate is kept encrypted on this computer.</p>
                             </section>
+                            <section id="assistantKeySection" class="settingsSection assistantKeySection" aria-labelledby="assistantKeyTitle" hidden>
+                                <h3 id="assistantKeyTitle" class="settingsSectionTitle">Use an API key</h3>
+                                <div class="settingsCard"><div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Have an API key?</span><small id="assistantKeyProviders" class="settingsItemHint"></small></div><div class="settingsItemControl"><button id="addAssistantApiKey" class="settingsButton primary" type="button">Add API key…</button></div></div></div>
+                                <p class="settingsNote">You pay the provider for what you use. The key is kept encrypted on this computer.</p>
+                            </section>
                             <section id="localModelsSection" class="settingsSection localModelsSection" aria-labelledby="localModelsTitle">
                                 <div class="settingsSectionHeader"><h3 id="localModelsTitle" class="settingsSectionTitle">Run a model on this computer</h3><span id="localModelsState" class="localModelsState" role="status"></span></div>
-                                <p id="localModelsDesktopOnly" class="settingsNote" hidden>Running a model on this computer needs the desktop app. Here, add a configuration for an online provider below.</p>
+                                <p id="localModelsDesktopOnly" class="settingsNote" hidden>Running a model on this computer needs the desktop app. Here, use an API key above.</p>
                                 <div id="localModelsMissing" class="settingsCard" hidden>
                                     <div class="settingsItem"><div class="settingsItemText"><span class="settingsItemLabel">Free, and private: your model never leaves this computer</span><small class="settingsItemHint">Konjugate runs models through Ollama, a free app made by others. Install it from its website, open it, then check again.</small><small id="localModelsLinuxNote" class="settingsItemHint" hidden>On Linux, Ollama's website gives a one-line command to install it.</small></div><div class="settingsItemControl"><button id="openOllamaPage" class="settingsButton primary" type="button">Open the Ollama website</button><button id="checkOllamaAgain" class="settingsButton" type="button">Check again</button></div></div>
                                 </div>
@@ -545,10 +550,10 @@
                                     </div>
                                 </details>
                             </section>
-                            <section class="settingsSection">
-                                <h3 class="settingsSectionTitle">Model configurations</h3>
-                                <div id="assistantConfigurationList" class="settingsCard assistantConfigurationList" role="list" aria-label="Model configurations"></div>
-                                <div class="settingsSectionActions"><button id="newAssistantConfiguration" class="settingsButton" type="button">Add configuration…</button></div>
+                            <section class="settingsSection" aria-labelledby="assistantYourModelsTitle">
+                                <h3 id="assistantYourModelsTitle" class="settingsSectionTitle">Your models</h3>
+                                <div id="assistantConfigurationList" class="settingsCard assistantConfigurationList" role="list" aria-label="Your models"></div>
+                                <div class="settingsSectionActions"><button id="newAssistantConfiguration" class="settingsButton" type="button" title="Another configuration, of any provider: another model, endpoint or timeout">Add another…</button></div>
                                 <p class="settingsNote">The assistant uses the one marked In use. Another can be chosen in the assistant's panel.</p>
                             </section>
                             <section id="assistantHistorySettings" class="settingsSection" aria-labelledby="assistantHistorySettingsTitle" hidden>

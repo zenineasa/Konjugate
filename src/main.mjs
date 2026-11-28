@@ -3627,7 +3627,7 @@ ipcMain.handle('aiCancelSignIn', async (event) => {
     return true;
 });
 
-ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history }) => {
+ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history, repair }) => {
     requireProjectWindow(event);
     if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');
     if (typeof request !== 'string' || !request.trim() || request.length > 8000) throw new Error('The AI request must contain between 1 and 8,000 characters.');
@@ -3636,6 +3636,11 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
         const validHistory = Array.isArray(history) && history.length <= 5 &&
             history.every((turn) => turn && typeof turn.request === 'string' && typeof turn.outcome === 'string');
         if (!validHistory || JSON.stringify(history).length > 20_000) throw new Error('The conversation history is invalid or too large.');
+    }
+    // A proposal the engine rejected, and why, for the model to fix (src/renderer: one round per request).
+    if (repair !== undefined && repair !== null) {
+        const validRepair = typeof repair === 'object' && typeof repair.error === 'string' && repair.error.length <= 4000;
+        if (!validRepair || JSON.stringify(repair.proposal ?? null).length > 1_000_000) throw new Error('The proposal to repair is invalid or too large.');
     }
     const key = aiRequestKey(event.sender, requestUuid);
     activeAIRequests.get(key)?.controller.abort();
@@ -3658,7 +3663,7 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     activeAIRequests.set(key, { owner: event.sender, controller });
     try {
         const proposal = await aiProviderRegistry.generate({
-            ...resolved, context, request: request.trim(), history, signal: controller.signal,
+            ...resolved, context, request: request.trim(), history, initialRepair: repair ?? null, signal: controller.signal,
             onProgress: (progress) => {
                 watchdog.touch();
                 progressToPanel.push(progress);

@@ -407,6 +407,7 @@ export async function runInteractionTests(driver) {
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
             'the assistant panel resizes from its edges, docks to the side and floats again',
             'a large proposal is folded into groups, and its problems come first, named',
+            'a proposal the engine rejects goes back to the model to fix before it is shown',
             'dismissing a clarification and starting a new conversation both clear it without submitting'
         ],
         'a subsystem from the selection': [
@@ -1274,6 +1275,25 @@ export async function runInteractionTests(driver) {
         assert.ok(groups.slice(0, -1).every((group) => !group.open && !group.problem), 'A group without a problem was opened or marked.');
         assert.deepEqual(groups.at(-1), { title: 'Heat Loss', count: '1 change', open: true, problem: true }, 'The group with the problem was not opened and marked.');
         await evaluate(window, `window.konjugateAssistant.discardProposal(); document.querySelector('#closeAssistantPanel').click()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run('a proposal the engine rejects goes back to the model to fix before it is shown', async () => {
+        await freshExample();
+        const chatsBefore = fakeOllama.requests.filter((request) => request.path === '/api/chat').length;
+        await evaluate(window, `document.querySelector('#assistantButton').click(); (() => {
+            document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The fixed proposal was not ready to apply.', 20000);
+        const chats = fakeOllama.requests.filter((request) => request.path === '/api/chat').slice(chatsBefore);
+        assert.equal(chats.length, 2, 'The model was not asked once, then once more to fix its proposal.');
+        const correction = chats[1].body.messages.at(-1).content;
+        assert.match(correction, /CORRECTION REQUIRED:/);
+        assert.match(correction, /"Heat sink" has no state variables/, 'The engine\'s problem was not sent back to the model, by name.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalSummary').textContent`), /with a temperature state/);
+        assert.equal(await isRenderedVisible(window, '#assistantProblemsSection'), false, 'The fixed proposal still shows the first one\'s problems.');
+        assert.match(await evaluate(window, `[...document.querySelectorAll('.assistantTranscriptOutcome')].at(-1).textContent`), /Proposed: Add a heat sink with a temperature state/);
+        await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); window.confirm = () => true; document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('the assistant panel resizes from its edges, docks to the side and floats again', async () => {

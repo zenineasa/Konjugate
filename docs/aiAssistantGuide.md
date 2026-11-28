@@ -161,14 +161,25 @@ The assistant workflow is:
 5. Correctable output errors are returned to the provider for a bounded number of repair attempts.
 6. Konjugate prepares the resulting model without modifying the active document.
 7. The native validator checks the prepared model.
-8. The user reviews the summary, assumptions and individual changes.
-9. The user applies or discards the proposal.
+8. If the prepared model is rejected (by the structure checks or the native validator), the proposal and its problems, each naming what it is about, go back to the provider once more to be fixed, and whatever comes back is prepared and checked again. A second rejection is shown as it is.
+9. The user reviews the summary, any problems, the assumptions and the individual changes.
+10. The user applies or discards the proposal.
 
 Invalid intermediate proposals are never applied. Authentication failures, connection failures and timeouts remain visible because repeating the same request cannot normally correct them.
 
+## The assistant's panel
+
+The panel reads like a chat. The conversation fills it and scrolls: each request you sent, what came of it, and the reply to the latest request (a question or a proposal) as a card at the end. The prompt stays pinned below the conversation, and grows as you type, up to a few lines. While a proposal is open, **Discard** and **Apply changes** stay in sight at the bottom of the conversation however long the proposal is.
+
+- **Resize** the panel by dragging any edge or corner. The size is kept for next time; a smaller window shrinks the panel to fit, and a larger one gives the size back. Double-click the header to return to the panel's own size and place.
+- **Dock** it with **⇥** in its header: it then fills the height of the window against the right edge, and its left edge sets its width. **⧉** floats it again. In a window narrower than 1100 or shorter than 600 pixels the panel docks by itself, until you choose either way. Docked, the inspector opens over the panel; closing the inspector shows it again.
+- On a phone-sized window the panel fills the screen.
+
+A proposal of more than eight changes is folded into one group for each node or relationship its changes touch, in the order the proposal touches them; open a group to see its changes. Problems come first, under **Problems to fix**, each naming the node or relationship it is about, and the group a problem concerns is opened and marked **Needs fixing**.
+
 ## While the assistant works
 
-The panel shows what is happening: waiting for the model, whether it is thinking or writing the proposal (with a character count), checking the proposal, and, when the first attempt was rejected, which attempt this is and why the model was asked again. **What the model is doing** opens the model's reasoning, where the provider shares it, and the proposal text as it is written. **Cancel** stops the request at any time.
+The panel shows what is happening as the assistant's turn in the conversation, under the request you sent: waiting for the model, whether it is thinking or writing the proposal, checking the proposal, with how long it has been going, and, when a proposal was rejected, that the model was asked to fix it and why. **What the model is doing** opens the model's reasoning, where the provider shares it, and the proposal text as it is written. **Cancel** stops the request at any time.
 
 A model's timeout counts silence: the request is stopped only when nothing has arrived from the model for that many seconds, so a slow model that keeps writing is not cut off, and a repair attempt starts a fresh clock. A request is also stopped after 20 minutes in total. If a model needs a long time to load or to start answering, raise the timeout in its configuration.
 
@@ -208,7 +219,7 @@ The model sent nothing for the configuration's timeout. Increase the timeout or 
 
 ### The proposal could not be repaired
 
-Try a more capable model or divide the request into smaller changes. State units, values, intended node roles and connection direction explicitly.
+The model was given the problems and asked to fix them, and its second proposal had problems too; they are listed under **Problems to fix**. Try a more capable model or divide the request into smaller changes. State units, values, intended node roles and connection direction explicitly.
 
 ### A hosted provider rejects the request
 

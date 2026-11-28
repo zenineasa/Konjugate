@@ -168,6 +168,10 @@ A provider that judges a request ambiguous or missing required information may r
 
 `suggestions` is optional and capped at five short strings. A clarification carries no operations, so it never reaches `applyAssistantProposal` or native validation — the registry returns it to the renderer directly, which shows it and waits for the user's reply. The reply becomes a new request, sent together with the conversation history described below so the provider has the original request and its own question in context.
 
+## Repair after the native validator
+
+The registry's own repair (below) sees only what it can check itself. The renderer prepares the proposal and runs the native validator afterwards; when either rejects it, it asks once more, in the same request, with `generateProposal(…, repair)` (`{ error, proposal }`), which the main process passes to the registry as `initialRepair`: the first attempt then already carries the correction, and the progress says the model is fixing the proposal (`fixingProblems`). The error sent is the problems as the panel lists them, each naming the node or relationship it is about (for a relationship to a node with no states, the validator's own message names the node). Whatever comes back is prepared and validated again and shown as it is; there is no second round. A proposal the native validator could not check at all (no engine) is not sent back.
+
 ## Automatic repair
 
 Provider output is untrusted. When a proposal is malformed or fails structural validation, the registry can send the provider:

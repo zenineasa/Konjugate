@@ -94,14 +94,16 @@ export function createAIProviderRegistry(providers = []) {
             if (!provider.listModels) return [];
             return provider.listModels({ configuration, credential, onCredential, signal });
         },
-        async generate({ configuration, credential, onCredential, context, request, history, signal, onProgress }) {
+        // `initialRepair` ({ error, proposal }): this request is the model fixing a proposal the host or the engine rejected.
+        async generate({ configuration, credential, onCredential, context, request, history, initialRepair = null, signal, onProgress }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             // What the panel shows while this runs: which attempt, what stage, and the latest of what the
             // model is saying. Every publish also tells the caller the request is alive.
-            const progress = { attempt: 0, attempts: maximumRepairAttempts + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', repairReason: '', attemptStartedAt: Date.now() };
+            const progress = { attempt: 0, attempts: maximumRepairAttempts + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', repairReason: '', fixingProblems: Boolean(initialRepair), attemptStartedAt: Date.now() };
             const publish = () => onProgress?.({ ...progress });
             const redact = (text) => (credential ? text.replaceAll(credential, '[redacted]') : text);
+            if (initialRepair) progress.repairReason = redact(String(initialRepair.error ?? '')).slice(0, repairReasonCharacters);
             const onEvent = (event) => {
                 if (event.type === 'thinking') {
                     progress.phase = 'receiving';
@@ -114,7 +116,7 @@ export function createAIProviderRegistry(providers = []) {
                 publish();
             };
             try {
-                let repair = null;
+                let repair = initialRepair ? { error: String(initialRepair.error ?? ''), proposal: initialRepair.proposal ?? null } : null;
                 for (let attempt = 0; attempt <= maximumRepairAttempts; attempt += 1) {
                     let response;
                     Object.assign(progress, { attempt: attempt + 1, phase: 'sending', outputCharacters: 0, thinking: '', output: '', attemptStartedAt: Date.now() });

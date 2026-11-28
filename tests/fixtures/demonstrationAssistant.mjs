@@ -142,9 +142,26 @@ function attemptResolve(context, text) {
 // turns -- when the plain request alone couldn't be resolved (attemptResolve asked a
 // clarifying question, or matched no recognized request shape at all), i.e. when this might be
 // answering an earlier clarification.
-export function demonstrationAnswer({ context, request, history }) {
+// "Add a heat sink": a model that slips the first time, adding the sink without a state yet connecting it, and gets it right
+// when asked to fix it, so a test can see the engine's problems sent back and the fixed proposal come in their place.
+function heatSinkAnswer(context, repairing) {
+    const source = context.nodes.find((node) => node.states?.length);
+    if (!source) throw new AssistantProviderError('There is no node with a state to connect the heat sink to.', 'invalidRequest');
+    const operations = [{ kind: 'addNode', ref: 'heatSink', name: 'Heat sink' }];
+    if (repairing) operations.push({ kind: 'addState', ref: 'sinkTemperature', nodeRef: 'heatSink', name: 'Temperature', symbol: 'temperature', initialValue: 293.15, unit: 'K' });
+    operations.push({ kind: 'addEdge', ref: 'sinkLink', name: 'Heat to sink', sourceNodeRef: source.id, targetNodeRef: 'heatSink', directionality: 'directed' });
+    if (repairing) {
+        const symbol = source.states[0].symbol;
+        operations.push({ kind: 'setEdgeEquation', edgeRef: 'sinkLink', outputStateRef: 'sinkTemperature',
+            latex: `0.1 \\cdot (\\mathrm{source${symbol[0].toUpperCase()}${symbol.slice(1)}} - \\mathrm{targetTemperature})` });
+    }
+    return { responseKind: 'proposal', proposalVersion: 1, summary: repairing ? 'Add a heat sink with a temperature state.' : 'Add a heat sink.', operations };
+}
+
+export function demonstrationAnswer({ context, request, history, repairing = false }) {
     const text = request.trim();
     if (!text) throw new AssistantProviderError('Describe the model change you want to make.', 'emptyRequest');
+    if (/^add a heat sink\b/i.test(text)) return heatSinkAnswer(context, repairing);
     try {
         const direct = attemptResolve(context, text);
         if (direct.responseKind !== 'clarification' || !history?.length) return direct;

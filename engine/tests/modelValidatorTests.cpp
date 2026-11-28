@@ -6,6 +6,8 @@
 
 #include "modelValidator.hpp"
 #include <algorithm>
+#include <boost/property_tree/json_parser.hpp>
+#include <sstream>
 #include <cctype>
 #include <iostream>
 #include <random>
@@ -124,10 +126,39 @@ void nameChecksMatchTheRegularExpressions() {
 
 }
 
+// A relationship to a node that is there but has no state is told apart from one to a node that is gone, and names the node.
+void relationshipToANodeWithoutStatesNamesIt() {
+    std::istringstream input(R"json({
+        "format": "konjugate", "version": 1,
+        "nodes": [
+            {"id": 1, "name": "Shell Cell", "states": [{"id": 11, "name": "Temperature", "symbol": "temperature", "initialValue": 300}]},
+            {"id": 2, "name": "Ambient", "states": []}
+        ],
+        "edges": [
+            {"id": 5, "name": "Heat Loss", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 2, "stateId": ""}, "parameters": []},
+            {"id": 6, "name": "Dangling", "source": {"nodeId": 1, "stateId": 11}, "target": {"nodeId": 9, "stateId": ""}, "parameters": []}
+        ]
+    })json");
+    boost::property_tree::ptree document;
+    boost::property_tree::read_json(input, document);
+    const auto result = konjugate::validateModel(document);
+    const auto find = [&](const std::string& code, const std::string& edgeId) {
+        return std::find_if(result.issues.begin(), result.issues.end(), [&](const auto& issue) { return issue.code == code && issue.location.entityId == edgeId; });
+    };
+    const auto stateless = find("edgeTargetStateless", "5");
+    require(stateless != result.issues.end(), "A relationship to a node without states was not reported as such.");
+    require(stateless->message.find("\"Ambient\"") != std::string::npos && stateless->message.find("no state variables") != std::string::npos,
+        "The message does not name the node or say what is wrong: " + stateless->message);
+    require(find("edgeTargetMissing", "5") == result.issues.end(), "A node that is there was reported as gone.");
+    require(find("edgeTargetMissing", "6") != result.issues.end(), "A relationship to a node that is gone was not reported as such.");
+    require(find("edgeTargetStateless", "6") == result.issues.end(), "A node that is gone was reported as having no states.");
+}
+
 int main() {
     try {
         latexScanMatchesTheRegularExpressions();
         nameChecksMatchTheRegularExpressions();
+        relationshipToANodeWithoutStatesNamesIt();
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
         return 1;

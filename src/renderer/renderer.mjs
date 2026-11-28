@@ -11736,18 +11736,25 @@ function inspectAssistantEntity(entityId) {
     return false;
 }
 
-async function previewAssistantProposal(proposal) {
+// `recordOutcome: false` leaves the conversation's turn as it is when the proposal is rejected, for a caller that will ask the
+// model to fix it first. A rejection the model could fix (the host's or the engine's checks, not an engine that is not
+// there) says so with `repairable`.
+async function previewAssistantProposal(proposal, { recordOutcome = true } = {}) {
     if (activeResult) throw new Error('Close simulation results before preparing model changes.');
+    let repairable = false;
     const revision = ++assistantPreviewRevision;
     showAssistantPanel();
     try {
         const baseDocument = serializeProjectDocument();
+        repairable = true;
         const prepared = buildAssistantProposal(baseDocument, proposal);
         renderAssistantProposal(proposal, prepared);
+        repairable = false;
         const validation = await window.engine.validate(JSON.stringify(prepared.document));
         if (validation.cancelled || revision !== assistantPreviewRevision) return { valid: false, superseded: true };
         if (!validation.available) throw new Error('The native validation engine is unavailable.');
         if (!validation.report.valid) {
+            repairable = true;
             const problems = showAssistantProblems(validation.report.issues, prepared.document);
             const message = problems.length
                 ? `${problems.length === 1 ? 'A problem needs' : `${problems.length} problems need`} fixing before this can be applied: ${problems.join(' ')}`
@@ -11778,9 +11785,11 @@ async function previewAssistantProposal(proposal) {
         $('#assistantError').textContent = error.message;
         $('#assistantError').hidden = false;
         $('#applyAssistantProposal').disabled = true;
-        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${error.message}`);
-        pendingAssistantTurnRecord = null;
-        return { valid: false, error: error.message };
+        if (recordOutcome) {
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${error.message}`);
+            pendingAssistantTurnRecord = null;
+        }
+        return { valid: false, error: error.message, repairable };
     }
 }
 
@@ -14791,7 +14800,31 @@ async function requestAssistantProposal() {
             return { valid: false, clarification: response };
         }
         pendingAssistantTurnRecord = pushAssistantTurn(request, `Proposed: ${response.summary?.trim() || 'model changes'}`);
-        return await previewAssistantProposal(response);
+        const preview = await previewAssistantProposal(response, { recordOutcome: false });
+        if (preview.valid || preview.superseded || controller.signal.aborted) return preview;
+        if (!preview.repairable) {
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Rejected: ${preview.error}`);
+            pendingAssistantTurnRecord = null;
+            return preview;
+        }
+        // One round of the model fixing what the checks found, before the person sees a rejection: the problems and the
+        // proposal go back to it, and whatever comes back is shown as it is.
+        const repairUuid = crypto.randomUUID();
+        controller.signal.addEventListener('abort', () => { window.aiProviders.cancelRequest(repairUuid).catch(() => {}); }, { once: true });
+        startAssistantProgress(repairUuid, request);
+        const fixed = await window.aiProviders.generateProposal(
+            repairUuid, $('#assistantConfiguration').value, request, assistantModelSummary(), assistantTurnHistory.slice(0, -1),
+            { error: preview.error.slice(0, 4000), proposal: response }
+        );
+        if (controller.signal.aborted) return { valid: false, cancelled: true };
+        stopAssistantProgress();
+        if (fixed.responseKind === 'clarification') {
+            updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Asked: ${fixed.question}`);
+            renderAssistantClarification(fixed);
+            return { valid: false, clarification: fixed };
+        }
+        updateAssistantTurnOutcome(pendingAssistantTurnRecord, `Proposed: ${fixed.summary?.trim() || 'model changes'}`);
+        return { ...(await previewAssistantProposal(fixed)), repaired: true };
     } catch (error) {
         if (controller.signal.aborted || error.name === 'AbortError') {
             if (assistantGenerationController === controller) updateAssistantCollapsedStatus('Request cancelled');

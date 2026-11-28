@@ -1040,8 +1040,20 @@ ValidationResult validateModel(const boost::property_tree::ptree& document) {
         const bool edgeEnabled = value(edge, "enabled") != "false" &&
             !disabledNodeIds.contains(sourceNode) && !disabledNodeIds.contains(targetNode);
         if (edgeEnabled) {
-            if (!stateIds.contains(sourceNode)) add(result, "edgeSourceMissing", "error", "Relationship source node no longer exists.", "edge", id, "source");
-            if (!stateIds.contains(targetNode)) add(result, "edgeTargetMissing", "error", "Relationship target node no longer exists.", "edge", id, "target");
+            // A node that is gone, and one that is there with no state for the relationship to act on, are told apart: the
+            // second used to be reported as gone, since only nodes with states are in stateIds.
+            const auto endpoint = [&](const std::string& nodeId, const std::string& role, const char* missingCode, const char* statelessCode) {
+                const auto node = nodesById.find(nodeId);
+                if (node == nodesById.end()) {
+                    add(result, missingCode, "error", "Relationship " + role + " node no longer exists.", "edge", id, role);
+                } else if (!stateIds.contains(nodeId)) {
+                    const auto name = value(*node->second, "name");
+                    add(result, statelessCode, "error", "Relationship " + role + " node " + (name.empty() ? std::string("") : "\"" + name + "\" ") +
+                        "has no state variables for the relationship to act on. Add a state to it, or connect another node.", "edge", id, role);
+                }
+            };
+            endpoint(sourceNode, "source", "edgeSourceMissing", "edgeSourceStateless");
+            endpoint(targetNode, "target", "edgeTargetMissing", "edgeTargetStateless");
             if (!sourceNode.empty() && sourceNode == targetNode) add(result, "edgeSelfConnection", "error", "A relationship must connect two different nodes.", "edge", id, "target");
         }
         const auto sourceState = value(edge, "source.stateId");

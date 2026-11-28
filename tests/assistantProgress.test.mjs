@@ -5,13 +5,20 @@ import test from 'node:test';
 import { describeAssistantProgress } from '../src/assistantProgress.mjs';
 
 test('before anything arrives the panel says it is waiting, with the elapsed time', () => {
-    assert.equal(describeAssistantProgress({ attempt: 1, attempts: 3, phase: 'sending' }, 4.7).headline, 'Waiting for the model… (4 s)');
-    assert.equal(describeAssistantProgress(null, 0).headline, 'Waiting for the model… (0 s)');
+    assert.equal(describeAssistantProgress({ attempt: 1, attempts: 3, phase: 'sending' }, 4.7).headline, 'Waiting for the model… · 4 s');
+    assert.equal(describeAssistantProgress(null, 0).headline, 'Waiting for the model… · 0 s');
+    assert.equal(describeAssistantProgress({ phase: 'sending' }, 112).headline, 'Waiting for the model… · 1:52', 'Past a minute, minutes and seconds.');
 });
 
-test('reasoning without output is "thinking"; output is "writing" with a character count', () => {
+test('reasoning without output is "thinking"; output is "writing", without a character count nobody can read', () => {
     assert.match(describeAssistantProgress({ phase: 'receiving', thinking: 'Let me see' }, 3).headline, /^The model is thinking…/);
-    assert.match(describeAssistantProgress({ phase: 'receiving', thinking: 'x', outputCharacters: 1240 }, 3).headline, /writing the proposal… 1,240 characters/);
+    assert.equal(describeAssistantProgress({ phase: 'receiving', thinking: 'x', outputCharacters: 1240 }, 3).headline, 'The model is writing the proposal… · 3 s');
+});
+
+test('fixing the problems the engine found says so, and which problems', () => {
+    const { headline, notes } = describeAssistantProgress({ phase: 'receiving', outputCharacters: 10, fixingProblems: true, repairReason: 'Heat Loss: no state variables.' }, 8);
+    assert.equal(headline, 'The model is fixing the proposal… · 8 s');
+    assert.deepEqual(notes, ['The engine found problems in the last proposal, so the model was asked to fix them: Heat Loss: no state variables.']);
 });
 
 test('validation is its own stage', () => {

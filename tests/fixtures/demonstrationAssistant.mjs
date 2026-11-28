@@ -144,7 +144,8 @@ function attemptResolve(context, text) {
 // answering an earlier clarification.
 // "Add a heat sink": a model that slips the first time, adding the sink without a state yet connecting it, and gets it right
 // when asked to fix it, so a test can see the engine's problems sent back and the fixed proposal come in their place.
-function heatSinkAnswer(context, repairing) {
+// Asked for another answer, it couples the sink twice as strongly, and says what it was asked to do differently.
+function heatSinkAnswer(context, repairing, alternative = null) {
     const source = context.nodes.find((node) => node.states?.length);
     if (!source) throw new AssistantProviderError('There is no node with a state to connect the heat sink to.', 'invalidRequest');
     const operations = [{ kind: 'addNode', ref: 'heatSink', name: 'Heat sink' }];
@@ -153,15 +154,16 @@ function heatSinkAnswer(context, repairing) {
     if (repairing) {
         const symbol = source.states[0].symbol;
         operations.push({ kind: 'setEdgeEquation', edgeRef: 'sinkLink', outputStateRef: 'sinkTemperature',
-            latex: `0.1 \\cdot (\\mathrm{source${symbol[0].toUpperCase()}${symbol.slice(1)}} - \\mathrm{targetTemperature})` });
+            latex: `${alternative ? '0.2' : '0.1'} \\cdot (\\mathrm{source${symbol[0].toUpperCase()}${symbol.slice(1)}} - \\mathrm{targetTemperature})` });
     }
-    return { responseKind: 'proposal', proposalVersion: 1, summary: repairing ? 'Add a heat sink with a temperature state.' : 'Add a heat sink.', operations };
+    const different = alternative ? `, coupled twice as strongly${alternative.note ? ` (${alternative.note})` : ''}` : '';
+    return { responseKind: 'proposal', proposalVersion: 1, summary: repairing ? `Add a heat sink with a temperature state${different}.` : 'Add a heat sink.', operations };
 }
 
-export function demonstrationAnswer({ context, request, history, repairing = false }) {
+export function demonstrationAnswer({ context, request, history, repairing = false, alternative = null }) {
     const text = request.trim();
     if (!text) throw new AssistantProviderError('Describe the model change you want to make.', 'emptyRequest');
-    if (/^add a heat sink\b/i.test(text)) return heatSinkAnswer(context, repairing);
+    if (/^add a heat sink\b/i.test(text)) return heatSinkAnswer(context, repairing, alternative);
     try {
         const direct = attemptResolve(context, text);
         if (direct.responseKind !== 'clarification' || !history?.length) return direct;

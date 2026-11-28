@@ -31,13 +31,16 @@ export function readPrompt(content) {
     const requestStart = content.indexOf('\n\nUSER REQUEST:\n');
     if (contextStart < 0 || requestStart < 0) throw new Error('The prompt has no model context or request.');
     const context = JSON.parse(content.slice(contextStart + 'MODEL CONTEXT:\n'.length, requestStart));
-    const request = content.slice(requestStart + '\n\nUSER REQUEST:\n'.length).split('\n\nCORRECTION REQUIRED:')[0];
+    const asked = content.slice(requestStart + '\n\nUSER REQUEST:\n'.length).split('\n\nCORRECTION REQUIRED:')[0];
+    // Regenerate: another answer wanted, with what should be different when the person said.
+    const [request, another] = asked.split('\n\nANOTHER ANSWER WANTED:');
+    const alternative = another === undefined ? null : { note: /\nWhat should be different: (.*)\n/.exec(another)?.[1] ?? '' };
     const history = [];
     const conversation = /(?:^|\n)CONVERSATION SO FAR:\n([\s\S]*?)\n\n/.exec(content);
     for (const match of (conversation?.[1] ?? '').matchAll(/^User: (.*)\nAssistant: (.*)$/gm)) history.push({ request: match[1], outcome: match[2] });
     // A request asking the model to fix its last proposal carries the problems in a correction section.
     const repairing = content.includes('\n\nCORRECTION REQUIRED:');
-    return { context, request, history, repairing };
+    return { context, request, history, repairing, alternative };
 }
 
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));

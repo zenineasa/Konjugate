@@ -139,6 +139,15 @@ export function requestPrompt(context, request, repair) {
     return `MODEL CONTEXT:\n${JSON.stringify(context)}\n\nUSER REQUEST:\n${request}${correction}`;
 }
 
+// Regenerate (docs/aiProviderArchitecture.md, "Another answer"): the person wants a different proposal for the same request, so
+// the proposals they did not take and what they want different go with it, for the model to propose something else rather
+// than a near copy. Appended to the request; bounded by the caller.
+export function alternativesPrompt({ earlier = [], note = '' } = {}) {
+    const said = String(note ?? '').trim();
+    const shown = earlier.map((proposal) => ({ summary: proposal?.summary ?? '', assumptions: proposal?.assumptions ?? [], operations: proposal?.operations ?? [] }));
+    return `\n\nANOTHER ANSWER WANTED: the person asked for a different proposal for this same request. ${shown.length === 1 ? 'An earlier proposal they did not take' : 'Earlier proposals they did not take'}:\n${JSON.stringify(shown)}\n${said ? `What should be different: ${said}\n` : ''}Propose a different approach that still does what the request asks${said ? ' and does what they said' : ''}; do not repeat an earlier proposal.`;
+}
+
 // Both parts as one text, for a provider that takes a single prompt.
 export function proposalPrompt(operationSchema, context, request, repair) {
     return `${assistantInstructions(operationSchema)}\n\n${requestPrompt(context, request, repair)}`;
@@ -266,7 +275,7 @@ function ollamaProvider() {
             const models = await this.listModels(input);
             return { connected: true, provider: 'ollama', modelCount: models.length };
         },
-        async generateProposal({ configuration, context, request, history, repair, signal, fetchImpl, operationSchema, onEvent }) {
+        async generateProposal({ configuration, context, request, history, repair, signal, fetchImpl, operationSchema, onEvent, vary = false }) {
             if (!configuration.model) throw new AssistantProviderError('Select an installed Ollama model before generating a proposal.', 'modelRequired');
             const text = await generateText(fetchImpl, `${baseUrl({ ...configuration, provider: 'ollama' })}/api/chat`, {
                 method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
@@ -276,7 +285,8 @@ function ollamaProvider() {
                     // Only when set: models that cannot think reject `think`, and the default is the model's own.
                     ...(typeof configuration.think === 'boolean' ? { think: configuration.think } : {}),
                     // Edits should repeat for the same request, and Ollama's default window (4096 tokens) is barely larger than this prompt. A proposal is a few hundred tokens, so the cap only ever stops a model that has started to loop.
-                    options: { temperature: 0, num_ctx: 8192, num_predict: 4096 },
+                    // `vary` (another answer to the same request) lifts the temperature for that request, or the same answer comes back.
+                    options: { temperature: vary ? 0.8 : 0, num_ctx: 8192, num_predict: 4096 },
                     // The instructions first: Ollama keeps a loaded model's work on an unchanged prompt start, so requests start sooner.
                     messages: [
                         { role: 'system', content: assistantInstructions(operationSchema) },

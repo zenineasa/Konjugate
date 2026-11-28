@@ -414,7 +414,7 @@ contextBridge.exposeInMainWorld('aiProviders', {
     // `reference` ({ summary, assumptions, operations }), when given, is an earlier proposal for the model to adapt (Ask about this).
     // `options.onUsage(usage)` is told what the request used (src/assistantUsage.mjs), whether it is answered or fails.
     generateProposal: async (requestUuid, configurationUuid, request, context, history, repair, reference, options = {}) => {
-        const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history, repair, reference });
+        const result = await invokePlainly('aiGenerateProposal', { requestUuid, configurationUuid, request, context, history, repair, reference, alternatives: options?.alternatives ?? null });
         options?.onUsage?.(result.usage ?? null);
         if (result.ok) return result.proposal;
         if (result.error?.code === 'requestCancelled') throw new DOMException(result.error.message, 'AbortError');

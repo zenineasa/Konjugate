@@ -2952,3 +2952,25 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 /* An FMU built from its sources (docs/proposals/sourceFmuImport.md): the card's actions and the build's log. */
 .fmuBuildActions { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
 .fmuBuildLog { max-height: 220px; overflow: auto; margin: 6px 0; padding: 6px; font-size: 8px; white-space: pre-wrap; color: #c9d6db; background: rgb(0 0 0 / 25%); border-radius: 4px; }
+
+/* Another answer to the same request: versions of a turn's proposal, Regenerate with what should be different, and More for a turn's actions. */
+.assistantSummaryHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.assistantVersions { display: inline-flex; flex: none; align-items: center; gap: 4px; color: #8aa0aa; font-size: var(--assistant-caption); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.assistantVersions button { width: 24px; height: 24px; padding: 0; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: 15px; line-height: 1; cursor: pointer; }
+.assistantVersions button:hover:not(:disabled) { color: #d2e6e8; border-color: #3d5b63; }
+.assistantVersions button:disabled { opacity: .4; cursor: default; }
+.assistantRegenerate { display: flex; gap: 6px; align-items: center; padding: 10px 12px 0; }
+.assistantRegenerate input { flex: 1; min-width: 0; height: 30px; padding: 0 9px; color: #d4e1e5; background: #0a161d; border: 1px solid #31444f; border-radius: 4px; font: inherit; font-size: var(--assistant-body); }
+.assistantRegenerate input:focus { border-color: var(--accent); outline: none; }
+.assistantRegenerate button { flex: none; height: 30px; padding: 0 12px; color: #8aa0aa; background: transparent; border: 1px solid #31444f; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; }
+.assistantRegenerate button.primary { color: #09201e; background: var(--accent); border-color: transparent; font-weight: 700; }
+.assistantPanel footer #discardAssistantProposal { margin-right: auto; }
+.assistantTurnMore { position: relative; }
+.assistantTurnMore summary { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; color: #8fb4b6; background: #12212a; border: 1px solid #2c4048; border-radius: 4px; font-size: var(--assistant-caption); font-weight: 600; cursor: pointer; list-style: none; }
+.assistantTurnMore summary::-webkit-details-marker { display: none; }
+.assistantTurnMore summary::after { content: '▾'; margin-left: 5px; font-size: 10px; }
+.assistantTurnMore summary:hover, .assistantTurnMore[open] summary { color: #d2e6e8; border-color: #3d5b63; }
+.assistantTurnMoreMenu { position: absolute; z-index: 3; top: calc(100% + 4px); left: 0; display: flex; flex-direction: column; gap: 2px; min-width: 170px; padding: 4px; background: #0f1d25; border: 1px solid #2c4048; border-radius: 6px; box-shadow: 0 8px 24px rgb(0 0 0 / 40%); }
+.assistantTurnMoreMenu button { justify-content: flex-start; width: 100%; text-align: left; background: transparent; border-color: transparent; }
+.assistantTurnMoreMenu button:hover { background: #162a34; }
+.assistantVersions[hidden], .assistantRegenerate[hidden] { display: none; }

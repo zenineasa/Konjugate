@@ -97,7 +97,8 @@ export function createAIProviderRegistry(providers = []) {
         },
         // `initialRepair` ({ error, proposal }): this request is the model fixing a proposal the host or the engine rejected.
         // `onUsage(total)` is told, once the request ends however it ends, what all its attempts used together (or null).
-        async generate({ configuration, credential, onCredential, context, request, history, initialRepair = null, signal, onProgress, onUsage }) {
+        // `vary`: another answer to a request already answered, for a provider that would otherwise repeat itself (Ollama at temperature 0).
+        async generate({ configuration, credential, onCredential, context, request, history, initialRepair = null, signal, onProgress, onUsage, vary = false }) {
             const provider = registry.get(configuration.provider);
             if (!provider) throw new AIProviderRegistryError(`Provider “${configuration.provider}” is unavailable.`, 'providerUnavailable');
             // What the panel shows while this runs: which attempt, what stage, and the latest of what the
@@ -127,7 +128,7 @@ export function createAIProviderRegistry(providers = []) {
                     publish();
                     try {
                         response = await generateAssistantProposal(provider, {
-                            configuration, credential, onCredential, context, request, history, repair, signal, onEvent
+                            configuration, credential, onCredential, context, request, history, repair, signal, onEvent, vary
                         });
                     } catch (error) {
                         // Only what the model itself got wrong is worth asking it to fix: JSON that does not parse, or

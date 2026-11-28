@@ -208,6 +208,14 @@ Under each turn, the panel says what the request used, as the provider reported 
 
 The instructions Konjugate sends are the same for every request and come first, so providers that cache a repeated start of a prompt (Anthropic, OpenAI, Gemini) charge less for them after the first request; where the provider enforces the response's format, the format's description is not sent a second time.
 
+## Another proposal
+
+If you don't like a proposal, choose **Regenerate…** beside **Discard**. You can say what should be different ("use five cells, not ten") or leave it empty, then choose **Regenerate**. Konjugate sends the same request again, with the proposals you didn't take and your note, and asks for a different approach. A local model is asked to vary its answer for that request, since it otherwise gives the same answer every time. The new proposal is checked like any other, and if the checks find problems, the model gets one round to fix them.
+
+Each answer is another version of the same turn, not a new turn. The arrows beside the proposal's summary (‹ 2 of 3 ›) move between versions, and **Apply changes** applies the one on screen. That version is also what the model is told about the turn later. Every version is kept in the history, and the exported conversation lists them with the note each was asked with and which one was applied. Each regenerate is a request to the model, so it costs what a request costs; the line under the turn adds them up.
+
+A turn with many actions shows the two most used ones and puts the rest under **More**.
+
 ## The same request again
 
 If you send exactly the same request about the same, unchanged model, after the same turns, to the same model, Konjugate shows the answer it got before and sends nothing, so it costs nothing. The line under the turn says when that answer was given. If you want a new answer, choose **Ask the model instead**. An answer you discarded is never reused.

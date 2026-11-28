@@ -410,6 +410,7 @@ export async function runInteractionTests(driver) {
             'a proposal the engine rejects goes back to the model to fix before it is shown',
             'a conversation is kept in the history, reopened from it, and deleted with everything it kept',
             'the same request to the same model is answered from its earlier answer, with nothing sent, unless the person asks the model instead',
+            "a proposal is regenerated with a note as another version of its turn, either version shown and applied, and a busy turn's actions fold under More",
             'an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it',
             'an earlier proposal is applied again, with a warning when it was made for another project, or referred to in a new request',
             'a conversation forks from a turn, in this window or a new one, each fork its own copy',
@@ -1399,6 +1400,62 @@ export async function runInteractionTests(driver) {
         assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn .assistantTranscriptOutcome').textContent`), /Discarded: an earlier answer/);
         assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn:last-child .assistantTranscriptUsage').textContent`), /tokens in/);
         await evaluate(window, `document.querySelector('#discardAssistantProposal').click(); document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click(); window.assistantHistory.clear()`);
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
+
+    await run("a proposal is regenerated with a note as another version of its turn, either version shown and applied, and a busy turn's actions fold under More", async () => {
+        await evaluate(window, `window.assistantHistory.clear()`);
+        await freshExample();
+        // Rendered, in an open menu and a shown form, not only display other than none.
+        const shown = (selector) => evaluate(window, `document.querySelector(${JSON.stringify(selector)})?.checkVisibility() ?? false`);
+        const chats = () => fakeOllama.requests.filter((request) => request.path === '/api/chat');
+        await evaluate(window, `(() => { window.confirm = () => true; if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#newAssistantConversation').click(); })()`);
+        await evaluate(window, `(() => {
+            document.querySelector('#assistantPrompt').value = 'Add a heat sink connected to the battery.';
+            document.querySelector('#assistantPromptForm').requestSubmit();
+        })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled`, 'The first proposal was not ready.', 20000);
+        assert.equal(await shown('#regenerateAssistantProposal'), true, 'The proposal offered no Regenerate.');
+        assert.equal(await shown('#assistantProposalVersions'), false, 'A proposal answered once showed versions.');
+
+        // Regenerate, saying what should be different: the earlier proposal and the note go to the model, which is asked to vary.
+        await evaluate(window, `document.querySelector('#regenerateAssistantProposal').click()`);
+        assert.equal(await shown('#assistantRegenerateNote'), true, 'Regenerate asked nothing of what should be different.');
+        const before = chats().length;
+        await evaluate(window, `(() => { document.querySelector('#assistantRegenerateNote').value = 'a stronger coupling'; document.querySelector('#assistantRegenerateForm').requestSubmit(); })()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled && /twice as strongly/.test(document.querySelector('#assistantProposalSummary').textContent)`, 'Regenerating gave no other proposal.', 20000);
+        const asked = chats().slice(before);
+        assert.ok(asked.length >= 1, 'Regenerate sent nothing to the model.');
+        const prompt = asked[0].body.messages.at(-1).content;
+        assert.match(prompt, /ANOTHER ANSWER WANTED:/);
+        assert.match(prompt, /Add a heat sink with a temperature state\./, 'The proposal not taken was not sent with it.');
+        assert.match(prompt, /What should be different: a stronger coupling/);
+        assert.equal(asked[0].body.options.temperature, 0.8, 'Ollama was not asked to vary its answer.');
+        assert.match(await evaluate(window, `document.querySelector('#assistantProposalSummary').textContent`), /coupled twice as strongly \(a stronger coupling\)/);
+        assert.equal(await evaluate(window, `document.querySelector('#assistantProposalVersionText').textContent`), '2 of 2');
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn').length`), 1, 'Regenerating added a turn instead of a version.');
+        assert.match(await evaluate(window, `document.querySelector('.assistantTranscriptTurn .assistantTranscriptUsage').textContent`), /version 2 of 2 · .*tokens in/);
+
+        // Back to the first version, then forward again, and the one on screen is applied.
+        await evaluate(window, `document.querySelector('#previousAssistantVersion').click()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled && /temperature state\.$/.test(document.querySelector('#assistantProposalSummary').textContent)`, 'The first version did not come back.');
+        assert.equal(await evaluate(window, `document.querySelector('#assistantProposalVersionText').textContent`), '1 of 2');
+        await evaluate(window, `document.querySelector('#nextAssistantVersion').click()`);
+        await waitFor(window, `!document.querySelector('#applyAssistantProposal').disabled && /twice as strongly/.test(document.querySelector('#assistantProposalSummary').textContent)`, 'The second version did not come back.');
+        await evaluate(window, `document.querySelector('#applyAssistantProposal').click()`);
+        await waitFor(window, `/^Applied: .*twice as strongly/.test(document.querySelector('.assistantTranscriptOutcome').textContent)`, 'The second version was not applied.');
+        const [summary] = await evaluate(window, `window.assistantHistory.list()`);
+        await waitFor(window, `window.assistantHistory.get(${JSON.stringify(summary.id)}).then((c) => c.turns[0].versions?.length === 2 && c.turns[0].version === 1 && c.turns[0].outcome.kind === 'applied')`, 'The versions and the one applied were not kept.');
+
+        // The applied turn has more to do than fits in a row: two in sight, the rest under More.
+        await waitFor(window, `Boolean(document.querySelector('.assistantTranscriptTurn [data-turn-action="restoreBefore"]'))`, 'The applied turn offered no checkpoints.');
+        await evaluate(window, `(() => { if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); })()`);
+        assert.equal(await evaluate(window, `document.querySelectorAll('.assistantTranscriptTurn .assistantTurnActions > button').length`), 2);
+        assert.equal(await shown('.assistantTranscriptTurn .assistantTurnMore [data-turn-action="restoreBefore"]'), false, 'More showed its actions before it was opened.');
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn .assistantTurnMore summary').click()`);
+        await waitFor(window, `document.querySelector('.assistantTranscriptTurn .assistantTurnMore [data-turn-action="restoreBefore"]')?.checkVisibility()`, 'Opening More did not show its actions.');
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        assert.equal(await shown('.assistantTranscriptTurn .assistantTurnMore [data-turn-action="restoreBefore"]'), true, 'More closed by itself.');
+        await evaluate(window, `document.querySelector('.assistantTranscriptTurn .assistantTurnMore summary').click(); document.querySelector('#newAssistantConversation').click(); document.querySelector('#closeAssistantPanel').click(); window.assistantHistory.clear()`);
     }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('an applied proposal keeps checkpoints, to see what it changed and restore the model before or after it', async () => {

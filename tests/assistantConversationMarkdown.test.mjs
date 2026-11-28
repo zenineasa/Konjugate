@@ -28,3 +28,12 @@ test('A conversation exports as a record: each request, when and with which mode
     assert.equal(markdown.split('\n').some((line) => line === '# not a heading'), false, 'A request made a heading of its own.');
     assert.equal(conversationMarkdown({ title: '', turns: [] }, { exportedAt: 0 }).includes('No turns yet.'), true);
 });
+
+test('A regenerated turn lists its versions in the export, with the note each was asked with and the one applied', () => {
+    const markdown = conversationMarkdown({ title: 'Cells', turns: [{
+        request: 'Add cells', createdAt: 0, outcome: { kind: 'applied', text: 'Applied: Five cells' }, version: 1,
+        reply: { responseKind: 'proposal', summary: 'Five cells', operations: [] },
+        versions: [{ reply: { summary: 'Ten cells' }, note: '' }, { reply: { summary: 'Five cells' }, note: 'use five cells' }]
+    }] }, { exportedAt: 0, formatTime: () => 'then' });
+    assert.match(markdown, /Regenerated: 2 versions, version 2 applied\.\n\n1\. Ten cells\n2\. Five cells \(asked: “use five cells”\) ← this one\n/);
+});

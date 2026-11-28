@@ -11699,13 +11699,14 @@ function assistantTurnCheckpoints(turn, index) {
     box.className = 'assistantTurnCheckpoints';
     const actions = document.createElement('div');
     actions.className = 'assistantTurnActions';
-    for (const [action, text, title] of [
+    // Most used first: what an applied change did, then reuse, then checkpoints and forks.
+    const offered = [
+        ...(applied ? [['changes', turn.diffLines ? 'Hide what changed' : 'Show what changed', 'List what this changed, and select it on the canvas']] : []),
         ...(proposal ? [
             ['applyAgain', 'Apply again', 'Prepare this proposal again against the model open now, to review and apply'],
             ['askAbout', 'Ask about this', 'Refer the next request to this proposal, so the model adapts it to the model open now']
         ] : []),
         ...(applied ? [
-            ['changes', turn.diffLines ? 'Hide what changed' : 'Show what changed', 'List what this changed, and select it on the canvas'],
             ['restoreBefore', 'Restore before', 'Put the model back as it was before this change (undoable)'],
             ['restoreAfter', 'Restore after', 'Put the model back as it was right after this change (undoable)']
         ] : []),
@@ -11713,10 +11714,25 @@ function assistantTurnCheckpoints(turn, index) {
             ['forkHere', 'Fork from here', 'Continue from this turn as a conversation of its own, here or in a new window'],
             ['editResend', 'Edit and resend', 'Change this request and send it again, as a fork from the turn before it']
         ] : [])
-    ]) {
-        const button = Object.assign(document.createElement('button'), { type: 'button', textContent: text, title });
-        button.dataset.turnAction = action;
-        actions.append(button);
+    ];
+    // The first two in sight; the rest under More, so a turn stays one short row however much can be done with it.
+    const shown = offered.length > 3 ? offered.slice(0, 2) : offered;
+    const button = ([action, text, title]) => {
+        const element = Object.assign(document.createElement('button'), { type: 'button', textContent: text, title });
+        element.dataset.turnAction = action;
+        return element;
+    };
+    actions.append(...shown.map(button));
+    if (offered.length > shown.length) {
+        const more = document.createElement('details');
+        more.className = 'assistantTurnMore';
+        const summary = Object.assign(document.createElement('summary'), { textContent: 'More' });
+        summary.title = 'More for this turn';
+        const menu = document.createElement('div');
+        menu.className = 'assistantTurnMoreMenu';
+        menu.append(...offered.slice(shown.length).map(button));
+        more.append(summary, menu);
+        actions.append(more);
     }
     box.append(actions);
     if (assistantForkChoice?.index === index) {
@@ -11759,6 +11775,8 @@ function assistantReusedCaption(turn, index) {
 function renderAssistantTranscript() {
     const transcript = $('#assistantTranscript');
     transcript.hidden = assistantTurnHistory.length === 0;
+    // A More menu open when a write comes back and the transcript is drawn again stays open.
+    const openMore = transcript.querySelector('.assistantTurnMore[open]')?.closest('[data-turn-index]')?.dataset.turnIndex;
     transcript.replaceChildren(...assistantTurnHistory.map((turn, index) => {
         const item = document.createElement('li');
         item.className = 'assistantTranscriptTurn';
@@ -11785,15 +11803,18 @@ function renderAssistantTranscript() {
         } else {
             item.append(you, outcome);
         }
+        const versionText = turn.versions?.length > 1 ? `version ${(turn.version ?? 0) + 1} of ${turn.versions.length}` : '';
         if (turn.reusedFrom) item.append(assistantReusedCaption(turn, index));
-        else if (turn.usage) item.append(Object.assign(document.createElement('p'), { className: 'assistantTranscriptUsage', textContent: describeUsage(turn.usage, turn.provider) }));
+        else if (turn.usage || versionText) item.append(Object.assign(document.createElement('p'), { className: 'assistantTranscriptUsage', textContent: [versionText, describeUsage(turn.usage, turn.provider)].filter(Boolean).join(' · ') }));
         const reply = assistantTurnReply(turn);
         if (reply) item.append(reply);
         const checkpoints = assistantTurnCheckpoints(turn, index);
         if (checkpoints) item.append(checkpoints);
         return item;
     }));
+    if (openMore !== undefined) transcript.querySelector(`[data-turn-index="${openMore}"] .assistantTurnMore`)?.setAttribute('open', '');
     syncAssistantEmpty();
+    syncAssistantVersions();
     scrollAssistantToEnd();
 }
 
@@ -11854,7 +11875,7 @@ function pushAssistantTurn(request, outcome, reply = null, reference = null, use
     const context = assistantTurnContext();
     const record = {
         request, outcome, reply, turnId: null, project: context.project, provider: context.model.provider, usage: used, reference: reference ? { summary: reference.summary } : null,
-        key, reusedFrom, referenceSource: reference
+        key, reusedFrom, referenceSource: reference, model: context.model, createdAt: Date.now()
     };
     assistantTurnHistory = [...assistantTurnHistory, record];
     renderAssistantTranscript();
@@ -11874,6 +11895,7 @@ function updateAssistantTurnOutcome(record, outcome, changes = {}) {
     if (changes.reply) record.reply = changes.reply;
     if (changes.problems) record.problems = changes.problems;
     if (changes.usage) record.usage = changes.usage;
+    if (changes.versions) Object.assign(record, { versions: changes.versions, version: changes.version ?? 0 });
     renderAssistantTranscript();
     const conversationId = assistantConversationId;
     const pending = assistantTurnWrites.get(record);
@@ -11881,7 +11903,7 @@ function updateAssistantTurnOutcome(record, outcome, changes = {}) {
     assistantTurnWrites.set(record, pending
         .then(() => record.turnId && historyStore.updateTurn(conversationId, record.turnId, {
             outcome: { kind: assistantOutcomeKind(outcome), text: outcome }, ...(changes.reply ? { reply: changes.reply } : {}), ...(changes.problems ? { problems: changes.problems } : {}),
-            ...(changes.usage ? { usage: changes.usage } : {})
+            ...(changes.usage ? { usage: changes.usage } : {}), ...(changes.versions ? { versions: changes.versions, version: changes.version ?? 0 } : {})
         }))
         .catch((error) => console.warn('[assistant] keeping this turn in the history:', error)));
 }
@@ -12088,7 +12110,8 @@ async function openAssistantConversation(id) {
     assistantConversationId = conversation.id;
     assistantTurnHistory = conversation.turns.map((turn) => ({
         request: turn.request, outcome: turn.outcome.text || turn.outcome.kind, reply: turn.reply, turnId: turn.id, before: turn.before, after: turn.after,
-        project: turn.project, reference: turn.reference, usage: turn.usage, provider: turn.model?.provider ?? '', key: turn.key ?? null, reusedFrom: turn.reusedFrom ?? null
+        project: turn.project, reference: turn.reference, usage: turn.usage, provider: turn.model?.provider ?? '', key: turn.key ?? null, reusedFrom: turn.reusedFrom ?? null,
+        model: turn.model ?? null, createdAt: turn.createdAt, versions: turn.versions ?? null, version: turn.version ?? 0
     }));
     assistantForkChoice = null;
     renderAssistantForkNote(conversation.forkedFrom);
@@ -12300,6 +12323,7 @@ function discardAssistantProposal() {
     $('#applyAssistantProposal').disabled = true;
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = true;
+    $('#assistantRegenerateForm').hidden = true;
     syncAssistantEmpty();
     $('#generateAssistantProposal').textContent = 'Generate proposal';
     updateAssistantCollapsedStatus('Your model remains unchanged');
@@ -15286,6 +15310,7 @@ async function requestAssistantProposal() {
     updateAssistantCollapsedStatus('Preparing proposal…');
     $('#assistantProposal').hidden = true;
     $('#assistantClarification').hidden = true;
+    $('#assistantRegenerateForm').hidden = true;
     startAssistantProgress(requestUuid, request);
     try {
         const reference = assistantReference;
@@ -15357,6 +15382,7 @@ async function requestAssistantProposal() {
             assistantGenerationController = null;
             stopAssistantProgress();
             if (pendingAssistantTurnRecord?.reusedFrom) renderAssistantTranscript();
+            syncAssistantVersions();
             button.disabled = false;
             button.textContent = pendingAssistantProposal ? 'Revise proposal'
                 : !$('#assistantClarification').hidden ? 'Answer'
@@ -15364,6 +15390,140 @@ async function requestAssistantProposal() {
         }
     }
 }
+
+// ---- Another answer to the same request (docs/aiAssistantGuide.md, "Another proposal"): Regenerate asks the model again,
+// with the proposals not taken and, optionally, what should be different; each answer is a version of the same turn, all
+// kept, ‹ › between them, and the one on screen is what Apply applies and what the model is told of the turn.
+
+// A turn's versions; a turn never regenerated is its one reply.
+const assistantVersions = (turn) => (turn.versions?.length ? turn.versions
+    : turn.reply ? [{ reply: turn.reply, usage: turn.usage ?? null, note: '', model: turn.model ?? null, createdAt: turn.createdAt ?? 0 }] : []);
+
+// The turn whose proposal is on screen, when it can be regenerated: the last turn, a proposal still under review or rejected,
+// asked of the model (Apply again replays a proposal, so it has no request to ask again).
+function assistantRegenerableTurn() {
+    const turn = assistantTurnHistory.at(-1);
+    if (!turn || turn.reply?.responseKind !== 'proposal' || /^Apply again: /.test(turn.request)) return null;
+    return ['proposed', 'rejected'].includes(assistantOutcomeKind(turn.outcome)) ? turn : null;
+}
+
+function syncAssistantVersions() {
+    const turn = assistantRegenerableTurn();
+    const count = turn?.versions?.length ?? 0;
+    $('#assistantProposalVersions').hidden = count < 2;
+    if (count > 1) {
+        $('#assistantProposalVersionText').textContent = `${turn.version + 1} of ${count}`;
+        $('#previousAssistantVersion').disabled = turn.version === 0 || Boolean(assistantGenerationController);
+        $('#nextAssistantVersion').disabled = turn.version === count - 1 || Boolean(assistantGenerationController);
+    }
+    $('#regenerateAssistantProposal').hidden = !turn || !$('#assistantRegenerateForm').hidden;
+    $('#regenerateAssistantProposal').disabled = Boolean(assistantGenerationController);
+}
+
+function showAssistantRegenerate(visible) {
+    $('#assistantRegenerateForm').hidden = !visible;
+    if (visible) { $('#assistantRegenerateNote').value = ''; $('#assistantRegenerateNote').focus(); }
+    syncAssistantVersions();
+}
+
+// Puts one of a turn's versions on screen as the turn's reply, and keeps that with the turn.
+function setAssistantTurnVersion(turn, index, { usage = null } = {}) {
+    const version = turn.versions[index];
+    pendingAssistantTurnRecord = turn;
+    updateAssistantTurnOutcome(turn, `Proposed: ${version.reply.summary?.trim() || 'model changes'}`, { reply: version.reply, versions: turn.versions, version: index, ...(usage ? { usage } : {}) });
+}
+
+async function showAssistantTurnVersion(step) {
+    const turn = assistantRegenerableTurn();
+    const index = (turn?.version ?? 0) + step;
+    if (!turn?.versions || assistantGenerationController || index < 0 || index >= turn.versions.length) return null;
+    setAssistantTurnVersion(turn, index);
+    return previewAssistantProposal(turn.reply);
+}
+
+async function regenerateAssistantProposal(note = '') {
+    const turn = assistantRegenerableTurn();
+    if (!turn || assistantGenerationController || activeResult) return { valid: false };
+    if (!confirmConfidentialHostedAssistant()) return { valid: false, cancelled: true };
+    const controller = new AbortController();
+    assistantGenerationController = controller;
+    const requestUuid = crypto.randomUUID();
+    const repairUuid = crypto.randomUUID();
+    controller.signal.addEventListener('abort', () => {
+        for (const id of [requestUuid, repairUuid]) window.aiProviders.cancelRequest(id).catch(() => {});
+    }, { once: true });
+    const versions = assistantVersions(turn);
+    const button = $('#generateAssistantProposal');
+    button.disabled = true;
+    $('#assistantRegenerateForm').hidden = true;
+    $('#assistantProposal').hidden = true;
+    updateAssistantCollapsedStatus('Preparing another proposal…');
+    startAssistantProgress(requestUuid, turn.request);
+    let used = null;
+    const onUsage = (value) => { used = addUsage(used, value); };
+    const summary = assistantModelSummary();
+    const history = assistantModelHistory(assistantTurnHistory.slice(0, assistantTurnHistory.indexOf(turn)));
+    const configuration = $('#assistantConfiguration').value;
+    const alternatives = { earlier: versions.map((version) => version.reply).filter((reply) => reply?.responseKind === 'proposal'), note: note.trim() };
+    const ask = (uuid, repair) => window.aiProviders.generateProposal(uuid, configuration, turn.request, summary, history, repair, turn.referenceSource ?? undefined, { onUsage, alternatives });
+    // Back to the version that was on screen, after a cancel or a failure, with what went wrong said under it.
+    const restore = async (message = '') => {
+        if (used) updateAssistantTurnOutcome(turn, turn.outcome, { usage: addUsage(turn.usage ?? null, used) });
+        pendingAssistantTurnRecord = turn;
+        await previewAssistantProposal(turn.reply);
+        if (message) {
+            $('#assistantError').textContent = `Another proposal could not be prepared: ${message}`;
+            $('#assistantError').hidden = false;
+        }
+    };
+    let finished = false;
+    try {
+        let reply = await ask(requestUuid);
+        if (controller.signal.aborted) return { valid: false, cancelled: true };
+        if (reply.responseKind === 'clarification') {
+            throw new Error(`the model asked a question instead: ${reply.question} Answer it in “What should be different?” and regenerate, or write a new request.`);
+        }
+        pendingAssistantTurnRecord = turn;
+        const preview = await previewAssistantProposal(reply, { recordOutcome: false });
+        if (controller.signal.aborted) return { valid: false, cancelled: true };
+        if (!preview.valid && !preview.superseded && preview.repairable) {
+            startAssistantProgress(repairUuid, turn.request);
+            const fixed = await ask(repairUuid, { error: preview.error.slice(0, 4000), proposal: reply });
+            if (controller.signal.aborted) return { valid: false, cancelled: true };
+            if (fixed.responseKind === 'proposal') reply = fixed;
+        }
+        stopAssistantProgress();
+        turn.versions = [...versions, { reply, usage: used, note: note.trim(), model: assistantTurnContext().model, createdAt: Date.now() }];
+        setAssistantTurnVersion(turn, turn.versions.length - 1, { usage: addUsage(turn.usage ?? null, used) });
+        finished = true;
+        return { ...(await previewAssistantProposal(reply)), regenerated: true };
+    } catch (error) {
+        if (controller.signal.aborted || error.name === 'AbortError') return { valid: false, cancelled: true };
+        console.warn(`[assistant] regenerating: ${error.message}`);
+        finished = true;
+        if (assistantGenerationController === controller) { assistantGenerationController = null; stopAssistantProgress(); }
+        await restore(error.message);
+        return { valid: false, error: error.message };
+    } finally {
+        if (assistantGenerationController === controller) {
+            assistantGenerationController = null;
+            stopAssistantProgress();
+        }
+        button.disabled = false;
+        if (!finished) await restore();
+        syncAssistantVersions();
+    }
+}
+
+$('#regenerateAssistantProposal').addEventListener('click', () => showAssistantRegenerate(true));
+$('#cancelAssistantRegenerate').addEventListener('click', () => showAssistantRegenerate(false));
+$('#assistantRegenerateNote').addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.stopPropagation(); showAssistantRegenerate(false); } });
+$('#assistantRegenerateForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    regenerateAssistantProposal($('#assistantRegenerateNote').value).catch((error) => renderAssistantGenerationError(error.message));
+});
+$('#previousAssistantVersion').addEventListener('click', () => showAssistantTurnVersion(-1));
+$('#nextAssistantVersion').addEventListener('click', () => showAssistantTurnVersion(1));
 
 // Sets a reused answer aside and sends its request to the model, as though the reused answer had never been shown.
 function askAssistantModelInstead(turn) {
@@ -15419,6 +15579,7 @@ $('#assistantTranscript').addEventListener('click', (event) => {
     const turn = assistantTurnHistory[Number(button.closest('[data-turn-index]')?.dataset.turnIndex)];
     if (!turn) return;
     const action = button.dataset.turnAction;
+    button.closest('details')?.removeAttribute('open');
     if (action === 'askAbout') { setAssistantReference(turn); return; }
     if (action === 'askModel') { askAssistantModelInstead(turn); return; }
     if (action === 'forkHere' || action === 'editResend') {

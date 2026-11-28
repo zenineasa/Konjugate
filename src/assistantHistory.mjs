@@ -19,6 +19,7 @@ const snapshotsFolder = 'snapshots';
 const idPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const hashPattern = /^[0-9a-f]{64}$/;
 const maximumTurnCharacters = 1_000_000;
+const maximumVersions = 20;
 const maximumSnapshotCharacters = 50_000_000;
 const promptsFile = 'savedPrompts.json';
 const maximumPrompts = 200;
@@ -47,6 +48,14 @@ function cleanTurn(input = {}) {
         problems: Array.isArray(input.problems) ? input.problems.filter((item) => typeof item === 'string').slice(0, 50).map((item) => item.slice(0, 1000)) : [],
         model: { configuration: text(input.model?.configuration, 200), provider: text(input.model?.provider, 100), model: text(input.model?.model, 200) },
         project: input.project && typeof input.project === 'object' ? { title: text(input.project.title, 300), path: text(input.project.path, 2000) } : null,
+        // Every answer to this request when it was regenerated (the reply is the one chosen, `version`), each with what it used,
+        // the note it was asked with, and the model that gave it.
+        versions: Array.isArray(input.versions) && input.versions.length > 1 ? input.versions.slice(0, maximumVersions).filter((item) => item?.reply && typeof item.reply === 'object').map((item) => ({
+            reply: item.reply, usage: item.usage && typeof item.usage === 'object' ? usage(item.usage) : null, note: text(item.note, 1000),
+            model: { configuration: text(item.model?.configuration, 200), provider: text(item.model?.provider, 100), model: text(item.model?.model, 200) },
+            createdAt: Number(item.createdAt) || 0
+        })) : null,
+        version: Number.isInteger(input.version) && input.version >= 0 ? input.version : 0,
         // What the request used (src/assistantUsage.mjs), as its provider reported it.
         usage: input.usage && typeof input.usage === 'object' ? usage(input.usage) : null,
         // An earlier proposal this request drew on (Ask about this), by its summary.

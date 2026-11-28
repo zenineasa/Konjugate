@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createRemoteAIProviders } from '../src/aiRemoteProviders.mjs';
+import { alternativesPrompt, createRemoteAIProviders } from '../src/aiRemoteProviders.mjs';
 
 const schema = { type: 'object', required: ['proposalVersion', 'operations'], properties: {
     proposalVersion: { const: 1 }, operations: { type: 'array' }
@@ -41,7 +41,22 @@ test('Ollama adapter fixes sampling and widens the context', async () => {
     assert.equal('think' in body, false);
     await adapter.generateProposal(input('ollama', { configuration: { provider: 'ollama', endpoint: '', model: 'test-model', think: false } }));
     assert.equal(body.think, false);
-}); 
+    // Another answer to the same request: at temperature 0 the same answer would come back.
+    await adapter.generateProposal(input('ollama', { vary: true }));
+    assert.equal(body.options.temperature, 0.8);
+});
+
+test('Another answer is asked for with the proposals not taken and what should be different', () => {
+    const earlier = [{ summary: 'Ten cells', assumptions: ['steel'], operations: [{ kind: 'addNode', ref: 'a', name: 'A' }], extra: 'dropped' }];
+    const text = alternativesPrompt({ earlier, note: 'use five cells' });
+    assert.match(text, /^\n\nANOTHER ANSWER WANTED: .*An earlier proposal they did not take:\n/);
+    assert.ok(text.includes(JSON.stringify([{ summary: 'Ten cells', assumptions: ['steel'], operations: earlier[0].operations }])), 'The earlier proposal was not sent as it was.');
+    assert.match(text, /\nWhat should be different: use five cells\n/);
+    assert.match(text, /do not repeat an earlier proposal\.$/);
+    const blind = alternativesPrompt({ earlier: [...earlier, earlier[0]] });
+    assert.match(blind, /Earlier proposals they did not take/);
+    assert.doesNotMatch(blind, /What should be different/);
+});
 
 test('A quoted numeric entity id is read as the id, and a temporary ref is left alone', async () => {
     const quoted = { proposalVersion: 1, operations: [

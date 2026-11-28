@@ -38,6 +38,15 @@ export function conversationMarkdown(conversation, { exportedAt = Date.now(), fo
             const count = Array.isArray(reply.operations) ? reply.operations.length : 0;
             lines.push(`The proposal had ${count} ${count === 1 ? 'operation' : 'operations'}.`, '');
         }
+        if (turn.versions?.length > 1) {
+            const chosen = (turn.version ?? 0) + 1;
+            lines.push(`Regenerated: ${turn.versions.length} versions, version ${chosen} ${kind === 'applied' ? 'applied' : 'kept'}.`, '');
+            turn.versions.forEach((version, at) => {
+                const said = version.note ? ` (asked: “${inline(version.note)}”)` : '';
+                lines.push(`${at + 1}. ${inline(version.reply?.summary) || 'A proposal'}${said}${at + 1 === chosen ? ' ← this one' : ''}`);
+            });
+            lines.push('');
+        }
         if (turn.problems?.length) lines.push('Problems found:', '', ...turn.problems.map((item) => `- ${inline(item)}`), '');
         if (turn.before && turn.after) lines.push('The model was kept before and after this change.', '');
     });

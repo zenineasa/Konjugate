@@ -35,7 +35,7 @@ import { createAssistantHistory } from './assistantHistory.mjs';
 import { conversationMarkdown } from './assistantConversationMarkdown.mjs';
 import { createLocalModels } from './localModels.mjs';
 import { ollamaDownloadPage } from './suggestedLocalModels.mjs';
-import { createRemoteAIProviders } from './aiRemoteProviders.mjs';
+import { alternativesPrompt, createRemoteAIProviders } from './aiRemoteProviders.mjs';
 import { openIndexedResult } from './indexedResultReader.mjs';
 import { defaultPlaybackSampleLimit, rendererResultProjection, resultSignalSeries, checkpointIndex } from './resultSession.mjs';
 import { createProviderToolchainStore, providerExecutionModes } from './providerToolchainStore.mjs';
@@ -3695,7 +3695,18 @@ function requestWithReference(request, reference) {
     return `${request}\n\nREFERENCE PROPOSAL: an earlier proposal the person wants this request to draw on, possibly made for another model. Adapt it to the current model context: refer to the entities the model context has, by their own ids, and use temporary refs for anything new. Do not copy an id from it that the model context does not have.\n${body}`;
 }
 
-ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history, repair, reference }) => {
+// Regenerate: the proposals not taken and what should be different (src/aiRemoteProviders.mjs alternativesPrompt), bounded.
+function requestWithAlternatives(request, alternatives) {
+    if (alternatives === undefined || alternatives === null) return request;
+    const earlier = Array.isArray(alternatives.earlier) ? alternatives.earlier.filter((item) => item && typeof item === 'object').slice(-5) : [];
+    const note = typeof alternatives.note === 'string' ? alternatives.note.slice(0, 1000) : '';
+    if (!earlier.length) throw new Error('Another answer needs the earlier proposal.');
+    const text = alternativesPrompt({ earlier, note });
+    if (text.length > maximumReferenceCharacters) throw new Error('The earlier proposals are too large to send again. Edit the request instead.');
+    return `${request}${text}`;
+}
+
+ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationUuid, request, context, history, repair, reference, alternatives }) => {
     requireProjectWindow(event);
     if (typeof requestUuid !== 'string' || requestUuid.length > 100) throw new Error('A valid AI request identifier is required.');
     if (typeof request !== 'string' || !request.trim() || request.length > 8000) throw new Error('The AI request must contain between 1 and 8,000 characters.');
@@ -3734,7 +3745,8 @@ ipcMain.handle('aiGenerateProposal', async (event, { requestUuid, configurationU
     try {
         const proposal = await aiProviderRegistry.generate({
             onUsage: (value) => { used = value; },
-            ...resolved, context, request: requestWithReference(request.trim(), reference), history, initialRepair: repair ?? null, signal: controller.signal,
+            ...resolved, context, request: requestWithAlternatives(requestWithReference(request.trim(), reference), alternatives), history, initialRepair: repair ?? null, signal: controller.signal,
+            vary: Boolean(alternatives),
             onProgress: (progress) => {
                 watchdog.touch();
                 progressToPanel.push(progress);

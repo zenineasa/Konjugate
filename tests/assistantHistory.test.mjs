@@ -185,3 +185,21 @@ test('The same request is answered from the newest turn asked it, in any convers
     assert.deepEqual(reused.reusedFrom, { conversationId: first.id, turnId: turn.id, createdAt: turn.createdAt });
     assert.equal(reused.key, null);
 }));
+
+test('A regenerated turn keeps every version, with what each used and was asked with, and which one is chosen', () => withHistory(async (history) => {
+    const conversation = await history.create({ title: 'Cells' });
+    const first = { responseKind: 'proposal', summary: 'Ten cells', operations: [] };
+    const second = { responseKind: 'proposal', summary: 'Five cells', operations: [] };
+    const turn = await history.appendTurn(conversation.id, { request: 'Add cells', outcome: { kind: 'proposed', text: 'Proposed: Ten cells' }, reply: first });
+    assert.equal(turn.versions, null, 'A turn answered once has versions.');
+    const versions = [
+        { reply: first, usage: { inputTokens: 100, outputTokens: 10 }, note: '', model: { configuration: 'Local', provider: 'ollama', model: 'qwen' }, createdAt: 5 },
+        { reply: second, usage: { inputTokens: 120, outputTokens: 12 }, note: 'use five cells', model: { configuration: 'Claude', provider: 'claudeCode', model: 'default' }, createdAt: 6, secret: 'dropped' }
+    ];
+    await history.updateTurn(conversation.id, turn.id, { reply: second, versions, version: 1, outcome: { kind: 'applied', text: 'Applied: Five cells' } });
+    const kept = (await history.get(conversation.id)).turns[0];
+    assert.equal(kept.version, 1);
+    assert.deepEqual(kept.versions.map((version) => [version.reply.summary, version.note, version.model.provider, version.usage.inputTokens]), [['Ten cells', '', 'ollama', 100], ['Five cells', 'use five cells', 'claudeCode', 120]]);
+    assert.equal('secret' in kept.versions[1], false);
+    assert.equal(kept.reply.summary, 'Five cells');
+}));

@@ -196,6 +196,6 @@ test('the fake Ollama server reads the turns so far from the prompt, so a reply 
 
 test('reading the prompt finds the context, the request and the turns, and keeps a correction note out of the request', () => {
     const prompt = 'CONVERSATION SO FAR:\nUser: first\nAssistant: Asked: which?\n\nCreate a proposal.\n\nMODEL CONTEXT:\n{"nodes":[]}\n\nUSER REQUEST:\nsecond\n\nCORRECTION REQUIRED:\nbad';
-    assert.deepEqual(readPrompt(prompt), { context: { nodes: [] }, request: 'second', history: [{ request: 'first', outcome: 'Asked: which?' }], repairing: true });
+    assert.deepEqual(readPrompt(prompt), { context: { nodes: [] }, request: 'second', history: [{ request: 'first', outcome: 'Asked: which?' }], repairing: true, alternative: null });
     assert.equal(readPrompt(prompt.split('\n\nCORRECTION REQUIRED:')[0]).repairing, false);
 });

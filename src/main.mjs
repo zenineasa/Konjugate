@@ -3671,6 +3671,24 @@ ipcMain.handle('aiSignInWithTool', async (event, provider) => {
     requireProjectWindow(event);
     return runAIToolTask(event, provider, ({ signal, onOutput }) => aiProviderRegistry.signInWithTool({ provider, signal, onOutput }));
 });
+// Signing out, or switching account (signed out, then signed in again): Konjugate's own sign-in of the tool, never the terminal's.
+ipcMain.handle('aiSignOutOfTool', async (event, provider, { thenSignIn = false } = {}) => {
+    requireProjectWindow(event);
+    return runAIToolTask(event, provider, async ({ signal, onOutput }) => {
+        await aiProviderRegistry.signOutOfTool({ provider, signal });
+        if (thenSignIn) await aiProviderRegistry.signInWithTool({ provider, signal, onOutput });
+    });
+});
+// How much of the plan's limits is used, as the tool says (Claude Code's /usage, which asks the model nothing).
+ipcMain.handle('aiPlanUsage', async (event, provider) => {
+    requireProjectWindow(event);
+    try {
+        return await aiProviderRegistry.planUsage({ provider: String(provider ?? ''), signal: AbortSignal.timeout(30_000) });
+    } catch (error) {
+        logAIIssue(`reading ${provider}'s plan usage`, error);
+        return null;
+    }
+});
 ipcMain.handle('aiCancelToolTask', async (event) => {
     requireProjectWindow(event);
     if (!activeAIToolTask || activeAIToolTask.owner !== event.sender) return false;
@@ -4466,7 +4484,7 @@ app.whenReady().then(async () => {
         return;
     }
     const operationSchema = JSON.parse(await readFile(join(currentDir, '..', 'schemas', 'assistantOperations.schema.json'), 'utf8'));
-    aiProviderRegistry = createAIProviderRegistry([...createRemoteAIProviders({ operationSchema }), ...createVendorToolProviders({ operationSchema })]);
+    aiProviderRegistry = createAIProviderRegistry([...createRemoteAIProviders({ operationSchema }), ...createVendorToolProviders({ operationSchema, claudeConfigDirectory: join(app.getPath('userData'), 'claudeCode') })]);
     // Every assistant conversation, kept for the person (docs/proposals/assistantHistory.md).
     assistantHistory = createAssistantHistory({ directory: join(app.getPath('userData'), 'assistantHistory') });
     aiConfigurationStore = createAIConfigurationStore({

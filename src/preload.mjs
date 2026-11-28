@@ -408,6 +408,10 @@ contextBridge.exposeInMainWorld('aiProviders', {
     installTool: (provider) => invokePlainly('aiInstallTool', provider),
     signInWithTool: (provider) => invokePlainly('aiSignInWithTool', provider),
     cancelToolTask: () => invokePlainly('aiCancelToolTask'),
+    // Signing Konjugate's own sign-in of a tool out; `{ thenSignIn: true }` signs in again at once, to switch account.
+    signOutOfTool: (provider, options = {}) => invokePlainly('aiSignOutOfTool', provider, { thenSignIn: Boolean(options?.thenSignIn) }),
+    // How much of a subscription's limits is used: { windows: [{ label, percent, resets }], summary } or null.
+    planUsage: (provider) => invokePlainly('aiPlanUsage', provider),
     // What an install or a sign-in is printing: { provider, line }.
     onToolProgress: (callback) => ipcRenderer.on('aiToolProgress', (_event, progress) => callback(progress)),
     // `repair` ({ error, proposal }), when given, asks the model to fix a proposal the engine rejected.

@@ -5,7 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { createVendorToolProviders, createVendorToolRunner } from '../src/aiVendorTools.mjs';
+import { createVendorToolProviders, createVendorToolRunner, parsePlanUsage } from '../src/aiVendorTools.mjs';
 
 const schema = { oneOf: [{ type: 'object', additionalProperties: false, properties: { proposalVersion: { const: 1 } } }] };
 const proposal = { responseKind: 'proposal', proposalVersion: 1, operations: [{ kind: 'addNode', ref: 'newNode', name: 'New node' }] };
@@ -17,16 +17,25 @@ const fakeClaude = `
 const fs = require('fs');
 const args = process.argv.slice(2);
 const stdin = fs.readFileSync(0, 'utf8');
-fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ args, stdin, cwd: process.cwd() }));
+fs.writeFileSync(process.env.FAKE_LOG, JSON.stringify({ args, stdin, cwd: process.cwd(), configDirectory: process.env.CLAUDE_CONFIG_DIR ?? null }));
 const mode = process.env.FAKE_MODE;
 const say = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+// With CLAUDE_CONFIG_DIR, a sign-in of its own, kept in that folder; without, the terminal's (signed in unless FAKE_MODE says not).
+const own = process.env.CLAUDE_CONFIG_DIR ? require('path').join(process.env.CLAUDE_CONFIG_DIR, 'signedIn') : null;
+if (args[0] === 'auth' && args[1] === 'login') { if (own) fs.writeFileSync(own, 'x'); process.exit(0); }
+if (args[0] === 'auth' && args[1] === 'logout') { if (own) fs.rmSync(own, { force: true }); process.exit(0); }
+if (args[0] === '-p' && args[1] === '/usage') {
+    say({ type: 'result', subtype: 'success', is_error: false, num_turns: 0, total_cost_usd: 0, local_command: 'usage',
+        result: 'You are currently using your subscription to power your Claude Code usage\\n\\nCurrent session: 16% used · resets Nov 28 at 11:50pm (Asia/Calcutta)\\nCurrent week (all models): 59% used · resets Dec 2 at 3:30am (Asia/Calcutta)\\n\\nLast 24h · 12 requests' });
+    process.exit(0);
+}
 if (args[0] === 'auth') {
-    if (mode === 'signedOut') { say({ loggedIn: false, authMethod: 'none' }); process.exit(1); }
+    if (mode === 'signedOut' || (own && !fs.existsSync(own))) { say({ loggedIn: false, authMethod: 'none' }); process.exit(1); }
     say({ loggedIn: true, authMethod: 'claude.ai', email: 'person@example.com', subscriptionType: 'pro', planTier: 'pro' });
     process.exit(0);
 }
 say({ type: 'system', subtype: 'init', tools: ['StructuredOutput'], model: 'claude-opus-5-5' });
-if (mode === 'signedOut') {
+if (mode === 'signedOut' || (own && !fs.existsSync(own))) {
     say({ type: 'assistant', message: { content: [{ type: 'text', text: 'Not logged in · Please run /login' }] }, error: 'authentication_failed' });
     say({ type: 'result', subtype: 'success', is_error: true, result: 'Not logged in · Please run /login' });
     process.exit(1);
@@ -73,8 +82,8 @@ async function withFakes(task) {
     }
 }
 
-const providersFor = (env, home) => createVendorToolProviders({
-    operationSchema: schema,
+const providersFor = (env, home, claudeConfigDirectory = null) => createVendorToolProviders({
+    operationSchema: schema, claudeConfigDirectory,
     runner: createVendorToolRunner({ env, home, platform: 'linux' })
 });
 
@@ -197,4 +206,47 @@ test('Signing in with a tool runs the tool\'s own sign-in and passes on what it 
     const notInstalled = recordingRunner({ found: null });
     const [, missing] = createVendorToolProviders({ runner: notInstalled, operationSchema: schema });
     await assert.rejects(missing.signInWithTool({}), { code: 'toolNotInstalled' });
+});
+
+test('Konjugate\'s Claude Code is signed in on its own, in its own folder, apart from the terminal\'s, and signs out and in again there', unixOnly, () => withFakes(async ({ env, root, logged }) => {
+    const folder = join(root, 'konjugate', 'claudeCode');
+    const [claude] = providersFor(env(), root, folder);
+    assert.equal(claude.ownSignIn, true);
+    // The terminal's Claude Code is signed in; Konjugate's is not yet, and says who the terminal's is.
+    assert.deepEqual(await claude.detect(), { installed: true, signedIn: false, account: '', plan: '', elsewhere: 'person@example.com' });
+    await assert.rejects(claude.generateProposal(input()), (error) => error.code === 'toolNotSignedIn' && /Settings › Model assistant/.test(error.message));
+    await claude.signInWithTool({});
+    assert.equal((await logged()).configDirectory, folder, 'The sign-in was not Konjugate\'s own.');
+    assert.deepEqual(await claude.detect(), { installed: true, signedIn: true, account: 'person@example.com', plan: 'pro' });
+    await claude.generateProposal(input());
+    assert.equal((await logged()).configDirectory, folder, 'A request did not run as Konjugate\'s Claude Code.');
+    await claude.signOutOfTool();
+    assert.equal((await logged()).configDirectory, folder);
+    assert.equal((await claude.detect()).signedIn, false);
+    // Without a folder of its own, it is the terminal's Claude Code, as before.
+    const [terminal] = providersFor(env(), root);
+    await terminal.generateProposal(input());
+    assert.equal((await logged()).configDirectory, null);
+}));
+
+test('The plan\'s session and weekly limits come from Claude Code\'s own /usage, which asks the model nothing', unixOnly, () => withFakes(async ({ env, root, logged }) => {
+    const folder = join(root, 'claudeCode');
+    const [claude] = providersFor(env(), root, folder);
+    assert.deepEqual(await claude.planUsage(), { windows: [
+        { kind: 'session', label: 'Session (5 h)', percent: 16, resets: 'Nov 28 at 11:50pm (Asia/Calcutta)' },
+        { kind: 'week', label: 'Week', percent: 59, resets: 'Dec 2 at 3:30am (Asia/Calcutta)' }
+    ] });
+    const { args, configDirectory, cwd } = await logged();
+    assert.deepEqual(args, ['-p', '/usage', '--output-format', 'json']);
+    assert.equal(configDirectory, folder);
+    assert.match(cwd, /konjugate-assistant-/);
+}));
+
+test('Reading the plan\'s limits keeps each limit it recognises, with a model-specific week named, and nothing else', () => {
+    assert.deepEqual(parsePlanUsage('Current session: 100% used\nCurrent week (Sonnet only): 7.5% used · resets Dec 2 at 3:30am\nSomething else: 3% used'), { windows: [
+        { kind: 'session', label: 'Session (5 h)', percent: 100, resets: '' },
+        { kind: 'week', label: 'Week, Sonnet only', percent: 7.5, resets: 'Dec 2 at 3:30am' }
+    ] });
+    assert.equal(parsePlanUsage('You are using an API key.'), null);
+    assert.equal(parsePlanUsage(undefined), null);
 });

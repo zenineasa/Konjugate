@@ -5,12 +5,16 @@
 // in by the vendor's own flow, and never sees a token: it finds the tool, asks it who is signed in, and runs it in print mode
 // with no tools, in an empty folder, with the person's own customisations left out, so all it can produce is the proposal.
 //
+// Claude Code is signed in for Konjugate on its own: it runs with CLAUDE_CONFIG_DIR set to a folder of Konjugate's (in its user
+// data), so signing in, switching account or signing out from Konjugate's settings never touches the Claude Code a person uses
+// in a terminal, and the person's own settings, CLAUDE.md and history there stay out of it.
+//
 // This is how a desktop app such as Orchestrator offers a person's Claude subscription: the unmodified Claude Code, signed in
 // by Claude Code's own login, which Anthropic's terms allow a platform to host. Where those terms are unclear (an app using
 // Claude Code as the model behind one of its features), the maintainer chose to offer it (docs/proposals/assistantSignIn.md).
 
 import { spawn as spawnProcess } from 'node:child_process';
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
@@ -117,10 +121,27 @@ async function runInstaller({ runner, installer, signal, onOutput }) {
 
 // Signing in with the tool's own sign-in command, which opens the vendor's page in the browser; what it prints (a link or a
 // code to enter) is passed on through `onOutput`, so the page can show it. Five minutes at most.
-async function runToolSignIn({ runner, path, args, signal, onOutput }) {
-    const { code, stderr } = await runner.run(path, args, { signal, onLine: onOutput, onErrorLine: onOutput, timeoutMilliseconds: 5 * 60_000 });
+async function runToolSignIn({ runner, path, args, signal, onOutput, extraEnv = {} }) {
+    const { code, stderr } = await runner.run(path, args, { signal, onLine: onOutput, onErrorLine: onOutput, extraEnv, timeoutMilliseconds: 5 * 60_000 });
     if (code !== 0) throw new AssistantProviderError(`Signing in did not finish${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}. You can also sign in from a terminal.`, 'toolSignInFailed');
     return true;
+}
+
+// Claude Code's /usage, as it says it ("Current session: 16% used · resets Nov 28 at 11:50pm (Asia/Calcutta)", one line for
+// the session and one for each weekly limit): each limit with how much is used and when it resets, in Claude Code's own words.
+// A line it does not recognise is left out; null when there is none, so a change in the wording hides the meter, not the panel.
+export function parsePlanUsage(text) {
+    const windows = [];
+    for (const line of String(text ?? '').split('\n')) {
+        const match = /^\s*(Current session|Current week(?: \(([^)]+)\))?)\s*:\s*(\d+(?:\.\d+)?)% used(?:\s*·\s*resets (.+?))?\s*$/i.exec(line);
+        if (!match) continue;
+        const session = /session/i.test(match[1]);
+        windows.push({
+            kind: session ? 'session' : 'week', label: session ? 'Session (5 h)' : match[2] && !/^all models$/i.test(match[2]) ? `Week, ${match[2]}` : 'Week',
+            percent: Math.min(100, Number(match[3])), resets: (match[4] ?? '').trim()
+        });
+    }
+    return windows.length ? { windows } : null;
 }
 
 const lastLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).at(-1)?.slice(0, 300) ?? '';
@@ -158,10 +179,26 @@ export function claudeCodeSchema(operationSchema) {
     };
 }
 
-function claudeCodeProvider({ runner }) {
+// `configDirectory`: Konjugate's own Claude Code sign-in (CLAUDE_CONFIG_DIR); without one, the Claude Code of the terminal.
+function claudeCodeProvider({ runner, configDirectory = null }) {
     const notInstalled = () => new AssistantProviderError('Claude Code is not installed on this computer.', 'toolNotInstalled');
-    const notSignedIn = () => new AssistantProviderError('Claude Code is not signed in. Open a terminal, run “claude auth login”, then try again.', 'toolNotSignedIn');
+    const notSignedIn = () => new AssistantProviderError(configDirectory
+        ? 'Claude is not signed in for Konjugate. Sign in in Settings › Model assistant, then try again.'
+        : 'Claude Code is not signed in. Open a terminal, run “claude auth login”, then try again.', 'toolNotSignedIn');
     const executable = async () => (await runner.find('claude')) ?? Promise.reject(notInstalled());
+    // The environment every run of Konjugate's Claude Code gets, its folder made first (private to the person).
+    const ownEnv = async () => {
+        if (!configDirectory) return {};
+        await mkdir(configDirectory, { recursive: true, mode: 0o700 });
+        return { CLAUDE_CONFIG_DIR: configDirectory };
+    };
+    // Who is signed in, from Claude Code itself (`claude auth status`, JSON, exit 1 when signed out). Reads no file.
+    const status = async (path, extraEnv) => {
+        const { code, stdout } = await runner.run(path, ['auth', 'status'], { timeoutMilliseconds: 15_000, extraEnv });
+        const said = JSON.parse(stdout);
+        const signedIn = code === 0 && said.loggedIn === true && said.authMethod !== 'none';
+        return { signedIn, account: signedIn ? String(said.email ?? '') : '', plan: signedIn ? String(said.subscriptionType ?? said.planTier ?? '') : '' };
+    };
     return {
         id: 'claudeCode', name: 'Claude (through Claude Code)', defaultEndpoint: '', defaultTimeoutSeconds: 180,
         credentialRequired: false, locality: 'online', vendorTool: 'claude',
@@ -169,16 +206,37 @@ function claudeCodeProvider({ runner }) {
         installer: claudeInstaller,
         installNotice: 'Konjugate will run Anthropic\'s installer for Claude Code. It installs into your own folders (~/.local), without administrator rights, and keeps itself up to date. Claude Code is Anthropic\'s software, under Anthropic\'s terms.',
         async install({ signal, onOutput }) { return runInstaller({ runner, installer: claudeInstaller, signal, onOutput }); },
-        async signInWithTool({ signal, onOutput }) { return runToolSignIn({ runner, path: await executable(), args: ['auth', 'login'], signal, onOutput }); },
-        // Who is signed in, from Claude Code itself (`claude auth status`, JSON, exit 1 when signed out). Reads no file.
+        ownSignIn: Boolean(configDirectory),
+        async signInWithTool({ signal, onOutput }) { return runToolSignIn({ runner, path: await executable(), args: ['auth', 'login'], signal, onOutput, extraEnv: await ownEnv() }); },
+        // Signs Konjugate's Claude Code out (only Konjugate's, with its own folder); to switch account, sign in again after.
+        async signOutOfTool({ signal } = {}) {
+            const { code, stderr } = await runner.run(await executable(), ['auth', 'logout'], { signal, extraEnv: await ownEnv(), timeoutMilliseconds: 30_000 });
+            if (code !== 0) throw new AssistantProviderError(`Signing out did not finish${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}.`, 'toolSignOutFailed');
+            return true;
+        },
+        // How much of the plan's limits is used, from Claude Code's own /usage: a local command that asks the model nothing and
+        // costs nothing, so Konjugate never needs the sign-in's token to show it.
+        async planUsage({ signal } = {}) {
+            const path = await executable();
+            const extraEnv = await ownEnv();
+            const { code, stdout } = await inEmptyFolder((cwd) => runner.run(path, ['-p', '/usage', '--output-format', 'json'], { cwd, signal, extraEnv, timeoutMilliseconds: 30_000 }));
+            if (code !== 0) return null;
+            let said;
+            try { said = JSON.parse(stdout); } catch { return null; }
+            return parsePlanUsage(typeof said?.result === 'string' ? said.result : '');
+        },
+        // Who is signed in for Konjugate; and, when no one is, who is signed in to the terminal's Claude Code (`elsewhere`), so
+        // the person knows signing in here is a step of its own.
         async detect() {
             const path = await runner.find('claude');
             if (!path) return { installed: false };
             try {
-                const { code, stdout } = await runner.run(path, ['auth', 'status'], { timeoutMilliseconds: 15_000 });
-                const status = JSON.parse(stdout);
-                const signedIn = code === 0 && status.loggedIn === true && status.authMethod !== 'none';
-                return { installed: true, signedIn, account: signedIn ? String(status.email ?? '') : '', plan: signedIn ? String(status.subscriptionType ?? status.planTier ?? '') : '' };
+                const own = await status(path, await ownEnv());
+                if (configDirectory && !own.signedIn) {
+                    const terminal = await status(path, {}).catch(() => null);
+                    if (terminal?.signedIn) return { installed: true, ...own, elsewhere: terminal.account || 'an account' };
+                }
+                return { installed: true, ...own };
             } catch {
                 return { installed: true, signedIn: null };
             }
@@ -237,8 +295,9 @@ function claudeCodeProvider({ runner }) {
                     if (used) onEvent?.({ type: 'usage', usage: used });
                 } else onEvent?.({ type: 'activity' });
             };
+            const extraEnv = await ownEnv();
             const { code, stderr } = await inEmptyFolder((cwd) => runner.run(path, args, {
-                cwd, signal, onLine, stdin: historyText(history) + requestPrompt(context, request, repair), timeoutMilliseconds: 20 * 60_000
+                cwd, signal, onLine, extraEnv, stdin: historyText(history) + requestPrompt(context, request, repair), timeoutMilliseconds: 20 * 60_000
             }));
             if (failure === 'authentication_failed') throw notSignedIn();
             if (!result) throw new AssistantProviderError(`Claude Code stopped without an answer${lastLine(stderr) ? `: ${lastLine(stderr)}` : ` (exit code ${code})`}.`, 'providerHttpError');
@@ -330,10 +389,11 @@ function copilotProvider({ runner }) {
 }
 
 // The vendor-tool providers: the person's own Claude Code and GitHub Copilot CLI.
-export function createVendorToolProviders({ runner = createVendorToolRunner(), operationSchema } = {}) {
+// `claudeConfigDirectory`: the folder that holds Konjugate's own Claude Code sign-in.
+export function createVendorToolProviders({ runner = createVendorToolRunner(), operationSchema, claudeConfigDirectory = null } = {}) {
     if (!operationSchema) throw new Error('Vendor tool providers require an operation schema.');
     return [
-        claudeCodeProvider({ runner }),
+        claudeCodeProvider({ runner, configDirectory: claudeConfigDirectory }),
         copilotProvider({ runner })
     ].map((provider) => Object.freeze({ ...provider, generateProposal: (input) => provider.generateProposal({ ...input, operationSchema }) }));
 }

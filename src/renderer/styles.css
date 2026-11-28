@@ -2974,3 +2974,23 @@ img.extensionsThumb.loaded, .extensionsDetailImage.loaded { opacity: 1; }
 .assistantTurnMoreMenu button { justify-content: flex-start; width: 100%; text-align: left; background: transparent; border-color: transparent; }
 .assistantTurnMoreMenu button:hover { background: #162a34; }
 .assistantVersions[hidden], .assistantRegenerate[hidden] { display: none; }
+
+/* A subscription's limits (Claude's session and week), as meters: in Settings beside the tool, and compact in the assistant panel. */
+.planUsage { display: grid; gap: 4px; margin-top: 7px; }
+.planUsageWindow { display: grid; grid-template-columns: 96px minmax(60px, 1fr) auto; gap: 8px; align-items: center; font-size: var(--assistant-caption, 11px); color: #8aa0aa; }
+.planUsageLabel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.planUsageBar { position: relative; height: 5px; overflow: hidden; background: #1a2c35; border-radius: 3px; }
+.planUsageBar > span { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
+.planUsageWindow.raised .planUsageBar > span { background: #d9a441; }
+.planUsageWindow.high .planUsageBar > span { background: #e06c5f; }
+.planUsageValue { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.planUsage.compact { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 0; }
+.planUsage.compact .planUsageWindow { grid-template-columns: auto 54px auto; gap: 6px; }
+.assistantPlanUsage { display: flex; align-items: center; gap: 10px; margin-top: 8px; color: #6f8792; font-size: var(--assistant-caption); }
+.assistantPlanUsage[hidden] { display: none; }
+.assistantPlanUsageTitle { flex: none; color: #8aa0aa; font-weight: 600; }
+.passwordDialog.settingsSheet .assistantToolRow .planUsage { gap: 3px; margin-top: 5px; max-width: 360px; }
+.passwordDialog.settingsSheet .assistantToolRow .planUsageWindow { grid-template-columns: 58px 90px auto; gap: 7px; color: #7d929c; font-size: 7.5px; }
+.passwordDialog.settingsSheet .assistantToolRow .planUsageBar { height: 4px; }
+.passwordDialog.settingsSheet .assistantToolRow .settingsItemText { min-width: 0; }
+.passwordDialog.settingsSheet [data-settings-page="assistant"] .settingsBadge { flex: none; white-space: nowrap; }

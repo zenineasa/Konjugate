@@ -9,14 +9,20 @@
 // `activeUuid()` the configuration in use, and `use(uuid)` puts a configuration in use. Hidden when there is no tool at all
 // (the web edition).
 
+import { planUsageMeters } from './assistantPlanUsage.mjs';
+
 const shownLines = 4;
+// How long a tool's plan usage is shown before it is asked again (each ask runs the tool once; it costs nothing).
+const planUsageSeconds = 60;
 
 export function createAssistantToolsSection({ root, api, providers = () => [], configurations = () => [], activeUuid = () => null, use }) {
     const find = (selector) => root.querySelector(selector);
     let tools = [];
     let checking = null;
     let message = { text: '', tone: 'neutral' };
-    let task = null; // { provider, kind: 'install' | 'signIn', lines: [] }
+    let task = null; // { provider, kind: 'install' | 'signIn' | 'switch' | 'signOut', lines: [] }
+    // Each signed-in tool's plan usage, as last read: provider → { value, at }.
+    const planUsage = new Map();
 
     api.onToolProgress?.((progress) => {
         if (!task || progress.provider !== task.provider) return;
@@ -43,6 +49,7 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
     const describe = (tool) => {
         if (!tool.installed) return tool.description || 'Not installed';
         if (tool.signedIn === true) return `Signed in${tool.account ? ` as ${tool.account}` : ''}${tool.plan ? ` · ${tool.plan} plan` : ''}`;
+        if (tool.signedIn === false && tool.elsewhere) return `Not signed in for Konjugate. Your terminal's Claude Code is signed in as ${tool.elsewhere}; Konjugate keeps a sign-in of its own.`;
         if (tool.signedIn === false) return 'Installed, not signed in';
         return 'Installed on this computer';
     };
@@ -70,13 +77,19 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
         message = { text: '', tone: 'neutral' };
         render();
         try {
-            const result = kind === 'install' ? await api.installTool(tool.provider) : await api.signInWithTool(tool.provider);
+            const result = kind === 'install' ? await api.installTool(tool.provider)
+                : kind === 'signIn' ? await api.signInWithTool(tool.provider)
+                    : await api.signOutOfTool(tool.provider, { thenSignIn: kind === 'switch' });
+            planUsage.delete(tool.provider);
             if (result?.ok) {
                 tools = result.tools ?? tools;
                 const now = tools.find((item) => item.provider === tool.provider);
+                const signedInAs = now?.account ? ` as ${now.account}` : '';
                 message = kind === 'install'
                     ? { text: now?.installed ? `${tool.name} is installed.${now.signedIn === true ? '' : ' Sign in to use it.'}` : `The installer finished, but Konjugate cannot find ${tool.name} yet.`, tone: now?.installed ? 'success' : 'warning' }
-                    : { text: `Signed in to ${tool.name}.`, tone: 'success' };
+                    : kind === 'signOut'
+                        ? { text: `Signed out of ${tool.name} in Konjugate.${tool.ownSignIn ? ' Claude Code in your terminal is not affected.' : ''}`, tone: 'success' }
+                        : { text: `Signed in to ${tool.name}${signedInAs}.`, tone: 'success' };
             } else if (!['installCancelled', 'taskCancelled'].includes(result?.error?.code)) {
                 message = { text: result?.error?.message || 'That did not finish.', tone: 'error' };
             }
@@ -96,7 +109,7 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
         text.append(element('span', 'settingsItemLabel', tool.name), element('small', 'settingsItemHint', describe(tool)));
         const control = element('div', 'settingsItemControl');
         if (task?.provider === tool.provider) {
-            text.append(element('small', 'assistantToolProgress', task.lines.join('\n') || (task.kind === 'install' ? 'Installing…' : 'Waiting for your browser…')));
+            text.append(element('small', 'assistantToolProgress', task.lines.join('\n') || (task.kind === 'install' ? 'Installing…' : task.kind === 'signOut' ? 'Signing out…' : 'Waiting for your browser…')));
             const stop = element('button', 'settingsButton', 'Stop');
             stop.type = 'button';
             stop.dataset.toolStop = tool.provider;
@@ -120,7 +133,18 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
                 const signIn = button('Sign in', { toolSignIn: tool.provider }, { primary: tool.signedIn === false });
                 signIn.addEventListener('click', () => runTask(tool, 'signIn'));
                 control.append(signIn);
+            } else if (tool.signOutable) {
+                // Konjugate's own sign-in of the tool: another account, or none.
+                const change = button('Switch account…', { toolSwitch: tool.provider });
+                change.title = 'Sign out, then sign in with another account in your browser';
+                change.addEventListener('click', () => runTask(tool, 'switch'));
+                const out = button('Sign out', { toolSignOut: tool.provider });
+                out.title = tool.ownSignIn ? 'Sign Konjugate out of this account (your terminal stays signed in)' : 'Sign out of this account';
+                out.addEventListener('click', () => runTask(tool, 'signOut'));
+                control.append(change, out);
             }
+            const used = tool.signedIn === true && planUsage.get(tool.provider)?.value;
+            if (used) text.append(planUsageMeters(used));
         }
         item.append(text, control);
         return item;
@@ -154,12 +178,27 @@ export function createAssistantToolsSection({ root, api, providers = () => [], c
             .finally(() => {
                 checking = null;
                 render();
+                readPlanUsage();
                 if (askAgain) {
                     askAgain = false;
                     check();
                 }
             });
         return checking;
+    }
+
+    // Each signed-in tool's plan usage, read again once the last reading is older than planUsageSeconds.
+    function readPlanUsage() {
+        for (const tool of tools) {
+            if (!tool.planUsage || tool.signedIn !== true) continue;
+            const last = planUsage.get(tool.provider);
+            if (last && (last.pending || Date.now() - last.at < planUsageSeconds * 1000)) continue;
+            planUsage.set(tool.provider, { ...last, pending: true });
+            api.planUsage?.(tool.provider)
+                .then((value) => { planUsage.set(tool.provider, { value, at: Date.now() }); })
+                .catch(() => { planUsage.set(tool.provider, { value: null, at: Date.now() }); })
+                .finally(render);
+        }
     }
 
     return Object.freeze({ check, render });

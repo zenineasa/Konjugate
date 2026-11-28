@@ -402,6 +402,7 @@ export async function runInteractionTests(driver) {
             'with no model set up the assistant offers Settings, which finds Ollama, downloads the suggested model and uses it',
             'signing in to OpenRouter opens its page in the browser, waits for it to come back, and can be cancelled; a key\'s provider says where keys are made',
             'a model tool found on this computer is offered first and used in one click',
+            "Claude has a sign-in of its own in Konjugate, with Switch account and Sign out, and its plan's session and weekly limits shown in Settings and the panel",
             'local assistant prepares, validates and applies one undoable transaction',
             'local assistant can disable and enable a node and a relationship',
             'local assistant asks a clarifying question for an ambiguous request and resolves it from a suggestion',
@@ -1128,6 +1129,74 @@ export async function runInteractionTests(driver) {
         await waitFor(window, `!document.querySelector('#settingsDialog').open`, 'Settings did not close.');
         await evaluate(window, `document.querySelector('#closeAssistantPanel').click()`);
     }, { skip: (!driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet') || (process.platform === 'win32' && 'The fake tool is a script') });
+
+    await run("Claude has a sign-in of its own in Konjugate, with Switch account and Sign out, and its plan's session and weekly limits shown in Settings and the panel", async () => {
+        // What the tool says, stood in for in the main process (this runs there), and put back afterwards.
+        const { ipcMain } = await import('electron');
+        const handlers = ipcMain._invokeHandlers;
+        assert.ok(handlers instanceof Map, 'Electron keeps its invoke handlers elsewhere now; this scenario needs another way in.');
+        const saved = new Map(['aiDetectTools', 'aiPlanUsage', 'aiSignOutOfTool'].map((channel) => [channel, handlers.get(channel)]));
+        const claude = { provider: 'claudeCode', name: 'Claude (through Claude Code)', description: '', installable: true, installed: true, ownSignIn: true, signOutable: true, planUsage: true, signedIn: false, account: '', plan: '', elsewhere: 'person@example.com' };
+        const signOuts = [];
+        for (const channel of saved.keys()) ipcMain.removeHandler(channel);
+        ipcMain.handle('aiDetectTools', async () => [claude]);
+        ipcMain.handle('aiPlanUsage', async () => ({ windows: [
+            { kind: 'session', label: 'Session (5 h)', percent: 16, resets: 'Nov 28 at 11:50pm' },
+            { kind: 'week', label: 'Week', percent: 81, resets: 'Dec 2 at 3:30am' }
+        ] }));
+        ipcMain.handle('aiSignOutOfTool', async (_event, provider, options) => {
+            signOuts.push({ provider, ...options });
+            Object.assign(claude, options?.thenSignIn ? { account: 'other@example.com' } : { signedIn: false, account: '', plan: '', elsewhere: undefined });
+            return { ok: true, tools: [claude] };
+        });
+        const before = await evaluate(window, `window.aiProviders.listConfigurations()`);
+        const openSettings = async () => {
+            await evaluate(window, `(() => { if (document.querySelector('#assistantPanel').hidden) document.querySelector('#assistantButton').click(); document.querySelector('#manageAssistantConfigurations').click(); })()`);
+            await waitFor(window, `Boolean(document.querySelector('[data-tool-row="claudeCode"]'))`, 'Settings did not offer Claude.');
+        };
+        try {
+            // Signed in only in the terminal: Konjugate says so, and offers its own sign-in.
+            await openSettings();
+            await waitFor(window, `/Your terminal's Claude Code is signed in as person@example\\.com; Konjugate keeps a sign-in of its own/.test(document.querySelector('[data-tool-row="claudeCode"]').textContent)`, 'Claude did not say its sign-in in Konjugate is its own.');
+            assert.ok(await evaluate(window, `Boolean(document.querySelector('[data-tool-sign-in="claudeCode"]'))`), 'Claude offered no Sign in.');
+            await evaluate(window, `document.querySelector('#settingsClose').click()`);
+
+            // Signed in: Switch account and Sign out, and the plan's limits as meters.
+            Object.assign(claude, { signedIn: true, account: 'person@example.com', plan: 'pro', elsewhere: undefined });
+            await openSettings();
+            await waitFor(window, `Boolean(document.querySelector('[data-tool-row="claudeCode"] .planUsage'))`, 'Settings showed no plan limits.');
+            assert.deepEqual(await evaluate(window, `[...document.querySelectorAll('[data-tool-row="claudeCode"] .planUsageWindow')].map((item) => [item.dataset.planWindow, item.querySelector('[role="meter"]').getAttribute('aria-valuenow'), item.querySelector('.planUsageValue').textContent])`),
+                [['session', '16', '16% · resets Nov 28 at 11:50pm'], ['week', '81', '81% · resets Dec 2 at 3:30am']]);
+            assert.match(await evaluate(window, `document.querySelector('[data-plan-window="week"]').className`), /raised/, 'A limit over three quarters used was not marked.');
+            await evaluate(window, `document.querySelector('[data-tool-switch="claudeCode"]').click()`);
+            await waitFor(window, `/Signed in to Claude \\(through Claude Code\\) as other@example\\.com/.test(document.querySelector('#assistantToolStatus').textContent)`, 'Switch account did not say who is signed in now.');
+            await evaluate(window, `document.querySelector('[data-tool-sign-out="claudeCode"]').click()`);
+            await waitFor(window, `/Claude Code in your terminal is not affected/.test(document.querySelector('#assistantToolStatus').textContent)`, 'Sign out did not say the terminal is not affected.');
+            assert.deepEqual(signOuts, [{ provider: 'claudeCode', thenSignIn: true }, { provider: 'claudeCode', thenSignIn: false }]);
+            await evaluate(window, `document.querySelector('#settingsClose').click()`);
+
+            // In the panel, while Claude answers: the limits in one line under the prompt.
+            Object.assign(claude, { signedIn: true, account: 'person@example.com' });
+            const made = await evaluate(window, `window.aiProviders.saveConfiguration({ name: 'Claude (through Claude Code)', provider: 'claudeCode', model: 'default', timeoutSeconds: 180 })`);
+            await evaluate(window, `window.aiProviders.setActiveConfiguration(${JSON.stringify(made.uuid)})`);
+            await evaluate(window, `(() => { document.querySelector('#closeAssistantPanel').click(); document.querySelector('#assistantButton').click(); })()`);
+            await waitFor(window, `[...document.querySelector('#assistantConfiguration').options].some((option) => option.value === ${JSON.stringify(made.uuid)})`, 'The panel did not list Claude.');
+            await evaluate(window, `(() => { const select = document.querySelector('#assistantConfiguration'); select.value = ${JSON.stringify(made.uuid)}; select.dispatchEvent(new Event('change')); })()`);
+            await waitFor(window, `!document.querySelector('#assistantPlanUsage').hidden && document.querySelectorAll('#assistantPlanUsage .planUsageWindow').length === 2`, 'The panel showed no plan limits while Claude answers.');
+        } finally {
+            for (const [channel, handler] of saved) { ipcMain.removeHandler(channel); handlers.set(channel, handler); }
+            const after = await evaluate(window, `window.aiProviders.listConfigurations()`);
+            for (const configuration of after.configurations) {
+                if (!before.configurations.some((item) => item.uuid === configuration.uuid)) await evaluate(window, `window.aiProviders.removeConfiguration(${JSON.stringify(configuration.uuid)})`);
+            }
+            if (before.activeConfigurationUuid) {
+                await evaluate(window, `window.aiProviders.setActiveConfiguration(${JSON.stringify(before.activeConfigurationUuid)})`);
+                // And the panel's own choice back, as the person had it.
+                await evaluate(window, `(async () => { const select = document.querySelector('#assistantConfiguration'); select.value = ${JSON.stringify(before.activeConfigurationUuid)}; select.dispatchEvent(new Event('change')); })()`);
+            }
+            await evaluate(window, `(() => { if (document.querySelector('#settingsDialog').open) document.querySelector('#settingsClose').click(); document.querySelector('#closeAssistantPanel').click(); })()`);
+        }
+    }, { skip: !driver.capabilities.aiAssistant && 'AI-assisted authoring has no web-edition equivalent yet' });
 
     await run('local assistant prepares, validates and applies one undoable transaction', async () => {
         await freshExample(); // the assistant's model is kept from the scenario before; the battery it edits is the example's

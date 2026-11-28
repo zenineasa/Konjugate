@@ -50,6 +50,7 @@ export function createAIProviderRegistry(providers = []) {
             return Promise.all(tools.map(async (provider) => ({
                 provider: provider.id, name: provider.name, account: '', plan: '', signedIn: null,
                 description: provider.toolDescription ?? '', installable: typeof provider.install === 'function',
+                ownSignIn: provider.ownSignIn === true, signOutable: typeof provider.signOutOfTool === 'function', planUsage: typeof provider.planUsage === 'function',
                 ...(await provider.detect().catch(() => ({ installed: false })))
             })));
         },
@@ -70,6 +71,18 @@ export function createAIProviderRegistry(providers = []) {
             const provider = registry.get(id);
             if (typeof provider?.signInWithTool !== 'function') throw new AIProviderRegistryError('That tool cannot be signed in to from Konjugate.', 'signInUnavailable');
             return provider.signInWithTool({ signal, onOutput });
+        },
+        // Signs a vendor tool out (Konjugate's own sign-in of it), for signing out or switching account.
+        async signOutOfTool({ provider: id, signal }) {
+            const provider = registry.get(id);
+            if (typeof provider?.signOutOfTool !== 'function') throw new AIProviderRegistryError('That tool cannot be signed out of from Konjugate.', 'signOutUnavailable');
+            return provider.signOutOfTool({ signal });
+        },
+        // How much of a subscription's limits is used (Claude's session and week), as the vendor's tool says; null where it cannot.
+        async planUsage({ provider: id, signal }) {
+            const provider = registry.get(id);
+            if (typeof provider?.planUsage !== 'function') return null;
+            return provider.planUsage({ signal });
         },
         // Ends a sign-in at the provider as well, where it can; false where there is nothing to end.
         async signOut({ provider: id, credential, signal }) {

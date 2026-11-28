@@ -33,6 +33,7 @@ import { createAssistantToolsSection } from './assistantToolsSection.mjs';
 import { createAssistantPanelLayout } from './assistantPanelLayout.mjs';
 import { describeModelDiff, diffModels } from '../modelDiff.mjs';
 import { addUsage, describeUsage, shortUsage } from '../assistantUsage.mjs';
+import { planUsageMeters } from './assistantPlanUsage.mjs';
 import { reasoningCostNote } from '../suggestedLocalModels.mjs';
 import { constraintRows, measuredDataObjectiveLatex, objectivePayload, objectiveVocabulary, reportedNames, runSettingsError } from './tuningObjective.mjs';
 import { firstModelValues } from '../tutorials/firstModel.mjs';
@@ -14857,12 +14858,33 @@ async function refreshAssistantConfigurations() {
         select.value = activeAssistantConfigurationUuid ?? '';
         select.disabled = !result.configurations.length;
         renderAssistantSetup();
+        refreshAssistantPlanUsage();
     } catch (error) {
         select.replaceChildren(new Option('Configurations unavailable', ''));
         select.disabled = true;
         renderAssistantGenerationError(error.message);
     }
 }
+
+// How much of the plan's limits is used, under the prompt, while a tool that can say (Claude through Claude Code) answers:
+// read when the panel opens, when the model changes, and after each request, at most once a minute unless `force`d (a request
+// just used some). Reading runs the tool's own /usage, which asks the model nothing.
+let assistantPlanUsageRead = { configuration: '', at: 0, pending: false };
+async function refreshAssistantPlanUsage({ force = false } = {}) {
+    const box = $('#assistantPlanUsage');
+    const configuration = activeConfigurationRecord();
+    if (!configuration || !window.aiProviders?.planUsage || !assistantVendorToolProviders.has(configuration.provider)) { box.hidden = true; return; }
+    const fresh = assistantPlanUsageRead.configuration === configuration.uuid && Date.now() - assistantPlanUsageRead.at < 60_000;
+    if (assistantPlanUsageRead.pending || (fresh && !force)) return;
+    assistantPlanUsageRead.pending = true;
+    const value = await window.aiProviders.planUsage(configuration.provider).catch(() => null);
+    assistantPlanUsageRead = { configuration: configuration.uuid, at: Date.now(), pending: false };
+    if (activeConfigurationRecord()?.uuid !== configuration.uuid) return;
+    box.hidden = !value;
+    if (value) box.replaceChildren(Object.assign(document.createElement('span'), { className: 'assistantPlanUsageTitle', textContent: 'Your plan' }), planUsageMeters(value, { compact: true }));
+}
+// The providers whose own tool can say how much of the plan is used.
+const assistantVendorToolProviders = new Set(['claudeCode']);
 
 // How a configuration is named in the assistant's list: its name, whether it runs on this computer, and whether it reasons first.
 function assistantConfigurationLabel(configuration) {
@@ -15383,6 +15405,7 @@ async function requestAssistantProposal() {
             stopAssistantProgress();
             if (pendingAssistantTurnRecord?.reusedFrom) renderAssistantTranscript();
             syncAssistantVersions();
+            refreshAssistantPlanUsage({ force: true });
             button.disabled = false;
             button.textContent = pendingAssistantProposal ? 'Revise proposal'
                 : !$('#assistantClarification').hidden ? 'Answer'
@@ -15512,6 +15535,7 @@ async function regenerateAssistantProposal(note = '') {
         button.disabled = false;
         if (!finished) await restore();
         syncAssistantVersions();
+        refreshAssistantPlanUsage({ force: true });
     }
 }
 
@@ -15673,6 +15697,7 @@ function fitAssistantPrompt() {
 $('#assistantPrompt').addEventListener('input', fitAssistantPrompt);
 $('#assistantConfiguration').addEventListener('change', async () => {
     activeAssistantConfigurationUuid = $('#assistantConfiguration').value;
+    refreshAssistantPlanUsage();
     assistantGenerationController?.abort();
     discardAssistantProposal();
     resetAssistantConversation();
